@@ -275,7 +275,7 @@ mod tests {
     fn test_haar_forward_dc() {
         // [c, c, c, c] → approx = [c·√2, c·√2], detail = [0, 0]
         let mut d = vec![1.0_f64; 4];
-        haar_forward(&mut d, 4).unwrap();
+        haar_forward(&mut d, 4).expect("Haar forward on length-4 input succeeds");
         let sqrt2 = std::f64::consts::SQRT_2;
         for (i, &dv) in d.iter().enumerate().take(2) {
             assert!((dv - sqrt2).abs() < 1e-12, "approx[{i}]={}", dv);
@@ -289,8 +289,8 @@ mod tests {
     fn test_haar_forward_inverse_roundtrip() {
         let original = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0_f64];
         let mut d = original.clone();
-        haar_forward(&mut d, 8).unwrap();
-        haar_inverse(&mut d, 8).unwrap();
+        haar_forward(&mut d, 8).expect("Haar forward on length-8 input succeeds");
+        haar_inverse(&mut d, 8).expect("Haar inverse on length-8 input succeeds");
         for (a, b) in original.iter().zip(d.iter()) {
             assert!((a - b).abs() < 1e-12, "round-trip mismatch: {a} vs {b}");
         }
@@ -302,7 +302,7 @@ mod tests {
         let x = vec![1.0, 2.0, 3.0, 4.0_f64];
         let energy_in: f64 = x.iter().map(|v| v * v).sum();
         let mut d = x.clone();
-        haar_forward(&mut d, 4).unwrap();
+        haar_forward(&mut d, 4).expect("Haar forward on length-4 input succeeds");
         let energy_out: f64 = d.iter().map(|v| v * v).sum();
         assert!((energy_in - energy_out).abs() < 1e-12);
     }
@@ -330,7 +330,7 @@ mod tests {
     fn test_haar_forward_impulse() {
         // x = [1, 0, 0, 0]: approx[0] = 1/√2, detail[0] = 1/√2, rest 0
         let mut d = vec![1.0, 0.0, 0.0, 0.0_f64];
-        haar_forward(&mut d, 4).unwrap();
+        haar_forward(&mut d, 4).expect("Haar forward on impulse input succeeds");
         let expected = std::f64::consts::FRAC_1_SQRT_2;
         assert!((d[0] - expected).abs() < 1e-12);
         assert!((d[2] - expected).abs() < 1e-12);

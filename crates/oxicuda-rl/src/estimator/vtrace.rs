@@ -148,7 +148,8 @@ mod tests {
         } else {
             vec![-1.0_f32; t] // IS ratio = exp(0-(-1)) = e > 1, clipped
         };
-        compute_vtrace(&r, &v, &d, &lp_new, &lp_old, VtraceConfig::default()).unwrap()
+        compute_vtrace(&r, &v, &d, &lp_new, &lp_old, VtraceConfig::default())
+            .expect("valid equal-length slices should not fail")
     }
 
     #[test]
@@ -170,7 +171,8 @@ mod tests {
         let v = vec![0.0_f32; 4];
         let d = vec![0.0_f32; 3];
         let lp = vec![0.0_f32; 3];
-        let out = compute_vtrace(&r, &v, &d, &lp, &lp, cfg).unwrap();
+        let out = compute_vtrace(&r, &v, &d, &lp, &lp, cfg)
+            .expect("valid equal-length slices should not fail");
         // vs[2] ≈ 0 + (1 + 0.99*0 - 0) = 1.0 (δ = ρ * (r + γ*v_next - v))
         assert!(
             out.vs[2] > 0.5,
@@ -203,7 +205,8 @@ mod tests {
         let v = vec![0.0_f32; 4];
         let d = vec![0.0, 1.0, 0.0];
         let lp = vec![0.0_f32; 3];
-        let out = compute_vtrace(&r, &v, &d, &lp, &lp, cfg).unwrap();
+        let out = compute_vtrace(&r, &v, &d, &lp, &lp, cfg)
+            .expect("valid equal-length slices should not fail");
         // At done step, mask=0 so no future contributions
         assert!(out.vs[1].is_finite());
     }
@@ -221,10 +224,12 @@ mod tests {
         let d = vec![0.0_f32; 2];
         let lp_new = vec![0.0_f32; 2];
         let lp_old = vec![-100.0_f32; 2]; // huge IS ratio, clipped to ρ̄=1
-        let out = compute_vtrace(&r, &v, &d, &lp_new, &lp_old, cfg).unwrap();
+        let out = compute_vtrace(&r, &v, &d, &lp_new, &lp_old, cfg)
+            .expect("valid equal-length slices should not fail");
         // Clipped to ρ̄=1, so same as on-policy
         let lp = vec![0.0_f32; 2];
-        let out_on = compute_vtrace(&r, &v, &d, &lp, &lp, cfg).unwrap();
+        let out_on = compute_vtrace(&r, &v, &d, &lp, &lp, cfg)
+            .expect("valid equal-length slices should not fail");
         assert!(
             (out.vs[0] - out_on.vs[0]).abs() < 1e-4,
             "clipped rho should match on-policy: {} vs {}",

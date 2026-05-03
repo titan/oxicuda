@@ -147,7 +147,8 @@ mod tests {
         } else {
             vec![-0.5_f32; t]
         };
-        compute_retrace(&r, &q, &v, &d, &lp_new, &lp_old, RetraceConfig::default()).unwrap()
+        compute_retrace(&r, &q, &v, &d, &lp_new, &lp_old, RetraceConfig::default())
+            .expect("valid equal-length slices should not fail")
     }
 
     #[test]
@@ -191,7 +192,8 @@ mod tests {
         let v = vec![0.0_f32; 4];
         let d = vec![0.0, 1.0, 0.0];
         let lp = vec![0.0_f32; 3];
-        let out = compute_retrace(&r, &q, &v, &d, &lp, &lp, cfg).unwrap();
+        let out = compute_retrace(&r, &q, &v, &d, &lp, &lp, cfg)
+            .expect("valid equal-length slices should not fail");
         assert!(out.q_targets.iter().all(|&q| q.is_finite()));
     }
 
@@ -207,7 +209,8 @@ mod tests {
         let v = vec![0.5_f32; 4];
         let d = vec![0.0_f32; 3];
         let lp = vec![0.0_f32; 3];
-        let out = compute_retrace(&r, &q, &v, &d, &lp, &lp, cfg).unwrap();
+        let out = compute_retrace(&r, &q, &v, &d, &lp, &lp, cfg)
+            .expect("valid equal-length slices should not fail");
         // Q^ret = Q + δ = Q + (r + γ*V_next - Q) = r + γ*V_next
         let expected = 1.0 + 0.99 * 0.5;
         for (i, &qt) in out.q_targets.iter().enumerate() {

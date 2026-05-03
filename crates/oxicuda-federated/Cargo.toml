@@ -1,0 +1,22 @@
+[package]
+name         = "oxicuda-federated"
+description  = "Federated learning primitives for OxiCUDA: FedAvg/FedProx/SCAFFOLD/FedAdam, differential privacy, secure aggregation, communication compression — pure Rust, zero CUDA SDK dependency."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+readme                 = "README.md"
+keywords = ["gpu", "federated-learning", "differential-privacy", "secure-aggregation", "distributed"]
+categories = ["science", "algorithms"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true

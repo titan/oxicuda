@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn test_imdct_zero_input() {
         let x = vec![0.0_f64; 8];
-        let out = imdct(&x).unwrap();
+        let out = imdct(&x).expect("IMDCT of zero input succeeds");
         assert_eq!(out.len(), 16);
         for v in &out {
             assert!(v.abs() < 1e-15);
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_mdct_plan_sine_window() {
-        let plan = MdctPlan::with_sine_window(8, 4).unwrap();
+        let plan = MdctPlan::with_sine_window(8, 4).expect("MDCT plan with sine window is valid");
         assert_eq!(plan.n, 8);
         assert_eq!(plan.batch, 4);
         assert_eq!(plan.window_coeffs.len(), 16);
@@ -313,7 +313,8 @@ mod tests {
 
     #[test]
     fn test_mdct_plan_kbd_window() {
-        let plan = MdctPlan::with_kbd_window(8, 1, 5.0).unwrap();
+        let plan =
+            MdctPlan::with_kbd_window(8, 1, 5.0).expect("MDCT plan with KBD window is valid");
         assert_eq!(plan.window_coeffs.len(), 16);
     }
 
@@ -341,10 +342,10 @@ mod tests {
         let w = sine_window(2 * n);
         let x_raw: Vec<f64> = (0..2 * n).map(|i| i as f64).collect();
         let x_win: Vec<f64> = x_raw.iter().zip(w.iter()).map(|(a, b)| a * b).collect();
-        let mdct_out = mdct(&x_win, n).unwrap();
+        let mdct_out = mdct(&x_win, n).expect("MDCT computation succeeds");
         assert_eq!(mdct_out.len(), n);
         // IMDCT should return 2N samples
-        let imdct_out = imdct(&mdct_out).unwrap();
+        let imdct_out = imdct(&mdct_out).expect("IMDCT computation succeeds");
         assert_eq!(imdct_out.len(), 2 * n);
     }
 }

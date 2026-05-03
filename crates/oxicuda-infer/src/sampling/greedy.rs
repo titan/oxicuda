@@ -75,19 +75,19 @@ mod tests {
     #[test]
     fn argmax_basic() {
         let logits = vec![0.1_f32, 5.0, 2.0, -1.0];
-        assert_eq!(greedy_sample(&logits).unwrap(), 1);
+        assert_eq!(greedy_sample(&logits).expect("non-empty logits"), 1);
     }
 
     #[test]
     fn argmax_first_element() {
         let logits = vec![10.0_f32, 1.0, 2.0];
-        assert_eq!(greedy_sample(&logits).unwrap(), 0);
+        assert_eq!(greedy_sample(&logits).expect("non-empty logits"), 0);
     }
 
     #[test]
     fn argmax_last_element() {
         let logits = vec![0.0_f32, 0.0, 7.0];
-        assert_eq!(greedy_sample(&logits).unwrap(), 2);
+        assert_eq!(greedy_sample(&logits).expect("non-empty logits"), 2);
     }
 
     #[test]
@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn batch_argmax() {
         let rows = vec![vec![0.0_f32, 3.0, 1.0], vec![5.0_f32, 1.0, 2.0]];
-        let tokens = greedy_sample_batch(&rows).unwrap();
+        let tokens = greedy_sample_batch(&rows).expect("non-empty rows with matching widths");
         assert_eq!(tokens, vec![1, 0]);
     }
 

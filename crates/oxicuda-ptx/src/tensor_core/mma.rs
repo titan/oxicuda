@@ -323,16 +323,32 @@ mod tests {
     fn valid_m16n8k16_f16() {
         let cfg = MmaConfig::new(MmaShape::M16N8K16, PtxType::F16, PtxType::F16, PtxType::F32);
         assert!(cfg.validate().is_ok());
-        assert_eq!(cfg.regs_per_thread_a().unwrap(), 4);
-        assert_eq!(cfg.regs_per_thread_b().unwrap(), 2);
-        assert_eq!(cfg.regs_per_thread_c().unwrap(), 4);
+        assert_eq!(
+            cfg.regs_per_thread_a()
+                .expect("valid MMA config should return register counts without error"),
+            4
+        );
+        assert_eq!(
+            cfg.regs_per_thread_b()
+                .expect("valid MMA config should return register counts without error"),
+            2
+        );
+        assert_eq!(
+            cfg.regs_per_thread_c()
+                .expect("valid MMA config should return register counts without error"),
+            4
+        );
     }
 
     #[test]
     fn valid_m16n8k8_f16() {
         let cfg = MmaConfig::new(MmaShape::M16N8K8, PtxType::F16, PtxType::F16, PtxType::F16);
         assert!(cfg.validate().is_ok());
-        assert_eq!(cfg.regs_per_thread_c().unwrap(), 2);
+        assert_eq!(
+            cfg.regs_per_thread_c()
+                .expect("valid MMA config should return register counts without error"),
+            2
+        );
     }
 
     #[test]
@@ -344,9 +360,21 @@ mod tests {
             PtxType::F32,
         );
         assert!(cfg.validate().is_ok(), "TF32 m16n8k8 must be valid");
-        assert_eq!(cfg.regs_per_thread_a().unwrap(), 2);
-        assert_eq!(cfg.regs_per_thread_b().unwrap(), 1);
-        assert_eq!(cfg.regs_per_thread_c().unwrap(), 4);
+        assert_eq!(
+            cfg.regs_per_thread_a()
+                .expect("valid MMA config should return register counts without error"),
+            2
+        );
+        assert_eq!(
+            cfg.regs_per_thread_b()
+                .expect("valid MMA config should return register counts without error"),
+            1
+        );
+        assert_eq!(
+            cfg.regs_per_thread_c()
+                .expect("valid MMA config should return register counts without error"),
+            4
+        );
     }
 
     #[test]
@@ -383,17 +411,20 @@ mod tests {
         let cfg = MmaConfig::new(MmaShape::M8N8K16, PtxType::S8, PtxType::S8, PtxType::S32);
         assert!(cfg.validate().is_ok(), "S8 m8n8k16 INT8 IMMA must be valid");
         assert_eq!(
-            cfg.regs_per_thread_a().unwrap(),
+            cfg.regs_per_thread_a()
+                .expect("valid MMA config should return register counts without error"),
             1,
             "A must use 1 reg/thread"
         );
         assert_eq!(
-            cfg.regs_per_thread_b().unwrap(),
+            cfg.regs_per_thread_b()
+                .expect("valid MMA config should return register counts without error"),
             1,
             "B must use 1 reg/thread"
         );
         assert_eq!(
-            cfg.regs_per_thread_c().unwrap(),
+            cfg.regs_per_thread_c()
+                .expect("valid MMA config should return register counts without error"),
             2,
             "C/D must use 2 S32 regs/thread"
         );
@@ -423,14 +454,22 @@ mod tests {
             cfg.validate().is_ok(),
             "S8 m16n8k16 INT8 IMMA must be valid"
         );
-        assert_eq!(cfg.regs_per_thread_c().unwrap(), 4);
+        assert_eq!(
+            cfg.regs_per_thread_c()
+                .expect("valid MMA config should return register counts without error"),
+            4
+        );
     }
 
     #[test]
     fn valid_m16n8k32_s8() {
         let cfg = MmaConfig::new(MmaShape::M16N8K32, PtxType::S8, PtxType::S8, PtxType::S32);
         assert!(cfg.validate().is_ok(), "S8 m16n8k32 INT8 must be valid");
-        assert_eq!(cfg.regs_per_thread_c().unwrap(), 4);
+        assert_eq!(
+            cfg.regs_per_thread_c()
+                .expect("valid MMA config should return register counts without error"),
+            4
+        );
     }
 
     #[test]

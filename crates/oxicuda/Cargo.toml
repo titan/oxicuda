@@ -33,6 +33,7 @@ oxicuda-levelzero = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
 serde_json.workspace = true
+half.workspace = true
 
 [features]
 default = ["driver", "memory", "launch"]
@@ -101,6 +102,10 @@ required-features = ["ptx"]
 [[example]]
 name = "autotune_demo"
 required-features = ["autotune"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

@@ -239,7 +239,9 @@ mod tests {
     #[test]
     fn past_kv_cache_layer_mut() {
         let mut c = PastKvCache::new(2, 2, 4);
-        let lc = c.layer_mut(0).unwrap();
+        let lc = c
+            .layer_mut(0)
+            .expect("layer index 0 within 2-layer cache should succeed");
         lc.append(&[1.0_f32; 2 * 4], &[1.0_f32; 2 * 4], 1);
         assert_eq!(c.past_len(), 1);
     }
@@ -248,9 +250,12 @@ mod tests {
 
     #[test]
     fn gpt_block_output_shape() {
-        let block = GptBlock::new(8, 2, 16, 1e-5).unwrap();
+        let block = GptBlock::new(8, 2, 16, 1e-5)
+            .expect("hidden=8 n_heads=2 ffn=16 GptBlock should be valid");
         let x = vec![0.5_f32; 2 * 8]; // 2 tokens, hidden=8
-        let (out, kv) = block.forward(&x, 2, None).unwrap();
+        let (out, kv) = block
+            .forward(&x, 2, None)
+            .expect("2-token GptBlock forward should succeed");
         assert_eq!(out.len(), 2 * 8);
         assert_eq!(kv.past_len, 2);
     }
@@ -258,9 +263,12 @@ mod tests {
     #[test]
     fn gpt_block_residual_connection() {
         // With all weights = 0, attn and FFN outputs are 0 → output = x
-        let block = GptBlock::new(4, 2, 8, 1e-5).unwrap();
+        let block = GptBlock::new(4, 2, 8, 1e-5)
+            .expect("hidden=4 n_heads=2 ffn=8 GptBlock should be valid");
         let x = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let (out, _) = block.forward(&x, 1, None).unwrap();
+        let (out, _) = block
+            .forward(&x, 1, None)
+            .expect("1-token GptBlock residual forward should succeed");
         // residual: out = x + 0 = x
         for (&o, &xi) in out.iter().zip(x.iter()) {
             assert!((o - xi).abs() < 1e-5, "residual failed: o={o} xi={xi}");
@@ -269,10 +277,15 @@ mod tests {
 
     #[test]
     fn gpt_block_kv_cache_extends() {
-        let block = GptBlock::new(4, 2, 8, 1e-5).unwrap();
+        let block = GptBlock::new(4, 2, 8, 1e-5)
+            .expect("hidden=4 n_heads=2 ffn=8 GptBlock for cache test should be valid");
         let x = vec![0.0_f32; 4];
-        let (_, kv1) = block.forward(&x, 1, None).unwrap();
-        let (_, kv2) = block.forward(&x, 1, Some(&kv1)).unwrap();
+        let (_, kv1) = block
+            .forward(&x, 1, None)
+            .expect("first token GptBlock forward should succeed");
+        let (_, kv2) = block
+            .forward(&x, 1, Some(&kv1))
+            .expect("second token GptBlock with cache should succeed");
         assert_eq!(kv2.past_len, 2);
     }
 
@@ -280,18 +293,24 @@ mod tests {
 
     #[test]
     fn llama_block_output_shape() {
-        let block = LlamaBlock::new(8, 4, 2, 12, 32, 10_000.0, 1e-5).unwrap();
+        let block = LlamaBlock::new(8, 4, 2, 12, 32, 10_000.0, 1e-5)
+            .expect("hidden=8 4Q/2KV ffn=12 LlamaBlock should be valid");
         let x = vec![0.5_f32; 2 * 8]; // 2 tokens
-        let (out, kv) = block.forward(&x, 2, None).unwrap();
+        let (out, kv) = block
+            .forward(&x, 2, None)
+            .expect("2-token LlamaBlock forward should succeed");
         assert_eq!(out.len(), 2 * 8);
         assert_eq!(kv.past_len, 2);
     }
 
     #[test]
     fn llama_block_residual_connection() {
-        let block = LlamaBlock::new(4, 2, 2, 8, 32, 10_000.0, 1e-5).unwrap();
+        let block = LlamaBlock::new(4, 2, 2, 8, 32, 10_000.0, 1e-5)
+            .expect("hidden=4 2Q/2KV ffn=8 LlamaBlock should be valid");
         let x = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let (out, _) = block.forward(&x, 1, None).unwrap();
+        let (out, _) = block
+            .forward(&x, 1, None)
+            .expect("1-token LlamaBlock residual forward should succeed");
         // Zero weights → attn and ffn outputs are 0 → output = x
         for (&o, &xi) in out.iter().zip(x.iter()) {
             assert!((o - xi).abs() < 1e-5, "residual failed: o={o} xi={xi}");
@@ -300,19 +319,27 @@ mod tests {
 
     #[test]
     fn llama_block_kv_cache_incremental() {
-        let block = LlamaBlock::new(4, 2, 2, 8, 32, 10_000.0, 1e-5).unwrap();
+        let block = LlamaBlock::new(4, 2, 2, 8, 32, 10_000.0, 1e-5)
+            .expect("hidden=4 2Q/2KV ffn=8 LlamaBlock for cache test should be valid");
         let x = vec![0.0_f32; 4];
-        let (_, kv1) = block.forward(&x, 1, None).unwrap();
-        let (_, kv2) = block.forward(&x, 1, Some(&kv1)).unwrap();
+        let (_, kv1) = block
+            .forward(&x, 1, None)
+            .expect("first token LlamaBlock forward should succeed");
+        let (_, kv2) = block
+            .forward(&x, 1, Some(&kv1))
+            .expect("second token LlamaBlock with cache should succeed");
         assert_eq!(kv2.past_len, 2);
     }
 
     #[test]
     fn llama_block_gqa() {
         // 4 query heads, 2 KV heads
-        let block = LlamaBlock::new(8, 4, 2, 12, 32, 10_000.0, 1e-5).unwrap();
+        let block = LlamaBlock::new(8, 4, 2, 12, 32, 10_000.0, 1e-5)
+            .expect("hidden=8 4Q/2KV ffn=12 LlamaBlock for GQA test should be valid");
         let x = vec![0.0_f32; 3 * 8]; // 3 tokens
-        let (out, _) = block.forward(&x, 3, None).unwrap();
+        let (out, _) = block
+            .forward(&x, 3, None)
+            .expect("3-token GQA LlamaBlock forward should succeed");
         assert_eq!(out.len(), 3 * 8);
     }
 

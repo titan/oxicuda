@@ -113,8 +113,9 @@ mod tests {
     #[test]
     fn test_softmax() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![1, 3]);
-        let r = execute_softmax(&[Some(&x)], &HashMap::new()).unwrap();
-        let out = r[0].as_f32().unwrap();
+        let r = execute_softmax(&[Some(&x)], &HashMap::new())
+            .expect("softmax execution should succeed with valid input");
+        let out = r[0].as_f32().expect("softmax output should be float32");
         // Sum should be 1
         let sum: f32 = out.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5);
@@ -128,8 +129,9 @@ mod tests {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let mut attrs = HashMap::new();
         attrs.insert("axis".into(), AttributeValue::Int(1));
-        let r = execute_softmax(&[Some(&x)], &attrs).unwrap();
-        let out = r[0].as_f32().unwrap();
+        let r = execute_softmax(&[Some(&x)], &attrs)
+            .expect("softmax execution with axis attr should succeed");
+        let out = r[0].as_f32().expect("softmax output should be float32");
         // Each row should sum to 1
         let sum0: f32 = out[0..3].iter().sum();
         let sum1: f32 = out[3..6].iter().sum();
@@ -140,8 +142,9 @@ mod tests {
     #[test]
     fn test_log_softmax() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![1, 3]);
-        let r = execute_log_softmax(&[Some(&x)], &HashMap::new()).unwrap();
-        let out = r[0].as_f32().unwrap();
+        let r = execute_log_softmax(&[Some(&x)], &HashMap::new())
+            .expect("log_softmax execution should succeed with valid input");
+        let out = r[0].as_f32().expect("softmax output should be float32");
         // All values should be <= 0
         assert!(out.iter().all(|&v| v <= 0.0));
         // exp(logsoftmax) should sum to 1
@@ -153,8 +156,9 @@ mod tests {
     fn test_softmax_numerically_stable() {
         // Large values shouldn't cause overflow
         let x = OnnxTensor::from_f32(&[1000.0, 1001.0, 1002.0], vec![1, 3]);
-        let r = execute_softmax(&[Some(&x)], &HashMap::new()).unwrap();
-        let out = r[0].as_f32().unwrap();
+        let r = execute_softmax(&[Some(&x)], &HashMap::new())
+            .expect("softmax execution should succeed with valid input");
+        let out = r[0].as_f32().expect("softmax output should be float32");
         let sum: f32 = out.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5);
         assert!(out.iter().all(|v| v.is_finite()));
@@ -163,8 +167,9 @@ mod tests {
     #[test]
     fn test_softmax_equals_manual() {
         let x = OnnxTensor::from_f32(&[0.0, 0.0, 0.0], vec![1, 3]);
-        let r = execute_softmax(&[Some(&x)], &HashMap::new()).unwrap();
-        let out = r[0].as_f32().unwrap();
+        let r = execute_softmax(&[Some(&x)], &HashMap::new())
+            .expect("softmax execution should succeed with valid input");
+        let out = r[0].as_f32().expect("softmax output should be float32");
         // Uniform distribution
         assert_f32_near(&out, &[1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0], 1e-5);
     }

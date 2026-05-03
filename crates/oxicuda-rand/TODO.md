@@ -84,7 +84,7 @@ The rand crate has the highest actual-to-estimate ratio among Vol.5 crates, refl
 
 | # | Requirement | Target | Status |
 |---|-------------|--------|--------|
-| P7 | Philox, 100M uniform F32 samples | ≥ 95% cuRAND throughput | [ ] |
+| P7 | Philox, 100M uniform F32 samples | ≥ 95% cuRAND throughput | [~] |
 
 ---
 
@@ -130,3 +130,7 @@ The rand crate has the highest actual-to-estimate ratio among Vol.5 crates, refl
 - [x] Box-Muller normal distribution: KS test p-value > 0.01 for 1M samples — implemented; also box_muller_lcg_accuracy() verifies mean ±0.1 and std within 10% for LCG-based Box-Muller (3 tests)
 - [x] Philox counter-mode independence verification with different seed/subsequence offsets — implemented; philox_counter_offset_independence() verifies that offset-N sequences give different results (5 tests including error handling)
 - [x] Skip-ahead for MRG32k3a: verified correct for parallel reproducible simulation — skip_ahead(100) + 10 sequential values match; 4-stream pairwise independence verified (< 10% identical values)
+
+## Performance Verification Harness Status (2026-04-26)
+
+- **P7** (Philox 100M uniform F32): harness at `benches/philox_uniform.rs`; awaiting Linux+NVIDIA run.

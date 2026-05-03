@@ -373,7 +373,8 @@ mod tests {
 
     fn make_param(data: Vec<f32>, grad: Vec<f32>) -> ParamTensor {
         let mut p = ParamTensor::new(data, "w");
-        p.set_grad(grad).unwrap();
+        p.set_grad(grad)
+            .expect("gradient length matches param data length");
         p
     }
 
@@ -381,7 +382,8 @@ mod tests {
     fn came_flat_step_decreases_param() {
         let mut opt = GpuCame::new(1e-3);
         let mut params = vec![make_param(vec![1.0_f32; 8], vec![0.5_f32; 8])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         for &v in &params[0].data {
             assert!(v < 1.0, "param should decrease, got {v}");
         }
@@ -394,7 +396,8 @@ mod tests {
         let mut opt = GpuCame::new(1e-3);
         opt.register_shape(0, 4, 4);
         let mut params = vec![make_param(vec![1.0_f32; n], vec![0.1_f32; n])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         for &v in &params[0].data {
             assert!(v < 1.0, "matrix param should decrease, got {v}");
         }
@@ -405,7 +408,8 @@ mod tests {
         let mut opt = GpuCame::new(1e-3);
         opt.register_shape(0, 8, 16);
         let mut params = vec![make_param(vec![0.0_f32; 128], vec![1.0_f32; 128])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
 
         // State should have row (8) + col (16) buffers, NOT 128-element v
         if let Some(CameV::Matrix { row, col, .. }) = opt.states[0].as_ref().map(|s| &s.v) {
@@ -422,8 +426,11 @@ mod tests {
         let mut params = vec![make_param(vec![4.0_f32], vec![0.0_f32])];
         for _ in 0..300 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         assert!(
             params[0].data[0].abs() < 0.3,

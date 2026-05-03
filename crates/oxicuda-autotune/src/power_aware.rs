@@ -32,7 +32,7 @@
 
 #[cfg(test)]
 use crate::benchmark::BenchmarkConfig;
-use crate::benchmark::{BenchmarkEngine, BenchmarkResult};
+use crate::benchmark::{BenchmarkEngine, BenchmarkResult, WarmupStrategy, warmup_converged};
 use crate::config::Config;
 use crate::error::AutotuneError;
 
@@ -372,7 +372,6 @@ impl PowerAwareBenchmarkEngine {
         // We use a custom measurement loop so we can sample power each
         // iteration, rather than delegating entirely to BenchmarkEngine.
         let bench_config = self.engine.config();
-        let warmup_runs = bench_config.warmup_runs;
         let benchmark_runs = bench_config.benchmark_runs;
 
         if benchmark_runs == 0 {
@@ -382,8 +381,41 @@ impl PowerAwareBenchmarkEngine {
         }
 
         // Warmup phase
-        for _ in 0..warmup_runs {
-            run_fn()?;
+        match &bench_config.warmup {
+            WarmupStrategy::Fixed(n) => {
+                for _ in 0..*n {
+                    run_fn()?;
+                }
+            }
+            WarmupStrategy::Adaptive {
+                min_iterations,
+                max_iterations,
+                tolerance,
+            } => {
+                let mut prev: Option<std::time::Duration> = None;
+                let mut converged = false;
+                for i in 0..*max_iterations {
+                    let start = std::time::Instant::now();
+                    run_fn()?;
+                    let t = start.elapsed();
+                    if i + 1 >= *min_iterations {
+                        if let Some(p) = prev {
+                            if warmup_converged(p, t, *tolerance) {
+                                converged = true;
+                                break;
+                            }
+                        }
+                    }
+                    prev = Some(t);
+                }
+                if !converged {
+                    tracing::warn!(
+                        "adaptive warmup did not converge within {} iterations (tolerance={})",
+                        max_iterations,
+                        tolerance
+                    );
+                }
+            }
         }
 
         // Measurement phase with power sampling
@@ -1123,7 +1155,7 @@ mod tests {
     fn benchmark_engine_with_synthetic_monitor() {
         let monitor = SyntheticPowerMonitor::new(make_reading(200.0, 55.0, 1800));
         let engine = BenchmarkEngine::with_config(BenchmarkConfig {
-            warmup_runs: 1,
+            warmup: WarmupStrategy::Fixed(1),
             benchmark_runs: 5,
         });
         let power_engine = PowerAwareBenchmarkEngine::new(engine, Box::new(monitor), 350.0);

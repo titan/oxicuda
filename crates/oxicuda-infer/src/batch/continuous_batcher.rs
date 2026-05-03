@@ -351,7 +351,9 @@ mod tests {
     #[test]
     fn step_with_empty_queue_returns_empty() {
         let mut b = make_batcher();
-        let outputs = b.step(greedy_model).unwrap();
+        let outputs = b
+            .step(greedy_model)
+            .expect("step with empty queue succeeds");
         assert!(outputs.is_empty());
     }
 
@@ -365,7 +367,7 @@ mod tests {
         };
         b.add_request(vec![0, 1], params);
         // Step 1: prefill → token 1 (EOS) generated
-        let out = b.step(eos_model).unwrap();
+        let out = b.step(eos_model).expect("eos model step with one sequence");
         assert!(!out.is_empty(), "sequence should finish in step 1");
         assert_eq!(out[0].finish_reason, FinishReason::EosToken(1));
         assert!(!b.has_unfinished());
@@ -379,7 +381,9 @@ mod tests {
             ..Default::default()
         };
         b.add_request(vec![5], params);
-        let out = b.step(greedy_model).unwrap();
+        let out = b
+            .step(greedy_model)
+            .expect("greedy model step with max_new_tokens=1");
         assert!(!out.is_empty(), "should finish after 1 token");
         assert_eq!(out[0].finish_reason, FinishReason::MaxLength);
     }
@@ -392,7 +396,9 @@ mod tests {
             ..Default::default()
         };
         b.add_request(vec![0], params);
-        let out = b.step(greedy_model).unwrap();
+        let out = b
+            .step(greedy_model)
+            .expect("greedy model step with max_new_tokens=1");
         assert!(!out.is_empty());
         assert_eq!(out[0].output_tokens, vec![42]);
     }
@@ -408,7 +414,9 @@ mod tests {
         for _ in 0..3 {
             b.add_request(vec![0], eos_params.clone());
         }
-        let out = b.step(eos_model).unwrap();
+        let out = b
+            .step(eos_model)
+            .expect("eos model step with 3 concurrent sequences");
         assert_eq!(
             out.len(),
             3,
@@ -423,7 +431,9 @@ mod tests {
         b.add_request(vec![2, 3], SamplingParams::default());
         assert_eq!(b.n_waiting(), 2);
         // After one step, seqs move from waiting to running (prefill)
-        let _ = b.step(greedy_model).unwrap();
+        let _ = b
+            .step(greedy_model)
+            .expect("greedy model step with 2 sequences in prefill");
         // After prefill step, sequences are in running (decode phase)
         assert_eq!(b.n_waiting(), 0);
     }
@@ -436,7 +446,9 @@ mod tests {
             ..Default::default()
         };
         b.add_request(vec![10, 20], params);
-        let out = b.step(greedy_model).unwrap();
+        let out = b
+            .step(greedy_model)
+            .expect("greedy model step for output_tokens test");
         assert!(!out.is_empty());
         assert!(!out[0].output_tokens.is_empty());
     }
@@ -463,7 +475,7 @@ mod tests {
                 }
                 Ok(v)
             })
-            .unwrap();
+            .expect("closure model step for last_prompt_token test");
 
         assert!(
             saw_expected_token.get(),

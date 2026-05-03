@@ -788,39 +788,64 @@ mod tests {
     fn test_elementwise_broadcast_shape() {
         let a = fixed(&[3, 4]);
         let b = fixed(&[1, 4]);
-        let r = ShapeInference::infer("Add", &[&a, &b], &HashMap::new()).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![3, 4]);
+        let r = ShapeInference::infer("Add", &[&a, &b], &HashMap::new())
+            .expect("Add shape inference should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![3, 4]
+        );
     }
 
     #[test]
     fn test_unary_passthrough() {
         let a = fixed(&[2, 3, 4]);
-        let r = ShapeInference::infer("Relu", &[&a], &HashMap::new()).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![2, 3, 4]);
+        let r = ShapeInference::infer("Relu", &[&a], &HashMap::new())
+            .expect("Relu shape inference should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![2, 3, 4]
+        );
     }
 
     #[test]
     fn test_matmul_shape() {
         let a = fixed(&[2, 3]);
         let b = fixed(&[3, 4]);
-        let r = ShapeInference::infer("MatMul", &[&a, &b], &HashMap::new()).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![2, 4]);
+        let r = ShapeInference::infer("MatMul", &[&a, &b], &HashMap::new())
+            .expect("MatMul shape inference should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![2, 4]
+        );
     }
 
     #[test]
     fn test_matmul_batch_shape() {
         let a = fixed(&[5, 2, 3]);
         let b = fixed(&[5, 3, 4]);
-        let r = ShapeInference::infer("MatMul", &[&a, &b], &HashMap::new()).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![5, 2, 4]);
+        let r = ShapeInference::infer("MatMul", &[&a, &b], &HashMap::new())
+            .expect("MatMul shape inference should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![5, 2, 4]
+        );
     }
 
     #[test]
     fn test_conv_shape() {
         let x = fixed(&[1, 3, 32, 32]);
         let w = fixed(&[16, 3, 3, 3]);
-        let r = ShapeInference::infer("Conv", &[&x, &w], &HashMap::new()).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![1, 16, 30, 30]);
+        let r = ShapeInference::infer("Conv", &[&x, &w], &HashMap::new())
+            .expect("Conv shape inference should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![1, 16, 30, 30]
+        );
     }
 
     #[test]
@@ -829,8 +854,13 @@ mod tests {
         let w = fixed(&[16, 3, 3, 3]);
         let mut attrs = HashMap::new();
         attrs.insert("pads".into(), AttributeValue::Ints(vec![1, 1, 1, 1]));
-        let r = ShapeInference::infer("Conv", &[&x, &w], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![1, 16, 32, 32]);
+        let r = ShapeInference::infer("Conv", &[&x, &w], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![1, 16, 32, 32]
+        );
     }
 
     #[test]
@@ -839,15 +869,25 @@ mod tests {
         let mut attrs = HashMap::new();
         attrs.insert("kernel_shape".into(), AttributeValue::Ints(vec![2, 2]));
         attrs.insert("strides".into(), AttributeValue::Ints(vec![2, 2]));
-        let r = ShapeInference::infer("MaxPool", &[&x], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![1, 3, 16, 16]);
+        let r = ShapeInference::infer("MaxPool", &[&x], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![1, 3, 16, 16]
+        );
     }
 
     #[test]
     fn test_global_pool_shape() {
         let x = fixed(&[1, 512, 7, 7]);
-        let r = ShapeInference::infer("GlobalAveragePool", &[&x], &HashMap::new()).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![1, 512, 1, 1]);
+        let r = ShapeInference::infer("GlobalAveragePool", &[&x], &HashMap::new())
+            .expect("GlobalAveragePool shape inference should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![1, 512, 1, 1]
+        );
     }
 
     #[test]
@@ -855,8 +895,13 @@ mod tests {
         let x = fixed(&[2, 3, 4, 5]);
         let mut attrs = HashMap::new();
         attrs.insert("axis".into(), AttributeValue::Int(2));
-        let r = ShapeInference::infer("Flatten", &[&x], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![6, 20]);
+        let r = ShapeInference::infer("Flatten", &[&x], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![6, 20]
+        );
     }
 
     #[test]
@@ -864,8 +909,13 @@ mod tests {
         let x = fixed(&[2, 3, 4]);
         let mut attrs = HashMap::new();
         attrs.insert("perm".into(), AttributeValue::Ints(vec![2, 0, 1]));
-        let r = ShapeInference::infer("Transpose", &[&x], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![4, 2, 3]);
+        let r = ShapeInference::infer("Transpose", &[&x], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![4, 2, 3]
+        );
     }
 
     #[test]
@@ -874,8 +924,13 @@ mod tests {
         let b = fixed(&[2, 4]);
         let mut attrs = HashMap::new();
         attrs.insert("axis".into(), AttributeValue::Int(1));
-        let r = ShapeInference::infer("Concat", &[&a, &b], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![2, 7]);
+        let r = ShapeInference::infer("Concat", &[&a, &b], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![2, 7]
+        );
     }
 
     #[test]
@@ -884,8 +939,13 @@ mod tests {
         let mut attrs = HashMap::new();
         attrs.insert("axes".into(), AttributeValue::Ints(vec![1]));
         attrs.insert("keepdims".into(), AttributeValue::Int(1));
-        let r = ShapeInference::infer("ReduceSum", &[&x], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![3, 1, 5]);
+        let r = ShapeInference::infer("ReduceSum", &[&x], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![3, 1, 5]
+        );
     }
 
     #[test]
@@ -894,16 +954,26 @@ mod tests {
         let mut attrs = HashMap::new();
         attrs.insert("axes".into(), AttributeValue::Ints(vec![1]));
         attrs.insert("keepdims".into(), AttributeValue::Int(0));
-        let r = ShapeInference::infer("ReduceSum", &[&x], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![3, 5]);
+        let r = ShapeInference::infer("ReduceSum", &[&x], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![3, 5]
+        );
     }
 
     #[test]
     fn test_gemm_shape() {
         let a = fixed(&[4, 3]);
         let b = fixed(&[3, 5]);
-        let r = ShapeInference::infer("Gemm", &[&a, &b], &HashMap::new()).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![4, 5]);
+        let r = ShapeInference::infer("Gemm", &[&a, &b], &HashMap::new())
+            .expect("Gemm shape inference should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![4, 5]
+        );
     }
 
     #[test]
@@ -912,8 +982,13 @@ mod tests {
         let b = fixed(&[3, 5]);
         let mut attrs = HashMap::new();
         attrs.insert("transA".into(), AttributeValue::Int(1));
-        let r = ShapeInference::infer("Gemm", &[&a, &b], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![4, 5]);
+        let r = ShapeInference::infer("Gemm", &[&a, &b], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![4, 5]
+        );
     }
 
     #[test]
@@ -940,7 +1015,8 @@ mod tests {
             initializers: HashMap::new(),
         };
 
-        let shapes = ShapeInference::infer_graph(&graph).unwrap();
+        let shapes =
+            ShapeInference::infer_graph(&graph).expect("graph shape inference should succeed");
         assert_eq!(
             shapes.get("Y").map(|s| s.to_concrete().ok()),
             Some(Some(vec![2, 3]))
@@ -951,7 +1027,8 @@ mod tests {
     fn test_dynamic_broadcast() {
         let a = TensorShape::new(vec![None, Some(4)]);
         let b = TensorShape::new(vec![Some(3), Some(1)]);
-        let r = ShapeInference::infer("Add", &[&a, &b], &HashMap::new()).unwrap();
+        let r = ShapeInference::infer("Add", &[&a, &b], &HashMap::new())
+            .expect("Add shape inference should succeed");
         // First dim dynamic, second dim 4
         assert_eq!(r[0].dims, vec![None, Some(4)]);
     }
@@ -963,21 +1040,32 @@ mod tests {
             "value".into(),
             AttributeValue::Tensor(OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![3])),
         );
-        let r = ShapeInference::infer("Constant", &[], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![3]);
+        let r = ShapeInference::infer("Constant", &[], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![3]
+        );
     }
 
     #[test]
     fn test_shape_op_inference() {
         let x = fixed(&[2, 3, 4]);
-        let r = ShapeInference::infer("Shape", &[&x], &HashMap::new()).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![3]);
+        let r = ShapeInference::infer("Shape", &[&x], &HashMap::new())
+            .expect("Shape op inference should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![3]
+        );
     }
 
     #[test]
     fn test_size_op_inference() {
         let x = fixed(&[2, 3, 4]);
-        let r = ShapeInference::infer("Size", &[&x], &HashMap::new()).unwrap();
+        let r = ShapeInference::infer("Size", &[&x], &HashMap::new())
+            .expect("Size op inference should succeed");
         assert!(r[0].dims.is_empty()); // scalar
     }
 
@@ -987,8 +1075,13 @@ mod tests {
         let indices = fixed(&[2]);
         let mut attrs = HashMap::new();
         attrs.insert("axis".into(), AttributeValue::Int(0));
-        let r = ShapeInference::infer("Gather", &[&data, &indices], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![2, 4, 3]);
+        let r = ShapeInference::infer("Gather", &[&data, &indices], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![2, 4, 3]
+        );
     }
 
     #[test]
@@ -996,8 +1089,13 @@ mod tests {
         let x = fixed(&[1, 3, 1, 4]);
         let mut attrs = HashMap::new();
         attrs.insert("axes".into(), AttributeValue::Ints(vec![0, 2]));
-        let r = ShapeInference::infer("Squeeze", &[&x], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![3, 4]);
+        let r = ShapeInference::infer("Squeeze", &[&x], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![3, 4]
+        );
     }
 
     #[test]
@@ -1005,7 +1103,12 @@ mod tests {
         let x = fixed(&[3, 4]);
         let mut attrs = HashMap::new();
         attrs.insert("axes".into(), AttributeValue::Ints(vec![0, 3]));
-        let r = ShapeInference::infer("Unsqueeze", &[&x], &attrs).unwrap();
-        assert_eq!(r[0].to_concrete().unwrap(), vec![1, 3, 4, 1]);
+        let r = ShapeInference::infer("Unsqueeze", &[&x], &attrs)
+            .expect("shape inference for valid operation should succeed");
+        assert_eq!(
+            r[0].to_concrete()
+                .expect("inferred shape should be fully concrete"),
+            vec![1, 3, 4, 1]
+        );
     }
 }

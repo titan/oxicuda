@@ -566,16 +566,24 @@ mod tests {
 
     #[test]
     fn workspace_bytes_positive() {
-        let conv = WinogradConv::new(make_3x3_problem(), SmVersion::Sm80);
-        assert!(conv.is_ok());
-        let ws = conv.unwrap_or_else(|_| {
-            WinogradConv::with_tile_size(
+        // Test inputs from `make_3x3_problem`: H=W=32, R=S=3, pad=1, stride=1 yield
+        // out_h=out_w=32 and a valid 3x3 filter, so both `new` (auto_select tile)
+        // and the explicit `with_tile_size(F2x3)` fallback are guaranteed to succeed.
+        let ws = match WinogradConv::new(make_3x3_problem(), SmVersion::Sm80) {
+            Ok(conv) => conv,
+            Err(outer_err) => match WinogradConv::with_tile_size(
                 make_3x3_problem(),
                 WinogradTileSize::F2x3,
                 SmVersion::Sm80,
-            )
-            .unwrap_or_else(|_| unreachable!())
-        });
+            ) {
+                Ok(conv) => conv,
+                Err(inner_err) => panic!(
+                    "winograd construction must succeed for the canonical 3x3 32x32 \
+                     test problem (outer auto-select error: {outer_err:?}; \
+                     explicit F2x3 fallback error: {inner_err:?})"
+                ),
+            },
+        };
         let bytes = ws.workspace_bytes();
         assert!(bytes.is_ok());
         assert!(bytes.unwrap_or(0) > 0);

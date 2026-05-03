@@ -233,7 +233,9 @@ mod tests {
     #[test]
     fn clip_action_within_bounds() {
         let p = DeterministicPolicy::new(3);
-        let clipped = p.clip_action(&[-2.0, 0.0, 2.0]).unwrap();
+        let clipped = p
+            .clip_action(&[-2.0, 0.0, 2.0])
+            .expect("action.len()==action_dim=3 should clip correctly");
         assert_eq!(clipped, vec![-1.0, 0.0, 1.0]);
     }
 
@@ -242,7 +244,9 @@ mod tests {
         let p = DeterministicPolicy::new(4);
         let mut handle = RlHandle::default_handle();
         for _ in 0..100 {
-            let a = p.exploration_action(&[0.0; 4], 0.3, &mut handle).unwrap();
+            let a = p
+                .exploration_action(&[0.0; 4], 0.3, &mut handle)
+                .expect("action.len()==action_dim=4 should add exploration noise");
             for v in a {
                 assert!(
                     (-1.0..=1.0).contains(&v),
@@ -259,7 +263,7 @@ mod tests {
         for _ in 0..100 {
             let a = p
                 .smooth_target_action(&[0.5, -0.5], 0.2, 0.5, &mut handle)
-                .unwrap();
+                .expect("action.len()==action_dim=2 should smooth target action");
             for v in a {
                 assert!(
                     (-1.0..=1.0).contains(&v),

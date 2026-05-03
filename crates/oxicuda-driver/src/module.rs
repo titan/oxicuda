@@ -110,7 +110,7 @@ impl std::fmt::Display for JitSeverity {
 /// ptxas warning : 'kernel', line 15; warning : double-precision is slow
 /// ptxas info    : 'kernel' used 16 registers, 0 bytes smem
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JitDiagnostic {
     /// Severity level.
     pub severity: JitSeverity,
@@ -130,7 +130,7 @@ pub struct JitDiagnostic {
 ///
 /// Use [`JitLog::parse_diagnostics`] to obtain structured
 /// [`JitDiagnostic`] entries instead of parsing the raw strings.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct JitLog {
     /// Informational messages from the JIT compiler.
     pub info: String,
@@ -325,6 +325,51 @@ fn extract_message(s: &str) -> &str {
 }
 
 // ---------------------------------------------------------------------------
+// jit_failure — build a JitFailed error from raw log buffers
+// ---------------------------------------------------------------------------
+
+/// Build a [`CudaError::JitFailed`] by combining the raw JIT log buffers
+/// with the underlying CUDA error.
+///
+/// Both `info_buf` and `error_buf` are interpreted as UTF-8 (with lossy
+/// conversion), parsed for structured diagnostics, and wrapped together
+/// with `source` into a [`CudaError::JitFailed`] variant.
+///
+/// This is `pub(crate)` so that both `module.rs` and `link.rs` can call
+/// it without exposing it as part of the public API.
+///
+/// Only compiled on non-macOS platforms because `link.rs`'s GPU path
+/// is the sole caller.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn jit_failure(source: CudaError, info_buf: &[u8], error_buf: &[u8]) -> CudaError {
+    let info = String::from_utf8_lossy(info_buf).into_owned();
+    let error = String::from_utf8_lossy(error_buf).into_owned();
+
+    let log = JitLog { info, error };
+    let diagnostic_count = log.parse_diagnostics().len();
+
+    CudaError::JitFailed {
+        log: Box::new(log),
+        diagnostic_count,
+        source: Box::new(source),
+    }
+}
+
+/// Variant of [`jit_failure`] that accepts a pre-built [`JitLog`].
+///
+/// Used when the log has already been assembled (e.g. in
+/// [`Module::from_ptx_with_options`] where the log was extracted
+/// before checking for a compilation error).
+pub(crate) fn jit_failure_from_log(source: CudaError, log: JitLog) -> CudaError {
+    let diagnostic_count = log.parse_diagnostics().len();
+    CudaError::JitFailed {
+        log: Box::new(log),
+        diagnostic_count,
+        source: Box::new(source),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Module
 // ---------------------------------------------------------------------------
 
@@ -447,7 +492,11 @@ impl Module {
             error: buf_to_string(&error_buf),
         };
 
-        result?;
+        // On failure, surface the full JIT diagnostic log in the error so
+        // callers can inspect exactly what went wrong.
+        if let Err(e) = result {
+            return Err(jit_failure_from_log(e, log));
+        }
         Ok((Self { raw }, log))
     }
 

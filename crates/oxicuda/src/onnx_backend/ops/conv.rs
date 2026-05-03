@@ -477,9 +477,13 @@ mod tests {
         // 1x1 conv: just a linear transformation per pixel
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![1, 1, 2, 2]);
         let w = OnnxTensor::from_f32(&[2.0], vec![1, 1, 1, 1]);
-        let r = execute_conv(&[Some(&x), Some(&w)], &HashMap::new()).unwrap();
+        let r = execute_conv(&[Some(&x), Some(&w)], &HashMap::new())
+            .expect("conv execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 1, 2, 2]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![2.0, 4.0, 6.0, 8.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![2.0, 4.0, 6.0, 8.0]
+        );
     }
 
     #[test]
@@ -490,9 +494,14 @@ mod tests {
             vec![1, 1, 3, 3],
         );
         let w = OnnxTensor::from_f32(&[1.0; 9], vec![1, 1, 3, 3]);
-        let r = execute_conv(&[Some(&x), Some(&w)], &HashMap::new()).unwrap();
+        let r = execute_conv(&[Some(&x), Some(&w)], &HashMap::new())
+            .expect("conv execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 1, 1, 1]);
-        assert_f32_near(&r[0].as_f32().unwrap(), &[45.0], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[45.0],
+            1e-5,
+        );
     }
 
     #[test]
@@ -500,8 +509,12 @@ mod tests {
         let x = OnnxTensor::from_f32(&[1.0, 1.0, 1.0, 1.0], vec![1, 1, 2, 2]);
         let w = OnnxTensor::from_f32(&[1.0], vec![1, 1, 1, 1]);
         let b = OnnxTensor::from_f32(&[10.0], vec![1]);
-        let r = execute_conv(&[Some(&x), Some(&w), Some(&b)], &HashMap::new()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![11.0, 11.0, 11.0, 11.0]);
+        let r = execute_conv(&[Some(&x), Some(&w), Some(&b)], &HashMap::new())
+            .expect("conv execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![11.0, 11.0, 11.0, 11.0]
+        );
     }
 
     #[test]
@@ -517,9 +530,13 @@ mod tests {
         let mut attrs = HashMap::new();
         attrs.insert("kernel_shape".into(), AttributeValue::Ints(vec![2, 2]));
         attrs.insert("strides".into(), AttributeValue::Ints(vec![2, 2]));
-        let r = execute_max_pool(&[Some(&x)], &attrs).unwrap();
+        let r = execute_max_pool(&[Some(&x)], &attrs)
+            .expect("max_pool execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 1, 2, 2]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![6.0, 8.0, 14.0, 16.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![6.0, 8.0, 14.0, 16.0]
+        );
     }
 
     #[test]
@@ -528,17 +545,27 @@ mod tests {
         let mut attrs = HashMap::new();
         attrs.insert("kernel_shape".into(), AttributeValue::Ints(vec![2, 2]));
         attrs.insert("strides".into(), AttributeValue::Ints(vec![2, 2]));
-        let r = execute_average_pool(&[Some(&x)], &attrs).unwrap();
+        let r = execute_average_pool(&[Some(&x)], &attrs)
+            .expect("average_pool execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 1, 1, 1]);
-        assert_f32_near(&r[0].as_f32().unwrap(), &[2.5], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[2.5],
+            1e-5,
+        );
     }
 
     #[test]
     fn test_global_average_pool() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![1, 2, 2, 2]);
-        let r = execute_global_average_pool(&[Some(&x)], &HashMap::new()).unwrap();
+        let r = execute_global_average_pool(&[Some(&x)], &HashMap::new())
+            .expect("global_average_pool execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 2, 1, 1]);
-        assert_f32_near(&r[0].as_f32().unwrap(), &[2.5, 6.5], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[2.5, 6.5],
+            1e-5,
+        );
     }
 
     #[test]
@@ -546,8 +573,13 @@ mod tests {
         // Simple 1x1 conv transpose
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![1, 1, 2, 2]);
         let w = OnnxTensor::from_f32(&[1.0], vec![1, 1, 1, 1]);
-        let r = execute_conv_transpose(&[Some(&x), Some(&w)], &HashMap::new()).unwrap();
+        let r = execute_conv_transpose(&[Some(&x), Some(&w)], &HashMap::new())
+            .expect("conv_transpose execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 1, 2, 2]);
-        assert_f32_near(&r[0].as_f32().unwrap(), &[1.0, 2.0, 3.0, 4.0], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[1.0, 2.0, 3.0, 4.0],
+            1e-5,
+        );
     }
 }

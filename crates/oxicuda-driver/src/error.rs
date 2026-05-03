@@ -6,6 +6,7 @@
 //! `cuda_call!` macro for ergonomic unsafe FFI calls.
 
 use crate::ffi;
+use crate::module::JitLog;
 
 // =========================================================================
 // CudaError — one variant per CUDA Driver API error code
@@ -16,7 +17,11 @@ use crate::ffi;
 /// Each variant maps to a specific `CUresult` code from the CUDA Driver API.
 /// The [`Unknown`](CudaError::Unknown) variant is the catch-all for codes not
 /// explicitly listed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+///
+/// Note: this enum intentionally does **not** implement `Copy` because the
+/// [`JitFailed`](CudaError::JitFailed) variant carries heap-allocated
+/// diagnostic data.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CudaError {
     // ----- Basic errors (1-8) -----
     /// `CUDA_ERROR_INVALID_VALUE` (1)
@@ -409,6 +414,28 @@ pub enum CudaError {
     #[error("CUDA: invalid resource configuration")]
     InvalidResourceConfiguration,
 
+    // ----- JIT diagnostic failure -----
+    /// JIT compilation failed with structured diagnostic output.
+    ///
+    /// The `log` field carries the full parsed JIT compiler output so that
+    /// callers can inspect warnings, errors, and informational messages.
+    /// The `source` field holds the original [`CudaError`] that triggered
+    /// the failure (e.g. [`InvalidPtx`](CudaError::InvalidPtx)).
+    ///
+    /// `Box` wrappers keep the enum size from inflating — `JitLog` can be
+    /// large when compilation produces verbose output.
+    #[error("JIT compilation failed: {diagnostic_count} diagnostic(s); see attached log")]
+    JitFailed {
+        /// Structured log from the JIT compiler.
+        log: Box<JitLog>,
+        /// Number of diagnostics in the log (pre-computed to avoid
+        /// re-parsing on every `Display` call).
+        diagnostic_count: usize,
+        /// The underlying CUDA error that triggered the failure.
+        #[source]
+        source: Box<CudaError>,
+    },
+
     // ----- Catch-all -----
     /// Unknown error code not covered by any other variant.
     #[error("CUDA: unknown error (code {0})")]
@@ -701,6 +728,8 @@ impl CudaError {
             Self::FunctionNotLoaded => ffi::CUDA_ERROR_FUNCTION_NOT_LOADED,
             Self::InvalidResourceType => ffi::CUDA_ERROR_INVALID_RESOURCE_TYPE,
             Self::InvalidResourceConfiguration => ffi::CUDA_ERROR_INVALID_RESOURCE_CONFIGURATION,
+            // JitFailed delegates to the inner source error's code.
+            Self::JitFailed { source, .. } => source.as_raw(),
             Self::Unknown(code) => *code,
         }
     }
@@ -885,10 +914,10 @@ mod tests {
     }
 
     #[test]
-    fn test_error_is_copy() {
+    fn test_error_is_clone() {
         let err = CudaError::InvalidValue;
-        let copy = err;
-        assert_eq!(err, copy);
+        let cloned = err.clone();
+        assert_eq!(err, cloned);
     }
 
     #[test]

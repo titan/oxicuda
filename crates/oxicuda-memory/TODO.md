@@ -81,7 +81,7 @@ Memory operations are bandwidth-bound. Key targets:
 
 | # | Requirement | Target | Status |
 |---|-------------|--------|--------|
-| NF2 | H2D / D2H copy bandwidth | ≥ 95% of PCIe theoretical bandwidth (same as `cuMemcpy`) | [ ] Verify |
+| NF2 | H2D / D2H copy bandwidth | ≥ 95% of PCIe theoretical bandwidth (same as `cuMemcpy`) | [~] Verify |
 | NF4 | Memory leak detection | Zero leaks via `compute-sanitizer --tool memcheck` in CI | [ ] Verify |
 
 ---
@@ -111,3 +111,9 @@ Memory operations are bandwidth-bound. Key targets:
 - [x] `DeviceBuffer::alloc_async` / `free_async` with `cuMemAllocAsync` / `cuMemFreeAsync` fully exercised (requires CUDA 11.2+ driver) — CPU-side API verified; requires driver for actual execution
 - [x] Pool trim / `cuMemPoolTrimTo` to release unused pool memory to system
 - [x] `MemoryPool` per-stream allocation tracking for debugging
+
+---
+
+## Performance Verification Harness Status (2026-04-26)
+
+- **NF2** (H2D / D2H bandwidth): harness implemented at `benches/bandwidth_copy.rs` with five criterion groups (`h2d_pageable`, `h2d_pinned`, `d2h_pageable`, `d2h_pinned`, `d2d`) sweeping 4 KiB → 256 MiB, each annotated with `Throughput::Bytes(...)`. The bench skips on macOS / no-GPU (logs `skip:` to stderr) and on Linux + NVIDIA emits a `report_nf2` line comparing the measured peak vs. PCIe Gen3 / Gen4 / Gen5 × 16 theoretical bandwidth. Default reference is **PCIe Gen4 ×16** (overridable via `OXI_PCIE_GEN={3|4|5}`). Awaiting Linux + NVIDIA verification run to confirm the ≥ 95 % gate.

@@ -31,8 +31,11 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use oxicuda_driver::error::{CudaError, CudaResult};
-use oxicuda_driver::ffi::CUdeviceptr;
+use oxicuda_driver::error::{CudaError, CudaResult, check};
+use oxicuda_driver::ffi::{
+    CUdeviceptr, CUmemAllocationHandleType, CUmemAllocationType, CUmemLocation, CUmemLocationType,
+    CUmemPoolProps, CUmemoryPool,
+};
 use oxicuda_driver::loader::try_driver;
 use oxicuda_driver::stream::Stream;
 use tracing::warn;
@@ -49,12 +52,11 @@ use tracing::warn;
 ///
 /// # Status
 ///
-/// This type is a placeholder.  The pool-related driver function pointers
-/// (`cuMemPoolCreate`, `cuMemPoolDestroy`, etc.) are not yet available in
-/// `oxicuda-driver`.
+/// `MemoryPool` is a software pool layered on top of `cuMemAlloc_v2`.
+/// For a thin wrapper over the *native* CUDA stream-ordered memory pool
+/// API (`cuMemPoolCreate`, `cuMemPoolDestroy`, `cuMemAllocFromPoolAsync`,
+/// `cuMemFreeAsync`), use [`NativeMemoryPool`].
 ///
-/// TODO: Add `cu_mem_pool_create`, `cu_mem_pool_destroy`,
-/// `cu_mem_alloc_from_pool_async`, `cu_mem_free_async` to `DriverApi`.
 /// Statistics for a memory pool's allocation behaviour.
 ///
 /// These statistics track the total bytes allocated, peak usage,
@@ -357,5 +359,242 @@ impl<T: Copy> Drop for PooledBuffer<T> {
             warn!("pool threshold trim failed: {e}");
         }
         self.ptr = 0;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NativeMemoryPool — thin wrapper over the CUDA stream-ordered pool API
+// ---------------------------------------------------------------------------
+
+/// Configuration for a [`NativeMemoryPool`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NativeMemoryPoolProps {
+    /// Device ordinal that physically backs the pool.
+    pub device_ordinal: i32,
+    /// Maximum aggregate size (bytes) the pool may hold.  `0` = unlimited.
+    pub max_size_bytes: usize,
+}
+
+/// Thin wrapper around the CUDA driver's stream-ordered memory pool
+/// (`cuMemPoolCreate` / `cuMemPoolDestroy`).
+///
+/// Allocations are issued via [`NativeMemoryPool::alloc_async`] which
+/// invokes `cuMemAllocFromPoolAsync`; frees are issued via
+/// [`NativeMemoryPool::free_async`] which invokes `cuMemFreeAsync`.
+///
+/// # Stream-ordering
+///
+/// The CUDA stream-ordered pool API requires the caller to ensure all
+/// outstanding work on the stream has completed before destroying the
+/// pool.  The [`Drop`] implementation calls `cuMemPoolDestroy` and
+/// silently swallows any error to honour the standard Drop convention.
+/// Call [`NativeMemoryPool::destroy`] explicitly to surface destruction
+/// errors.
+///
+/// # Status
+///
+/// On systems without a CUDA driver (e.g. macOS), [`NativeMemoryPool::new`]
+/// fails with [`CudaError::NotInitialized`].  On older drivers that lack
+/// the pool entry points it fails with [`CudaError::NotSupported`].
+pub struct NativeMemoryPool {
+    raw: CUmemoryPool,
+    device_ordinal: i32,
+}
+
+// SAFETY: `CUmemoryPool` is an opaque driver handle.  The CUDA driver is
+// thread-safe; multiple threads may issue stream-ordered allocations from
+// the same pool concurrently.
+unsafe impl Send for NativeMemoryPool {}
+unsafe impl Sync for NativeMemoryPool {}
+
+impl NativeMemoryPool {
+    /// Creates a new native memory pool on the device described by `props`.
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::InvalidValue`] if `device_ordinal` is negative.
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available.
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemPoolCreate`.
+    /// * Other [`CudaError`] variants on driver failure.
+    pub fn new(props: NativeMemoryPoolProps) -> CudaResult<Self> {
+        if props.device_ordinal < 0 {
+            return Err(CudaError::InvalidDevice);
+        }
+
+        let api = try_driver()?;
+        let f = api.cu_mem_pool_create.ok_or(CudaError::NotSupported)?;
+
+        let pool_props = CUmemPoolProps {
+            alloc_type: CUmemAllocationType::Pinned as u32,
+            handle_types: CUmemAllocationHandleType::None as u32,
+            location: CUmemLocation {
+                loc_type: CUmemLocationType::Device as u32,
+                id: props.device_ordinal,
+            },
+            max_size: props.max_size_bytes,
+            ..CUmemPoolProps::default()
+        };
+
+        let mut raw = CUmemoryPool::default();
+        check(unsafe { f(&mut raw, &pool_props) })?;
+
+        Ok(Self {
+            raw,
+            device_ordinal: props.device_ordinal,
+        })
+    }
+
+    /// Returns the raw [`CUmemoryPool`] handle.
+    #[inline]
+    pub fn raw(&self) -> CUmemoryPool {
+        self.raw
+    }
+
+    /// Returns the device ordinal that backs this pool.
+    #[inline]
+    pub fn device_ordinal(&self) -> i32 {
+        self.device_ordinal
+    }
+
+    /// Asynchronously allocates `bytes` of memory from the pool, ordered
+    /// against `stream`.
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::InvalidValue`] if `bytes` is zero.
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available.
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemAllocFromPoolAsync`.
+    /// * Other [`CudaError`] variants on driver failure.
+    pub fn alloc_async(&self, bytes: usize, stream: &Stream) -> CudaResult<CUdeviceptr> {
+        if bytes == 0 {
+            return Err(CudaError::InvalidValue);
+        }
+        let api = try_driver()?;
+        let f = api
+            .cu_mem_alloc_from_pool_async
+            .ok_or(CudaError::NotSupported)?;
+        let mut ptr: CUdeviceptr = 0;
+        check(unsafe { f(&mut ptr, bytes, self.raw, stream.raw()) })?;
+        Ok(ptr)
+    }
+
+    /// Asynchronously frees a pointer previously returned by
+    /// [`alloc_async`](Self::alloc_async), ordered against `stream`.
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available.
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemFreeAsync`.
+    /// * Other [`CudaError`] variants on driver failure.
+    pub fn free_async(&self, ptr: CUdeviceptr, stream: &Stream) -> CudaResult<()> {
+        let api = try_driver()?;
+        let f = api.cu_mem_free_async.ok_or(CudaError::NotSupported)?;
+        check(unsafe { f(ptr, stream.raw()) })
+    }
+
+    /// Destroys the pool, returning any driver error to the caller.
+    ///
+    /// The caller is responsible for ensuring all outstanding work on
+    /// streams that allocated from this pool has completed before calling
+    /// `destroy`.
+    ///
+    /// After this call returns, the [`Drop`] implementation will be a
+    /// no-op.
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available.
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemPoolDestroy`.
+    /// * Other [`CudaError`] variants on driver failure.
+    pub fn destroy(mut self) -> CudaResult<()> {
+        self.destroy_inner()
+    }
+
+    fn destroy_inner(&mut self) -> CudaResult<()> {
+        if self.raw.is_null() {
+            return Ok(());
+        }
+        let api = try_driver()?;
+        let f = api.cu_mem_pool_destroy.ok_or(CudaError::NotSupported)?;
+        let result = check(unsafe { f(self.raw) });
+        // Always clear the handle so Drop is a no-op even if destroy fails.
+        self.raw = CUmemoryPool::default();
+        result
+    }
+}
+
+impl Drop for NativeMemoryPool {
+    fn drop(&mut self) {
+        if let Err(e) = self.destroy_inner() {
+            warn!("failed to destroy native memory pool during drop: {e}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_driver_unavailable(err: &CudaError) -> bool {
+        matches!(err, CudaError::NotInitialized | CudaError::NotSupported)
+    }
+
+    #[test]
+    fn native_memory_pool_props_default() {
+        let props = NativeMemoryPoolProps::default();
+        assert_eq!(props.device_ordinal, 0);
+        assert_eq!(props.max_size_bytes, 0);
+    }
+
+    #[test]
+    fn native_memory_pool_new_negative_device_fails() {
+        let props = NativeMemoryPoolProps {
+            device_ordinal: -1,
+            max_size_bytes: 0,
+        };
+        let result = NativeMemoryPool::new(props);
+        assert_eq!(result.err(), Some(CudaError::InvalidDevice));
+    }
+
+    /// Without a CUDA driver, `NativeMemoryPool::new` must fail with one of
+    /// the driver-unavailability error kinds rather than panicking.
+    #[test]
+    fn native_memory_pool_new_no_driver_returns_driver_unavailable() {
+        let result = NativeMemoryPool::new(NativeMemoryPoolProps::default());
+        match result {
+            Ok(pool) => {
+                // CUDA available: explicit destroy must succeed too.
+                let destroy = pool.destroy();
+                assert!(destroy.is_ok(), "destroy failed: {destroy:?}");
+            }
+            Err(e) => assert!(
+                is_driver_unavailable(&e),
+                "expected driver-unavailable error, got {e:?}"
+            ),
+        }
+    }
+
+    /// On macOS specifically, every driver-calling method must return
+    /// [`CudaError::NotInitialized`] (no library to load).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_native_pool_returns_not_initialized() {
+        let result = NativeMemoryPool::new(NativeMemoryPoolProps::default());
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected NotInitialized on macOS, got Ok"),
+        };
+        assert!(
+            matches!(err, CudaError::NotInitialized),
+            "expected NotInitialized, got {err:?}"
+        );
     }
 }

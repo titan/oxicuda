@@ -135,7 +135,8 @@ mod tests {
     #[test]
     fn gae_output_length() {
         let (r, v, nv, d) = ones_trajectory(10);
-        let out = compute_gae(&r, &v, &nv, &d, GaeConfig::default()).unwrap();
+        let out = compute_gae(&r, &v, &nv, &d, GaeConfig::default())
+            .expect("valid equal-length slices should not fail");
         assert_eq!(out.advantages.len(), 10);
         assert_eq!(out.returns.len(), 10);
     }
@@ -161,7 +162,8 @@ mod tests {
         let v = vec![0.0_f32; 3];
         let nv = vec![0.0_f32; 3];
         let d = vec![0.0_f32; 3];
-        let out = compute_gae(&r, &v, &nv, &d, cfg).unwrap();
+        let out =
+            compute_gae(&r, &v, &nv, &d, cfg).expect("valid equal-length slices should not fail");
         // δ = 1 + 0.99*0 - 0 = 1.0 for all t; no λ accumulation
         for &a in &out.advantages {
             assert!((a - 1.0).abs() < 1e-5, "A={a}");
@@ -180,7 +182,8 @@ mod tests {
         let v = vec![0.0, 0.0, 0.0];
         let nv = vec![0.0, 0.0, 0.0];
         let d = vec![0.0, 0.0, 1.0]; // done at t=2
-        let out = compute_gae(&r, &v, &nv, &d, cfg).unwrap();
+        let out =
+            compute_gae(&r, &v, &nv, &d, cfg).expect("valid equal-length slices should not fail");
         // At t=2 (last): δ = 1 + 0.99*0*(1-1) - 0 = 1; gae = 1
         // At t=1: δ = 1 + 0.99*0 - 0 = 1; gae = 1 + 0.99*0.95*(1-0)*1 = 1.94..
         // At t=0: gae should be > 1
@@ -197,7 +200,8 @@ mod tests {
             normalise: true,
             ..GaeConfig::default()
         };
-        let out = compute_gae(&r, &v, &nv, &d, cfg).unwrap();
+        let out =
+            compute_gae(&r, &v, &nv, &d, cfg).expect("valid equal-length slices should not fail");
         let mean = out.advantages.iter().sum::<f32>() / 20.0;
         assert!(
             mean.abs() < 1e-4,
@@ -212,7 +216,8 @@ mod tests {
             normalise: true,
             ..GaeConfig::default()
         };
-        let out = compute_gae(&r, &v, &nv, &d, cfg).unwrap();
+        let out =
+            compute_gae(&r, &v, &nv, &d, cfg).expect("valid equal-length slices should not fail");
         let mean = out.advantages.iter().sum::<f32>() / 50.0;
         let var: f32 = out
             .advantages
@@ -234,7 +239,8 @@ mod tests {
             normalise: false,
             ..GaeConfig::default()
         };
-        let out = compute_gae(&r, &v, &nv, &d, cfg).unwrap();
+        let out =
+            compute_gae(&r, &v, &nv, &d, cfg).expect("valid equal-length slices should not fail");
         for (i, (&ret, (&a, &vi))) in out
             .returns
             .iter()

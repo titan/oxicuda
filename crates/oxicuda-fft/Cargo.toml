@@ -27,5 +27,16 @@ f16 = ["dep:half", "oxicuda-blas/f16"]
 workspace = true
 optional = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "fft_throughput"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true

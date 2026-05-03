@@ -211,8 +211,8 @@ mod tests {
     fn memory_no_buffers() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         b.add_barrier("n");
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("memory analysis succeeds on valid graph");
         assert_eq!(plan.total_bytes, 0);
         assert_eq!(plan.num_slots, 0);
     }
@@ -226,11 +226,11 @@ mod tests {
         b.set_outputs(w, [buf]);
         b.set_inputs(r, [buf]);
         b.dep(w, r);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("memory analysis succeeds on valid graph");
         assert_eq!(plan.num_slots, 1);
         assert!(plan.total_bytes >= 1024);
-        let asgn = plan.assignment(buf).unwrap();
+        let asgn = plan.assignment(buf).expect("buffer has memory assignment");
         assert_eq!(asgn.buf, buf);
         assert_eq!(asgn.slot, 0);
     }
@@ -250,8 +250,8 @@ mod tests {
         b.set_outputs(n2, [buf1]);
         b.set_inputs(n3, [buf1]);
         b.chain(&[n0, n1, n2, n3]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("memory analysis succeeds on valid graph");
         // Ideally they share one slot.
         let a0 = plan.assignment(buf0);
         let a1 = plan.assignment(buf1);
@@ -277,10 +277,10 @@ mod tests {
         b.set_outputs(w1, [buf1]);
         b.set_inputs(reader, [buf0, buf1]);
         b.fan_in(&[w0, w1], reader);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
-        let a0 = plan.assignment(buf0).unwrap();
-        let a1 = plan.assignment(buf1).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("memory analysis succeeds on valid graph");
+        let a0 = plan.assignment(buf0).expect("buf0 has memory assignment");
+        let a1 = plan.assignment(buf1).expect("buf1 has memory assignment");
         assert_ne!(a0.slot, a1.slot);
         assert_eq!(plan.num_slots, 2);
     }
@@ -291,8 +291,8 @@ mod tests {
         let ext = b.alloc_external_buffer("weights", 65536);
         let r = b.add_barrier("r");
         b.set_inputs(r, [ext]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("memory analysis succeeds on valid graph");
         assert_eq!(plan.external_count, 1);
         assert_eq!(plan.num_slots, 0);
         assert_eq!(plan.total_bytes, 0);
@@ -304,10 +304,10 @@ mod tests {
         let buf = b.alloc_buffer("small", 17); // 17 bytes → must align to 256
         let w = b.add_barrier("w");
         b.set_outputs(w, [buf]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("memory analysis succeeds on valid graph");
         assert!(plan.total_bytes >= 256);
-        let asgn = plan.assignment(buf).unwrap();
+        let asgn = plan.assignment(buf).expect("buffer has memory assignment");
         assert!(asgn.slot_size >= 256);
     }
 
@@ -325,8 +325,8 @@ mod tests {
             b.set_inputs(nodes[2 * i + 1], [bufs[i]]);
         }
         b.chain(&nodes);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("memory analysis succeeds on valid graph");
         // With perfect sharing, total = 1 * 256 (aligned) vs naive = 3 * 1024 = 3072.
         // ratio should be < 1.0 (better than naive).
         assert!(
@@ -352,12 +352,12 @@ mod tests {
         b.set_outputs(w2, [buf2]);
         b.set_inputs(sink, [buf0, buf1, buf2]);
         b.fan_in(&[w0, w1, w2], sink);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("memory analysis succeeds on valid graph");
         // All concurrent → 3 slots with non-overlapping offsets.
-        let a0 = plan.assignment(buf0).unwrap();
-        let a1 = plan.assignment(buf1).unwrap();
-        let a2 = plan.assignment(buf2).unwrap();
+        let a0 = plan.assignment(buf0).expect("buf0 has memory assignment");
+        let a1 = plan.assignment(buf1).expect("buf1 has memory assignment");
+        let a2 = plan.assignment(buf2).expect("buf2 has memory assignment");
         // Offsets should not overlap.
         let ranges = [
             (a0.offset, a0.offset + a0.slot_size),

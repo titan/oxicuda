@@ -336,11 +336,16 @@ mod tests {
     fn fusion_single_fusible_kernel_trivial_group() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         let k = fusible_kernel(&mut b, "add");
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
         assert_eq!(plan.groups.len(), 1);
         assert!(plan.groups[0].is_trivial());
-        assert_eq!(plan.group_of(k).unwrap().members, vec![k]);
+        assert_eq!(
+            plan.group_of(k)
+                .expect("kernel node has fusion group")
+                .members,
+            vec![k]
+        );
     }
 
     #[test]
@@ -350,11 +355,11 @@ mod tests {
         let k1 = fusible_kernel(&mut b, "k1");
         let k2 = fusible_kernel(&mut b, "k2");
         b.chain(&[k0, k1, k2]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
         // All three are fusible and in a chain → one non-trivial group.
         assert_eq!(plan.fusion_count(), 1);
-        let group = plan.group_of(k0).unwrap();
+        let group = plan.group_of(k0).expect("k0 has fusion group");
         assert_eq!(group.size(), 3);
         assert!(group.members.contains(&k0));
         assert!(group.members.contains(&k1));
@@ -369,11 +374,11 @@ mod tests {
         let k1 = non_fusible_kernel(&mut b, "k1");
         let k2 = fusible_kernel(&mut b, "k2");
         b.chain(&[k0, k1, k2]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
         // k0 and k2 should be in different groups.
-        let g0 = plan.group_of(k0).unwrap().id;
-        let g2 = plan.group_of(k2).unwrap().id;
+        let g0 = plan.group_of(k0).expect("k0 has fusion group").id;
+        let g2 = plan.group_of(k2).expect("k2 has fusion group").id;
         assert_ne!(g0, g2);
     }
 
@@ -384,11 +389,13 @@ mod tests {
         let k = fusible_kernel(&mut b, "k");
         let download = b.add_memcpy("dn", MemcpyDir::DeviceToHost, 1024);
         b.chain(&[upload, k, download]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
         // Upload and download are non-kernel nodes → trivial groups.
-        let gup = plan.group_of(upload).unwrap();
-        let gdn = plan.group_of(download).unwrap();
+        let gup = plan.group_of(upload).expect("upload node has fusion group");
+        let gdn = plan
+            .group_of(download)
+            .expect("download node has fusion group");
         assert!(gup.is_trivial());
         assert!(gdn.is_trivial());
     }
@@ -401,10 +408,10 @@ mod tests {
         let k0 = b.add_kernel("k0", 4, 256, 0).fusible(true).finish();
         let k1 = b.add_kernel("k1", 8, 256, 0).fusible(true).finish();
         b.dep(k0, k1);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
-        let gk0 = plan.group_of(k0).unwrap().id;
-        let gk1 = plan.group_of(k1).unwrap().id;
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
+        let gk0 = plan.group_of(k0).expect("k0 has fusion group").id;
+        let gk1 = plan.group_of(k1).expect("k1 has fusion group").id;
         assert_ne!(gk0, gk1);
     }
 
@@ -415,8 +422,8 @@ mod tests {
         let k1 = fusible_kernel(&mut b, "k1");
         let k2 = fusible_kernel(&mut b, "k2");
         b.chain(&[k0, k1, k2]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
         // Group of 3 saves 2 kernel launches.
         assert_eq!(plan.nodes_saved(), 2);
     }
@@ -428,8 +435,8 @@ mod tests {
         let k1 = non_fusible_kernel(&mut b, "k1");
         let upload = b.add_memcpy("up", MemcpyDir::HostToDevice, 512);
         b.chain(&[upload, k0, k1]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
         // Every node must appear in exactly one group.
         let total: usize = plan.groups.iter().map(|g| g.size()).sum();
         assert_eq!(total, 3);
@@ -447,11 +454,11 @@ mod tests {
         let k0 = fusible_kernel(&mut b, "k0");
         let k1 = fusible_kernel(&mut b, "k1");
         b.fan_out(src, &[k0, k1]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
         // k0 and k1 are in separate groups (not dominator-related to each other).
-        let gk0 = plan.group_of(k0).unwrap().id;
-        let gk1 = plan.group_of(k1).unwrap().id;
+        let gk0 = plan.group_of(k0).expect("k0 has fusion group").id;
+        let gk1 = plan.group_of(k1).expect("k1 has fusion group").id;
         assert_ne!(gk0, gk1);
     }
 
@@ -461,9 +468,9 @@ mod tests {
         let k0 = fusible_kernel(&mut b, "relu");
         let k1 = fusible_kernel(&mut b, "scale");
         b.dep(k0, k1);
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
-        let group = plan.group_of(k0).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
+        let group = plan.group_of(k0).expect("k0 has fusion group");
         assert!(!group.tag.is_empty());
     }
 
@@ -471,10 +478,15 @@ mod tests {
     fn fusion_empty_fusible_graph_one_group() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         let k = fusible_kernel(&mut b, "solo");
-        let g = b.build().unwrap();
-        let plan = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g).expect("kernel fusion analysis succeeds on valid graph");
         assert_eq!(plan.fusion_count(), 0); // trivial, not fused
         assert_eq!(plan.nodes_saved(), 0);
-        assert_eq!(plan.group_of(k).unwrap().size(), 1);
+        assert_eq!(
+            plan.group_of(k)
+                .expect("kernel node has fusion group")
+                .size(),
+            1
+        );
     }
 }

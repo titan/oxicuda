@@ -300,7 +300,7 @@ mod tests {
     fn alloc_and_free() {
         let mut cache = tiny_cache();
         assert_eq!(cache.n_free_blocks(), 8);
-        let id = cache.alloc_block().unwrap();
+        let id = cache.alloc_block().expect("cache has 8 free blocks");
         assert_eq!(cache.n_free_blocks(), 7);
         cache.dec_ref(id);
         assert_eq!(cache.n_free_blocks(), 8);
@@ -309,8 +309,10 @@ mod tests {
     #[test]
     fn alloc_exhaustion_error() {
         let mut cache = PagedKvCache::new(1, 1, 4, 4, 2);
-        cache.alloc_block().unwrap();
-        cache.alloc_block().unwrap();
+        cache.alloc_block().expect("first alloc from 2-block cache");
+        cache
+            .alloc_block()
+            .expect("second alloc from 2-block cache");
         let res = cache.alloc_block();
         assert!(matches!(res, Err(InferError::BlockAllocFailed { .. })));
     }
@@ -318,7 +320,9 @@ mod tests {
     #[test]
     fn alloc_blocks_batch() {
         let mut cache = tiny_cache();
-        let ids = cache.alloc_blocks(3).unwrap();
+        let ids = cache
+            .alloc_blocks(3)
+            .expect("cache has 8 free blocks, need 3");
         assert_eq!(ids.len(), 3);
         assert_eq!(cache.n_free_blocks(), 5);
     }
@@ -332,11 +336,13 @@ mod tests {
     #[test]
     fn append_and_read_token() {
         let mut cache = tiny_cache();
-        let id = cache.alloc_block().unwrap();
+        let id = cache.alloc_block().expect("cache has free blocks");
         let k = vec![1.0_f32; 2 * 4]; // n_kv_heads=2, head_dim=4
         let v = vec![2.0_f32; 2 * 4];
-        cache.append_token(id, 0, &k, &v).unwrap();
-        let blk = cache.block(id, 0).unwrap();
+        cache
+            .append_token(id, 0, &k, &v)
+            .expect("layer 0 exists and block has free slots");
+        let blk = cache.block(id, 0).expect("block id and layer 0 are valid");
         assert_eq!(blk.filled, 1);
         assert!(blk.key_slice(0).iter().all(|&x| (x - 1.0).abs() < 1e-7));
         assert!(blk.value_slice(0).iter().all(|&x| (x - 2.0).abs() < 1e-7));
@@ -345,10 +351,14 @@ mod tests {
     #[test]
     fn block_full_error() {
         let mut cache = PagedKvCache::new(1, 2, 4, 2, 4); // block_size=2
-        let id = cache.alloc_block().unwrap();
+        let id = cache.alloc_block().expect("cache has free blocks");
         let kv = vec![0.5_f32; 2 * 4];
-        cache.append_token(id, 0, &kv, &kv).unwrap();
-        cache.append_token(id, 0, &kv, &kv).unwrap();
+        cache
+            .append_token(id, 0, &kv, &kv)
+            .expect("first token fits in block_size=2");
+        cache
+            .append_token(id, 0, &kv, &kv)
+            .expect("second token fills block_size=2");
         // Block now full
         assert!(cache.append_token(id, 0, &kv, &kv).is_err());
     }
@@ -356,7 +366,9 @@ mod tests {
     #[test]
     fn ref_count_sharing() {
         let mut cache = tiny_cache();
-        let id = cache.alloc_block().unwrap();
+        let id = cache
+            .alloc_block()
+            .expect("cache has free blocks for ref count test");
         // Block should be allocated (refcount = 1)
         assert_eq!(cache.n_used_blocks(), 1);
         cache.inc_ref(id);
@@ -371,13 +383,21 @@ mod tests {
     #[test]
     fn block_reset_on_free() {
         let mut cache = tiny_cache();
-        let id = cache.alloc_block().unwrap();
+        let id = cache
+            .alloc_block()
+            .expect("cache has free blocks for reset test");
         let kv = vec![9.0_f32; 2 * 4];
-        cache.append_token(id, 0, &kv, &kv).unwrap();
+        cache
+            .append_token(id, 0, &kv, &kv)
+            .expect("layer 0 exists and slot is free");
         // Free and reallocate
         cache.dec_ref(id);
-        let id2 = cache.alloc_block().unwrap();
-        let blk = cache.block(id2, 0).unwrap();
+        let id2 = cache
+            .alloc_block()
+            .expect("block returned to free list after dec_ref");
+        let blk = cache
+            .block(id2, 0)
+            .expect("reallocated block and layer 0 are valid");
         assert_eq!(blk.filled, 0);
         assert!(blk.keys.iter().all(|&x| x == 0.0));
     }

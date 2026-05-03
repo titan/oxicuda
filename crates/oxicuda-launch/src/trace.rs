@@ -172,8 +172,7 @@ mod tests {
     #[test]
     fn test_macro_invocation_compiles() {
         // Verify the macro expands without error.
+        // On tracing builds this is a Span; on no-tracing builds it is ().
         let _span = kernel_launch_span!("test_kernel", (4u32, 1u32, 1u32), (256u32, 1u32, 1u32));
-        // On tracing builds _span is a Span; on no-tracing builds it is ().
-        let _ = _span;
     }
 }

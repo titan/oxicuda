@@ -640,20 +640,37 @@ mod tests {
 
     #[test]
     fn test_basic_allocation() {
-        let mut cache = PagedKvCache::new(test_config(100)).unwrap();
+        let mut cache = PagedKvCache::new(test_config(100))
+            .expect("PagedKvCache creation with valid config should succeed");
         assert_eq!(cache.num_free_blocks(), 100);
 
-        let block = cache.allocate_block(1).unwrap();
+        let block = cache
+            .allocate_block(1)
+            .expect("block allocation for new sequence should succeed");
         assert_eq!(cache.num_free_blocks(), 99);
         assert!(cache.get_block_table(1).is_some());
-        assert_eq!(cache.get_block_table(1).unwrap().len(), 1);
-        assert_eq!(cache.get_block_table(1).unwrap()[0], block);
+        assert_eq!(
+            cache
+                .get_block_table(1)
+                .expect("block table for allocated sequence should exist")
+                .len(),
+            1
+        );
+        assert_eq!(
+            cache
+                .get_block_table(1)
+                .expect("block table for allocated sequence should exist")[0],
+            block
+        );
     }
 
     #[test]
     fn test_allocate_blocks_for_tokens() {
-        let mut cache = PagedKvCache::new(test_config(100)).unwrap();
-        let blocks = cache.allocate_blocks_for_tokens(1, 50).unwrap();
+        let mut cache = PagedKvCache::new(test_config(100))
+            .expect("PagedKvCache creation with valid config should succeed");
+        let blocks = cache
+            .allocate_blocks_for_tokens(1, 50)
+            .expect("multi-block allocation for 50 tokens should succeed");
         // 50 tokens / 16 block_size = 4 blocks needed (16+16+16+2)
         assert_eq!(blocks.len(), 4);
         assert_eq!(cache.num_free_blocks(), 96);
@@ -661,39 +678,52 @@ mod tests {
 
     #[test]
     fn test_free_sequence() {
-        let mut cache = PagedKvCache::new(test_config(100)).unwrap();
-        cache.allocate_blocks_for_tokens(1, 32).unwrap();
+        let mut cache = PagedKvCache::new(test_config(100))
+            .expect("PagedKvCache creation with valid config should succeed");
+        cache
+            .allocate_blocks_for_tokens(1, 32)
+            .expect("block allocation for 32 tokens should succeed");
         assert_eq!(cache.num_free_blocks(), 98);
 
-        cache.free_sequence(1).unwrap();
+        cache
+            .free_sequence(1)
+            .expect("freeing allocated sequence should succeed");
         assert_eq!(cache.num_free_blocks(), 100);
         assert!(cache.get_block_table(1).is_none());
     }
 
     #[test]
     fn test_free_unknown_sequence() {
-        let mut cache = PagedKvCache::new(test_config(10)).unwrap();
+        let mut cache = PagedKvCache::new(test_config(10))
+            .expect("PagedKvCache creation with valid config should succeed");
         assert!(cache.free_sequence(999).is_err());
     }
 
     #[test]
     fn test_append_token() {
-        let mut cache = PagedKvCache::new(test_config(10)).unwrap();
+        let mut cache = PagedKvCache::new(test_config(10))
+            .expect("PagedKvCache creation with valid config should succeed");
 
         // First token should allocate a new block
-        let b1 = cache.append_token(1).unwrap();
+        let b1 = cache
+            .append_token(1)
+            .expect("appending first token to new sequence should succeed");
         assert_eq!(cache.num_cached_tokens(1), 1);
         assert_eq!(cache.num_free_blocks(), 9);
 
         // Fill the block (block_size = 16)
         for _ in 1..16 {
-            let b = cache.append_token(1).unwrap();
+            let b = cache
+                .append_token(1)
+                .expect("appending token to existing block should succeed");
             assert_eq!(b, b1); // same block
         }
         assert_eq!(cache.num_cached_tokens(1), 16);
 
         // 17th token should allocate a new block
-        let b2 = cache.append_token(1).unwrap();
+        let b2 = cache
+            .append_token(1)
+            .expect("appending token that overflows to new block should succeed");
         assert_ne!(b1, b2);
         assert_eq!(cache.num_cached_tokens(1), 17);
         assert_eq!(cache.num_free_blocks(), 8);
@@ -701,27 +731,40 @@ mod tests {
 
     #[test]
     fn test_copy_on_write() {
-        let mut cache = PagedKvCache::new(test_config(20)).unwrap();
+        let mut cache = PagedKvCache::new(test_config(20))
+            .expect("PagedKvCache creation with valid config should succeed");
 
         // Allocate blocks for sequence 1
-        cache.allocate_blocks_for_tokens(1, 32).unwrap();
+        cache
+            .allocate_blocks_for_tokens(1, 32)
+            .expect("block allocation for 32 tokens should succeed");
         assert_eq!(cache.num_free_blocks(), 18);
 
         // Share prefix with sequence 2
-        cache.share_prefix(1, 2, 2).unwrap();
+        cache
+            .share_prefix(1, 2, 2)
+            .expect("sharing prefix between sequences should succeed");
         assert_eq!(cache.num_free_blocks(), 18); // no new allocation
 
         // Append token to seq 2 -> triggers CoW on shared block
-        let _ = cache.append_token(2).unwrap();
+        let _ = cache
+            .append_token(2)
+            .expect("appending token to copy-on-write sequence should succeed");
         assert!(cache.stats().cow_copies > 0 || cache.num_free_blocks() < 18);
     }
 
     #[test]
     fn test_prefix_sharing() {
-        let mut cache = PagedKvCache::new(test_config(20)).unwrap();
+        let mut cache = PagedKvCache::new(test_config(20))
+            .expect("PagedKvCache creation with valid config should succeed");
 
-        cache.allocate_blocks_for_tokens(1, 32).unwrap();
-        let blocks = cache.get_block_table(1).unwrap().to_vec();
+        cache
+            .allocate_blocks_for_tokens(1, 32)
+            .expect("block allocation for 32 tokens should succeed");
+        let blocks = cache
+            .get_block_table(1)
+            .expect("block table for allocated sequence should exist")
+            .to_vec();
 
         // Register prefix
         let prefix_hash = 0x1234u64;
@@ -729,23 +772,40 @@ mod tests {
 
         // Lookup
         assert!(cache.lookup_prefix(prefix_hash).is_some());
-        assert_eq!(cache.lookup_prefix(prefix_hash).unwrap().len(), 2);
+        assert_eq!(
+            cache
+                .lookup_prefix(prefix_hash)
+                .expect("registered prefix should be found")
+                .len(),
+            2
+        );
         assert!(cache.lookup_prefix(0xDEAD).is_none());
     }
 
     #[test]
     fn test_eviction_lru() {
-        let mut cache = PagedKvCache::new(test_config(4)).unwrap();
+        let mut cache = PagedKvCache::new(test_config(4))
+            .expect("PagedKvCache creation with valid config should succeed");
 
         // Fill all blocks
-        cache.allocate_blocks_for_tokens(1, 16).unwrap(); // 1 block
-        cache.allocate_blocks_for_tokens(2, 16).unwrap(); // 1 block
-        cache.allocate_blocks_for_tokens(3, 16).unwrap(); // 1 block
-        cache.allocate_blocks_for_tokens(4, 16).unwrap(); // 1 block
+        cache
+            .allocate_blocks_for_tokens(1, 16)
+            .expect("block allocation for 16 tokens should succeed"); // 1 block
+        cache
+            .allocate_blocks_for_tokens(2, 16)
+            .expect("block allocation for 16 tokens for seq 2 should succeed"); // 1 block
+        cache
+            .allocate_blocks_for_tokens(3, 16)
+            .expect("block allocation for 16 tokens for seq 3 should succeed"); // 1 block
+        cache
+            .allocate_blocks_for_tokens(4, 16)
+            .expect("block allocation for 16 tokens for seq 4 should succeed"); // 1 block
         assert_eq!(cache.num_free_blocks(), 0);
 
         // Allocate one more -> forces eviction of LRU block (seq 1's block)
-        let _new_block = cache.allocate_block(5).unwrap();
+        let _new_block = cache
+            .allocate_block(5)
+            .expect("block allocation triggering LRU eviction should succeed");
         assert_eq!(cache.stats().evictions, 1);
     }
 
@@ -755,15 +815,24 @@ mod tests {
             eviction_policy: CacheEvictionPolicy::Fifo,
             ..test_config(3)
         };
-        let mut cache = PagedKvCache::new(config).unwrap();
+        let mut cache = PagedKvCache::new(config)
+            .expect("PagedKvCache creation with custom eviction policy should succeed");
 
-        cache.allocate_block(1).unwrap();
-        cache.allocate_block(2).unwrap();
-        cache.allocate_block(3).unwrap();
+        cache
+            .allocate_block(1)
+            .expect("block allocation for sequence 1 should succeed");
+        cache
+            .allocate_block(2)
+            .expect("block allocation for sequence 2 should succeed");
+        cache
+            .allocate_block(3)
+            .expect("block allocation for sequence 3 should succeed");
         assert_eq!(cache.num_free_blocks(), 0);
 
         // Force eviction
-        let _ = cache.allocate_block(4).unwrap();
+        let _ = cache
+            .allocate_block(4)
+            .expect("block allocation triggering eviction should succeed");
         assert_eq!(cache.stats().evictions, 1);
     }
 
@@ -773,23 +842,38 @@ mod tests {
             eviction_policy: CacheEvictionPolicy::Frequency,
             ..test_config(3)
         };
-        let mut cache = PagedKvCache::new(config).unwrap();
+        let mut cache = PagedKvCache::new(config)
+            .expect("PagedKvCache creation with custom eviction policy should succeed");
 
-        cache.allocate_block(1).unwrap();
-        cache.allocate_block(2).unwrap();
-        cache.allocate_block(3).unwrap();
+        cache
+            .allocate_block(1)
+            .expect("block allocation for sequence 1 should succeed");
+        cache
+            .allocate_block(2)
+            .expect("block allocation for sequence 2 should succeed");
+        cache
+            .allocate_block(3)
+            .expect("block allocation for sequence 3 should succeed");
 
-        let _ = cache.allocate_block(4).unwrap();
+        let _ = cache
+            .allocate_block(4)
+            .expect("block allocation triggering eviction should succeed");
         assert_eq!(cache.stats().evictions, 1);
     }
 
     #[test]
     fn test_cache_stats() {
-        let mut cache = PagedKvCache::new(test_config(20)).unwrap();
+        let mut cache = PagedKvCache::new(test_config(20))
+            .expect("PagedKvCache creation with valid config should succeed");
         assert_eq!(cache.stats().hit_rate(), 0.0);
 
-        cache.allocate_blocks_for_tokens(1, 32).unwrap();
-        let blocks = cache.get_block_table(1).unwrap().to_vec();
+        cache
+            .allocate_blocks_for_tokens(1, 32)
+            .expect("block allocation for 32 tokens should succeed");
+        let blocks = cache
+            .get_block_table(1)
+            .expect("block table for allocated sequence should exist")
+            .to_vec();
         assert_eq!(cache.stats().total_allocations, 2);
 
         cache.register_prefix(42, blocks[..1].to_vec());
@@ -800,18 +884,22 @@ mod tests {
 
     #[test]
     fn test_memory_usage() {
-        let cache = PagedKvCache::new(test_config(100)).unwrap();
+        let cache = PagedKvCache::new(test_config(100))
+            .expect("PagedKvCache creation with valid config should succeed");
         // All blocks free, no memory used
         assert_eq!(cache.memory_usage_bytes(), 0);
     }
 
     #[test]
     fn test_fragmentation() {
-        let mut cache = PagedKvCache::new(test_config(20)).unwrap();
+        let mut cache = PagedKvCache::new(test_config(20))
+            .expect("PagedKvCache creation with valid config should succeed");
         assert_eq!(cache.fragmentation(), 0.0);
 
         // Allocate 17 tokens -> 2 blocks, one partial
-        cache.allocate_blocks_for_tokens(1, 17).unwrap();
+        cache
+            .allocate_blocks_for_tokens(1, 17)
+            .expect("block allocation for 17 tokens should succeed");
         let frag = cache.fragmentation();
         assert!(frag > 0.0);
     }
@@ -837,7 +925,8 @@ mod tests {
 
     #[test]
     fn test_num_cached_tokens_no_sequence() {
-        let cache = PagedKvCache::new(test_config(10)).unwrap();
+        let cache = PagedKvCache::new(test_config(10))
+            .expect("PagedKvCache creation with valid config should succeed");
         assert_eq!(cache.num_cached_tokens(999), 0);
     }
 }

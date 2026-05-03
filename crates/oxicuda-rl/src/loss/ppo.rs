@@ -176,7 +176,7 @@ mod tests {
             &ovp,
             PpoConfig::default(),
         )
-        .unwrap()
+        .expect("valid equal-length PPO slices should compute loss")
     }
 
     #[test]
@@ -239,7 +239,7 @@ mod tests {
             &ovp,
             PpoConfig::default(),
         )
-        .unwrap();
+        .expect("valid equal-length PPO slices should compute loss");
         let l_high = ppo_loss(
             &lp_new,
             &lp_old,
@@ -250,7 +250,7 @@ mod tests {
             &ovp,
             PpoConfig::default(),
         )
-        .unwrap();
+        .expect("valid equal-length PPO slices should compute loss");
         assert!(
             l_high.total < l_low.total,
             "higher entropy should reduce total loss"

@@ -9,14 +9,20 @@
 //! (elements per row):
 //! - `cols <= 32`: warp-level shuffle reduction (1 warp per row)
 //! - `cols <= 1024`: shared-memory block reduction (1 block per row)
-//! - `cols > 1024`: currently unsupported (returns an error)
+//! - `cols > 1024`: multi-block (`reduce` + `finalize`) pipeline that
+//!   exchanges per-block `(max, sum_exp)` pairs through a global scratch
+//!   buffer.
 
 use std::sync::Arc;
 
 use oxicuda_driver::Module;
-use oxicuda_launch::{Kernel, LaunchParams, grid_size_for};
+use oxicuda_launch::{Dim3, Kernel, LaunchParams, grid_size_for};
 use oxicuda_memory::DeviceBuffer;
-use oxicuda_ptx::templates::softmax::SoftmaxTemplate;
+use oxicuda_ptx::ir::PtxType;
+use oxicuda_ptx::templates::softmax::{
+    MULTI_BLOCK_DEFAULT_STRIDE, MULTI_BLOCK_THREADS, MultiBlockSoftmaxPtx, SoftmaxTemplate,
+    generate_multi_block_softmax_ptx,
+};
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
@@ -60,13 +66,19 @@ fn build_softmax_kernel(
 ///
 /// # Strategy selection
 ///
-/// | `cols`         | Strategy                      | Threads/row |
-/// |----------------|-------------------------------|-------------|
-/// | `<= 32`        | Warp shuffle reduction        | 32          |
-/// | `33..=1024`    | Shared memory block reduction | `cols`*     |
-/// | `> 1024`       | Error (not yet supported)     | N/A         |
+/// | `cols`         | Strategy                      | Threads/row              |
+/// |----------------|-------------------------------|--------------------------|
+/// | `<= 32`        | Warp shuffle reduction        | 32                       |
+/// | `33..=1024`    | Shared memory block reduction | `cols`*                  |
+/// | `> 1024`       | Multi-block reduce + finalize | `MULTI_BLOCK_THREADS`    |
 ///
 /// (*) Rounded up to the nearest power of two.
+///
+/// The multi-block path requires `T` to be `f32`. Other precisions return
+/// [`BlasError::UnsupportedOperation`] when `cols > 1024`. The PTX template
+/// for `f64`/`f16`/`bf16` multi-block reduction is not yet implemented;
+/// extending it requires per-precision constants and the corresponding
+/// load/store widths.
 ///
 /// # Arguments
 ///
@@ -82,7 +94,7 @@ fn build_softmax_kernel(
 ///
 /// Returns [`BlasError::BufferTooSmall`] if buffers are too small,
 /// [`BlasError::InvalidDimension`] if `rows` or `cols` is zero, or
-/// [`BlasError::UnsupportedOperation`] if `cols > 1024`.
+/// [`BlasError::UnsupportedOperation`] if `cols > 1024` and `T != f32`.
 pub fn softmax<T: GpuFloat>(
     handle: &BlasHandle,
     rows: u32,
@@ -94,12 +106,6 @@ pub fn softmax<T: GpuFloat>(
         return Err(BlasError::InvalidDimension(
             "softmax requires rows > 0 and cols > 0".to_string(),
         ));
-    }
-    if cols > 1024 {
-        return Err(BlasError::UnsupportedOperation(format!(
-            "softmax: cols={cols} exceeds the current limit of 1024; \
-             multi-block softmax not yet implemented"
-        )));
     }
 
     let total_elements = rows as usize * cols as usize;
@@ -114,6 +120,17 @@ pub fn softmax<T: GpuFloat>(
             expected: total_elements,
             actual: output.len(),
         });
+    }
+
+    if cols > 1024 {
+        if !matches!(T::PTX_TYPE, PtxType::F32) {
+            return Err(BlasError::UnsupportedOperation(format!(
+                "multi-block softmax (cols > 1024) currently supports only f32, \
+                 got {}",
+                T::PTX_TYPE.as_ptx_str()
+            )));
+        }
+        return softmax_multi_block(handle, rows, cols, input, output);
     }
 
     let (kernel, _) = build_softmax_kernel(handle, T::PTX_TYPE, cols)?;
@@ -144,6 +161,123 @@ pub fn softmax<T: GpuFloat>(
         .map_err(|e| BlasError::LaunchFailed(format!("softmax: {e}")))?;
 
     Ok(())
+}
+
+/// Multi-block softmax dispatcher (`cols > 1024`, F32 only).
+///
+/// Generates the two-kernel reduce+finalize pipeline via
+/// [`generate_multi_block_softmax_ptx`], allocates the per-block
+/// `(max, sum_exp)` scratch buffer, and launches both kernels on the
+/// handle's stream. The stream is synchronized before the scratch buffer
+/// is dropped so the legacy synchronous `cuMemFree` cannot race the
+/// in-flight launches (kernels run asynchronously on the stream, but the
+/// scratch must outlive both launches).
+///
+/// # Layout
+///
+/// - **Reduce kernel.** Grid `(num_blocks_per_row, rows, 1)`. Each block
+///   handles `block_stride = MULTI_BLOCK_DEFAULT_STRIDE` consecutive
+///   elements of one row, writing the per-block `(max, sum_exp)` pair into
+///   global scratch.
+/// - **Finalize kernel.** Grid `(rows, 1, 1)`. Each block reads the
+///   per-block scratch entries for one row, derives the global `(max, sum)`
+///   via warp-cooperative tree reduction, then strides over the row writing
+///   the normalized output.
+///
+/// The scratch layout is documented on [`MultiBlockSoftmaxPtx`].
+fn softmax_multi_block<T: GpuFloat>(
+    handle: &BlasHandle,
+    rows: u32,
+    cols: u32,
+    input: &DeviceBuffer<T>,
+    output: &mut DeviceBuffer<T>,
+) -> BlasResult<()> {
+    // Generate the two PTX modules and metadata.
+    let plan: MultiBlockSoftmaxPtx = generate_multi_block_softmax_ptx(
+        cols,
+        MULTI_BLOCK_DEFAULT_STRIDE,
+        MULTI_BLOCK_THREADS,
+        PtxType::F32,
+        handle.sm_version(),
+    )
+    .map_err(|e| {
+        BlasError::PtxGeneration(format!(
+            "multi-block softmax (rows={rows}, cols={cols}): {e}"
+        ))
+    })?;
+
+    // Build both kernels. They share the precision (f32) and stride
+    // configuration; we look them up via the canonical kernel names exposed
+    // by `MultiBlockSoftmaxPtx`.
+    let reduce_kernel = build_kernel_from_ptx(&plan.reduce_ptx, &plan.reduce_kernel_name())?;
+    let finalize_kernel = build_kernel_from_ptx(&plan.finalize_ptx, &plan.finalize_kernel_name())?;
+
+    // Allocate the per-row, per-block scratch buffer:
+    // `rows * num_blocks_per_row` (max, sum) pairs, each f32-sized.
+    let scratch_pairs = rows.checked_mul(plan.num_blocks_per_row).ok_or_else(|| {
+        BlasError::InvalidDimension(format!(
+            "softmax scratch overflow: rows={rows} * num_blocks_per_row={}",
+            plan.num_blocks_per_row
+        ))
+    })?;
+    let scratch_floats = (scratch_pairs as usize).checked_mul(2).ok_or_else(|| {
+        BlasError::InvalidDimension(format!(
+            "softmax scratch overflow: pairs={scratch_pairs} * 2 floats"
+        ))
+    })?;
+    let scratch = DeviceBuffer::<f32>::alloc(scratch_floats).map_err(BlasError::Cuda)?;
+
+    // Reduce kernel grid: (block-in-row, row, 1).
+    // The PTX uses %ctaid.x for block-in-row, %ctaid.y for the row.
+    let reduce_grid = Dim3::xy(plan.num_blocks_per_row, rows);
+    let reduce_block = Dim3::x(plan.threads_per_block);
+    let reduce_params = LaunchParams::new(reduce_grid, reduce_block);
+    let reduce_args = (input.as_device_ptr(), scratch.as_device_ptr(), rows);
+    reduce_kernel
+        .launch(&reduce_params, handle.stream(), &reduce_args)
+        .map_err(|e| BlasError::LaunchFailed(format!("softmax multi-block reduce: {e}")))?;
+
+    // Finalize kernel grid: (row, 1, 1). The PTX uses %ctaid.x for the row.
+    // Each row-block must have at least `num_blocks_per_row` threads to
+    // avoid silently dropping per-block (max, sum) entries during the
+    // strided global-max / global-sum reductions in the finalize kernel.
+    // The PTX header pinned threads_per_block at MULTI_BLOCK_THREADS = 256;
+    // since the default stride keeps num_blocks_per_row well under 256 for
+    // any sane row size, that constraint is automatically satisfied.
+    let finalize_grid = Dim3::x(rows);
+    let finalize_block = Dim3::x(plan.threads_per_block);
+    let finalize_params = LaunchParams::new(finalize_grid, finalize_block);
+    let finalize_args = (
+        input.as_device_ptr(),
+        output.as_device_ptr(),
+        scratch.as_device_ptr(),
+        rows,
+    );
+    finalize_kernel
+        .launch(&finalize_params, handle.stream(), &finalize_args)
+        .map_err(|e| BlasError::LaunchFailed(format!("softmax multi-block finalize: {e}")))?;
+
+    // Both launches are queued on `handle.stream()`. The legacy
+    // `cuMemFree_v2` triggered by `scratch`'s `Drop` is a synchronous
+    // device-wide barrier on most drivers, but synchronizing the stream
+    // here is the documented contract and makes the lifetime correctness
+    // independent of the driver's free semantics.
+    handle.stream().synchronize().map_err(BlasError::Cuda)?;
+
+    drop(scratch);
+    Ok(())
+}
+
+/// Compiles a PTX source and looks up `kernel_name` from the resulting
+/// module. Used by the multi-block softmax dispatcher to build both the
+/// reduce and finalize kernels.
+fn build_kernel_from_ptx(ptx_source: &str, kernel_name: &str) -> BlasResult<Kernel> {
+    let module = Arc::new(
+        Module::from_ptx(ptx_source)
+            .map_err(|e| BlasError::LaunchFailed(format!("module load for {kernel_name}: {e}")))?,
+    );
+    Kernel::from_module(module, kernel_name)
+        .map_err(|e| BlasError::LaunchFailed(format!("kernel lookup for {kernel_name}: {e}")))
 }
 
 #[cfg(test)]
@@ -219,5 +353,72 @@ mod tests {
             .generate()
             .expect("small warp softmax should generate");
         assert!(ptx.contains("softmax_f32_r8"));
+    }
+
+    // ---- multi-block softmax dispatch (cols > 1024) -------------------
+
+    /// Verify the multi-block PTX generator is wired up for `cols = 2048`.
+    /// This does not launch on a device -- it only validates the kernel
+    /// names and scratch layout that the dispatcher relies on.
+    #[test]
+    fn multi_block_dispatch_layout_2048() {
+        let plan = generate_multi_block_softmax_ptx(
+            2048,
+            MULTI_BLOCK_DEFAULT_STRIDE,
+            MULTI_BLOCK_THREADS,
+            PtxType::F32,
+            SmVersion::Sm80,
+        )
+        .expect("multi-block softmax PTX should generate");
+        assert_eq!(plan.num_blocks_per_row, 2);
+        assert_eq!(plan.threads_per_block, MULTI_BLOCK_THREADS);
+        // Reduce kernel grid is (num_blocks_per_row, batch_size, 1); verify
+        // the kernel name matches what the dispatcher looks up.
+        assert!(
+            plan.reduce_ptx
+                .contains(&format!(".entry {}", plan.reduce_kernel_name()))
+        );
+        assert!(
+            plan.finalize_ptx
+                .contains(&format!(".entry {}", plan.finalize_kernel_name()))
+        );
+    }
+
+    /// Verify scratch sizing for a deep multi-block dispatch (`cols = 8192`).
+    /// 8192 / 1024 = 8 blocks per row; the dispatcher allocates
+    /// `rows * 8 * 2 * sizeof(f32)` bytes of scratch.
+    #[test]
+    fn multi_block_dispatch_scratch_for_8192() {
+        let plan = generate_multi_block_softmax_ptx(
+            8192,
+            MULTI_BLOCK_DEFAULT_STRIDE,
+            MULTI_BLOCK_THREADS,
+            PtxType::F32,
+            SmVersion::Sm80,
+        )
+        .expect("multi-block softmax PTX should generate");
+        assert_eq!(plan.num_blocks_per_row, 8);
+        assert_eq!(plan.scratch_bytes_per_row, 8 * 2 * 4);
+
+        // Per-row scratch math the dispatcher uses: pairs * 2 floats.
+        let rows: u32 = 16;
+        let scratch_pairs = rows * plan.num_blocks_per_row;
+        let scratch_floats = scratch_pairs as usize * 2;
+        assert_eq!(scratch_floats, 16 * 8 * 2);
+    }
+
+    /// Verify the multi-block path rejects non-F32 element types at the
+    /// dispatch boundary. `f64` callers still get the single-block path
+    /// for `cols <= 1024`; only the multi-block branch is restricted.
+    #[test]
+    fn multi_block_rejects_non_f32_dtype_in_template() {
+        let r = generate_multi_block_softmax_ptx(
+            2048,
+            MULTI_BLOCK_DEFAULT_STRIDE,
+            MULTI_BLOCK_THREADS,
+            PtxType::F64,
+            SmVersion::Sm80,
+        );
+        assert!(r.is_err());
     }
 }

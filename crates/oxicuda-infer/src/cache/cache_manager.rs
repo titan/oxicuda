@@ -187,7 +187,8 @@ mod tests {
     #[test]
     fn allocate_and_free() {
         let mut m = make_manager(8);
-        m.allocate_sequence(1, 1).unwrap();
+        m.allocate_sequence(1, 1)
+            .expect("8 free blocks available for seq 1");
         assert_eq!(m.n_active_sequences(), 1);
         m.free_sequence(1);
         assert_eq!(m.n_active_sequences(), 0);
@@ -196,49 +197,61 @@ mod tests {
     #[test]
     fn duplicate_allocate_error() {
         let mut m = make_manager(8);
-        m.allocate_sequence(1, 1).unwrap();
+        m.allocate_sequence(1, 1)
+            .expect("first allocation of seq 1 succeeds");
         assert!(m.allocate_sequence(1, 1).is_err());
     }
 
     #[test]
     fn append_increments_length() {
         let mut m = make_manager(8);
-        m.allocate_sequence(42, 4).unwrap();
+        m.allocate_sequence(42, 4)
+            .expect("8 free blocks available for seq 42");
         let kvs = zero_kvs(2, 2, 4);
-        m.append_token(42, &kvs).unwrap();
-        assert_eq!(m.seq_length(42).unwrap(), 1);
-        m.append_token(42, &kvs).unwrap();
-        assert_eq!(m.seq_length(42).unwrap(), 2);
+        m.append_token(42, &kvs)
+            .expect("first token append to seq 42");
+        assert_eq!(m.seq_length(42).expect("seq 42 is allocated"), 1);
+        m.append_token(42, &kvs)
+            .expect("second token append to seq 42");
+        assert_eq!(m.seq_length(42).expect("seq 42 is allocated"), 2);
     }
 
     #[test]
     fn block_overflow_triggers_new_block() {
         let mut m = make_manager(16);
-        m.allocate_sequence(7, 4).unwrap(); // block_size=4, pre-alloc 1 block
+        m.allocate_sequence(7, 4)
+            .expect("16 free blocks available for seq 7"); // block_size=4, pre-alloc 1 block
         let kvs = zero_kvs(2, 2, 4);
         let free_before = m.n_free_blocks();
         // Fill the first block (4 tokens)
         for _ in 0..4 {
-            m.append_token(7, &kvs).unwrap();
+            m.append_token(7, &kvs).expect("token fits in first block");
         }
         // 5th token should trigger a new block alloc
-        m.append_token(7, &kvs).unwrap();
+        m.append_token(7, &kvs)
+            .expect("5th token triggers new block allocation");
         assert!(
             m.n_free_blocks() < free_before,
             "new block should be allocated"
         );
-        assert_eq!(m.seq_length(7).unwrap(), 5);
+        assert_eq!(m.seq_length(7).expect("seq 7 is allocated"), 5);
     }
 
     #[test]
     fn block_table_length_matches() {
         let mut m = make_manager(16);
-        m.allocate_sequence(3, 4).unwrap();
+        m.allocate_sequence(3, 4)
+            .expect("16 free blocks available for seq 3");
         let kvs = zero_kvs(2, 2, 4);
         for _ in 0..4 {
-            m.append_token(3, &kvs).unwrap();
+            m.append_token(3, &kvs)
+                .expect("token fits within allocated block");
         }
-        assert!(!m.block_table(3).unwrap().is_empty());
+        assert!(
+            !m.block_table(3)
+                .expect("seq 3 block table exists")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -258,7 +271,8 @@ mod tests {
     fn free_returns_blocks_to_pool() {
         let mut m = make_manager(8);
         let free_start = m.n_free_blocks();
-        m.allocate_sequence(5, 4).unwrap();
+        m.allocate_sequence(5, 4)
+            .expect("8 free blocks available for seq 5");
         let free_mid = m.n_free_blocks();
         assert!(free_mid < free_start);
         m.free_sequence(5);

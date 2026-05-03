@@ -149,14 +149,19 @@ mod tests {
         for _step in 0..500u64 {
             let x = params[0].data[0];
             let y = params[1].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            params[1].set_grad(vec![4.0 * y]).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            params[1]
+                .set_grad(vec![4.0 * y])
+                .expect("gradient length matches param length");
 
-            clip_grad_norm(&mut params, 10.0).unwrap();
+            clip_grad_norm(&mut params, 10.0).expect("params are non-empty");
 
             let lr = sched.step();
             opt.set_lr(lr);
-            opt.step(&mut params).unwrap();
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
 
         let x = params[0].data[0].abs();
@@ -181,11 +186,18 @@ mod tests {
             for _ in 0..k {
                 let x = params[0].data[0];
                 // param has 4 elements; gradient must match length
-                params[0].set_grad(vec![2.0 * x; 4]).unwrap();
-                accum.accumulate(&params).unwrap();
+                params[0]
+                    .set_grad(vec![2.0 * x; 4])
+                    .expect("gradient length matches param length");
+                accum
+                    .accumulate(&params)
+                    .expect("accumulate should succeed");
             }
-            accum.finalise(&mut params).unwrap();
-            opt.step(&mut params).unwrap();
+            accum
+                .finalise(&mut params)
+                .expect("finalise should succeed after k steps");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
             opt.zero_grad(&mut params);
             let _ = outer;
         }
@@ -205,7 +217,8 @@ mod tests {
 
         for (i, act) in activations.iter().enumerate() {
             if mgr.should_checkpoint(&format!("layer_{i}")) {
-                mgr.save_input(&format!("layer_{i}"), act.clone()).unwrap();
+                mgr.save_input(&format!("layer_{i}"), act.clone())
+                    .expect("checkpoint save should succeed");
             }
         }
 
@@ -216,7 +229,10 @@ mod tests {
 
         // Backward recomputation via closure
         let relu = RecomputeFn::new("relu", |x| x.iter().map(|&v| v.max(0.0)).collect());
-        let inp = mgr.get_input("layer_0").unwrap().to_vec();
+        let inp = mgr
+            .get_input("layer_0")
+            .expect("layer_0 was saved and must be retrievable")
+            .to_vec();
         let recomputed = relu.run(&inp);
         assert_eq!(recomputed, inp); // all >= 0 so relu is identity here
     }
@@ -227,10 +243,12 @@ mod tests {
         let mut zero = ZeroOptimizer::new(GpuAdamW::new(1e-3), cfg);
         let mut params = vec![{
             let mut p = ParamTensor::new(vec![1.0_f32; 16], "w");
-            p.set_grad(vec![0.5_f32; 16]).unwrap();
+            p.set_grad(vec![0.5_f32; 16])
+                .expect("gradient length matches param length");
             p
         }];
-        zero.step(&mut params).unwrap();
+        zero.step(&mut params)
+            .expect("ZeRO optimizer step should succeed");
         for &v in &params[0].data {
             assert!(v < 1.0, "param should decrease after ZeRO step");
         }
@@ -245,10 +263,13 @@ mod tests {
 
         for _ in 0..50 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
             let lr = sched.step();
             opt.set_lr(lr);
-            opt.step(&mut params).unwrap();
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         let val = params[0].data[0].abs();
         assert!(
@@ -267,12 +288,17 @@ mod tests {
         for _ in 0..100 {
             let x = params[0].data[0];
             let loss = x * x;
-            let _ = sched.step_metric(loss as f64).unwrap();
+            let _ = sched
+                .step_metric(loss as f64)
+                .expect("step_metric should succeed");
 
-            params[0].set_grad(vec![2.0 * x]).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
             let lr = sched.get_lr();
             opt.set_lr(lr);
-            opt.step(&mut params).unwrap();
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
             last_loss = loss;
         }
         assert!(

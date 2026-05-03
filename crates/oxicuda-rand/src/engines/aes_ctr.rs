@@ -646,15 +646,15 @@ pub fn generate_aes_ctr_ptx(config: &AesCtrConfig) -> Result<String, PtxGenError
 
                 // total_ctr = init + gid + ctr_param
                 let t_lo = b.alloc_reg(PtxType::U32);
-                let t_hi = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("add.cc.u32 {t_lo}, {init_lo}, {gid};"));
-                b.raw_ptx(&format!("addc.u32 {t_hi}, {init_hi}, {gid_hi};"));
+                // addc carries from the above add.cc into the high word
+                let t_hi = b.addc_u32(init_hi, gid_hi, false);
                 let ctr_final_lo = b.alloc_reg(PtxType::U32);
-                let ctr_final_hi = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!(
                     "add.cc.u32 {ctr_final_lo}, {t_lo}, {ctr_lo_param};"
                 ));
-                b.raw_ptx(&format!("addc.u32 {ctr_final_hi}, {t_hi}, {ctr_hi_param};"));
+                // addc carries from the above add.cc into the high word; high word unused here
+                let _ctr_final_hi = b.addc_u32(t_hi, ctr_hi_param, false);
 
                 // Build 128-bit counter block: nonce (3 words) || counter (1 word, big-endian)
                 // State words s0..s3 in column-major AES state format

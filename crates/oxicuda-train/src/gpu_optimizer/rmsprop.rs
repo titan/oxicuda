@@ -192,7 +192,8 @@ mod tests {
 
     fn simple_param(val: f32) -> Vec<ParamTensor> {
         let mut p = ParamTensor::new(vec![val], "p");
-        p.set_grad(vec![2.0 * val]).unwrap();
+        p.set_grad(vec![2.0 * val])
+            .expect("gradient length matches param data length");
         vec![p]
     }
 
@@ -200,7 +201,8 @@ mod tests {
     fn rmsprop_reduces_param() {
         let mut opt = GpuRMSProp::new(0.01);
         let mut params = simple_param(3.0);
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         assert!(params[0].data[0] < 3.0);
     }
 
@@ -210,8 +212,11 @@ mod tests {
         let mut params = vec![ParamTensor::new(vec![4.0_f32], "x")];
         for _ in 0..300 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         let x = params[0].data[0].abs();
         assert!(x < 0.5, "RMSProp should converge, |x|={x}");
@@ -223,8 +228,11 @@ mod tests {
         let mut params = vec![ParamTensor::new(vec![4.0_f32], "x")];
         for _ in 0..300 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         let x = params[0].data[0].abs();
         assert!(x < 0.5, "Centred RMSProp should converge, |x|={x}");
@@ -236,8 +244,11 @@ mod tests {
         let mut params = vec![ParamTensor::new(vec![4.0_f32], "x")];
         for _ in 0..300 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         let x = params[0].data[0].abs();
         assert!(x < 0.5, "RMSProp+momentum should converge, |x|={x}");
@@ -261,8 +272,11 @@ mod tests {
         let mut opt = GpuRMSProp::new(0.01);
         let mut params = simple_param(1.0);
         for _ in 0..7 {
-            params[0].set_grad(vec![0.1]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![0.1])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         assert_eq!(opt.step_count(), 7);
     }

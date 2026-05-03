@@ -338,7 +338,9 @@ mod tests {
 
     #[test]
     fn gpt2_small_validates() {
-        GptConfig::gpt2_small().validate().unwrap();
+        GptConfig::gpt2_small()
+            .validate()
+            .expect("gpt2_small config should be valid");
     }
 
     #[test]
@@ -349,12 +351,16 @@ mod tests {
 
     #[test]
     fn gpt2_xl_validates() {
-        GptConfig::gpt2_xl().validate().unwrap();
+        GptConfig::gpt2_xl()
+            .validate()
+            .expect("gpt2_xl config should be valid");
     }
 
     #[test]
     fn gpt2_tiny_validates() {
-        GptConfig::tiny().validate().unwrap();
+        GptConfig::tiny()
+            .validate()
+            .expect("gpt2_tiny config should be valid");
     }
 
     #[test]
@@ -376,7 +382,9 @@ mod tests {
 
     #[test]
     fn llama2_7b_validates() {
-        LlamaConfig::llama2_7b().validate().unwrap();
+        LlamaConfig::llama2_7b()
+            .validate()
+            .expect("llama2_7b config should be valid");
     }
 
     #[test]
@@ -388,17 +396,23 @@ mod tests {
 
     #[test]
     fn mistral_7b_validates() {
-        LlamaConfig::mistral_7b().validate().unwrap();
+        LlamaConfig::mistral_7b()
+            .validate()
+            .expect("mistral_7b config should be valid");
     }
 
     #[test]
     fn phi2_validates() {
-        LlamaConfig::phi2().validate().unwrap();
+        LlamaConfig::phi2()
+            .validate()
+            .expect("phi2 config should be valid");
     }
 
     #[test]
     fn llama_tiny_validates() {
-        LlamaConfig::tiny().validate().unwrap();
+        LlamaConfig::tiny()
+            .validate()
+            .expect("llama_tiny config should be valid");
     }
 
     #[test]

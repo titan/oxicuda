@@ -621,6 +621,9 @@ const fn estimate_latency(inst: &Instruction) -> InstructionLatency {
         | Instruction::Bfind { .. }
         | Instruction::Bfe { .. }
         | Instruction::Bfi { .. }
+        // Carry-add and select: 4-cycle arithmetic
+        | Instruction::Addc { .. }
+        | Instruction::Selp { .. }
         // Dot-product accumulate: 4-cycle arithmetic
         | Instruction::Dp4a { .. }
         | Instruction::Dp2a { .. } => InstructionLatency {
@@ -672,7 +675,9 @@ const fn estimate_latency(inst: &Instruction) -> InstructionLatency {
             ..
         }
         | Instruction::TmaLoad { .. }
-        | Instruction::CpAsyncBulk { .. } => InstructionLatency {
+        | Instruction::CpAsyncBulk { .. }
+        // AtomGlobalAddFloat always targets global memory — same high latency class
+        | Instruction::AtomGlobalAddFloat { .. } => InstructionLatency {
             execute: 4,
             memory: 200,
         },
@@ -804,6 +809,9 @@ fn defs(inst: &Instruction) -> Vec<&Register> {
         | Instruction::LoadParam { dst, .. }
         | Instruction::Atom { dst, .. }
         | Instruction::AtomCas { dst, .. }
+        | Instruction::AtomGlobalAddFloat { dst, .. }
+        | Instruction::Addc { dst, .. }
+        | Instruction::Selp { dst, .. }
         | Instruction::Dp4a { dst, .. }
         | Instruction::Dp2a { dst, .. }
         | Instruction::Tex1d { dst, .. }
@@ -867,7 +875,8 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
         | Instruction::And { a, b, .. }
         | Instruction::Or { a, b, .. }
         | Instruction::Xor { a, b, .. }
-        | Instruction::SetP { a, b, .. } => {
+        | Instruction::SetP { a, b, .. }
+        | Instruction::Addc { a, b, .. } => {
             let mut regs = operand_regs(a);
             regs.extend(operand_regs(b));
             regs
@@ -1040,7 +1049,9 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
             regs
         }
 
-        Instruction::Atom { addr, src, .. } | Instruction::Red { addr, src, .. } => {
+        Instruction::Atom { addr, src, .. }
+        | Instruction::Red { addr, src, .. }
+        | Instruction::AtomGlobalAddFloat { addr, src, .. } => {
             let mut regs = operand_regs(addr);
             regs.extend(operand_regs(src));
             regs
@@ -1055,6 +1066,13 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
             let mut regs = operand_regs(addr);
             regs.extend(operand_regs(compare));
             regs.extend(operand_regs(value));
+            regs
+        }
+
+        Instruction::Selp { a, b, pred, .. } => {
+            let mut regs = operand_regs(a);
+            regs.extend(operand_regs(b));
+            regs.push(pred);
             regs
         }
 
@@ -1145,6 +1163,7 @@ const fn has_side_effects(inst: &Instruction) -> bool {
         | Instruction::Atom { .. }
         | Instruction::AtomCas { .. }
         | Instruction::Red { .. }
+        | Instruction::AtomGlobalAddFloat { .. }
         | Instruction::SurfStore { .. }
         | Instruction::Comment(_)
         | Instruction::Raw(_)
@@ -1174,6 +1193,8 @@ const fn has_side_effects(inst: &Instruction) -> bool {
         | Instruction::Abs { .. }
         | Instruction::Min { .. }
         | Instruction::Max { .. }
+        | Instruction::Addc { .. }
+        | Instruction::Selp { .. }
         | Instruction::Brev { .. }
         | Instruction::Clz { .. }
         | Instruction::Popc { .. }

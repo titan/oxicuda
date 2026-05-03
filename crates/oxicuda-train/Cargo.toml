@@ -32,5 +32,9 @@ criterion = { workspace = true }
 name = "train_ops"
 harness = false
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true

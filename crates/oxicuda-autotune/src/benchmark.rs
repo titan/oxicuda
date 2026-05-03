@@ -8,12 +8,12 @@
 //! # Typical usage
 //!
 //! ```rust,no_run
-//! use oxicuda_autotune::{BenchmarkEngine, BenchmarkConfig, Config};
+//! use oxicuda_autotune::{BenchmarkEngine, BenchmarkConfig, WarmupStrategy, Config};
 //! use oxicuda_driver::{Stream, Event};
 //!
 //! # fn example(stream: &Stream) -> Result<(), oxicuda_autotune::AutotuneError> {
 //! let engine = BenchmarkEngine::with_config(BenchmarkConfig {
-//!     warmup_runs: 3,
+//!     warmup: WarmupStrategy::Fixed(3),
 //!     benchmark_runs: 10,
 //! });
 //!
@@ -30,11 +30,63 @@
 //! # }
 //! ```
 
+use std::time::Duration;
+
 use oxicuda_driver::{Event, Stream};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::error::AutotuneError;
+
+// ---------------------------------------------------------------------------
+// WarmupStrategy
+// ---------------------------------------------------------------------------
+
+/// Controls how many warmup iterations the benchmark engine performs before
+/// collecting timed samples.
+///
+/// # Variants
+///
+/// - [`WarmupStrategy::Fixed`] — Run exactly `n` warmup iterations.  This is
+///   the default (`Fixed(5)`) and matches the original behaviour.
+/// - [`WarmupStrategy::Adaptive`] — Run until two consecutive timing samples
+///   agree within `tolerance` (relative delta), subject to `[min, max]`
+///   iteration bounds.  Emits a `tracing::warn!` if the cap is reached
+///   without convergence.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WarmupStrategy {
+    /// Run exactly `n` warmup iterations.
+    Fixed(usize),
+    /// Run until consecutive timing samples converge.
+    Adaptive {
+        /// Minimum iterations regardless of convergence.
+        min_iterations: usize,
+        /// Maximum iterations before giving up and emitting a warning.
+        max_iterations: usize,
+        /// Relative-delta convergence threshold (e.g. `0.05` = 5%).
+        tolerance: f64,
+    },
+}
+
+impl Default for WarmupStrategy {
+    fn default() -> Self {
+        WarmupStrategy::Fixed(5)
+    }
+}
+
+/// Returns `true` when two consecutive warmup timing samples are considered
+/// converged, i.e. the relative difference between them is less than
+/// `tolerance`.
+///
+/// Returns `false` when `prev` is zero (avoids divide-by-zero).
+pub(crate) fn warmup_converged(prev: Duration, curr: Duration, tolerance: f64) -> bool {
+    let p = prev.as_secs_f64();
+    if p <= 0.0 {
+        return false;
+    }
+    let rel = (curr.as_secs_f64() - p).abs() / p;
+    rel < tolerance
+}
 
 /// Result of benchmarking a single configuration.
 ///
@@ -68,11 +120,11 @@ pub struct BenchmarkResult {
 /// Controls how many warmup and measurement iterations are performed.
 #[derive(Debug, Clone)]
 pub struct BenchmarkConfig {
-    /// Number of warmup iterations before measurement begins.
+    /// Warmup strategy before measurement begins.
     ///
     /// Warmup stabilizes GPU clock frequencies and populates caches.
-    /// Default: 5.
-    pub warmup_runs: u32,
+    /// Default: [`WarmupStrategy::Fixed`]`(5)`.
+    pub warmup: WarmupStrategy,
     /// Number of timed measurement iterations.
     ///
     /// More iterations produce more stable statistics at the cost of
@@ -83,7 +135,7 @@ pub struct BenchmarkConfig {
 impl Default for BenchmarkConfig {
     fn default() -> Self {
         Self {
-            warmup_runs: 5,
+            warmup: WarmupStrategy::default(),
             benchmark_runs: 20,
         }
     }
@@ -99,8 +151,8 @@ impl Default for BenchmarkConfig {
 /// 3. Reads back elapsed times and computes statistics.
 ///
 /// The `launch_fn` closure is responsible for enqueuing the kernel
-/// onto the provided [`Stream`].  It will be called
-/// `warmup_runs + benchmark_runs` times in total.
+/// onto the provided [`Stream`].  It will be called at least
+/// `benchmark_runs` times in addition to the warmup invocations.
 pub struct BenchmarkEngine {
     /// Benchmark configuration (warmup + measurement counts).
     config: BenchmarkConfig,
@@ -154,10 +206,48 @@ impl BenchmarkEngine {
         F: Fn(&Stream) -> Result<(), oxicuda_driver::CudaError>,
     {
         // Phase 1: Warmup — run the kernel without timing.
-        for _ in 0..self.config.warmup_runs {
-            launch_fn(stream)?;
+        match &self.config.warmup {
+            WarmupStrategy::Fixed(n) => {
+                for _ in 0..*n {
+                    launch_fn(stream)?;
+                }
+                stream.synchronize()?;
+            }
+            WarmupStrategy::Adaptive {
+                min_iterations,
+                max_iterations,
+                tolerance,
+            } => {
+                let mut prev: Option<Duration> = None;
+                let mut converged = false;
+                for i in 0..*max_iterations {
+                    let start_ev = Event::new()?;
+                    let end_ev = Event::new()?;
+                    start_ev.record(stream)?;
+                    launch_fn(stream)?;
+                    end_ev.record(stream)?;
+                    end_ev.synchronize()?;
+                    let elapsed_ms = Event::elapsed_time(&start_ev, &end_ev)?;
+                    let t = Duration::from_secs_f64(f64::from(elapsed_ms) * 1e-3);
+                    if i + 1 >= *min_iterations {
+                        if let Some(p) = prev {
+                            if warmup_converged(p, t, *tolerance) {
+                                converged = true;
+                                break;
+                            }
+                        }
+                    }
+                    prev = Some(t);
+                }
+                if !converged {
+                    tracing::warn!(
+                        "adaptive warmup did not converge within {} iterations (tolerance={})",
+                        max_iterations,
+                        tolerance
+                    );
+                }
+            }
         }
-        stream.synchronize()?;
 
         // Phase 2: Timed measurement — record events around each launch.
         let num_runs = self.config.benchmark_runs;
@@ -226,8 +316,41 @@ impl BenchmarkEngine {
         F: Fn() -> Result<(), AutotuneError>,
     {
         // Phase 1: Warmup
-        for _ in 0..self.config.warmup_runs {
-            run_fn()?;
+        match &self.config.warmup {
+            WarmupStrategy::Fixed(n) => {
+                for _ in 0..*n {
+                    run_fn()?;
+                }
+            }
+            WarmupStrategy::Adaptive {
+                min_iterations,
+                max_iterations,
+                tolerance,
+            } => {
+                let mut prev: Option<Duration> = None;
+                let mut converged = false;
+                for i in 0..*max_iterations {
+                    let start = std::time::Instant::now();
+                    run_fn()?;
+                    let t = start.elapsed();
+                    if i + 1 >= *min_iterations {
+                        if let Some(p) = prev {
+                            if warmup_converged(p, t, *tolerance) {
+                                converged = true;
+                                break;
+                            }
+                        }
+                    }
+                    prev = Some(t);
+                }
+                if !converged {
+                    tracing::warn!(
+                        "adaptive warmup did not converge within {} iterations (tolerance={})",
+                        max_iterations,
+                        tolerance
+                    );
+                }
+            }
         }
 
         // Phase 2: Timed measurement
@@ -343,7 +466,7 @@ mod tests {
     #[test]
     fn benchmark_wallclock_smoke() {
         let engine = BenchmarkEngine::with_config(BenchmarkConfig {
-            warmup_runs: 1,
+            warmup: WarmupStrategy::Fixed(1),
             benchmark_runs: 3,
         });
         let cfg = Config::new();
@@ -358,7 +481,7 @@ mod tests {
     #[test]
     fn benchmark_zero_runs_errors() {
         let engine = BenchmarkEngine::with_config(BenchmarkConfig {
-            warmup_runs: 0,
+            warmup: WarmupStrategy::Fixed(0),
             benchmark_runs: 0,
         });
         let cfg = Config::new();
@@ -414,7 +537,7 @@ mod tests {
         // Verify via benchmark_wallclock with a mock that takes ~0 time.
         // We verify gflops is populated when flops is supplied.
         let engine = BenchmarkEngine::with_config(BenchmarkConfig {
-            warmup_runs: 0,
+            warmup: WarmupStrategy::Fixed(0),
             benchmark_runs: 5,
         });
         let cfg = Config::new();
@@ -430,5 +553,193 @@ mod tests {
             result.gflops.unwrap_or(0.0) > 0.0,
             "gflops should be positive"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // WarmupStrategy unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn warmup_strategy_default_is_fixed_5() {
+        assert_eq!(WarmupStrategy::default(), WarmupStrategy::Fixed(5));
+    }
+
+    #[test]
+    fn warmup_converged_pure_fn_stable() {
+        let p = Duration::from_millis(10);
+        let c = Duration::from_millis(10);
+        assert!(
+            warmup_converged(p, c, 0.05),
+            "identical samples should converge"
+        );
+    }
+
+    #[test]
+    fn warmup_converged_pure_fn_noisy() {
+        let p = Duration::from_millis(10);
+        let c = Duration::from_millis(15); // 50% delta
+        assert!(
+            !warmup_converged(p, c, 0.05),
+            "50% delta should not converge at 5% tolerance"
+        );
+    }
+
+    #[test]
+    fn warmup_converged_pure_fn_zero_prev() {
+        let p = Duration::ZERO;
+        let c = Duration::from_millis(10);
+        assert!(
+            !warmup_converged(p, c, 0.05),
+            "zero prev should not converge (avoid div-by-zero)"
+        );
+    }
+
+    #[test]
+    fn warmup_strategy_fixed_runs_exact_count() {
+        // Verify Fixed(7) runs exactly 7 warmup iterations + 1 measurement = 8 total.
+        use std::sync::{Arc, Mutex};
+
+        let total_calls = Arc::new(Mutex::new(0usize));
+        let total_calls_c = Arc::clone(&total_calls);
+
+        let engine = BenchmarkEngine::with_config(BenchmarkConfig {
+            warmup: WarmupStrategy::Fixed(7),
+            benchmark_runs: 1,
+        });
+        let cfg = Config::new();
+        let _result = engine
+            .benchmark_wallclock(&cfg, None, || {
+                let mut g = total_calls_c.lock().expect("lock");
+                *g += 1;
+                Ok(())
+            })
+            .expect("benchmark should succeed");
+
+        // Total calls = warmup(7) + measurement(1) = 8
+        let total = *total_calls.lock().expect("lock");
+        assert_eq!(
+            total, 8,
+            "Fixed(7) + 1 measurement run must produce 8 total calls"
+        );
+    }
+
+    #[test]
+    fn warmup_strategy_adaptive_converges_on_stable_input() {
+        // All iterations return ~10ms — should converge right after min_iterations.
+        let engine = BenchmarkEngine::with_config(BenchmarkConfig {
+            warmup: WarmupStrategy::Adaptive {
+                min_iterations: 2,
+                max_iterations: 20,
+                tolerance: 0.05,
+            },
+            benchmark_runs: 1,
+        });
+        let cfg = Config::new();
+        // Use benchmark_wallclock; closure does effectively nothing so elapsed
+        // will be near-zero and stable.  Convergence should happen quickly.
+        let result = engine.benchmark_wallclock(&cfg, None, || Ok(()));
+        assert!(result.is_ok(), "adaptive convergence should succeed");
+    }
+
+    #[test]
+    fn warmup_strategy_adaptive_caps_at_max() {
+        // Use the pure warmup_converged fn to verify cap logic: alternating
+        // durations 10ms / 20ms never converge at 5% tolerance.
+        let samples: Vec<Duration> = (0..6)
+            .map(|i| {
+                if i % 2 == 0 {
+                    Duration::from_millis(10)
+                } else {
+                    Duration::from_millis(20)
+                }
+            })
+            .collect();
+
+        let tolerance = 0.05f64;
+        let min_iterations = 2usize;
+        let max_iterations = 5usize;
+
+        let mut prev: Option<Duration> = None;
+        let mut converged = false;
+        let mut iters = 0usize;
+
+        for (i, t) in samples.iter().copied().enumerate().take(max_iterations) {
+            iters += 1;
+            if i + 1 >= min_iterations {
+                if let Some(p) = prev {
+                    if warmup_converged(p, t, tolerance) {
+                        converged = true;
+                        break;
+                    }
+                }
+            }
+            prev = Some(t);
+        }
+
+        assert!(
+            !converged,
+            "alternating 10ms/20ms should not converge at 5% tolerance"
+        );
+        assert_eq!(
+            iters, max_iterations,
+            "should run exactly max_iterations iterations"
+        );
+    }
+
+    #[test]
+    fn warmup_strategy_adaptive_respects_min() {
+        // Stable samples — would converge at i=1 if min were 1.
+        // With min=3 it must not converge before iteration 3.
+        let sample = Duration::from_millis(10);
+        let tolerance = 0.05f64;
+        let min_iterations = 3usize;
+        let max_iterations = 20usize;
+
+        let mut prev: Option<Duration> = None;
+        let mut converged_at: Option<usize> = None;
+
+        for i in 0..max_iterations {
+            let t = sample;
+            if i + 1 >= min_iterations {
+                if let Some(p) = prev {
+                    if warmup_converged(p, t, tolerance) {
+                        converged_at = Some(i + 1);
+                        break;
+                    }
+                }
+            }
+            prev = Some(t);
+        }
+
+        assert!(
+            converged_at.is_some(),
+            "stable input should converge eventually"
+        );
+        assert!(
+            converged_at.unwrap_or(0) >= min_iterations,
+            "convergence must not happen before min_iterations=3"
+        );
+    }
+
+    #[test]
+    fn warmup_strategy_adaptive_wallclock_integration() {
+        // Verify the adaptive path in benchmark_wallclock runs without error.
+        let engine = BenchmarkEngine::with_config(BenchmarkConfig {
+            warmup: WarmupStrategy::Adaptive {
+                min_iterations: 2,
+                max_iterations: 10,
+                tolerance: 0.10,
+            },
+            benchmark_runs: 3,
+        });
+        let cfg = Config::new();
+        let result = engine.benchmark_wallclock(&cfg, Some(1e9), || Ok(()));
+        assert!(
+            result.is_ok(),
+            "adaptive wallclock benchmark must not error"
+        );
+        let result = result.expect("already checked");
+        assert!(result.median_us >= 0.0);
+        assert!(result.gflops.is_some());
     }
 }

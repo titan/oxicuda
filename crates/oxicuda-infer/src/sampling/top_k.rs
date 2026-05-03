@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn filter_keeps_exactly_k() {
         let mut logits = vec![1.0_f32, 4.0, 2.0, 3.0, 0.5];
-        top_k_filter(&mut logits, 2).unwrap();
+        top_k_filter(&mut logits, 2).expect("k=2 and non-empty logits");
         let finite_count = logits.iter().filter(|&&v| v.is_finite()).count();
         assert_eq!(finite_count, 2);
     }
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn filter_top1_is_greedy() {
         let mut logits = vec![0.0_f32, 9.0, 1.0];
-        top_k_filter(&mut logits, 1).unwrap();
+        top_k_filter(&mut logits, 1).expect("k=1 and non-empty logits");
         assert!(logits[1].is_finite());
         assert!(logits[0].is_infinite());
         assert!(logits[2].is_infinite());
@@ -123,7 +123,7 @@ mod tests {
     fn filter_k_gte_vocab_is_noop() {
         let orig = vec![1.0_f32, 2.0, 3.0];
         let mut logits = orig.clone();
-        top_k_filter(&mut logits, 10).unwrap();
+        top_k_filter(&mut logits, 10).expect("k >= vocab_size is a no-op");
         assert_eq!(logits, orig);
     }
 
@@ -149,7 +149,10 @@ mod tests {
         let logits = vec![0.0_f32, 0.0, 10.0, 0.0];
         let mut rng = Rng::new(0);
         for _ in 0..20 {
-            assert_eq!(top_k_sample(&logits, 1, &mut rng).unwrap(), 2);
+            assert_eq!(
+                top_k_sample(&logits, 1, &mut rng).expect("k=1 greedy sample"),
+                2
+            );
         }
     }
 
@@ -158,7 +161,7 @@ mod tests {
         let logits = vec![0.0_f32, 5.0, 4.0, -100.0];
         let mut rng = Rng::new(99);
         for _ in 0..100 {
-            let t = top_k_sample(&logits, 2, &mut rng).unwrap();
+            let t = top_k_sample(&logits, 2, &mut rng).expect("k=2 sample from non-empty logits");
             assert!(t == 1 || t == 2, "expected token 1 or 2, got {t}");
         }
     }

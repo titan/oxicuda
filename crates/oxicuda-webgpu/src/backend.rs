@@ -92,6 +92,177 @@ impl WebGpuBackend {
     fn device(&self) -> BackendResult<&Arc<WebGpuDevice>> {
         self.device.as_ref().ok_or(BackendError::NotInitialized)
     }
+
+    /// Multi-dimensional reduce along a single axis.
+    ///
+    /// The tensor is logically reshaped to `[outer, dk, inner]`:
+    /// * `outer` = product of dimensions before the reduce axis,
+    /// * `dk`    = the reduce axis length,
+    /// * `inner` = product of dimensions after the reduce axis.
+    ///
+    /// One workgroup of 256 threads is dispatched per `(o, j)` output slot.
+    /// To stay within WebGPU's 65 535-per-axis dispatch limit a 2-D grid is
+    /// used and the workgroup decodes its linear slot internally.
+    ///
+    /// `Mean` is handled inside the shader (divide by `dk`); the host does
+    /// not need a post-pass.
+    fn reduce_nd(
+        &self,
+        op: ReduceOp,
+        input_ptr: u64,
+        output_ptr: u64,
+        shape: &[usize],
+        axis: usize,
+    ) -> BackendResult<()> {
+        // Caller (`reduce`) already validated `shape.is_empty()` and
+        // `axis < shape.len()`; assert in debug to catch regressions but
+        // recompute defensively in release as well.
+        debug_assert!(!shape.is_empty());
+        debug_assert!(axis < shape.len());
+
+        // Output shape = shape with `axis` removed; length = outer * inner.
+        let outer: usize = shape[..axis].iter().product();
+        let dk: usize = shape[axis];
+        let inner: usize = shape[axis + 1..].iter().product();
+
+        // Empty tensor — nothing to do.
+        if outer == 0 || dk == 0 || inner == 0 {
+            return Ok(());
+        }
+
+        let total = outer.checked_mul(inner).ok_or_else(|| {
+            BackendError::InvalidArgument("reduce: outer * inner overflows usize".into())
+        })?;
+
+        // Strides in elements: row-major (C order) layout.
+        let inner_stride: usize = 1;
+        let dk_stride: usize = inner;
+        let outer_stride: usize = dk
+            .checked_mul(inner)
+            .ok_or_else(|| BackendError::InvalidArgument("reduce: dk * inner overflows".into()))?;
+
+        // Cap each dispatch dimension below the WebGPU 65 535 limit.  We pick
+        // grid_x = min(total, 32 768) so grid_y stays modest for huge tensors.
+        const MAX_GRID_DIM: u32 = 32_768;
+        let total_u32: u32 = total.try_into().map_err(|_| {
+            BackendError::InvalidArgument(format!(
+                "reduce: output element count {total} exceeds u32 range"
+            ))
+        })?;
+        let grid_x: u32 = total_u32.clamp(1, MAX_GRID_DIM);
+        let grid_y: u32 = total_u32.div_ceil(grid_x);
+
+        let dev = self.device()?;
+        let mem = self.memory()?;
+        let op_str = map_reduce_op(op);
+
+        let wgsl = shader::reduction_nd_wgsl(op_str);
+        let shader_mod = dev
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("oxicuda-reduce-nd"),
+                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+            });
+        let pipeline = dev
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("oxicuda-reduce-nd"),
+                layout: None,
+                module: &shader_mod,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+
+        // Build the uniform buffer: 8 × u32 = 32 bytes (16-byte aligned).
+        let mut params_bytes = [0u8; 32];
+        let outer_u32: u32 = outer
+            .try_into()
+            .map_err(|_| BackendError::InvalidArgument("reduce: outer exceeds u32 range".into()))?;
+        let dk_u32: u32 = dk
+            .try_into()
+            .map_err(|_| BackendError::InvalidArgument("reduce: dk exceeds u32 range".into()))?;
+        let inner_u32: u32 = inner
+            .try_into()
+            .map_err(|_| BackendError::InvalidArgument("reduce: inner exceeds u32 range".into()))?;
+        let outer_stride_u32: u32 = outer_stride.try_into().map_err(|_| {
+            BackendError::InvalidArgument("reduce: outer_stride exceeds u32 range".into())
+        })?;
+        let dk_stride_u32: u32 = dk_stride.try_into().map_err(|_| {
+            BackendError::InvalidArgument("reduce: dk_stride exceeds u32 range".into())
+        })?;
+        let inner_stride_u32: u32 = inner_stride.try_into().map_err(|_| {
+            BackendError::InvalidArgument("reduce: inner_stride exceeds u32 range".into())
+        })?;
+        params_bytes[0..4].copy_from_slice(&outer_u32.to_le_bytes());
+        params_bytes[4..8].copy_from_slice(&dk_u32.to_le_bytes());
+        params_bytes[8..12].copy_from_slice(&inner_u32.to_le_bytes());
+        params_bytes[12..16].copy_from_slice(&outer_stride_u32.to_le_bytes());
+        params_bytes[16..20].copy_from_slice(&dk_stride_u32.to_le_bytes());
+        params_bytes[20..24].copy_from_slice(&inner_stride_u32.to_le_bytes());
+        params_bytes[24..28].copy_from_slice(&grid_x.to_le_bytes());
+        // bytes 28..32 are zero padding.
+
+        let uniform_buf = dev.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("oxicuda-reduce-nd-params"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        dev.queue.write_buffer(&uniform_buf, 0, &params_bytes);
+
+        let bgl = pipeline.get_bind_group_layout(0);
+        let bind_group = {
+            let buffers = mem
+                .lock_buffers()
+                .map_err(|e| BackendError::DeviceError(e.to_string()))?;
+            let in_info = buffers.get(&input_ptr).ok_or_else(|| {
+                BackendError::InvalidArgument(format!("unknown handle {input_ptr}"))
+            })?;
+            let out_info = buffers.get(&output_ptr).ok_or_else(|| {
+                BackendError::InvalidArgument(format!("unknown handle {output_ptr}"))
+            })?;
+
+            dev.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("oxicuda-reduce-nd"),
+                layout: &bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: in_info.buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_info.buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform_buf.as_entire_binding(),
+                    },
+                ],
+            })
+        };
+
+        let mut encoder = dev
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("oxicuda-reduce-nd"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("oxicuda-reduce-nd"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(grid_x, grid_y, 1);
+        }
+
+        dev.queue.submit(std::iter::once(encoder.finish()));
+        let _ = dev.device.poll(wgpu::PollType::wait_indefinitely());
+
+        Ok(())
+    }
 }
 
 impl WebGpuBackend {
@@ -779,13 +950,11 @@ impl ComputeBackend for WebGpuBackend {
             )));
         }
 
-        // Only flat 1-D reduction (shape.len() == 1, axis == 0) is currently
-        // supported on the GPU.  Multi-dimensional reductions require batched
-        // shaders that are not yet implemented.
+        // 1-D shapes (or any shape that reduces to a single scalar) take the
+        // optimised two-pass scalar path.  Higher-rank shapes go through the
+        // batched N-D shader below.
         if shape.len() != 1 {
-            return Err(BackendError::Unsupported(
-                "WebGPU reduce currently supports only 1-D shapes".into(),
-            ));
+            return self.reduce_nd(op, input_ptr, output_ptr, shape, axis);
         }
 
         let n_elements = shape[0];
@@ -1214,1043 +1383,9 @@ fn f32_slice_to_bytes(data: &[f32]) -> Vec<u8> {
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
-
+//
+// The test module lives in a sibling file (`backend_tests.rs`) so the
+// production code in this file stays under the 2 000-line refactoring policy.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use oxicuda_backend::{BackendTranspose, BinaryOp, ReduceOp, UnaryOp};
-
-    // ── Construction ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn webgpu_backend_new_uninitialized() {
-        let b = WebGpuBackend::new();
-        assert!(!b.is_initialized());
-    }
-
-    #[test]
-    fn webgpu_backend_name() {
-        let b = WebGpuBackend::new();
-        assert_eq!(b.name(), "webgpu");
-    }
-
-    #[test]
-    fn webgpu_backend_default() {
-        let b = WebGpuBackend::default();
-        assert!(!b.is_initialized());
-        assert_eq!(b.name(), "webgpu");
-    }
-
-    #[test]
-    fn backend_debug_impl() {
-        let b = WebGpuBackend::new();
-        let s = format!("{b:?}");
-        assert!(s.contains("WebGpuBackend"));
-    }
-
-    // ── Object-safety smoke test ──────────────────────────────────────────────
-
-    #[test]
-    fn backend_object_safe() {
-        let b: Box<dyn ComputeBackend> = Box::new(WebGpuBackend::new());
-        assert_eq!(b.name(), "webgpu");
-    }
-
-    // ── Not-initialized guards ────────────────────────────────────────────────
-
-    #[test]
-    fn backend_not_initialized_gemm() {
-        let b = WebGpuBackend::new();
-        let result = b.gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            4,
-            4,
-            4,
-            1.0,
-            0,
-            4,
-            0,
-            4,
-            0.0,
-            0,
-            4,
-        );
-        assert_eq!(result, Err(BackendError::NotInitialized));
-    }
-
-    #[test]
-    fn backend_not_initialized_alloc() {
-        let b = WebGpuBackend::new();
-        let result = b.alloc(1024);
-        assert_eq!(result, Err(BackendError::NotInitialized));
-    }
-
-    #[test]
-    fn backend_not_initialized_synchronize() {
-        let b = WebGpuBackend::new();
-        assert_eq!(b.synchronize(), Err(BackendError::NotInitialized));
-    }
-
-    #[test]
-    fn backend_not_initialized_free() {
-        let b = WebGpuBackend::new();
-        assert_eq!(b.free(1), Err(BackendError::NotInitialized));
-    }
-
-    #[test]
-    fn backend_not_initialized_copy_htod() {
-        let b = WebGpuBackend::new();
-        assert_eq!(b.copy_htod(1, b"hello"), Err(BackendError::NotInitialized));
-    }
-
-    #[test]
-    fn backend_not_initialized_copy_dtoh() {
-        let b = WebGpuBackend::new();
-        let mut buf = [0u8; 4];
-        assert_eq!(b.copy_dtoh(&mut buf, 1), Err(BackendError::NotInitialized));
-    }
-
-    // ── Zero-size / trivial-OK paths (no GPU needed) ─────────────────────────
-
-    /// These tests exercise the "no-op for zero size" branches.  We need the
-    /// backend to be initialised, but if no GPU is available we skip.
-    fn try_init() -> Option<WebGpuBackend> {
-        let mut b = WebGpuBackend::new();
-        match b.init() {
-            Ok(()) => Some(b),
-            Err(_) => None,
-        }
-    }
-
-    #[test]
-    fn gemm_zero_size_after_init() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        let result = b.gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            0,
-            0,
-            0,
-            1.0,
-            0,
-            1,
-            0,
-            1,
-            0.0,
-            0,
-            1,
-        );
-        assert_eq!(result, Ok(()));
-    }
-
-    #[test]
-    fn unary_zero_elements_after_init() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(b.unary(UnaryOp::Relu, 0, 0, 0), Ok(()));
-    }
-
-    #[test]
-    fn binary_zero_elements_after_init() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(b.binary(BinaryOp::Add, 0, 0, 0, 0), Ok(()));
-    }
-
-    #[test]
-    fn copy_htod_empty_noop() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(b.copy_htod(0, &[]), Ok(()));
-    }
-
-    #[test]
-    fn copy_dtoh_empty_noop() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(b.copy_dtoh(&mut [], 0), Ok(()));
-    }
-
-    #[test]
-    fn alloc_zero_bytes_error() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(
-            b.alloc(0),
-            Err(BackendError::InvalidArgument(
-                "cannot allocate 0 bytes".into()
-            ))
-        );
-    }
-
-    #[test]
-    fn synchronize_after_init() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(b.synchronize(), Ok(()));
-    }
-
-    // ── Argument validation (post-init) ───────────────────────────────────────
-
-    #[test]
-    fn reduce_empty_shape_error() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(
-            b.reduce(ReduceOp::Sum, 0, 0, &[], 0),
-            Err(BackendError::InvalidArgument(
-                "shape must not be empty".into()
-            ))
-        );
-    }
-
-    #[test]
-    fn reduce_axis_out_of_bounds_error() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(
-            b.reduce(ReduceOp::Sum, 0, 0, &[4, 4], 5),
-            Err(BackendError::InvalidArgument(
-                "axis 5 is out of bounds for shape of length 2".into()
-            ))
-        );
-    }
-
-    #[test]
-    fn attention_zero_seq_error() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(
-            b.attention(0, 0, 0, 0, 1, 1, 0, 8, 64, 0.125, false),
-            Err(BackendError::InvalidArgument(
-                "seq_q, seq_kv, and head_dim must all be > 0".into()
-            ))
-        );
-    }
-
-    #[test]
-    fn attention_nonpositive_scale_error() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(
-            b.attention(0, 0, 0, 0, 1, 1, 8, 8, 64, 0.0, false),
-            Err(BackendError::InvalidArgument(
-                "scale must be a positive finite number, got 0".into()
-            ))
-        );
-        assert_eq!(
-            b.attention(0, 0, 0, 0, 1, 1, 8, 8, 64, -1.0, false),
-            Err(BackendError::InvalidArgument(
-                "scale must be a positive finite number, got -1".into()
-            ))
-        );
-        assert!(
-            b.attention(0, 0, 0, 0, 1, 1, 8, 8, 64, f64::INFINITY, false)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn conv2d_wrong_input_shape_error() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        // 3-element input_shape — should fail.
-        assert_eq!(
-            b.conv2d_forward(
-                0,
-                &[1, 3, 32],
-                0,
-                &[16, 3, 3, 3],
-                0,
-                &[1, 16, 30, 30],
-                &[1, 1],
-                &[0, 0]
-            ),
-            Err(BackendError::InvalidArgument(
-                "input_shape must have 4 elements (NCHW)".into()
-            ))
-        );
-    }
-
-    #[test]
-    fn conv2d_wrong_filter_shape_error() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(
-            b.conv2d_forward(
-                0,
-                &[1, 3, 32, 32],
-                0,
-                &[16, 3, 3],
-                0,
-                &[1, 16, 30, 30],
-                &[1, 1],
-                &[0, 0]
-            ),
-            Err(BackendError::InvalidArgument(
-                "filter_shape must have 4 elements (KCFHFW)".into()
-            ))
-        );
-    }
-
-    #[test]
-    fn conv2d_wrong_stride_shape_error() {
-        let Some(b) = try_init() else {
-            return;
-        };
-        assert_eq!(
-            b.conv2d_forward(
-                0,
-                &[1, 3, 32, 32],
-                0,
-                &[16, 3, 3, 3],
-                0,
-                &[1, 16, 30, 30],
-                &[1], // <-- wrong
-                &[0, 0],
-            ),
-            Err(BackendError::InvalidArgument(
-                "stride must have 2 elements [sh, sw]".into()
-            ))
-        );
-    }
-
-    // ── Init is idempotent ────────────────────────────────────────────────────
-
-    #[test]
-    fn init_idempotent() {
-        let Some(mut b) = try_init() else {
-            return;
-        };
-        // Second call must succeed without error.
-        assert_eq!(b.init(), Ok(()));
-        assert!(b.is_initialized());
-    }
-
-    // ── Graceful failure ──────────────────────────────────────────────────────
-
-    #[test]
-    fn webgpu_init_graceful_failure() {
-        // We cannot force a failure, but we can at least verify that init()
-        // returns a Result and never panics.
-        let mut b = WebGpuBackend::new();
-        let _result = b.init(); // Ok or Err — both are acceptable.
-        // No panic => test passes.
-    }
-
-    // ── GPU compute tests ─────────────────────────────────────────────────────
-    //
-    // These helpers upload f32 slices and read back results, exercising the
-    // full shader → pipeline → dispatch path.
-
-    /// Helper: upload `data` (f32 slice) to a new GPU buffer, return its handle.
-    fn upload_f32(b: &WebGpuBackend, data: &[f32]) -> u64 {
-        let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
-        let h = b.alloc(bytes.len()).expect("alloc");
-        b.copy_htod(h, &bytes).expect("copy_htod");
-        h
-    }
-
-    /// Helper: download `n` f32 values from a GPU buffer handle.
-    fn download_f32(b: &WebGpuBackend, h: u64, n: usize) -> Vec<f32> {
-        let mut bytes = vec![0u8; n * 4];
-        b.copy_dtoh(&mut bytes, h).expect("copy_dtoh");
-        bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-            .collect()
-    }
-
-    #[test]
-    fn unary_neg_small() {
-        let Some(b) = try_init() else { return };
-        let input = [1.0f32, -2.0, 3.0, 0.0];
-        let in_h = upload_f32(&b, &input);
-        let out_h = b.alloc(input.len() * 4).expect("alloc output");
-
-        b.unary(UnaryOp::Neg, in_h, out_h, input.len())
-            .expect("unary neg");
-
-        let result = download_f32(&b, out_h, input.len());
-        let expected = [-1.0f32, 2.0, -3.0, 0.0];
-        for (r, e) in result.iter().zip(expected.iter()) {
-            assert!((r - e).abs() < 1e-6, "got {r}, expected {e}");
-        }
-
-        b.free(in_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn unary_abs_small() {
-        let Some(b) = try_init() else { return };
-        let input = [-3.0f32, 4.0, -5.0, 0.0];
-        let in_h = upload_f32(&b, &input);
-        let out_h = b.alloc(input.len() * 4).expect("alloc output");
-
-        b.unary(UnaryOp::Abs, in_h, out_h, input.len())
-            .expect("unary abs");
-
-        let result = download_f32(&b, out_h, input.len());
-        let expected = [3.0f32, 4.0, 5.0, 0.0];
-        for (r, e) in result.iter().zip(expected.iter()) {
-            assert!((r - e).abs() < 1e-6, "got {r}, expected {e}");
-        }
-
-        b.free(in_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn binary_add_small() {
-        let Some(b) = try_init() else { return };
-        let a = [1.0f32, 2.0, 3.0, 4.0];
-        let bv = [10.0f32, 20.0, 30.0, 40.0];
-        let a_h = upload_f32(&b, &a);
-        let b_h = upload_f32(&b, &bv);
-        let out_h = b.alloc(a.len() * 4).expect("alloc output");
-
-        b.binary(BinaryOp::Add, a_h, b_h, out_h, a.len())
-            .expect("binary add");
-
-        let result = download_f32(&b, out_h, a.len());
-        let expected = [11.0f32, 22.0, 33.0, 44.0];
-        for (r, e) in result.iter().zip(expected.iter()) {
-            assert!((r - e).abs() < 1e-6, "got {r}, expected {e}");
-        }
-
-        b.free(a_h).expect("free");
-        b.free(b_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn binary_mul_small() {
-        let Some(b) = try_init() else { return };
-        let a = [2.0f32, 3.0, 4.0, 5.0];
-        let bv = [10.0f32, 10.0, 10.0, 10.0];
-        let a_h = upload_f32(&b, &a);
-        let b_h = upload_f32(&b, &bv);
-        let out_h = b.alloc(a.len() * 4).expect("alloc output");
-
-        b.binary(BinaryOp::Mul, a_h, b_h, out_h, a.len())
-            .expect("binary mul");
-
-        let result = download_f32(&b, out_h, a.len());
-        let expected = [20.0f32, 30.0, 40.0, 50.0];
-        for (r, e) in result.iter().zip(expected.iter()) {
-            assert!((r - e).abs() < 1e-6, "got {r}, expected {e}");
-        }
-
-        b.free(a_h).expect("free");
-        b.free(b_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn reduce_sum_small() {
-        let Some(b) = try_init() else { return };
-        let input = [1.0f32, 2.0, 3.0, 4.0];
-        let in_h = upload_f32(&b, &input);
-        let out_h = b.alloc(4).expect("alloc output"); // single f32
-
-        b.reduce(ReduceOp::Sum, in_h, out_h, &[4], 0)
-            .expect("reduce sum");
-
-        let result = download_f32(&b, out_h, 1);
-        assert!(
-            (result[0] - 10.0).abs() < 1e-5,
-            "expected 10.0, got {}",
-            result[0]
-        );
-
-        b.free(in_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn reduce_max_small() {
-        let Some(b) = try_init() else { return };
-        let input = [1.0f32, 5.0, 3.0, 2.0];
-        let in_h = upload_f32(&b, &input);
-        let out_h = b.alloc(4).expect("alloc output");
-
-        b.reduce(ReduceOp::Max, in_h, out_h, &[4], 0)
-            .expect("reduce max");
-
-        let result = download_f32(&b, out_h, 1);
-        assert!(
-            (result[0] - 5.0).abs() < 1e-5,
-            "expected 5.0, got {}",
-            result[0]
-        );
-
-        b.free(in_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn reduce_mean_small() {
-        let Some(b) = try_init() else { return };
-        let input = [2.0f32, 4.0, 6.0, 8.0];
-        let in_h = upload_f32(&b, &input);
-        let out_h = b.alloc(4).expect("alloc output");
-
-        b.reduce(ReduceOp::Mean, in_h, out_h, &[4], 0)
-            .expect("reduce mean");
-
-        let result = download_f32(&b, out_h, 1);
-        assert!(
-            (result[0] - 5.0).abs() < 1e-5,
-            "expected 5.0, got {}",
-            result[0]
-        );
-
-        b.free(in_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn gemm_identity_2x2() {
-        let Some(b) = try_init() else { return };
-        // A = [[1,2],[3,4]], B = [[1,0],[0,1]] (identity), C = zeros
-        // C = 1.0 * A * I + 0.0 * C = A
-        let a = [1.0f32, 2.0, 3.0, 4.0];
-        let eye = [1.0f32, 0.0, 0.0, 1.0];
-        let c_init = [0.0f32; 4];
-
-        let a_h = upload_f32(&b, &a);
-        let b_h = upload_f32(&b, &eye);
-        let c_h = upload_f32(&b, &c_init);
-
-        b.gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            2,
-            2,
-            2,
-            1.0,
-            a_h,
-            2,
-            b_h,
-            2,
-            0.0,
-            c_h,
-            2,
-        )
-        .expect("gemm");
-
-        let result = download_f32(&b, c_h, 4);
-        for (r, e) in result.iter().zip(a.iter()) {
-            assert!((r - e).abs() < 1e-5, "got {r}, expected {e}");
-        }
-
-        b.free(a_h).expect("free");
-        b.free(b_h).expect("free");
-        b.free(c_h).expect("free");
-    }
-
-    #[test]
-    fn gemm_2x3_times_3x2() {
-        let Some(b) = try_init() else { return };
-        // A 2x3, B 3x2 → C 2x2
-        let a = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let bm = [7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0];
-        let c_init = [0.0f32; 4];
-
-        let a_h = upload_f32(&b, &a);
-        let b_h = upload_f32(&b, &bm);
-        let c_h = upload_f32(&b, &c_init);
-
-        b.gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            2,
-            2,
-            3,
-            1.0,
-            a_h,
-            3,
-            b_h,
-            2,
-            0.0,
-            c_h,
-            2,
-        )
-        .expect("gemm");
-
-        // Expected: [[58, 64], [139, 154]]
-        let result = download_f32(&b, c_h, 4);
-        let expected = [58.0f32, 64.0, 139.0, 154.0];
-        for (r, e) in result.iter().zip(expected.iter()) {
-            assert!((r - e).abs() < 1e-4, "got {r}, expected {e}");
-        }
-
-        b.free(a_h).expect("free");
-        b.free(b_h).expect("free");
-        b.free(c_h).expect("free");
-    }
-
-    #[test]
-    fn gemm_alpha_beta() {
-        let Some(b) = try_init() else { return };
-        // C = 2.0 * A * B + 3.0 * C
-        // A = [[1,0],[0,1]], B = [[1,0],[0,1]], C = [[1,1],[1,1]]
-        // C = 2*I + 3*ones = [[5,3],[3,5]]
-        let a = [1.0f32, 0.0, 0.0, 1.0];
-        let bm = [1.0f32, 0.0, 0.0, 1.0];
-        let c_init = [1.0f32, 1.0, 1.0, 1.0];
-
-        let a_h = upload_f32(&b, &a);
-        let b_h = upload_f32(&b, &bm);
-        let c_h = upload_f32(&b, &c_init);
-
-        b.gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            2,
-            2,
-            2,
-            2.0,
-            a_h,
-            2,
-            b_h,
-            2,
-            3.0,
-            c_h,
-            2,
-        )
-        .expect("gemm alpha+beta");
-
-        let result = download_f32(&b, c_h, 4);
-        let expected = [5.0f32, 3.0, 3.0, 5.0];
-        for (r, e) in result.iter().zip(expected.iter()) {
-            assert!((r - e).abs() < 1e-4, "got {r}, expected {e}");
-        }
-
-        b.free(a_h).expect("free");
-        b.free(b_h).expect("free");
-        b.free(c_h).expect("free");
-    }
-
-    // ── Conv2D tests ──────────────────────────────────────────────────────
-
-    #[test]
-    fn conv2d_identity_1x1() {
-        // 1×1 convolution with single channel, no padding, stride=1
-        // input: 1×1×3×3, filter: 1×1×1×1 (weight=2.0), output: 1×1×3×3
-        let Some(b) = try_init() else { return };
-        let input: Vec<f32> = (1..=9).map(|x| x as f32).collect();
-        let filter = [2.0f32];
-        let expected: Vec<f32> = input.iter().map(|x| x * 2.0).collect();
-
-        let in_h = upload_f32(&b, &input);
-        let f_h = upload_f32(&b, &filter);
-        let out_h = b.alloc(9 * 4).expect("alloc output");
-
-        b.conv2d_forward(
-            in_h,
-            &[1, 1, 3, 3],
-            f_h,
-            &[1, 1, 1, 1],
-            out_h,
-            &[1, 1, 3, 3],
-            &[1, 1],
-            &[0, 0],
-        )
-        .expect("conv2d");
-
-        let result = download_f32(&b, out_h, 9);
-        for (r, e) in result.iter().zip(expected.iter()) {
-            assert!((r - e).abs() < 1e-5, "got {r}, expected {e}");
-        }
-
-        b.free(in_h).expect("free");
-        b.free(f_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn conv2d_3x3_no_padding() {
-        // input: 1×1×4×4, filter: 1×1×3×3 (all ones), stride=1, pad=0
-        // output: 1×1×2×2
-        let Some(b) = try_init() else { return };
-        let input: Vec<f32> = (0..16).map(|x| x as f32).collect();
-        let filter = [1.0f32; 9];
-
-        let in_h = upload_f32(&b, &input);
-        let f_h = upload_f32(&b, &filter);
-        let out_h = b.alloc(4 * 4).expect("alloc output");
-
-        b.conv2d_forward(
-            in_h,
-            &[1, 1, 4, 4],
-            f_h,
-            &[1, 1, 3, 3],
-            out_h,
-            &[1, 1, 2, 2],
-            &[1, 1],
-            &[0, 0],
-        )
-        .expect("conv2d");
-
-        let result = download_f32(&b, out_h, 4);
-        // top-left 3×3 sum: 0+1+2+4+5+6+8+9+10 = 45
-        assert!((result[0] - 45.0).abs() < 1e-4, "got {}", result[0]);
-        // top-right 3×3 sum: 1+2+3+5+6+7+9+10+11 = 54
-        assert!((result[1] - 54.0).abs() < 1e-4, "got {}", result[1]);
-
-        b.free(in_h).expect("free");
-        b.free(f_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    #[test]
-    fn conv2d_with_padding() {
-        // input: 1×1×2×2, filter: 1×1×3×3 (all ones), stride=1, pad=1
-        // output: 1×1×2×2
-        // With padding=1 around a 2×2 input, the output is also 2×2.
-        let Some(b) = try_init() else { return };
-        let input = [1.0f32, 2.0, 3.0, 4.0];
-        let filter = [1.0f32; 9];
-
-        let in_h = upload_f32(&b, &input);
-        let f_h = upload_f32(&b, &filter);
-        let out_h = b.alloc(4 * 4).expect("alloc output");
-
-        b.conv2d_forward(
-            in_h,
-            &[1, 1, 2, 2],
-            f_h,
-            &[1, 1, 3, 3],
-            out_h,
-            &[1, 1, 2, 2],
-            &[1, 1],
-            &[1, 1],
-        )
-        .expect("conv2d");
-
-        let result = download_f32(&b, out_h, 4);
-        // Top-left output: only 4 of 9 filter taps hit valid input
-        // input[0,0]=1, input[0,1]=2, input[1,0]=3, input[1,1]=4 => sum=10
-        assert!((result[0] - 10.0).abs() < 1e-4, "got {}", result[0]);
-
-        b.free(in_h).expect("free");
-        b.free(f_h).expect("free");
-        b.free(out_h).expect("free");
-    }
-
-    // ── Attention tests ───────────────────────────────────────────────────
-
-    #[test]
-    fn attention_uniform_weights() {
-        // 1 head, seq_q=1, seq_kv=2, head_dim=2, no causal
-        // Q = [1, 0], K = [[1, 0], [1, 0]], V = [[1, 2], [3, 4]]
-        // scores = [1*scale, 1*scale] => equal weights => O = mean(V) = [2, 3]
-        let Some(b) = try_init() else { return };
-
-        let q = [1.0f32, 0.0];
-        let k = [1.0f32, 0.0, 1.0, 0.0];
-        let v = [1.0f32, 2.0, 3.0, 4.0];
-
-        let q_h = upload_f32(&b, &q);
-        let k_h = upload_f32(&b, &k);
-        let v_h = upload_f32(&b, &v);
-        let o_h = b.alloc(2 * 4).expect("alloc output");
-
-        b.attention(q_h, k_h, v_h, o_h, 1, 1, 1, 2, 2, 1.0, false)
-            .expect("attention");
-
-        let result = download_f32(&b, o_h, 2);
-        // Equal scores → equal softmax weights → average of V rows
-        assert!(
-            (result[0] - 2.0).abs() < 1e-4,
-            "got {}, expected 2.0",
-            result[0]
-        );
-        assert!(
-            (result[1] - 3.0).abs() < 1e-4,
-            "got {}, expected 3.0",
-            result[1]
-        );
-
-        b.free(q_h).expect("free");
-        b.free(k_h).expect("free");
-        b.free(v_h).expect("free");
-        b.free(o_h).expect("free");
-    }
-
-    #[test]
-    fn attention_causal_single_token() {
-        // 1 head, seq_q=2, seq_kv=2, head_dim=1, causal
-        // Q = [1, 1], K = [1, 1], V = [10, 20]
-        // sq=0: only sees sk=0 → O[0] = V[0] = 10
-        // sq=1: sees sk=0,1 with equal scores → O[1] = (10+20)/2 = 15
-        let Some(b) = try_init() else { return };
-
-        let q = [1.0f32, 1.0];
-        let k = [1.0f32, 1.0];
-        let v = [10.0f32, 20.0];
-
-        let q_h = upload_f32(&b, &q);
-        let k_h = upload_f32(&b, &k);
-        let v_h = upload_f32(&b, &v);
-        let o_h = b.alloc(2 * 4).expect("alloc output");
-
-        b.attention(q_h, k_h, v_h, o_h, 1, 1, 2, 2, 1, 1.0, true)
-            .expect("attention causal");
-
-        let result = download_f32(&b, o_h, 2);
-        assert!(
-            (result[0] - 10.0).abs() < 1e-4,
-            "got {}, expected 10.0",
-            result[0]
-        );
-        assert!(
-            (result[1] - 15.0).abs() < 1e-4,
-            "got {}, expected 15.0",
-            result[1]
-        );
-
-        b.free(q_h).expect("free");
-        b.free(k_h).expect("free");
-        b.free(v_h).expect("free");
-        b.free(o_h).expect("free");
-    }
-
-    // ── Batched GEMM tests ─────────────────────────────────────────────
-
-    #[test]
-    fn batched_gemm_not_initialized() {
-        let b = WebGpuBackend::new();
-        let result = b.batched_gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            4,
-            4,
-            4,
-            1.0,
-            0,
-            4,
-            16,
-            0,
-            4,
-            16,
-            0.0,
-            0,
-            4,
-            16,
-            2,
-        );
-        assert_eq!(result, Err(BackendError::NotInitialized));
-    }
-
-    #[test]
-    fn batched_gemm_zero_batch_noop() {
-        let Some(b) = try_init() else { return };
-        let result = b.batched_gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            4,
-            4,
-            4,
-            1.0,
-            0,
-            4,
-            16,
-            0,
-            4,
-            16,
-            0.0,
-            0,
-            4,
-            16,
-            0, // batch_count = 0
-        );
-        assert_eq!(result, Ok(()));
-    }
-
-    #[test]
-    fn batched_gemm_zero_dims_noop() {
-        let Some(b) = try_init() else { return };
-        // m = 0
-        let result = b.batched_gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            0,
-            4,
-            4,
-            1.0,
-            0,
-            4,
-            16,
-            0,
-            4,
-            16,
-            0.0,
-            0,
-            4,
-            16,
-            2,
-        );
-        assert_eq!(result, Ok(()));
-        // n = 0
-        let result = b.batched_gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            4,
-            0,
-            4,
-            1.0,
-            0,
-            4,
-            16,
-            0,
-            4,
-            16,
-            0.0,
-            0,
-            4,
-            16,
-            2,
-        );
-        assert_eq!(result, Ok(()));
-        // k = 0
-        let result = b.batched_gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            4,
-            4,
-            0,
-            1.0,
-            0,
-            4,
-            16,
-            0,
-            4,
-            16,
-            0.0,
-            0,
-            4,
-            16,
-            2,
-        );
-        assert_eq!(result, Ok(()));
-    }
-
-    #[test]
-    fn batched_gemm_identity_2x2() {
-        let Some(b) = try_init() else { return };
-        // 2 batches of 2x2 identity multiply
-        // batch 0: A0=[[1,2],[3,4]] * I = [[1,2],[3,4]]
-        // batch 1: A1=[[5,6],[7,8]] * I = [[5,6],[7,8]]
-        let a = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        let eye = [1.0f32, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0];
-        let c_init = [0.0f32; 8];
-
-        let a_h = upload_f32(&b, &a);
-        let b_h = upload_f32(&b, &eye);
-        let c_h = upload_f32(&b, &c_init);
-
-        b.batched_gemm(
-            BackendTranspose::NoTrans,
-            BackendTranspose::NoTrans,
-            2,
-            2,
-            2,
-            1.0,
-            a_h,
-            2,
-            4, // stride_a = 2*2 = 4
-            b_h,
-            2,
-            4, // stride_b = 4
-            0.0,
-            c_h,
-            2,
-            4, // stride_c = 4
-            2, // batch_count
-        )
-        .expect("batched_gemm");
-
-        let result = download_f32(&b, c_h, 8);
-        for (r, e) in result.iter().zip(a.iter()) {
-            assert!((r - e).abs() < 1e-5, "got {r}, expected {e}");
-        }
-
-        b.free(a_h).expect("free");
-        b.free(b_h).expect("free");
-        b.free(c_h).expect("free");
-    }
-
-    // ── FP16 GEMM tests ─────────────────────────────────────────────────
-
-    #[test]
-    fn gemm_f16_not_initialized() {
-        let b = WebGpuBackend::new();
-        let result = b.gemm_f16(4, 4, 4, 1.0, 0, 0, 0.0, 0);
-        assert_eq!(result, Err(BackendError::NotInitialized));
-    }
-
-    #[test]
-    fn gemm_f16_zero_dims_noop() {
-        let Some(b) = try_init() else { return };
-        assert_eq!(b.gemm_f16(0, 4, 4, 1.0, 0, 0, 0.0, 0), Ok(()));
-        assert_eq!(b.gemm_f16(4, 0, 4, 1.0, 0, 0, 0.0, 0), Ok(()));
-        assert_eq!(b.gemm_f16(4, 4, 0, 1.0, 0, 0, 0.0, 0), Ok(()));
-    }
-
-    #[test]
-    fn attention_dominant_key() {
-        // 1 head, seq_q=1, seq_kv=2, head_dim=2, no causal
-        // Q = [1, 0], K = [[10, 0], [0, 0]], V = [[100, 200], [0, 0]]
-        // score[0] = 10*scale, score[1] = 0*scale
-        // With large enough difference, softmax saturates → O ≈ V[0]
-        let Some(b) = try_init() else { return };
-
-        let q = [1.0f32, 0.0];
-        let k = [10.0f32, 0.0, 0.0, 0.0];
-        let v = [100.0f32, 200.0, 0.0, 0.0];
-
-        let q_h = upload_f32(&b, &q);
-        let k_h = upload_f32(&b, &k);
-        let v_h = upload_f32(&b, &v);
-        let o_h = b.alloc(2 * 4).expect("alloc output");
-
-        // scale=1.0 gives scores 10 vs 0 → softmax ≈ [1, 0]
-        b.attention(q_h, k_h, v_h, o_h, 1, 1, 1, 2, 2, 1.0, false)
-            .expect("attention dominant");
-
-        let result = download_f32(&b, o_h, 2);
-        assert!(
-            (result[0] - 100.0).abs() < 0.1,
-            "got {}, expected ~100",
-            result[0]
-        );
-        assert!(
-            (result[1] - 200.0).abs() < 0.1,
-            "got {}, expected ~200",
-            result[1]
-        );
-
-        b.free(q_h).expect("free");
-        b.free(k_h).expect("free");
-        b.free(v_h).expect("free");
-        b.free(o_h).expect("free");
-    }
-}
+#[path = "backend_tests.rs"]
+mod tests;

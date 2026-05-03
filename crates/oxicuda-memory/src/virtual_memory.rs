@@ -31,30 +31,34 @@
 //!
 //! # Status
 //!
-//! The virtual memory driver functions are not yet loaded in
-//! `oxicuda-driver`. All operations that would require driver calls
-//! currently return [`CudaError::NotSupported`]. The data structures
-//! are fully functional for planning and validation purposes.
+//! The CUDA virtual-memory management entry points (`cuMemAddressReserve`,
+//! `cuMemCreate`, `cuMemMap`, `cuMemUnmap`, `cuMemSetAccess`,
+//! `cuMemRelease`, `cuMemAddressFree`) are now wired through
+//! `oxicuda-driver`.  Operations forward to the driver when it is
+//! available; on platforms without a CUDA driver (such as macOS),
+//! [`oxicuda_driver::loader::try_driver`] returns
+//! [`CudaError::NotInitialized`].  When the driver loads but a particular
+//! VMM symbol is missing (older drivers), the corresponding method
+//! returns [`CudaError::NotSupported`].
 //!
 //! # Example
 //!
 //! ```rust,no_run
-//! use oxicuda_memory::virtual_memory::{
-//!     VirtualAddressRange, PhysicalAllocation, VirtualMemoryManager, AccessFlags,
-//! };
+//! use oxicuda_memory::virtual_memory::VirtualMemoryManager;
 //!
 //! // Reserve 1 GiB of virtual address space with 2 MiB alignment.
 //! let va = VirtualMemoryManager::reserve(1 << 30, 1 << 21)?;
 //! assert_eq!(va.size(), 1 << 30);
-//!
-//! // The actual GPU calls are not yet available, so alloc/map/unmap
-//! // return NotSupported.
 //! # Ok::<(), oxicuda_driver::error::CudaError>(())
 //! ```
 
 use std::fmt;
 
-use oxicuda_driver::error::{CudaError, CudaResult};
+use oxicuda_driver::error::{CudaError, CudaResult, check};
+use oxicuda_driver::ffi::{
+    CUdeviceptr, CUmemAccessDesc, CUmemAllocationHandleType, CUmemAllocationProp,
+    CUmemAllocationType, CUmemGenericAllocationHandle, CUmemLocation, CUmemLocationType,
+};
 
 // ---------------------------------------------------------------------------
 // AccessFlags
@@ -232,12 +236,11 @@ pub struct MappingRecord {
 ///
 /// The underlying CUDA virtual memory driver functions
 /// (`cuMemAddressReserve`, `cuMemCreate`, `cuMemMap`, `cuMemUnmap`,
-/// `cuMemSetAccess`) are not yet loaded in `oxicuda-driver`. All
-/// methods that would require driver calls return
-/// [`CudaError::NotSupported`].
-///
-/// The [`reserve`](Self::reserve) method creates a local placeholder
-/// object for planning purposes.
+/// `cuMemSetAccess`, `cuMemRelease`, `cuMemAddressFree`) are wired
+/// through `oxicuda-driver`.  On systems without a CUDA driver
+/// the calls fail with [`CudaError::NotInitialized`]; on systems
+/// with a driver that lacks a specific VMM symbol the calls fail
+/// with [`CudaError::NotSupported`].
 pub struct VirtualMemoryManager;
 
 impl VirtualMemoryManager {
@@ -269,16 +272,14 @@ impl VirtualMemoryManager {
             return Err(CudaError::InvalidValue);
         }
 
-        // TODO: call cuMemAddressReserve when available in DriverApi.
-        // For now, create a placeholder with a synthetic base address.
-        // We use a deterministic address based on size+alignment for
-        // reproducible testing.
-        let synthetic_base = 0x0000_7F00_0000_0000_u64
-            .wrapping_add(size as u64)
-            .wrapping_add(alignment as u64);
+        let api = oxicuda_driver::loader::try_driver()?;
+        let f = api.cu_mem_address_reserve.ok_or(CudaError::NotSupported)?;
+        let mut base: CUdeviceptr = 0;
+        // addr=0 lets the driver choose; flags=0 (reserved for future use).
+        check(unsafe { f(&mut base, size, alignment, 0, 0) })?;
 
         Ok(VirtualAddressRange {
-            base: synthetic_base,
+            base,
             size,
             alignment,
         })
@@ -291,11 +292,15 @@ impl VirtualMemoryManager {
     ///
     /// # Errors
     ///
-    /// Returns [`CudaError::NotSupported`] because the driver function
-    /// `cuMemAddressFree` is not yet loaded.
-    pub fn release(_va: VirtualAddressRange) -> CudaResult<()> {
-        // TODO: call cuMemAddressFree when available
-        Err(CudaError::NotSupported)
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available
+    ///   (e.g. on macOS).
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemAddressFree`.
+    /// * Other [`CudaError`] variants on driver failure.
+    pub fn release(va: VirtualAddressRange) -> CudaResult<()> {
+        let api = oxicuda_driver::loader::try_driver()?;
+        let f = api.cu_mem_address_free.ok_or(CudaError::NotSupported)?;
+        check(unsafe { f(va.base, va.size) })
     }
 
     /// Allocates physical memory on the specified device.
@@ -310,19 +315,39 @@ impl VirtualMemoryManager {
     ///
     /// # Errors
     ///
-    /// * [`CudaError::InvalidValue`] if `size` is zero.
-    /// * [`CudaError::NotSupported`] because the driver function
-    ///   `cuMemCreate` is not yet loaded.
+    /// * [`CudaError::InvalidValue`] if `size` is zero or `device_ordinal`
+    ///   is negative.
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available
+    ///   (e.g. on macOS).
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemCreate`.
+    /// * Other [`CudaError`] variants on driver failure.
     pub fn alloc_physical(size: usize, device_ordinal: i32) -> CudaResult<PhysicalAllocation> {
         if size == 0 {
             return Err(CudaError::InvalidValue);
         }
-        // TODO: call cuMemCreate when available in DriverApi
-        Err(CudaError::NotSupported)?;
+        if device_ordinal < 0 {
+            return Err(CudaError::InvalidValue);
+        }
 
-        // This code is unreachable today but shows the intended return type.
+        let api = oxicuda_driver::loader::try_driver()?;
+        let f = api.cu_mem_create.ok_or(CudaError::NotSupported)?;
+
+        let prop = CUmemAllocationProp {
+            alloc_type: CUmemAllocationType::Pinned as u32,
+            requested_handle_types: CUmemAllocationHandleType::None as u32,
+            location: CUmemLocation {
+                loc_type: CUmemLocationType::Device as u32,
+                id: device_ordinal,
+            },
+            ..CUmemAllocationProp::default()
+        };
+
+        let mut handle: CUmemGenericAllocationHandle = 0;
+        check(unsafe { f(&mut handle, size, &prop, 0) })?;
+
         Ok(PhysicalAllocation {
-            handle: 0,
+            handle,
             size,
             device_ordinal,
         })
@@ -334,11 +359,15 @@ impl VirtualMemoryManager {
     ///
     /// # Errors
     ///
-    /// Returns [`CudaError::NotSupported`] because the driver function
-    /// `cuMemRelease` is not yet loaded.
-    pub fn free_physical(_phys: PhysicalAllocation) -> CudaResult<()> {
-        // TODO: call cuMemRelease when available
-        Err(CudaError::NotSupported)
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available
+    ///   (e.g. on macOS).
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemRelease`.
+    /// * Other [`CudaError`] variants on driver failure.
+    pub fn free_physical(phys: PhysicalAllocation) -> CudaResult<()> {
+        let api = oxicuda_driver::loader::try_driver()?;
+        let f = api.cu_mem_release.ok_or(CudaError::NotSupported)?;
+        check(unsafe { f(phys.handle) })
     }
 
     /// Maps a physical allocation to a region of a virtual address range.
@@ -358,8 +387,11 @@ impl VirtualMemoryManager {
     /// * [`CudaError::InvalidValue`] if `offset` is not aligned, or if
     ///   the physical allocation would extend past the end of the virtual
     ///   range.
-    /// * [`CudaError::NotSupported`] because the driver function
-    ///   `cuMemMap` is not yet loaded.
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available
+    ///   (e.g. on macOS).
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemMap`.
+    /// * Other [`CudaError`] variants on driver failure.
     pub fn map(
         va: &VirtualAddressRange,
         phys: &PhysicalAllocation,
@@ -376,8 +408,13 @@ impl VirtualMemoryManager {
         if end > va.size {
             return Err(CudaError::InvalidValue);
         }
-        // TODO: call cuMemMap when available
-        Err(CudaError::NotSupported)
+
+        let api = oxicuda_driver::loader::try_driver()?;
+        let f = api.cu_mem_map.ok_or(CudaError::NotSupported)?;
+
+        // ptr = base + offset (VA), offset_into_phys = 0, size = phys.size, flags = 0.
+        let target_va: CUdeviceptr = va.base.saturating_add(offset as u64);
+        check(unsafe { f(target_va, phys.size, 0, phys.handle, 0) })
     }
 
     /// Unmaps a region of a virtual address range.
@@ -396,15 +433,22 @@ impl VirtualMemoryManager {
     ///
     /// * [`CudaError::InvalidValue`] if the offset+size exceeds the
     ///   virtual range bounds.
-    /// * [`CudaError::NotSupported`] because the driver function
-    ///   `cuMemUnmap` is not yet loaded.
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available
+    ///   (e.g. on macOS).
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemUnmap`.
+    /// * Other [`CudaError`] variants on driver failure.
     pub fn unmap(va: &VirtualAddressRange, offset: usize, size: usize) -> CudaResult<()> {
         let end = offset.checked_add(size).ok_or(CudaError::InvalidValue)?;
         if end > va.size {
             return Err(CudaError::InvalidValue);
         }
-        // TODO: call cuMemUnmap when available
-        Err(CudaError::NotSupported)
+
+        let api = oxicuda_driver::loader::try_driver()?;
+        let f = api.cu_mem_unmap.ok_or(CudaError::NotSupported)?;
+
+        let target_va: CUdeviceptr = va.base.saturating_add(offset as u64);
+        check(unsafe { f(target_va, size) })
     }
 
     /// Sets access permissions for a virtual address range on a device.
@@ -420,15 +464,32 @@ impl VirtualMemoryManager {
     ///
     /// # Errors
     ///
-    /// Returns [`CudaError::NotSupported`] because the driver function
-    /// `cuMemSetAccess` is not yet loaded.
+    /// * [`CudaError::NotInitialized`] if no CUDA driver is available
+    ///   (e.g. on macOS).
+    /// * [`CudaError::NotSupported`] if the driver does not export
+    ///   `cuMemSetAccess`.
+    /// * Other [`CudaError`] variants on driver failure.
     pub fn set_access(
-        _va: &VirtualAddressRange,
-        _device_ordinal: i32,
-        _flags: AccessFlags,
+        va: &VirtualAddressRange,
+        device_ordinal: i32,
+        flags: AccessFlags,
     ) -> CudaResult<()> {
-        // TODO: call cuMemSetAccess when available
-        Err(CudaError::NotSupported)
+        let api = oxicuda_driver::loader::try_driver()?;
+        let f = api.cu_mem_set_access.ok_or(CudaError::NotSupported)?;
+
+        let desc = CUmemAccessDesc {
+            location: CUmemLocation {
+                loc_type: CUmemLocationType::Device as u32,
+                id: device_ordinal,
+            },
+            flags: match flags {
+                AccessFlags::None => 0,
+                AccessFlags::Read => 1,
+                AccessFlags::ReadWrite => 3,
+            },
+        };
+
+        check(unsafe { f(va.base, va.size, &desc, 1) })
     }
 }
 
@@ -440,18 +501,25 @@ impl VirtualMemoryManager {
 mod tests {
     use super::*;
 
-    #[test]
-    fn reserve_valid_range() {
-        let va = VirtualMemoryManager::reserve(4096, 4096);
-        assert!(va.is_ok());
-        let va = va.ok();
-        assert!(va.is_some());
-        if let Some(va) = va {
-            assert_eq!(va.size(), 4096);
-            assert_eq!(va.alignment(), 4096);
-            assert!(va.base() > 0);
-        }
+    /// Returns `true` when the driver-failure error kind is acceptable for a
+    /// no-GPU host.  The driver may be loaded but have no real GPU hardware or
+    /// VMM granularity support, in which case it returns `InvalidValue`,
+    /// `InvalidDevice`, `NoDevice`, or `InvalidContext` in addition to the
+    /// canonical `NotInitialized` (no driver; macOS) and `NotSupported`
+    /// (driver loaded but symbol missing) variants.
+    fn is_driver_unavailable(err: &CudaError) -> bool {
+        matches!(
+            err,
+            CudaError::NotInitialized
+                | CudaError::NotSupported
+                | CudaError::InvalidValue
+                | CudaError::InvalidDevice
+                | CudaError::NoDevice
+                | CudaError::InvalidContext
+        )
     }
+
+    // -- Reservation: argument-validation paths --------------------------------
 
     #[test]
     fn reserve_zero_size_fails() {
@@ -478,51 +546,66 @@ mod tests {
         assert_eq!(result, Err(CudaError::InvalidValue));
     }
 
+    // -- Reservation: driver-call path on hosts without a CUDA driver ----------
+
+    /// On a host without a CUDA driver, `reserve` must fail cleanly with one of
+    /// the driver-unavailability error kinds rather than panicking.
     #[test]
-    fn reserve_large_range() {
-        // Reserve 1 GiB with 2 MiB alignment.
-        let gib = 1 << 30;
-        let mib2 = 1 << 21;
-        let va = VirtualMemoryManager::reserve(gib, mib2);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            assert_eq!(va.size(), gib);
-            assert_eq!(va.alignment(), mib2);
+    fn reserve_no_driver_returns_driver_unavailable() {
+        let result = VirtualMemoryManager::reserve(4096, 4096);
+        match result {
+            Ok(va) => {
+                // Real CUDA driver present: the driver gave us a base.
+                assert_eq!(va.size(), 4096);
+                assert_eq!(va.alignment(), 4096);
+            }
+            Err(e) => assert!(
+                is_driver_unavailable(&e),
+                "unexpected error from reserve: {e:?}"
+            ),
         }
     }
 
+    // -- VirtualAddressRange accessor methods ---------------------------------
+
     #[test]
-    fn virtual_address_range_contains() {
-        let va = VirtualMemoryManager::reserve(8192, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            assert!(va.contains(va.base()));
-            assert!(va.contains(va.base() + 1));
-            assert!(va.contains(va.base() + 8191));
-            assert!(!va.contains(va.end()));
-            assert!(!va.contains(va.base().wrapping_sub(1)));
-        }
+    fn virtual_address_range_contains_synthetic() {
+        // Build the value-object directly so the test runs everywhere.
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 8192,
+            alignment: 4096,
+        };
+        assert!(va.contains(va.base()));
+        assert!(va.contains(va.base() + 1));
+        assert!(va.contains(va.base() + 8191));
+        assert!(!va.contains(va.end()));
+        assert!(!va.contains(va.base().wrapping_sub(1)));
     }
 
     #[test]
-    fn virtual_address_range_end() {
-        let va = VirtualMemoryManager::reserve(4096, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            assert_eq!(va.end(), va.base() + 4096);
-        }
+    fn virtual_address_range_end_synthetic() {
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 4096,
+            alignment: 4096,
+        };
+        assert_eq!(va.end(), va.base() + 4096);
     }
 
     #[test]
-    fn virtual_address_range_display() {
-        let va = VirtualMemoryManager::reserve(4096, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            let disp = format!("{va}");
-            assert!(disp.contains("VA["));
-            assert!(disp.contains("4096 bytes"));
-        }
+    fn virtual_address_range_display_synthetic() {
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 4096,
+            alignment: 4096,
+        };
+        let disp = format!("{va}");
+        assert!(disp.contains("VA["));
+        assert!(disp.contains("4096 bytes"));
     }
+
+    // -- Physical allocation: argument-validation and driver-unavailable path --
 
     #[test]
     fn alloc_physical_zero_size_fails() {
@@ -531,96 +614,162 @@ mod tests {
     }
 
     #[test]
-    fn alloc_physical_returns_not_supported() {
-        let result = VirtualMemoryManager::alloc_physical(4096, 0);
-        assert_eq!(result, Err(CudaError::NotSupported));
+    fn alloc_physical_negative_device_fails() {
+        let result = VirtualMemoryManager::alloc_physical(4096, -1);
+        assert_eq!(result, Err(CudaError::InvalidValue));
     }
 
     #[test]
-    fn release_returns_not_supported() {
-        let va = VirtualMemoryManager::reserve(4096, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            let result = VirtualMemoryManager::release(va);
-            assert_eq!(result, Err(CudaError::NotSupported));
+    fn alloc_physical_no_driver_returns_driver_unavailable() {
+        let result = VirtualMemoryManager::alloc_physical(4096, 0);
+        if let Err(e) = result {
+            assert!(
+                is_driver_unavailable(&e),
+                "expected driver-unavailable error, got {e:?}"
+            );
+        }
+        // On a real CUDA box the call may succeed; we only require not-panic.
+    }
+
+    #[test]
+    fn release_no_driver_returns_driver_unavailable() {
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 4096,
+            alignment: 4096,
+        };
+        if let Err(e) = VirtualMemoryManager::release(va) {
+            assert!(
+                is_driver_unavailable(&e),
+                "expected driver-unavailable error, got {e:?}"
+            );
         }
     }
+
+    #[test]
+    fn free_physical_no_driver_returns_driver_unavailable() {
+        // Calling cuMemRelease with a fake handle when the driver is loaded is
+        // undefined behaviour that can SIGSEGV the process.  This test only
+        // covers the "driver not available" path.
+        if oxicuda_driver::loader::try_driver().is_ok() {
+            return;
+        }
+        let phys = PhysicalAllocation {
+            handle: 1,
+            size: 4096,
+            device_ordinal: 0,
+        };
+        if let Err(e) = VirtualMemoryManager::free_physical(phys) {
+            assert!(
+                is_driver_unavailable(&e),
+                "expected driver-unavailable error, got {e:?}"
+            );
+        }
+    }
+
+    // -- map / unmap / set_access argument-validation paths --------------------
 
     #[test]
     fn map_validates_alignment() {
-        let va = VirtualMemoryManager::reserve(8192, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            let phys = PhysicalAllocation {
-                handle: 1,
-                size: 4096,
-                device_ordinal: 0,
-            };
-            // Offset 1 is not aligned to 4096
-            let result = VirtualMemoryManager::map(&va, &phys, 1);
-            assert_eq!(result, Err(CudaError::InvalidValue));
-        }
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 8192,
+            alignment: 4096,
+        };
+        let phys = PhysicalAllocation {
+            handle: 1,
+            size: 4096,
+            device_ordinal: 0,
+        };
+        // Offset 1 is not aligned to 4096
+        let result = VirtualMemoryManager::map(&va, &phys, 1);
+        assert_eq!(result, Err(CudaError::InvalidValue));
     }
 
     #[test]
     fn map_validates_bounds() {
-        let va = VirtualMemoryManager::reserve(4096, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            let phys = PhysicalAllocation {
-                handle: 1,
-                size: 8192, // larger than VA range
-                device_ordinal: 0,
-            };
-            let result = VirtualMemoryManager::map(&va, &phys, 0);
-            assert_eq!(result, Err(CudaError::InvalidValue));
-        }
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 4096,
+            alignment: 4096,
+        };
+        let phys = PhysicalAllocation {
+            handle: 1,
+            size: 8192, // larger than VA range
+            device_ordinal: 0,
+        };
+        let result = VirtualMemoryManager::map(&va, &phys, 0);
+        assert_eq!(result, Err(CudaError::InvalidValue));
     }
 
     #[test]
-    fn map_returns_not_supported_when_valid() {
-        let va = VirtualMemoryManager::reserve(8192, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            let phys = PhysicalAllocation {
-                handle: 1,
-                size: 4096,
-                device_ordinal: 0,
-            };
-            let result = VirtualMemoryManager::map(&va, &phys, 0);
-            assert_eq!(result, Err(CudaError::NotSupported));
+    fn map_no_driver_returns_driver_unavailable() {
+        // Calling cuMemMap with a fake virtual address and fake handle when the
+        // driver is loaded is undefined behaviour that can SIGSEGV the process.
+        // This test only covers the "driver not available" path.
+        if oxicuda_driver::loader::try_driver().is_ok() {
+            return;
+        }
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 8192,
+            alignment: 4096,
+        };
+        let phys = PhysicalAllocation {
+            handle: 1,
+            size: 4096,
+            device_ordinal: 0,
+        };
+        if let Err(e) = VirtualMemoryManager::map(&va, &phys, 0) {
+            assert!(
+                is_driver_unavailable(&e),
+                "expected driver-unavailable error, got {e:?}"
+            );
         }
     }
 
     #[test]
     fn unmap_validates_bounds() {
-        let va = VirtualMemoryManager::reserve(4096, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            let result = VirtualMemoryManager::unmap(&va, 0, 8192);
-            assert_eq!(result, Err(CudaError::InvalidValue));
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 4096,
+            alignment: 4096,
+        };
+        let result = VirtualMemoryManager::unmap(&va, 0, 8192);
+        assert_eq!(result, Err(CudaError::InvalidValue));
+    }
+
+    #[test]
+    fn unmap_no_driver_returns_driver_unavailable() {
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 4096,
+            alignment: 4096,
+        };
+        if let Err(e) = VirtualMemoryManager::unmap(&va, 0, 4096) {
+            assert!(
+                is_driver_unavailable(&e),
+                "expected driver-unavailable error, got {e:?}"
+            );
         }
     }
 
     #[test]
-    fn unmap_returns_not_supported_when_valid() {
-        let va = VirtualMemoryManager::reserve(4096, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            let result = VirtualMemoryManager::unmap(&va, 0, 4096);
-            assert_eq!(result, Err(CudaError::NotSupported));
+    fn set_access_no_driver_returns_driver_unavailable() {
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 4096,
+            alignment: 4096,
+        };
+        if let Err(e) = VirtualMemoryManager::set_access(&va, 0, AccessFlags::ReadWrite) {
+            assert!(
+                is_driver_unavailable(&e),
+                "expected driver-unavailable error, got {e:?}"
+            );
         }
     }
 
-    #[test]
-    fn set_access_returns_not_supported() {
-        let va = VirtualMemoryManager::reserve(4096, 4096);
-        assert!(va.is_ok());
-        if let Ok(va) = va {
-            let result = VirtualMemoryManager::set_access(&va, 0, AccessFlags::ReadWrite);
-            assert_eq!(result, Err(CudaError::NotSupported));
-        }
-    }
+    // -- Plain value-object tests (platform-independent) -----------------------
 
     #[test]
     fn access_flags_default() {
@@ -660,14 +809,48 @@ mod tests {
         assert_eq!(record.access, AccessFlags::ReadWrite);
     }
 
+    /// On macOS specifically, every driver-calling method must return
+    /// [`CudaError::NotInitialized`] (no library to load).
+    #[cfg(target_os = "macos")]
     #[test]
-    fn free_physical_returns_not_supported() {
+    fn macos_paths_return_not_initialized() {
+        assert_eq!(
+            VirtualMemoryManager::reserve(4096, 4096),
+            Err(CudaError::NotInitialized)
+        );
+        assert_eq!(
+            VirtualMemoryManager::alloc_physical(4096, 0),
+            Err(CudaError::NotInitialized)
+        );
         let phys = PhysicalAllocation {
             handle: 1,
             size: 4096,
             device_ordinal: 0,
         };
-        let result = VirtualMemoryManager::free_physical(phys);
-        assert_eq!(result, Err(CudaError::NotSupported));
+        assert_eq!(
+            VirtualMemoryManager::free_physical(phys.clone()),
+            Err(CudaError::NotInitialized)
+        );
+        let va = VirtualAddressRange {
+            base: 0x1_0000_0000,
+            size: 4096,
+            alignment: 4096,
+        };
+        assert_eq!(
+            VirtualMemoryManager::release(va.clone()),
+            Err(CudaError::NotInitialized)
+        );
+        assert_eq!(
+            VirtualMemoryManager::map(&va, &phys, 0),
+            Err(CudaError::NotInitialized)
+        );
+        assert_eq!(
+            VirtualMemoryManager::unmap(&va, 0, 4096),
+            Err(CudaError::NotInitialized)
+        );
+        assert_eq!(
+            VirtualMemoryManager::set_access(&va, 0, AccessFlags::ReadWrite),
+            Err(CudaError::NotInitialized)
+        );
     }
 }

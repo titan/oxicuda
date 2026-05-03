@@ -598,6 +598,7 @@ pub fn optimal_stream_count(num_configs: usize, available_memory_mb: u64) -> usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::benchmark::WarmupStrategy;
 
     #[test]
     fn sequential_strategy_smoke() {
@@ -610,7 +611,7 @@ mod tests {
         let engine = ParallelBenchmarkEngine::new(
             config,
             BenchmarkConfig {
-                warmup_runs: 1,
+                warmup: WarmupStrategy::Fixed(1),
                 benchmark_runs: 2,
             },
         );
@@ -654,7 +655,7 @@ mod tests {
         let engine = ParallelBenchmarkEngine::new(
             config,
             BenchmarkConfig {
-                warmup_runs: 1,
+                warmup: WarmupStrategy::Fixed(1),
                 benchmark_runs: 2,
             },
         );
@@ -702,7 +703,7 @@ mod tests {
         let engine = ParallelBenchmarkEngine::new(
             config,
             BenchmarkConfig {
-                warmup_runs: 0,
+                warmup: WarmupStrategy::Fixed(0),
                 benchmark_runs: 1,
             },
         )
@@ -787,7 +788,7 @@ mod tests {
         let engine = ParallelBenchmarkEngine::new(
             config,
             BenchmarkConfig {
-                warmup_runs: 1,
+                warmup: WarmupStrategy::Fixed(1),
                 benchmark_runs: 2,
             },
         );
@@ -823,7 +824,7 @@ mod tests {
         let engine = ParallelBenchmarkEngine::new(
             config_with_retry,
             BenchmarkConfig {
-                warmup_runs: 0,
+                warmup: WarmupStrategy::Fixed(0),
                 benchmark_runs: 1,
             },
         );

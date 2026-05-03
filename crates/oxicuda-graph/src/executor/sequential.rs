@@ -190,7 +190,7 @@ mod tests {
         let k = b.add_kernel("k", 4, 256, 0).fusible(false).finish();
         let dn = b.add_memcpy("dn", MemcpyDir::DeviceToHost, 2048);
         b.chain(&[up, k, dn]);
-        b.build().unwrap()
+        b.build().expect("test graph builds successfully")
     }
 
     fn build_and_execute(graph: &ComputeGraph) -> GraphResult<ExecutionStats> {
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn seq_simple_chain_runs() {
         let g = simple_chain_graph();
-        let stats = build_and_execute(&g).unwrap();
+        let stats = build_and_execute(&g).expect("sequential execution of valid graph succeeds");
         assert_eq!(stats.kernels_launched, 1);
         assert_eq!(stats.bytes_copied, 2048 * 2);
     }
@@ -210,8 +210,8 @@ mod tests {
     fn seq_memset_counted() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         b.add_memset("zero", 8192, 0x00);
-        let g = b.build().unwrap();
-        let stats = build_and_execute(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let stats = build_and_execute(&g).expect("sequential execution of valid graph succeeds");
         assert_eq!(stats.bytes_set, 8192);
     }
 
@@ -219,8 +219,8 @@ mod tests {
     fn seq_barrier_counted() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         b.add_barrier("sync");
-        let g = b.build().unwrap();
-        let stats = build_and_execute(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let stats = build_and_execute(&g).expect("sequential execution of valid graph succeeds");
         assert_eq!(stats.barriers, 1);
     }
 
@@ -228,8 +228,8 @@ mod tests {
     fn seq_host_callback_counted() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         b.add_host_callback("checkpoint");
-        let g = b.build().unwrap();
-        let stats = build_and_execute(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let stats = build_and_execute(&g).expect("sequential execution of valid graph succeeds");
         assert_eq!(stats.host_callbacks, 1);
     }
 
@@ -254,7 +254,9 @@ mod tests {
             kernel_count_fused: 0,
             event_count: 1,
         };
-        let stats = SequentialExecutor::new(&plan).run().unwrap();
+        let stats = SequentialExecutor::new(&plan)
+            .run()
+            .expect("sequential executor runs a valid plan");
         assert_eq!(stats.events_recorded, 1);
         assert_eq!(stats.events_waited, 1);
     }
@@ -297,7 +299,9 @@ mod tests {
             kernel_count_fused: 0,
             event_count: 1,
         };
-        let issues = SequentialExecutor::new(&plan).validate().unwrap();
+        let issues = SequentialExecutor::new(&plan)
+            .validate()
+            .expect("plan validation succeeds on well-formed plan");
         assert_eq!(issues, 0);
     }
 
@@ -335,7 +339,9 @@ mod tests {
             kernel_count_fused: 0,
             event_count: 0,
         };
-        let stats = SequentialExecutor::new(&plan).run().unwrap();
+        let stats = SequentialExecutor::new(&plan)
+            .run()
+            .expect("sequential executor runs a valid plan");
         assert_eq!(stats.steps_on_stream0, 1);
         assert_eq!(stats.steps_on_other_streams, 0);
     }
@@ -354,7 +360,9 @@ mod tests {
             kernel_count_fused: 0,
             event_count: 0,
         };
-        let stats = SequentialExecutor::new(&plan).run().unwrap();
+        let stats = SequentialExecutor::new(&plan)
+            .run()
+            .expect("sequential executor runs a valid plan");
         assert_eq!(stats.steps_on_other_streams, 1);
     }
 
@@ -366,9 +374,11 @@ mod tests {
         let k1 = b.add_kernel("relu", 4, 256, 0).fusible(true).finish();
         let k2 = b.add_kernel("scale", 4, 256, 0).fusible(true).finish();
         b.chain(&[k0, k1, k2]);
-        let g = b.build().unwrap();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
-        let stats = SequentialExecutor::new(&plan).run().unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
+        let stats = SequentialExecutor::new(&plan)
+            .run()
+            .expect("sequential executor runs a valid plan");
         // After fusion: 1 kernel launch.
         assert_eq!(stats.kernels_launched, 1);
     }

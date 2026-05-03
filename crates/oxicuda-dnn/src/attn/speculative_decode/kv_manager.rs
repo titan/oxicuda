@@ -28,7 +28,7 @@ use crate::error::DnnError;
 /// use oxicuda_dnn::attn::speculative_decode::KvManager;
 ///
 /// let mut mgr = KvManager::new(128, 16, 64);
-/// let page = mgr.allocate_page(42).unwrap();
+/// let page = mgr.allocate_page(42).expect("allocate_page should succeed when pages are available");
 /// assert_eq!(mgr.free_page_count(), 127);
 /// mgr.free_sequence(42);
 /// assert_eq!(mgr.free_page_count(), 128);

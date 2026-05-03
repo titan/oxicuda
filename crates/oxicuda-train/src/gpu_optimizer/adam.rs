@@ -273,7 +273,8 @@ mod tests {
 
     fn make_param(data: Vec<f32>, grad: Vec<f32>) -> ParamTensor {
         let mut p = ParamTensor::new(data, "w");
-        p.set_grad(grad).unwrap();
+        p.set_grad(grad)
+            .expect("gradient length matches param data length");
         p
     }
 
@@ -282,7 +283,8 @@ mod tests {
         // With a positive gradient, parameter should decrease.
         let mut opt = GpuAdam::new(1e-3);
         let mut params = vec![make_param(vec![1.0_f32; 4], vec![0.5_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         for &v in &params[0].data {
             assert!(v < 1.0_f32, "param should decrease, got {v}");
         }
@@ -292,7 +294,8 @@ mod tests {
     fn adam_negative_gradient_increases_param() {
         let mut opt = GpuAdam::new(1e-3);
         let mut params = vec![make_param(vec![0.5_f32; 4], vec![-0.5_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         for &v in &params[0].data {
             assert!(v > 0.5_f32, "param should increase, got {v}");
         }
@@ -309,8 +312,11 @@ mod tests {
 
         for _ in 0..200 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         let x_final = params[0].data[0].abs();
         assert!(
@@ -323,8 +329,10 @@ mod tests {
     fn adam_amsgrad_smoke() {
         let mut opt = GpuAdam::new(1e-3).with_amsgrad(true);
         let mut params = vec![make_param(vec![1.0_f32; 4], vec![0.1_f32; 4])];
-        opt.step(&mut params).unwrap();
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         // Should not panic; max moment should grow
         assert!(opt.max_exp_avg_sq[0][0] > 0.0);
     }
@@ -351,7 +359,8 @@ mod tests {
         p.requires_grad = false;
         let data_before = p.data.clone();
         let mut params = vec![p];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         assert_eq!(
             params[0].data, data_before,
             "frozen param should not change"
@@ -364,7 +373,8 @@ mod tests {
         // slightly different but the optimiser should still work.
         let mut opt = GpuAdam::new(1e-3).with_weight_decay(1e-4);
         let mut params = vec![make_param(vec![1.0_f32; 4], vec![0.5_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         for &v in &params[0].data {
             assert!(v < 1.0, "param should decrease with weight decay");
         }

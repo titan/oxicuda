@@ -230,7 +230,8 @@ mod tests {
     #[test]
     fn weight_tensor_from_data_ok() {
         let d = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let w = WeightTensor::from_data(d.clone(), vec![2, 2]).unwrap();
+        let w = WeightTensor::from_data(d.clone(), vec![2, 2])
+            .expect("4 elements with shape [2,2] should match");
         assert_eq!(w.data, d);
     }
 
@@ -243,9 +244,16 @@ mod tests {
 
     #[test]
     fn weight_tensor_row_slice() {
-        let w = WeightTensor::from_data(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        assert_eq!(w.row_slice(0).unwrap(), &[1.0_f32, 2.0]);
-        assert_eq!(w.row_slice(1).unwrap(), &[3.0_f32, 4.0]);
+        let w = WeightTensor::from_data(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])
+            .expect("4 elements with shape [2,2] should match");
+        assert_eq!(
+            w.row_slice(0).expect("row 0 of 2x2 tensor should exist"),
+            &[1.0_f32, 2.0]
+        );
+        assert_eq!(
+            w.row_slice(1).expect("row 1 of 2x2 tensor should exist"),
+            &[3.0_f32, 4.0]
+        );
     }
 
     #[test]
@@ -257,7 +265,8 @@ mod tests {
     #[test]
     fn weight_tensor_validate_shape_ok() {
         let w = WeightTensor::zeros(&[4, 8]);
-        w.validate_shape(&[4, 8]).unwrap();
+        w.validate_shape(&[4, 8])
+            .expect("validate_shape should succeed when shape matches");
     }
 
     #[test]
@@ -270,7 +279,9 @@ mod tests {
     fn model_weights_insert_and_get() {
         let mut mw = ModelWeights::new();
         mw.insert("embed", WeightTensor::zeros(&[10, 4]));
-        let t = mw.get("embed").unwrap();
+        let t = mw
+            .get("embed")
+            .expect("'embed' key should exist after insertion");
         assert_eq!(t.shape, vec![10, 4]);
     }
 

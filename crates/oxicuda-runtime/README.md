@@ -22,7 +22,7 @@ Part of the [OxiCUDA](https://github.com/cool-japan/oxicuda) ecosystem — Pure 
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-oxicuda-runtime = "0.1.4"
+oxicuda-runtime = "0.1.5"
 ```
 
 ```rust
@@ -51,7 +51,7 @@ memory::free(d_buf)?;
 
 | Item       | Value              |
 |------------|--------------------|
-| Version    | 0.1.4 (2026-04-18) |
+| Version    | 0.1.5 (2026-05-01) |
 | Tests      | 47 passing         |
 | Warnings   | 0                  |
 | `unwrap()` | 0                  |

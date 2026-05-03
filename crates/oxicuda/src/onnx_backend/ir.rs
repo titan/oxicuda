@@ -7,6 +7,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use half::f16;
+
 // ─── Error types ────────────────────────────────────────────
 
 /// Error type for ONNX backend operations.
@@ -364,6 +366,35 @@ impl OnnxTensor {
         }
     }
 
+    /// Create from f16 slice.
+    pub fn from_f16(values: &[f16], shape: Vec<usize>) -> Self {
+        let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        Self {
+            data,
+            dtype: DataType::Float16,
+            shape,
+        }
+    }
+
+    /// Create from i8 slice.
+    pub fn from_i8(values: &[i8], shape: Vec<usize>) -> Self {
+        let data: Vec<u8> = values.iter().map(|&v| v as u8).collect();
+        Self {
+            data,
+            dtype: DataType::Int8,
+            shape,
+        }
+    }
+
+    /// Create from u8 slice.
+    pub fn from_u8(values: &[u8], shape: Vec<usize>) -> Self {
+        Self {
+            data: values.to_vec(),
+            dtype: DataType::Uint8,
+            shape,
+        }
+    }
+
     /// Create a scalar f32 tensor.
     pub fn scalar_f32(value: f32) -> Self {
         Self::from_f32(&[value], vec![])
@@ -443,6 +474,43 @@ impl OnnxTensor {
             )));
         }
         Ok(self.data.iter().map(|&b| b != 0).collect())
+    }
+
+    /// Read data as f16 values.
+    pub fn as_f16(&self) -> OnnxResult<Vec<f16>> {
+        if self.dtype != DataType::Float16 {
+            return Err(OnnxError::TypeError(format!(
+                "expected Float16, got {:?}",
+                self.dtype
+            )));
+        }
+        Ok(self
+            .data
+            .chunks_exact(2)
+            .map(|c| f16::from_le_bytes([c[0], c[1]]))
+            .collect())
+    }
+
+    /// Read data as i8 values.
+    pub fn as_i8(&self) -> OnnxResult<Vec<i8>> {
+        if self.dtype != DataType::Int8 {
+            return Err(OnnxError::TypeError(format!(
+                "expected Int8, got {:?}",
+                self.dtype
+            )));
+        }
+        Ok(self.data.iter().map(|&b| b as i8).collect())
+    }
+
+    /// Read data as u8 values.
+    pub fn as_u8(&self) -> OnnxResult<Vec<u8>> {
+        if self.dtype != DataType::Uint8 {
+            return Err(OnnxError::TypeError(format!(
+                "expected Uint8, got {:?}",
+                self.dtype
+            )));
+        }
+        Ok(self.data.clone())
     }
 }
 

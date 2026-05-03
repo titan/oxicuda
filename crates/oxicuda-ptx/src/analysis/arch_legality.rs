@@ -201,6 +201,9 @@ pub const fn minimum_sm_for_instruction(instr: &Instruction) -> Option<SmVersion
         | Instruction::Atom { .. }
         | Instruction::AtomCas { .. }
         | Instruction::Red { .. }
+        | Instruction::AtomGlobalAddFloat { .. }
+        | Instruction::Addc { .. }
+        | Instruction::Selp { .. }
         | Instruction::MovSpecial { .. }
         | Instruction::LoadParam { .. }
         | Instruction::Comment(_)
@@ -387,6 +390,14 @@ fn instruction_description(instr: &Instruction) -> String {
         Instruction::Atom { op, .. } => format!("atom.{op:?}"),
         Instruction::AtomCas { .. } => "atom.cas".into(),
         Instruction::Red { op, .. } => format!("red.{op:?}"),
+        Instruction::AtomGlobalAddFloat { ty, .. } => {
+            format!("atom.global.add{}", ty.as_ptx_str())
+        }
+        Instruction::Addc { ty, carry_out, .. } => {
+            let cc = if *carry_out { ".cc" } else { "" };
+            format!("addc{cc}{}", ty.as_ptx_str())
+        }
+        Instruction::Selp { ty, .. } => format!("selp{}", ty.as_ptx_str()),
         Instruction::MovSpecial { special, .. } => format!("mov.{special:?}"),
         Instruction::LoadParam { param_name, .. } => format!("ld.param {param_name}"),
         Instruction::Comment(_) => "comment".into(),

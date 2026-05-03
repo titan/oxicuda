@@ -302,8 +302,8 @@ mod tests {
     fn stream_single_node_default_stream() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         let n = barrier(&mut b, "n");
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 4).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 4).expect("stream assignment analysis succeeds on valid graph");
         assert_eq!(plan.stream_of(n), StreamId(0));
     }
 
@@ -314,8 +314,8 @@ mod tests {
         let bnode = barrier(&mut b, "b");
         let c = barrier(&mut b, "c");
         b.chain(&[a, bnode, c]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 4).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 4).expect("stream assignment analysis succeeds on valid graph");
         // All in a chain → same stream (no concurrency).
         assert!(!plan.has_concurrency());
         assert_eq!(plan.sync_count(), 0);
@@ -329,8 +329,8 @@ mod tests {
         let a = barrier(&mut b, "a");
         let bnode = barrier(&mut b, "b");
         b.fan_out(src, &[a, bnode]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 4).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 4).expect("stream assignment analysis succeeds on valid graph");
         // a and b should be on different streams.
         let sa = plan.stream_of(a);
         let sb = plan.stream_of(bnode);
@@ -347,8 +347,8 @@ mod tests {
         let bnode = barrier(&mut b, "b");
         let c = barrier(&mut b, "c");
         // No deps — all independent sources.
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 1).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 1).expect("stream assignment analysis succeeds on valid graph");
         // All on stream 0.
         assert_eq!(plan.stream_of(a), StreamId(0));
         assert_eq!(plan.stream_of(bnode), StreamId(0));
@@ -365,8 +365,8 @@ mod tests {
         let c = barrier(&mut b, "c");
         let bnode = barrier(&mut b, "b");
         b.dep(a, bnode).dep(c, bnode);
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 4).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 4).expect("stream assignment analysis succeeds on valid graph");
         let sa = plan.stream_of(a);
         let sc = plan.stream_of(c);
         if sa != sc {
@@ -381,8 +381,8 @@ mod tests {
         let a = barrier(&mut b, "a");
         let bnode = barrier(&mut b, "b");
         b.dep(a, bnode);
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 4).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 4).expect("stream assignment analysis succeeds on valid graph");
         let on_s0 = plan.nodes_on(StreamId(0));
         assert!(!on_s0.is_empty());
     }
@@ -394,8 +394,8 @@ mod tests {
         let bnode = barrier(&mut b, "b");
         let c = barrier(&mut b, "c");
         b.chain(&[a, bnode, c]);
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 2).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 2).expect("stream assignment analysis succeeds on valid graph");
         assert_eq!(plan.assignments.len(), 3);
     }
 
@@ -406,8 +406,8 @@ mod tests {
         for i in 0..5 {
             barrier(&mut b, &format!("n{i}"));
         }
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 3).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 3).expect("stream assignment analysis succeeds on valid graph");
         assert!(plan.num_streams <= 3);
     }
 
@@ -420,8 +420,8 @@ mod tests {
         let c = barrier(&mut b, "c");
         let d = barrier(&mut b, "d");
         b.dep(a, bnode).dep(a, c).dep(bnode, d).dep(c, d);
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 4).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = analyse(&g, 4).expect("stream assignment analysis succeeds on valid graph");
         // d depends on both b and c; all preds must complete before d.
         // No assertion about stream assignment (heuristic), but must not crash.
         assert_eq!(plan.assignments.len(), 4);
@@ -431,8 +431,9 @@ mod tests {
     fn stream_zero_max_treated_as_one() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         barrier(&mut b, "n");
-        let g = b.build().unwrap();
-        let plan = analyse(&g, 0).unwrap(); // 0 → treated as 1
+        let g = b.build().expect("test graph builds successfully");
+        let plan =
+            analyse(&g, 0).expect("stream assignment analysis succeeds even with 0 max_streams"); // 0 → treated as 1
         assert_eq!(plan.num_streams, 1);
     }
 }

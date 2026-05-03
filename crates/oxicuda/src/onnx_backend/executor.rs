@@ -190,7 +190,8 @@ mod tests {
             outputs: vec![make_info("C")],
             initializers: HashMap::new(),
         };
-        let order = topological_sort(&graph).unwrap();
+        let order = topological_sort(&graph)
+            .expect("topological sort of valid acyclic graph should succeed");
         assert_eq!(order, vec![0, 1]);
     }
 
@@ -208,7 +209,8 @@ mod tests {
             outputs: vec![make_info("Y")],
             initializers: HashMap::new(),
         };
-        let order = topological_sort(&graph).unwrap();
+        let order = topological_sort(&graph)
+            .expect("topological sort of valid acyclic graph should succeed");
         // left and right can be in any order, but merge must come last
         assert_eq!(*order.last().unwrap_or(&999), 2);
         assert_eq!(order.len(), 3);
@@ -240,13 +242,21 @@ mod tests {
             initializers: HashMap::new(),
         };
 
-        let exec = GraphExecutor::new(graph).unwrap();
+        let exec = GraphExecutor::new(graph)
+            .expect("GraphExecutor creation with valid graph should succeed");
         let mut inputs = HashMap::new();
         inputs.insert("X".into(), OnnxTensor::from_f32(&[-1.0, 2.0], vec![2]));
 
-        let result = exec.run(inputs).unwrap();
-        let y = result.get("Y").unwrap();
-        assert_eq!(y.as_f32().unwrap(), vec![0.0, 2.0]);
+        let result = exec
+            .run(inputs)
+            .expect("graph execution with valid inputs should succeed");
+        let y = result
+            .get("Y")
+            .expect("output tensor Y should be present in results");
+        assert_eq!(
+            y.as_f32().expect("output Y should be float32"),
+            vec![0.0, 2.0]
+        );
     }
 
     #[test]
@@ -274,15 +284,23 @@ mod tests {
             initializers: HashMap::new(),
         };
 
-        let exec = GraphExecutor::new(graph).unwrap();
+        let exec = GraphExecutor::new(graph)
+            .expect("GraphExecutor creation with valid graph should succeed");
         let mut inputs = HashMap::new();
         inputs.insert("X".into(), OnnxTensor::from_f32(&[-1.0, 2.0, 0.0], vec![3]));
 
-        let result = exec.run(inputs).unwrap();
-        let y = result.get("Y").unwrap();
+        let result = exec
+            .run(inputs)
+            .expect("graph execution with valid inputs should succeed");
+        let y = result
+            .get("Y")
+            .expect("output tensor Y should be present in results");
         // relu([-1,2,0]) = [0,2,0], neg([-1,2,0]) = [1,-2,0]
         // add = [1, 0, 0]
-        assert_eq!(y.as_f32().unwrap(), vec![1.0, 0.0, 0.0]);
+        assert_eq!(
+            y.as_f32().expect("output Y should be float32"),
+            vec![1.0, 0.0, 0.0]
+        );
     }
 
     #[test]
@@ -308,14 +326,22 @@ mod tests {
             initializers: HashMap::new(),
         };
 
-        let exec = GraphExecutor::new(graph).unwrap();
+        let exec = GraphExecutor::new(graph)
+            .expect("GraphExecutor creation with valid graph should succeed");
         let mut inputs = HashMap::new();
         inputs.insert("X".into(), OnnxTensor::from_f32(&[-2.0, 3.0, 1.0], vec![3]));
 
-        let result = exec.run(inputs).unwrap();
-        let y = result.get("Y").unwrap();
+        let result = exec
+            .run(inputs)
+            .expect("graph execution with valid inputs should succeed");
+        let y = result
+            .get("Y")
+            .expect("output tensor Y should be present in results");
         // relu([-2,3,1]) = [0,3,1], add([0,3,1], [-2,3,1]) = [-2,6,2]
-        assert_eq!(y.as_f32().unwrap(), vec![-2.0, 6.0, 2.0]);
+        assert_eq!(
+            y.as_f32().expect("output Y should be float32"),
+            vec![-2.0, 6.0, 2.0]
+        );
     }
 
     #[test]
@@ -332,13 +358,21 @@ mod tests {
             initializers,
         };
 
-        let exec = GraphExecutor::new(graph).unwrap();
+        let exec = GraphExecutor::new(graph)
+            .expect("GraphExecutor creation with valid graph should succeed");
         let mut inputs = HashMap::new();
         inputs.insert("X".into(), OnnxTensor::from_f32(&[1.0, 2.0], vec![2]));
 
-        let result = exec.run(inputs).unwrap();
-        let y = result.get("Y").unwrap();
-        assert_eq!(y.as_f32().unwrap(), vec![11.0, 22.0]);
+        let result = exec
+            .run(inputs)
+            .expect("graph execution with valid inputs should succeed");
+        let y = result
+            .get("Y")
+            .expect("output tensor Y should be present in results");
+        assert_eq!(
+            y.as_f32().expect("output Y should be float32"),
+            vec![11.0, 22.0]
+        );
     }
 
     #[test]
@@ -350,8 +384,11 @@ mod tests {
             outputs: vec![],
             initializers: HashMap::new(),
         };
-        let exec = GraphExecutor::new(graph).unwrap();
-        let result = exec.run(HashMap::new()).unwrap();
+        let exec = GraphExecutor::new(graph)
+            .expect("GraphExecutor creation with valid graph should succeed");
+        let result = exec
+            .run(HashMap::new())
+            .expect("graph execution with no inputs (empty graph) should succeed");
         assert!(result.is_empty());
     }
 }

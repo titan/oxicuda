@@ -25,7 +25,17 @@ default = []
 full = ["f16", "serde"]
 f16 = ["dep:half"]
 serde = ["dep:serde"]
-gpu-tests = []
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "philox_uniform"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

@@ -25,5 +25,9 @@ full = ["ptx"]
 ptx = ["dep:oxicuda-ptx"]
 gpu-tests = ["oxicuda-driver/gpu-tests"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true

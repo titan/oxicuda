@@ -1408,3 +1408,77 @@ fn emit_mbarrier_wait() {
         "mbarrier.try_wait.parity.shared.b64 [%r0], %r1;"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Typed-variant tier-1: Addc, Selp, AtomGlobalAddFloat
+// ---------------------------------------------------------------------------
+
+#[test]
+fn emit_addc_u32_no_carry() {
+    let inst = Instruction::Addc {
+        ty: PtxType::U32,
+        dst: make_reg("%r0", PtxType::U32),
+        a: make_reg_op("%r1", PtxType::U32),
+        b: make_reg_op("%r2", PtxType::U32),
+        carry_out: false,
+    };
+    assert_eq!(inst.emit(), "addc.u32 %r0, %r1, %r2;");
+}
+
+#[test]
+fn emit_addc_u32_carry_out() {
+    let inst = Instruction::Addc {
+        ty: PtxType::U32,
+        dst: make_reg("%r0", PtxType::U32),
+        a: make_reg_op("%r1", PtxType::U32),
+        b: make_reg_op("%r2", PtxType::U32),
+        carry_out: true,
+    };
+    assert_eq!(inst.emit(), "addc.cc.u32 %r0, %r1, %r2;");
+}
+
+#[test]
+fn emit_selp_f32_true_branch() {
+    let inst = Instruction::Selp {
+        ty: PtxType::F32,
+        dst: make_reg("%f0", PtxType::F32),
+        a: make_reg_op("%f1", PtxType::F32),
+        b: make_reg_op("%f2", PtxType::F32),
+        pred: make_reg("%p0", PtxType::Pred),
+    };
+    assert_eq!(inst.emit(), "selp.f32 %f0, %f1, %f2, %p0;");
+}
+
+#[test]
+fn emit_selp_u32() {
+    let inst = Instruction::Selp {
+        ty: PtxType::U32,
+        dst: make_reg("%r0", PtxType::U32),
+        a: make_reg_op("%r1", PtxType::U32),
+        b: make_reg_op("%r2", PtxType::U32),
+        pred: make_reg("%p1", PtxType::Pred),
+    };
+    assert_eq!(inst.emit(), "selp.u32 %r0, %r1, %r2, %p1;");
+}
+
+#[test]
+fn emit_atom_global_add_float_f32() {
+    let inst = Instruction::AtomGlobalAddFloat {
+        ty: PtxType::F32,
+        dst: make_reg("%f0", PtxType::F32),
+        addr: make_reg_op("%rd0", PtxType::U64),
+        src: make_reg_op("%f1", PtxType::F32),
+    };
+    assert_eq!(inst.emit(), "atom.global.add.f32 %f0, [%rd0], %f1;");
+}
+
+#[test]
+fn emit_atom_global_add_float_f64() {
+    let inst = Instruction::AtomGlobalAddFloat {
+        ty: PtxType::F64,
+        dst: make_reg("%fd0", PtxType::F64),
+        addr: make_reg_op("%rd1", PtxType::U64),
+        src: make_reg_op("%fd1", PtxType::F64),
+    };
+    assert_eq!(inst.emit(), "atom.global.add.f64 %fd0, [%rd1], %fd1;");
+}

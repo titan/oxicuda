@@ -184,14 +184,16 @@ mod tests {
         // Q1=Q2=1.5 → loss=0
         let (_, _, r, d, min_qn, w) = make_td3_inputs(4);
         let q = vec![1.5_f32; 4];
-        let l = td3_critic_loss(&q, &q, &r, &d, &min_qn, &w, cfg).unwrap();
+        let l = td3_critic_loss(&q, &q, &r, &d, &min_qn, &w, cfg)
+            .expect("valid equal-length TD3 slices should compute critic loss");
         assert!(l.critic_loss.abs() < 1e-5, "critic_loss={}", l.critic_loss);
     }
 
     #[test]
     fn td3_critic_loss_positive_when_off() {
         let (q1, q2, r, d, min_qn, w) = make_td3_inputs(4);
-        let l = td3_critic_loss(&q1, &q2, &r, &d, &min_qn, &w, Td3Config::default()).unwrap();
+        let l = td3_critic_loss(&q1, &q2, &r, &d, &min_qn, &w, Td3Config::default())
+            .expect("valid equal-length TD3 slices should compute critic loss");
         assert!(l.critic_loss > 0.0, "loss should be > 0");
     }
 
@@ -199,7 +201,8 @@ mod tests {
     fn td3_twin_q_both_contribute() {
         let (q1, _, r, d, min_qn, w) = make_td3_inputs(4);
         let q2_bad = vec![100.0_f32; 4]; // very wrong Q2
-        let l = td3_critic_loss(&q1, &q2_bad, &r, &d, &min_qn, &w, Td3Config::default()).unwrap();
+        let l = td3_critic_loss(&q1, &q2_bad, &r, &d, &min_qn, &w, Td3Config::default())
+            .expect("valid equal-length TD3 slices should compute critic loss");
         assert!(l.q2_loss > l.q1_loss, "Q2 loss should be larger");
     }
 
@@ -215,7 +218,8 @@ mod tests {
         let d = vec![1.0_f32]; // done
         let min_qn = vec![100.0_f32]; // should be masked
         let w = vec![1.0_f32];
-        let l = td3_critic_loss(&q1, &q2, &r, &d, &min_qn, &w, cfg).unwrap();
+        let l = td3_critic_loss(&q1, &q2, &r, &d, &min_qn, &w, cfg)
+            .expect("valid equal-length TD3 slices should compute critic loss");
         // target = r = 2.0, Q1=Q2=2.0 → loss=0
         assert!(l.critic_loss.abs() < 1e-5, "done should mask future Q");
     }
@@ -223,7 +227,7 @@ mod tests {
     #[test]
     fn td3_actor_loss_negative_when_high_q() {
         let q1 = vec![5.0_f32; 4];
-        let l = td3_actor_loss(&q1).unwrap();
+        let l = td3_actor_loss(&q1).expect("non-empty q1 slice should compute actor loss");
         assert!(l < 0.0, "actor loss should be negative (we maximise Q1)");
         assert!((l - (-5.0)).abs() < 1e-5, "actor_loss={l}");
     }
@@ -236,7 +240,8 @@ mod tests {
     #[test]
     fn td3_td_errors_all_positive() {
         let (q1, q2, r, d, min_qn, w) = make_td3_inputs(8);
-        let l = td3_critic_loss(&q1, &q2, &r, &d, &min_qn, &w, Td3Config::default()).unwrap();
+        let l = td3_critic_loss(&q1, &q2, &r, &d, &min_qn, &w, Td3Config::default())
+            .expect("valid equal-length TD3 slices should compute critic loss");
         for (i, &e) in l.td_errors.iter().enumerate() {
             assert!(e >= 0.0, "td_error[{i}]={e}");
         }
@@ -263,7 +268,7 @@ mod tests {
                 huber: false,
             },
         )
-        .unwrap();
+        .expect("valid equal-length TD3 slices should compute MSE critic loss");
         let l_hub = td3_critic_loss(
             &q1,
             &q2,
@@ -276,7 +281,7 @@ mod tests {
                 huber: true,
             },
         )
-        .unwrap();
+        .expect("valid equal-length TD3 slices should compute Huber critic loss");
         assert!(
             l_hub.critic_loss < l_mse.critic_loss,
             "Huber < MSE for large errors"

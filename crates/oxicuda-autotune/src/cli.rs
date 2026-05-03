@@ -24,7 +24,7 @@
 //!
 //! (C) 2026 COOLJAPAN OU (Team KitaSan)
 
-use crate::benchmark::BenchmarkResult;
+use crate::benchmark::{BenchmarkConfig, BenchmarkResult, WarmupStrategy};
 use crate::error::AutotuneError;
 use crate::export::{ExportBundle, ExportFilter, ExportFormat, ImportPolicy, import_bundle};
 use crate::result_db::ResultDb;
@@ -44,8 +44,8 @@ pub enum CliCommand {
         problem_sizes: Vec<String>,
         /// Path to the result database file.
         db_path: Option<String>,
-        /// Number of warmup iterations per configuration.
-        warmup: u32,
+        /// Warmup strategy for each configuration.
+        warmup: WarmupStrategy,
         /// Number of timed iterations per configuration.
         iterations: u32,
         /// Whether to enable early stopping.
@@ -160,14 +160,16 @@ impl CliConfig {
                     .ok_or_else(|| parse_err("tune requires a kernel name"))?;
                 let problem_sizes: Vec<String> =
                     positional[2..].iter().map(|s| s.to_string()).collect();
+                let warmup = match named.get("warmup") {
+                    Some(v) => parse_warmup_strategy(v)
+                        .map_err(|e| parse_err(&format!("--warmup: {e}")))?,
+                    None => WarmupStrategy::default(),
+                };
                 CliCommand::Tune {
                     kernel,
                     problem_sizes,
                     db_path: named.get("db").cloned(),
-                    warmup: named
-                        .get("warmup")
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(5),
+                    warmup,
                     iterations: named
                         .get("iterations")
                         .and_then(|v| v.parse().ok())
@@ -241,6 +243,50 @@ impl CliConfig {
 /// Helper to create a parse error.
 fn parse_err(msg: &str) -> AutotuneError {
     AutotuneError::BenchmarkFailed(format!("argument error: {msg}"))
+}
+
+/// Parses a `--warmup` CLI argument string into a [`WarmupStrategy`].
+///
+/// Accepted forms:
+/// - `"fixed:N"` — run exactly N warmup iterations.
+/// - `"adaptive:TOL"` — adaptive convergence with tolerance `TOL`
+///   (default min=2, max=20).
+/// - `"adaptive:TOL,min=M,max=N"` — adaptive with custom bounds.
+///
+/// # Errors
+///
+/// Returns a `String` error suitable for display when the input is invalid.
+pub(crate) fn parse_warmup_strategy(s: &str) -> Result<WarmupStrategy, String> {
+    if let Some(n_str) = s.strip_prefix("fixed:") {
+        let n = n_str
+            .parse::<usize>()
+            .map_err(|e| format!("invalid fixed count: {e}"))?;
+        Ok(WarmupStrategy::Fixed(n))
+    } else if let Some(rest) = s.strip_prefix("adaptive:") {
+        let mut parts = rest.split(',');
+        let tol_str = parts.next().unwrap_or("0.05");
+        let tol: f64 = tol_str
+            .parse()
+            .map_err(|e| format!("invalid tolerance: {e}"))?;
+        let mut min = 2usize;
+        let mut max = 20usize;
+        for part in parts {
+            if let Some(v) = part.strip_prefix("min=") {
+                min = v.parse().map_err(|e| format!("invalid min: {e}"))?;
+            } else if let Some(v) = part.strip_prefix("max=") {
+                max = v.parse().map_err(|e| format!("invalid max: {e}"))?;
+            }
+        }
+        Ok(WarmupStrategy::Adaptive {
+            min_iterations: min,
+            max_iterations: max,
+            tolerance: tol,
+        })
+    } else {
+        Err(format!(
+            "expected 'fixed:N' or 'adaptive:TOL[,min=N,max=N]', got '{s}'"
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -419,7 +465,7 @@ impl CliRunner {
                     kernel,
                     problem_sizes,
                     db_path.as_deref(),
-                    *warmup,
+                    warmup.clone(),
                     *iterations,
                     *early_stop,
                     *parallel,
@@ -461,7 +507,7 @@ impl CliRunner {
         kernel: &str,
         problem_sizes: &[String],
         db_path: Option<&str>,
-        _warmup: u32,
+        warmup: WarmupStrategy,
         _iterations: u32,
         _early_stop: bool,
         _parallel: bool,
@@ -476,6 +522,13 @@ impl CliRunner {
                 skipped: 0,
             });
         }
+
+        // Wire the warmup strategy into the benchmark config so that any
+        // future benchmark calls within this session honour the CLI flag.
+        let _bench_config = BenchmarkConfig {
+            warmup,
+            ..BenchmarkConfig::default()
+        };
 
         let db = open_db(db_path)?;
         let mut best_results = Vec::new();
@@ -732,7 +785,6 @@ fn parse_import_policy(s: &str) -> Result<ImportPolicy, AutotuneError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::benchmark::BenchmarkResult;
     use crate::config::Config;
 
     fn args(s: &str) -> Vec<String> {
@@ -780,7 +832,11 @@ mod tests {
             } => {
                 assert_eq!(kernel, "sgemm");
                 assert_eq!(problem_sizes.len(), 2);
-                assert_eq!(*warmup, 5);
+                assert_eq!(
+                    *warmup,
+                    WarmupStrategy::Fixed(5),
+                    "default warmup should be Fixed(5)"
+                );
                 assert_eq!(*iterations, 20);
             }
             _ => panic!("expected Tune command"),
@@ -792,7 +848,7 @@ mod tests {
     #[test]
     fn parse_tune_with_flags() {
         let cli = CliConfig::from_args(&args(
-            "oxitune --verbose --dry-run tune sgemm 1024 --warmup 10 --iterations 50 --early-stop --parallel",
+            "oxitune --verbose --dry-run tune sgemm 1024 --warmup fixed:10 --iterations 50 --early-stop --parallel",
         ))
         .expect("parse");
         assert!(cli.verbose);
@@ -805,7 +861,7 @@ mod tests {
                 parallel,
                 ..
             } => {
-                assert_eq!(*warmup, 10);
+                assert_eq!(*warmup, WarmupStrategy::Fixed(10));
                 assert_eq!(*iterations, 50);
                 assert!(early_stop);
                 assert!(parallel);
@@ -1045,5 +1101,89 @@ mod tests {
         assert_eq!(db2.total_entries(), 0);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- WarmupStrategy parser tests ---
+
+    #[test]
+    fn cli_warmup_parser_roundtrip() {
+        assert_eq!(
+            parse_warmup_strategy("fixed:5").expect("fixed:5"),
+            WarmupStrategy::Fixed(5)
+        );
+        assert_eq!(
+            parse_warmup_strategy("fixed:0").expect("fixed:0"),
+            WarmupStrategy::Fixed(0)
+        );
+        assert_eq!(
+            parse_warmup_strategy("adaptive:0.05").expect("adaptive:0.05"),
+            WarmupStrategy::Adaptive {
+                min_iterations: 2,
+                max_iterations: 20,
+                tolerance: 0.05,
+            }
+        );
+        assert_eq!(
+            parse_warmup_strategy("adaptive:0.1,min=3,max=15").expect("adaptive:0.1,min=3,max=15"),
+            WarmupStrategy::Adaptive {
+                min_iterations: 3,
+                max_iterations: 15,
+                tolerance: 0.1,
+            }
+        );
+        assert!(
+            parse_warmup_strategy("garbage").is_err(),
+            "unknown format should error"
+        );
+        assert!(
+            parse_warmup_strategy("fixed:notanumber").is_err(),
+            "invalid fixed count should error"
+        );
+        assert!(
+            parse_warmup_strategy("adaptive:notanumber").is_err(),
+            "invalid tolerance should error"
+        );
+    }
+
+    #[test]
+    fn parse_tune_warmup_fixed_flag() {
+        let cli =
+            CliConfig::from_args(&args("oxitune tune sgemm --warmup fixed:3")).expect("parse");
+        match &cli.command {
+            CliCommand::Tune { warmup, .. } => {
+                assert_eq!(*warmup, WarmupStrategy::Fixed(3));
+            }
+            _ => panic!("expected Tune command"),
+        }
+    }
+
+    #[test]
+    fn parse_tune_warmup_adaptive_flag() {
+        let cli = CliConfig::from_args(&args(
+            "oxitune tune sgemm --warmup adaptive:0.05,min=2,max=10",
+        ))
+        .expect("parse");
+        match &cli.command {
+            CliCommand::Tune { warmup, .. } => {
+                assert_eq!(
+                    *warmup,
+                    WarmupStrategy::Adaptive {
+                        min_iterations: 2,
+                        max_iterations: 10,
+                        tolerance: 0.05,
+                    }
+                );
+            }
+            _ => panic!("expected Tune command"),
+        }
+    }
+
+    #[test]
+    fn parse_tune_warmup_invalid_errors() {
+        let result = CliConfig::from_args(&args("oxitune tune sgemm --warmup badvalue"));
+        assert!(
+            result.is_err(),
+            "invalid warmup strategy should fail to parse"
+        );
     }
 }

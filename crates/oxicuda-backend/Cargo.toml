@@ -14,5 +14,9 @@ categories = ["hardware-support", "science", "mathematics"]
 [dependencies]
 # Zero external dependencies - trait uses only std types
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true

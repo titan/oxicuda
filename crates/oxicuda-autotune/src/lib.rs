@@ -130,7 +130,7 @@ pub use adaptive::{
     PerformanceRegression, PerformanceTrend, RuntimeMetric, SwitchDecision,
 };
 pub use bayesian::{AcquisitionFunction, BayesianOptimizer, GaussianProcess, GpPrediction};
-pub use benchmark::{BenchmarkConfig, BenchmarkEngine, BenchmarkResult};
+pub use benchmark::{BenchmarkConfig, BenchmarkEngine, BenchmarkResult, WarmupStrategy};
 pub use cli::{
     CliCommand, CliConfig, CliRunner, ConsoleProgressCallback, ProgressCallback, TuneProgress,
     TuneReport,
@@ -222,6 +222,6 @@ pub mod prelude {
         ReductionType, ResultDb, RuntimeMetric, SearchSpace, SearchSpaceBuilder, SimilarityMatch,
         SimilarityScore, SimulatedAnnealing, SimulatedAnnealingConfig, SizeInterpolator,
         StopReason, SwitchDecision, TemplateAutotuner, TransferLearningEngine, TransferStrategy,
-        TransferredConfig, TunableKernel, WeightedScalarization,
+        TransferredConfig, TunableKernel, WarmupStrategy, WeightedScalarization,
     };
 }

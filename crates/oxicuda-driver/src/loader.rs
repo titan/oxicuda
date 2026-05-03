@@ -961,6 +961,178 @@ pub struct DriverApi {
     ///
     /// Destroys a surface object created by `cuSurfObjectCreate`.
     pub cu_surf_object_destroy: Option<unsafe extern "C" fn(surf_object: CUsurfObject) -> CUresult>,
+
+    // -- JIT linker (optional) ----------------------------------------------
+    /// `cuLinkCreate_v2(numOptions, options*, optionValues**, stateOut*) -> CUresult`
+    ///
+    /// Creates a pending JIT linker invocation.  When `None`, the driver does
+    /// not expose the linker API.
+    pub cu_link_create: Option<
+        unsafe extern "C" fn(
+            num_options: u32,
+            options: *mut CUjit_option,
+            option_values: *mut *mut c_void,
+            state_out: *mut CUlinkState,
+        ) -> CUresult,
+    >,
+
+    /// `cuLinkAddData_v2(state, type, data*, size, name*, numOptions, options*, optionValues**) -> CUresult`
+    ///
+    /// Adds an input PTX/cubin/fatbin to a pending linker invocation.  When
+    /// `None`, the driver does not expose the linker API.
+    #[allow(clippy::type_complexity)]
+    pub cu_link_add_data: Option<
+        unsafe extern "C" fn(
+            state: CUlinkState,
+            input_type: CUjitInputType,
+            data: *mut c_void,
+            size: usize,
+            name: *const c_char,
+            num_options: u32,
+            options: *mut CUjit_option,
+            option_values: *mut *mut c_void,
+        ) -> CUresult,
+    >,
+
+    /// `cuLinkComplete(state, cubinOut**, sizeOut*) -> CUresult`
+    ///
+    /// Finalises a JIT linker invocation and returns the resulting cubin
+    /// pointer / size.  When `None`, the driver does not expose the linker
+    /// API.
+    pub cu_link_complete: Option<
+        unsafe extern "C" fn(
+            state: CUlinkState,
+            cubin_out: *mut *mut c_void,
+            size_out: *mut usize,
+        ) -> CUresult,
+    >,
+
+    /// `cuLinkDestroy(state) -> CUresult`
+    ///
+    /// Destroys a linker state previously created by `cuLinkCreate`.  When
+    /// `None`, the driver does not expose the linker API.
+    pub cu_link_destroy: Option<unsafe extern "C" fn(state: CUlinkState) -> CUresult>,
+
+    // -- 2-D memory copy (optional) -----------------------------------------
+    /// `cuMemcpy2D_v2(pCopy*) -> CUresult`
+    ///
+    /// Performs a 2-D memory copy described by [`CUDA_MEMCPY2D`].  When
+    /// `None`, fall back to issuing per-row 1-D `cuMemcpyXXX_v2` calls.
+    pub cu_memcpy_2d: Option<unsafe extern "C" fn(p_copy: *const CUDA_MEMCPY2D) -> CUresult>,
+
+    // -- Virtual memory management (optional, CUDA 11.2+) -------------------
+    /// `cuMemAddressReserve(ptr*, size, alignment, addr, flags) -> CUresult`
+    ///
+    /// Reserves a contiguous range of virtual addresses on the device for
+    /// later mapping by `cuMemMap`.  When `None`, the VMM API is not
+    /// supported.
+    pub cu_mem_address_reserve: Option<
+        unsafe extern "C" fn(
+            ptr: *mut CUdeviceptr,
+            size: usize,
+            alignment: usize,
+            addr: CUdeviceptr,
+            flags: u64,
+        ) -> CUresult,
+    >,
+
+    /// `cuMemAddressFree(ptr, size) -> CUresult`
+    ///
+    /// Releases a virtual-address range previously obtained from
+    /// `cuMemAddressReserve`.  When `None`, the VMM API is not supported.
+    pub cu_mem_address_free:
+        Option<unsafe extern "C" fn(ptr: CUdeviceptr, size: usize) -> CUresult>,
+
+    /// `cuMemCreate(handle*, size, prop*, flags) -> CUresult`
+    ///
+    /// Creates a new generic VMM allocation handle.  When `None`, the VMM
+    /// API is not supported.
+    pub cu_mem_create: Option<
+        unsafe extern "C" fn(
+            handle: *mut CUmemGenericAllocationHandle,
+            size: usize,
+            prop: *const CUmemAllocationProp,
+            flags: u64,
+        ) -> CUresult,
+    >,
+
+    /// `cuMemRelease(handle) -> CUresult`
+    ///
+    /// Releases a generic VMM allocation handle.  When `None`, the VMM
+    /// API is not supported.
+    pub cu_mem_release:
+        Option<unsafe extern "C" fn(handle: CUmemGenericAllocationHandle) -> CUresult>,
+
+    /// `cuMemMap(ptr, size, offset, handle, flags) -> CUresult`
+    ///
+    /// Maps a VMM allocation onto a previously reserved virtual address
+    /// range.  When `None`, the VMM API is not supported.
+    pub cu_mem_map: Option<
+        unsafe extern "C" fn(
+            ptr: CUdeviceptr,
+            size: usize,
+            offset: usize,
+            handle: CUmemGenericAllocationHandle,
+            flags: u64,
+        ) -> CUresult,
+    >,
+
+    /// `cuMemUnmap(ptr, size) -> CUresult`
+    ///
+    /// Unmaps a VMM allocation from a virtual address range.  When `None`,
+    /// the VMM API is not supported.
+    pub cu_mem_unmap: Option<unsafe extern "C" fn(ptr: CUdeviceptr, size: usize) -> CUresult>,
+
+    /// `cuMemSetAccess(ptr, size, desc*, count) -> CUresult`
+    ///
+    /// Sets per-location access permissions for a VMM mapping.  When `None`,
+    /// the VMM API is not supported.
+    pub cu_mem_set_access: Option<
+        unsafe extern "C" fn(
+            ptr: CUdeviceptr,
+            size: usize,
+            desc: *const CUmemAccessDesc,
+            count: usize,
+        ) -> CUresult,
+    >,
+
+    // -- Stream-ordered memory pools (optional, CUDA 11.2+) -----------------
+    /// `cuMemPoolCreate(pool*, poolProps*) -> CUresult`
+    ///
+    /// Creates a stream-ordered memory pool.  When `None`, the memory pool
+    /// API is not supported.
+    pub cu_mem_pool_create: Option<
+        unsafe extern "C" fn(
+            pool: *mut CUmemoryPool,
+            pool_props: *const CUmemPoolProps,
+        ) -> CUresult,
+    >,
+
+    /// `cuMemPoolDestroy(pool) -> CUresult`
+    ///
+    /// Destroys a stream-ordered memory pool.  When `None`, the memory pool
+    /// API is not supported.
+    pub cu_mem_pool_destroy: Option<unsafe extern "C" fn(pool: CUmemoryPool) -> CUresult>,
+
+    /// `cuMemAllocFromPoolAsync(dptr*, bytesize, pool, hStream) -> CUresult`
+    ///
+    /// Asynchronously allocates memory from a pool on a stream.  When `None`,
+    /// the memory pool API is not supported.
+    pub cu_mem_alloc_from_pool_async: Option<
+        unsafe extern "C" fn(
+            dptr: *mut CUdeviceptr,
+            bytesize: usize,
+            pool: CUmemoryPool,
+            hstream: CUstream,
+        ) -> CUresult,
+    >,
+
+    /// `cuMemFreeAsync(dptr, hStream) -> CUresult`
+    ///
+    /// Asynchronously frees memory on a stream.  When `None`, the
+    /// stream-ordered memory API is not supported.
+    pub cu_mem_free_async:
+        Option<unsafe extern "C" fn(dptr: CUdeviceptr, hstream: CUstream) -> CUresult>,
 }
 
 // SAFETY: All fields are plain function pointers (which are Send + Sync) and
@@ -1225,6 +1397,30 @@ impl DriverApi {
             cu_surf_object_create: load_sym_optional!(lib, "cuSurfObjectCreate"),
             cu_surf_object_destroy: load_sym_optional!(lib, "cuSurfObjectDestroy"),
 
+            // -- JIT linker (optional) ----------------------------------------
+            cu_link_create: load_sym_optional!(lib, "cuLinkCreate_v2"),
+            cu_link_add_data: load_sym_optional!(lib, "cuLinkAddData_v2"),
+            cu_link_complete: load_sym_optional!(lib, "cuLinkComplete"),
+            cu_link_destroy: load_sym_optional!(lib, "cuLinkDestroy"),
+
+            // -- 2-D memory copy (optional) -----------------------------------
+            cu_memcpy_2d: load_sym_optional!(lib, "cuMemcpy2D_v2"),
+
+            // -- VMM (optional, CUDA 11.2+) -----------------------------------
+            cu_mem_address_reserve: load_sym_optional!(lib, "cuMemAddressReserve"),
+            cu_mem_address_free: load_sym_optional!(lib, "cuMemAddressFree"),
+            cu_mem_create: load_sym_optional!(lib, "cuMemCreate"),
+            cu_mem_release: load_sym_optional!(lib, "cuMemRelease"),
+            cu_mem_map: load_sym_optional!(lib, "cuMemMap"),
+            cu_mem_unmap: load_sym_optional!(lib, "cuMemUnmap"),
+            cu_mem_set_access: load_sym_optional!(lib, "cuMemSetAccess"),
+
+            // -- Stream-ordered memory pools (optional, CUDA 11.2+) -----------
+            cu_mem_pool_create: load_sym_optional!(lib, "cuMemPoolCreate"),
+            cu_mem_pool_destroy: load_sym_optional!(lib, "cuMemPoolDestroy"),
+            cu_mem_alloc_from_pool_async: load_sym_optional!(lib, "cuMemAllocFromPoolAsync"),
+            cu_mem_free_async: load_sym_optional!(lib, "cuMemFreeAsync"),
+
             // Keep the library handle alive.
             _lib: lib,
         })
@@ -1373,5 +1569,57 @@ mod tests {
     fn driver_v12_8_kernel_get_library_field_present() {
         let _probe = |api: &DriverApi| api.cu_kernel_get_library.is_none();
         let _ = _probe;
+    }
+
+    // -----------------------------------------------------------------------
+    // Wave 1 — Extended Driver API field-presence tests
+    // -----------------------------------------------------------------------
+
+    /// All four `cuLink*` JIT linker fields are present and `Option`.
+    #[test]
+    fn driver_link_api_fields_present() {
+        let _probe_create = |api: &DriverApi| api.cu_link_create.is_none();
+        let _probe_add = |api: &DriverApi| api.cu_link_add_data.is_none();
+        let _probe_complete = |api: &DriverApi| api.cu_link_complete.is_none();
+        let _probe_destroy = |api: &DriverApi| api.cu_link_destroy.is_none();
+        let _ = (_probe_create, _probe_add, _probe_complete, _probe_destroy);
+    }
+
+    /// The `cuMemcpy2D_v2` field is present and `Option`.
+    #[test]
+    fn driver_memcpy_2d_field_present() {
+        let _probe = |api: &DriverApi| api.cu_memcpy_2d.is_none();
+        let _ = _probe;
+    }
+
+    /// All seven VMM (CUDA 11.2+) fields are present and `Option`.
+    #[test]
+    fn driver_vmm_api_fields_present() {
+        let _probe_reserve = |api: &DriverApi| api.cu_mem_address_reserve.is_none();
+        let _probe_free = |api: &DriverApi| api.cu_mem_address_free.is_none();
+        let _probe_create = |api: &DriverApi| api.cu_mem_create.is_none();
+        let _probe_release = |api: &DriverApi| api.cu_mem_release.is_none();
+        let _probe_map = |api: &DriverApi| api.cu_mem_map.is_none();
+        let _probe_unmap = |api: &DriverApi| api.cu_mem_unmap.is_none();
+        let _probe_set_access = |api: &DriverApi| api.cu_mem_set_access.is_none();
+        let _ = (
+            _probe_reserve,
+            _probe_free,
+            _probe_create,
+            _probe_release,
+            _probe_map,
+            _probe_unmap,
+            _probe_set_access,
+        );
+    }
+
+    /// All four memory-pool (CUDA 11.2+) fields are present and `Option`.
+    #[test]
+    fn driver_mem_pool_api_fields_present() {
+        let _probe_create = |api: &DriverApi| api.cu_mem_pool_create.is_none();
+        let _probe_destroy = |api: &DriverApi| api.cu_mem_pool_destroy.is_none();
+        let _probe_alloc = |api: &DriverApi| api.cu_mem_alloc_from_pool_async.is_none();
+        let _probe_free = |api: &DriverApi| api.cu_mem_free_async.is_none();
+        let _ = (_probe_create, _probe_destroy, _probe_alloc, _probe_free);
     }
 }

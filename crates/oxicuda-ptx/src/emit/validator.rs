@@ -636,7 +636,8 @@ fn collect_src_register_names(inst: &Instruction) -> Vec<String> {
         | Instruction::And { a, b, .. }
         | Instruction::Or { a, b, .. }
         | Instruction::Xor { a, b, .. }
-        | Instruction::SetP { a, b, .. } => {
+        | Instruction::SetP { a, b, .. }
+        | Instruction::Addc { a, b, .. } => {
             push_operand_names(a, &mut names);
             push_operand_names(b, &mut names);
         }
@@ -711,9 +712,16 @@ fn collect_src_register_names(inst: &Instruction) -> Vec<String> {
                 names.push(r.name.clone());
             }
         }
-        Instruction::Atom { addr, src, .. } | Instruction::Red { addr, src, .. } => {
+        Instruction::Atom { addr, src, .. }
+        | Instruction::Red { addr, src, .. }
+        | Instruction::AtomGlobalAddFloat { addr, src, .. } => {
             push_operand_names(addr, &mut names);
             push_operand_names(src, &mut names);
+        }
+        Instruction::Selp { a, b, pred, .. } => {
+            push_operand_names(a, &mut names);
+            push_operand_names(b, &mut names);
+            names.push(pred.name.clone());
         }
         Instruction::AtomCas {
             addr,
@@ -883,6 +891,9 @@ fn dst_register_name(inst: &Instruction) -> Option<String> {
         | Instruction::Cvt { dst, .. }
         | Instruction::Atom { dst, .. }
         | Instruction::AtomCas { dst, .. }
+        | Instruction::AtomGlobalAddFloat { dst, .. }
+        | Instruction::Addc { dst, .. }
+        | Instruction::Selp { dst, .. }
         | Instruction::MovSpecial { dst, .. }
         | Instruction::LoadParam { dst, .. }
         | Instruction::Dp4a { dst, .. }

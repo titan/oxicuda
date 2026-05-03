@@ -536,10 +536,13 @@ fn test_device_info_from_device() {
 #[test]
 fn test_methods_return_error_without_gpu() {
     // On macOS (or systems without NVIDIA driver), init() fails.
-    // Verify that Device::get(0) returns an error rather than panicking.
+    // Verify that Device::get(0) returns NotInitialized rather than panicking.
     if oxicuda_driver::init().is_err() {
         let result = Device::get(0);
-        assert!(result.is_err(), "Device::get should fail without a driver");
+        assert!(
+            matches!(result, Err(oxicuda_driver::CudaError::NotInitialized)),
+            "Device::get should return Err(NotInitialized) without a driver, got {result:?}"
+        );
     }
 }
 

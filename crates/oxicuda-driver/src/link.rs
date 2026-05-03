@@ -41,10 +41,16 @@
 
 use std::ffi::{CString, c_void};
 
+#[cfg(not(target_os = "macos"))]
+use crate::error::check;
 use crate::error::{CudaError, CudaResult};
 #[cfg(any(not(target_os = "macos"), test))]
 use crate::ffi::CUjit_option;
 use crate::ffi::CUjitInputType;
+#[cfg(not(target_os = "macos"))]
+use crate::ffi::CUlinkState;
+#[cfg(not(target_os = "macos"))]
+use crate::module::jit_failure;
 
 // ---------------------------------------------------------------------------
 // OptimizationLevel
@@ -341,6 +347,20 @@ pub struct Linker {
     /// Names of inputs added (for diagnostics).
     input_names: Vec<String>,
 
+    // -- Driver-owned buffer keep-alive (non-macOS only) ----------------------
+    //
+    // These buffers are passed to `cuLinkCreate` as the back-store for
+    // `CU_JIT_INFO_LOG_BUFFER` / `CU_JIT_ERROR_LOG_BUFFER`.  The driver
+    // retains the raw pointers internally for the lifetime of the link
+    // state, so we **must** keep these `Vec`s alive (and not reallocate
+    // them) until after `cuLinkComplete` runs.  Do not call `push`,
+    // `reserve`, `shrink_to_fit`, or any other API that may reallocate
+    // these vectors after `Linker::new` returns.
+    #[cfg(not(target_os = "macos"))]
+    info_buf: Vec<u8>,
+    #[cfg(not(target_os = "macos"))]
+    error_buf: Vec<u8>,
+
     // -- macOS synthetic state ------------------------------------------------
     /// Accumulated PTX sources (macOS only — empty on real GPU platforms).
     #[cfg(target_os = "macos")]
@@ -365,13 +385,23 @@ impl Linker {
     /// Returns a [`CudaError`] if `cuLinkCreate` fails (e.g. no active
     /// CUDA context).
     pub fn new(options: LinkerOptions) -> CudaResult<Self> {
-        let state = Self::platform_create(&options)?;
+        let (state, info_buf, error_buf) = Self::platform_create(&options)?;
+
+        // Suppress unused-variable warnings on macOS (synthetic mode).
+        #[cfg(target_os = "macos")]
+        {
+            let _ = (info_buf, error_buf);
+        }
 
         Ok(Self {
             state,
             options,
             input_count: 0,
             input_names: Vec::new(),
+            #[cfg(not(target_os = "macos"))]
+            info_buf,
+            #[cfg(not(target_os = "macos"))]
+            error_buf,
             #[cfg(target_os = "macos")]
             ptx_sources: Vec::new(),
             #[cfg(target_os = "macos")]
@@ -593,11 +623,15 @@ impl Linker {
     // -----------------------------------------------------------------------
 
     /// Create the link state.  On macOS, returns a null pointer (synthetic).
-    fn platform_create(options: &LinkerOptions) -> CudaResult<*mut c_void> {
+    ///
+    /// Returns `(state, info_buf, error_buf)`.  The caller (the constructor)
+    /// must keep the buffers alive for the lifetime of the linker because
+    /// the driver retains raw pointers into them.
+    fn platform_create(options: &LinkerOptions) -> CudaResult<(*mut c_void, Vec<u8>, Vec<u8>)> {
         #[cfg(target_os = "macos")]
         {
             let _ = options;
-            Ok(std::ptr::null_mut())
+            Ok((std::ptr::null_mut(), Vec::new(), Vec::new()))
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -635,7 +669,7 @@ impl Linker {
 
         #[cfg(not(target_os = "macos"))]
         {
-            Self::gpu_link_complete(self.state)
+            self.gpu_link_complete()
         }
     }
 
@@ -695,30 +729,40 @@ impl Linker {
     // GPU-only stubs (compiled out on macOS)
     // -----------------------------------------------------------------------
 
-    /// Create link state via `cuLinkCreate`.
+    /// Create link state via `cuLinkCreate_v2`.
+    ///
+    /// Returns `(state, info_buf, error_buf)`.  The buffers must be moved
+    /// into the [`Linker`] without reallocation, because the driver retains
+    /// raw pointers into them as the back-store for the JIT info / error
+    /// log options.
     #[cfg(not(target_os = "macos"))]
-    fn gpu_link_create(options: &LinkerOptions) -> CudaResult<*mut c_void> {
+    fn gpu_link_create(options: &LinkerOptions) -> CudaResult<(*mut c_void, Vec<u8>, Vec<u8>)> {
         let api = crate::loader::try_driver()?;
-        let (mut keys, mut vals, _info_buf, _error_buf) = options.build_jit_options();
+        let f = api.cu_link_create.ok_or(CudaError::NotSupported)?;
+
+        let (mut keys, mut vals, info_buf, error_buf) = options.build_jit_options();
         let num_options = keys.len() as u32;
 
-        let mut state: *mut c_void = std::ptr::null_mut();
+        let mut state_handle: CUlinkState = CUlinkState::default();
 
-        // cuLinkCreate(numOptions, options*, optionValues*, stateOut*)
-        // We load this symbol dynamically — it's part of the module management
-        // group in the CUDA driver.
-        //
-        // For now, use the module-load-data-ex path as a stub.
-        // A full implementation would load cuLinkCreate from the driver.
-        let _ = (api, num_options, &mut keys, &mut vals, &mut state);
+        // SAFETY: `f` is the loaded `cuLinkCreate_v2` entry point.  `keys`
+        // and `vals` are parallel arrays of length `num_options` whose
+        // backing storage outlives the call.  `info_buf` / `error_buf`
+        // back the log-buffer pointers stored in `vals`; the caller of
+        // this fn keeps them alive for the lifetime of the link state.
+        check(unsafe {
+            f(
+                num_options,
+                keys.as_mut_ptr(),
+                vals.as_mut_ptr(),
+                &mut state_handle,
+            )
+        })?;
 
-        // TODO: Wire up cuLinkCreate when adding link function pointers
-        // to DriverApi.  For now, return the state pointer (which may be
-        // null if the stub is not fully wired).
-        Ok(state)
+        Ok((state_handle.0, info_buf, error_buf))
     }
 
-    /// Add data via `cuLinkAddData`.
+    /// Add data via `cuLinkAddData_v2`.
     #[cfg(not(target_os = "macos"))]
     fn gpu_link_add_data(
         state: *mut c_void,
@@ -727,32 +771,95 @@ impl Linker {
         size: usize,
         name: *const std::ffi::c_char,
     ) -> CudaResult<()> {
-        let _ = (state, input_type, data, size, name);
-        // TODO: Wire up cuLinkAddData when adding link function pointers
-        // to DriverApi.
-        Ok(())
+        let api = crate::loader::try_driver()?;
+        let f = api.cu_link_add_data.ok_or(CudaError::NotSupported)?;
+
+        // The C signature accepts `data` as `*mut c_void` even though the
+        // payload is logically read-only; cast at the boundary.
+        // Per-call options are not required — the linker-wide options were
+        // supplied at `cuLinkCreate` time.
+        // SAFETY: `state` was returned by `cuLinkCreate_v2` and has not
+        // yet been destroyed.  `data` points to a buffer of `size` bytes
+        // owned by the caller (PTX/cubin/fatbin/object/library bytes).
+        // `name` is a NUL-terminated C string owned by the caller.
+        check(unsafe {
+            f(
+                CUlinkState(state),
+                input_type,
+                data as *mut c_void,
+                size,
+                name,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        })
     }
 
     /// Complete the link via `cuLinkComplete`.
+    ///
+    /// Reads the driver-owned cubin pointer and copies it into a `Vec<u8>`
+    /// before the underlying link state is destroyed by [`Drop`].
     #[cfg(not(target_os = "macos"))]
-    fn gpu_link_complete(state: *mut c_void) -> CudaResult<LinkedModule> {
-        let _ = state;
-        // TODO: Wire up cuLinkComplete.
+    fn gpu_link_complete(self) -> CudaResult<LinkedModule> {
+        let api = crate::loader::try_driver()?;
+        let f = api.cu_link_complete.ok_or(CudaError::NotSupported)?;
+
+        let mut cubin_ptr: *mut c_void = std::ptr::null_mut();
+        let mut cubin_size: usize = 0;
+
+        // SAFETY: `self.state` is a valid link state from `cuLinkCreate_v2`.
+        // `cubin_ptr` and `cubin_size` are fresh out-parameters.
+        let link_result =
+            check(unsafe { f(CUlinkState(self.state), &mut cubin_ptr, &mut cubin_size) });
+        if let Err(e) = link_result {
+            // Surface the JIT diagnostic log in the error so callers can
+            // inspect the ptxas output that led to the failure.
+            return Err(jit_failure(e, &self.info_buf, &self.error_buf));
+        }
+
+        // Copy the driver-owned cubin into our own buffer *before* Drop runs
+        // `cuLinkDestroy`, which invalidates `cubin_ptr`.
+        let cubin_data = if cubin_ptr.is_null() || cubin_size == 0 {
+            Vec::new()
+        } else {
+            // SAFETY: the driver guarantees `cubin_ptr` references a buffer
+            // of `cubin_size` bytes that remains valid until the link state
+            // is destroyed.
+            unsafe { std::slice::from_raw_parts(cubin_ptr.cast::<u8>(), cubin_size) }.to_vec()
+        };
+
+        let info_log = buf_to_string(&self.info_buf);
+        let error_log = buf_to_string(&self.error_buf);
+
+        // `self` is dropped at the end of this fn, which calls
+        // `cuLinkDestroy` and frees the driver-side cubin allocation —
+        // safe now that we've copied it out.
         Ok(LinkedModule {
-            cubin_data: Vec::new(),
-            info_log: String::new(),
-            error_log: String::new(),
+            cubin_data,
+            info_log,
+            error_log,
         })
     }
 
     /// Destroy the link state via `cuLinkDestroy`.
+    ///
+    /// Called from [`Drop`].  Errors are intentionally ignored — panicking
+    /// in a destructor is fatal, and a missing entry point or stale state
+    /// cannot be recovered from at this stage.
     #[cfg(not(target_os = "macos"))]
     fn gpu_link_destroy(state: *mut c_void) {
+        if state.is_null() {
+            return;
+        }
         if let Ok(api) = crate::loader::try_driver() {
-            // cuLinkDestroy is part of the linker API.
-            // TODO: Wire up when adding to DriverApi.
-            let _ = api;
-            let _ = state;
+            if let Some(f) = api.cu_link_destroy {
+                // SAFETY: `state` was returned by a successful
+                // `cuLinkCreate_v2` and has not been destroyed yet
+                // (this is the only place that calls `cuLinkDestroy`,
+                // and `Drop` runs at most once per `Linker`).
+                let _ = unsafe { f(CUlinkState(state)) };
+            }
         }
     }
 }
@@ -780,7 +887,7 @@ impl std::fmt::Debug for Linker {
 
 /// Converts a null-terminated C buffer to a Rust [`String`], trimming
 /// trailing null bytes and whitespace.
-#[allow(dead_code)]
+#[cfg(any(not(target_os = "macos"), test))]
 fn buf_to_string(buf: &[u8]) -> String {
     let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     String::from_utf8_lossy(&buf[..len]).trim().to_string()
@@ -1226,5 +1333,57 @@ mod tests {
         assert_eq!(CUjitInputType::Fatbin as u32, 3);
         assert_eq!(CUjitInputType::Object as u32, 4);
         assert_eq!(CUjitInputType::Library as u32, 5);
+    }
+
+    // -- Cross-platform end-to-end smoke test --
+
+    /// Construct a linker, add a PTX input, and complete it.  This exercises
+    /// the full `cuLink*` wiring on platforms where the driver is available
+    /// (Linux/Windows with NVIDIA), and the synthetic implementation on
+    /// macOS.  The test passes when:
+    ///   * the operation succeeds end-to-end (real or synthetic driver), or
+    ///   * any failure is a recognised, non-panicking [`CudaError`] variant
+    ///     (typical on CI without a GPU: `NotSupported`, `NotInitialized`,
+    ///     `NoDevice`, `UnsupportedPlatform`, etc.).
+    ///
+    /// The intent is to catch a `panic!` in any of the four newly-wired
+    /// link entry points (`cuLinkCreate_v2`, `cuLinkAddData_v2`,
+    /// `cuLinkComplete`, `cuLinkDestroy`) — implementations must always
+    /// return a `CudaError` rather than aborting.
+    #[test]
+    fn linker_end_to_end_returns_sensible_result() {
+        const PTX: &str = r#"
+            .version 7.0
+            .target sm_70
+            .address_size 64
+            .visible .entry kernel_smoke() { ret; }
+        "#;
+
+        let linker = Linker::new(LinkerOptions::default());
+        let mut linker = match linker {
+            Ok(l) => l,
+            Err(e) => {
+                // Acceptable on systems without a CUDA driver.
+                let _ = format!("{e}");
+                return;
+            }
+        };
+
+        if let Err(e) = linker.add_ptx(PTX, "smoke.ptx") {
+            // Acceptable when the driver is absent or rejects the PTX.
+            let _ = format!("{e}");
+            return;
+        }
+
+        match linker.complete() {
+            Ok(linked) => {
+                // Real or synthetic — both produce a non-zero cubin.
+                assert!(linked.cubin_size() > 0);
+            }
+            Err(e) => {
+                // Acceptable failure modes — what matters is no panic.
+                let _ = format!("{e}");
+            }
+        }
     }
 }

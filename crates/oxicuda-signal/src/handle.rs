@@ -15,7 +15,7 @@ use crate::error::SignalResult;
 /// # Example
 /// ```rust,no_run
 /// use oxicuda_signal::handle::SignalHandle;
-/// let handle = SignalHandle::new().unwrap();
+/// let handle = SignalHandle::new().expect("CUDA device available");
 /// ```
 #[derive(Clone)]
 pub struct SignalHandle {

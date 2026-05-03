@@ -139,7 +139,9 @@ mod tests {
         let mut norm = ObservationNormalizer::new(3);
         norm.disable();
         let obs = vec![1.0, 2.0, 3.0];
-        let out = norm.process_one(&obs).unwrap();
+        let out = norm
+            .process_one(&obs)
+            .expect("obs_dim matches normalizer dim");
         assert_eq!(out, obs);
     }
 
@@ -148,10 +150,13 @@ mod tests {
         let mut norm = ObservationNormalizer::new(1).with_clip(2.0);
         // Seed with many values so std is reasonable
         for _ in 0..200 {
-            norm.process_one(&[0.0]).unwrap();
+            norm.process_one(&[0.0])
+                .expect("obs_dim=1 matches normalizer dim");
         }
         // Now feed an extreme value
-        let out = norm.process_one(&[1000.0]).unwrap();
+        let out = norm
+            .process_one(&[1000.0])
+            .expect("obs_dim=1 matches normalizer dim");
         assert!(out[0] <= 2.0 + 1e-3, "clipped={}", out[0]);
     }
 
@@ -159,7 +164,8 @@ mod tests {
     fn count_increments() {
         let mut norm = ObservationNormalizer::new(2);
         for _ in 0..10 {
-            norm.process_one(&[1.0, 2.0]).unwrap();
+            norm.process_one(&[1.0, 2.0])
+                .expect("obs_dim=2 matches normalizer dim");
         }
         assert_eq!(norm.count(), 10);
     }
@@ -170,9 +176,13 @@ mod tests {
         let mut norm_bat = ObservationNormalizer::new(2);
         let obs = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0]; // 3 × dim 2
         for chunk in obs.chunks_exact(2) {
-            norm_seq.process_one(chunk).unwrap();
+            norm_seq
+                .process_one(chunk)
+                .expect("obs_dim=2 matches normalizer dim");
         }
-        norm_bat.process(&obs).unwrap();
+        norm_bat
+            .process(&obs)
+            .expect("batch length divisible by obs_dim=2");
         let std_seq = norm_seq.stats().std_f32();
         let std_bat = norm_bat.stats().std_f32();
         for (a, b) in std_seq.iter().zip(std_bat.iter()) {

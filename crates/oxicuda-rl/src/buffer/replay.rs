@@ -341,7 +341,9 @@ mod tests {
         let mut buf = UniformReplayBuffer::new(100, 4, 2);
         push_n(&mut buf, 100);
         let mut handle = RlHandle::default_handle();
-        let batch = buf.sample(32, &mut handle).unwrap();
+        let batch = buf
+            .sample(32, &mut handle)
+            .expect("buffer has 100 entries, 32 requested");
         assert_eq!(batch.len(), 32);
     }
 
@@ -350,7 +352,9 @@ mod tests {
         let mut buf = UniformReplayBuffer::new(100, 1, 1);
         push_n(&mut buf, 100);
         let mut handle = RlHandle::default_handle();
-        let batch = buf.sample(50, &mut handle).unwrap();
+        let batch = buf
+            .sample(50, &mut handle)
+            .expect("buffer has 100 entries, 50 requested");
         let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
         for t in &batch {
             let idx = t.obs[0] as usize;
@@ -398,7 +402,7 @@ mod tests {
             &mut done,
             &mut handle,
         )
-        .unwrap();
+        .expect("buffer has 64 entries, 16 requested with correct slice sizes");
         // obs entries should be >= 0 (we pushed i as f32)
         assert!(obs.iter().all(|&v| v >= 0.0));
     }
@@ -416,7 +420,9 @@ mod tests {
         let mut buf = UniformReplayBuffer::new(5, 1, 1);
         buf.push([0.0], [0.0], 0.0, [1.0], true);
         let mut handle = RlHandle::default_handle();
-        let batch = buf.sample(1, &mut handle).unwrap();
+        let batch = buf
+            .sample(1, &mut handle)
+            .expect("buffer has 1 entry, 1 requested");
         assert!(batch[0].done);
     }
 }

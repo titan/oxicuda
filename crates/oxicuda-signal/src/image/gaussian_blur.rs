@@ -409,7 +409,7 @@ mod tests {
         // sigma=1.0 → radius=3, so check interior pixels starting at row/col 3.
         let size = 15usize;
         let img = vec![7.0f32; size * size];
-        let result = gaussian_blur(&img, size, size, 1.0, None).unwrap();
+        let result = gaussian_blur(&img, size, size, 1.0, None).expect("Gaussian blur succeeds");
         let radius = gaussian_radius_from_sigma(1.0);
         for r in radius..size - radius {
             for c in radius..size - radius {
@@ -424,7 +424,7 @@ mod tests {
         // The blur of a single impulse should conserve mass (sum of weights).
         let mut img = vec![0.0f32; 49];
         img[3 * 7 + 3] = 1.0;
-        let result = gaussian_blur(&img, 7, 7, 1.0, Some(2)).unwrap();
+        let result = gaussian_blur(&img, 7, 7, 1.0, Some(2)).expect("Gaussian blur succeeds");
         let sum: f32 = result.iter().sum();
         // Zero-padding means total mass ≤ 1.0 (some weight leaks outside).
         assert!(sum > 0.5 && sum <= 1.0 + 1e-5, "impulse energy = {sum}");
@@ -458,7 +458,7 @@ mod tests {
         let k = gaussian_kernel_1d(1.0, 3);
         let tmp = gaussian_blur_h(&img, 7, 7, &k);
         let manual = gaussian_blur_v(&tmp, 7, 7, &k);
-        let full = gaussian_blur(&img, 7, 7, 1.0, Some(3)).unwrap();
+        let full = gaussian_blur(&img, 7, 7, 1.0, Some(3)).expect("Gaussian blur succeeds");
         for (a, b) in manual.iter().zip(full.iter()) {
             assert!((a - b).abs() < 1e-6);
         }

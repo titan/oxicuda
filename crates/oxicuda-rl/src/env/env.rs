@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn lqr_reset_alternating() {
         let mut env = LinearQuadraticEnv::new(4, 10);
-        let obs = env.reset().unwrap();
+        let obs = env.reset().expect("LQR reset should not fail");
         assert_eq!(obs.len(), 4);
         assert!((obs[0] - 0.5).abs() < 1e-6);
         assert!((obs[1] + 0.5).abs() < 1e-6);
@@ -203,16 +203,18 @@ mod tests {
     #[test]
     fn lqr_step_dimension_mismatch() {
         let mut env = LinearQuadraticEnv::new(4, 10);
-        let _ = env.reset().unwrap();
+        let _ = env.reset().expect("LQR reset should not fail");
         assert!(env.step(&[0.0; 3]).is_err());
     }
 
     #[test]
     fn lqr_step_reward_is_negative() {
         let mut env = LinearQuadraticEnv::new(4, 10);
-        let _ = env.reset().unwrap();
+        let _ = env.reset().expect("LQR reset should not fail");
         // State is non-zero after reset, so reward should be negative.
-        let res = env.step(&[0.0; 4]).unwrap();
+        let res = env
+            .step(&[0.0; 4])
+            .expect("LQR step with correct action dim should not fail");
         assert!(res.reward <= 0.0, "reward={}", res.reward);
     }
 
@@ -220,10 +222,12 @@ mod tests {
     fn lqr_episode_ends_at_max_steps() {
         let max = 5;
         let mut env = LinearQuadraticEnv::new(2, max);
-        let _ = env.reset().unwrap();
+        let _ = env.reset().expect("LQR reset should not fail");
         let mut done = false;
         for i in 0..max {
-            let res = env.step(&[0.0; 2]).unwrap();
+            let res = env
+                .step(&[0.0; 2])
+                .expect("LQR step with correct action dim should not fail");
             done = res.done;
             if i < max - 1 {
                 assert!(!done, "should not be done before max_steps");
@@ -251,7 +255,7 @@ mod tests {
     #[test]
     fn lqr_large_action_terminates_early() {
         let mut env = LinearQuadraticEnv::new(2, 1000);
-        let _ = env.reset().unwrap();
+        let _ = env.reset().expect("LQR reset should not fail");
         // Massive action drives state norm above 10.
         let done_at_some_point =
             (0..1000).any(|_| env.step(&[100.0, 100.0]).map(|r| r.done).unwrap_or(true));

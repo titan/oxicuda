@@ -228,10 +228,11 @@ mod tests {
     #[test]
     fn test_power_spectrogram_shape() {
         let x = make_sine(512, 440.0, 8000.0);
-        let cfg = SpectrogramConfig::new(64, 32, WindowType::Hann, SpectrogramType::Power).unwrap();
-        let s = spectrogram(&x, &cfg).unwrap();
+        let cfg = SpectrogramConfig::new(64, 32, WindowType::Hann, SpectrogramType::Power)
+            .expect("valid spectrogram config");
+        let s = spectrogram(&x, &cfg).expect("spectrogram computation succeeds");
         let n_frames = StftConfig::new(64, 64, 32, WindowType::Hann)
-            .unwrap()
+            .expect("valid STFT config for frame count")
             .num_frames(512);
         assert_eq!(s.len(), n_frames * cfg.n_bins());
     }
@@ -239,26 +240,27 @@ mod tests {
     #[test]
     fn test_power_spectrogram_non_negative() {
         let x = make_sine(256, 440.0, 8000.0);
-        let cfg = SpectrogramConfig::new(32, 16, WindowType::Hann, SpectrogramType::Power).unwrap();
-        let s = spectrogram(&x, &cfg).unwrap();
+        let cfg = SpectrogramConfig::new(32, 16, WindowType::Hann, SpectrogramType::Power)
+            .expect("valid spectrogram config");
+        let s = spectrogram(&x, &cfg).expect("spectrogram computation succeeds");
         assert!(s.iter().all(|&v| v >= 0.0));
     }
 
     #[test]
     fn test_magnitude_spectrogram_non_negative() {
         let x = make_sine(256, 440.0, 8000.0);
-        let cfg =
-            SpectrogramConfig::new(32, 16, WindowType::Hann, SpectrogramType::Magnitude).unwrap();
-        let s = spectrogram(&x, &cfg).unwrap();
+        let cfg = SpectrogramConfig::new(32, 16, WindowType::Hann, SpectrogramType::Magnitude)
+            .expect("valid spectrogram config");
+        let s = spectrogram(&x, &cfg).expect("magnitude spectrogram computation succeeds");
         assert!(s.iter().all(|&v| v >= 0.0));
     }
 
     #[test]
     fn test_power_db_spectrogram_finite() {
         let x = make_sine(256, 440.0, 8000.0);
-        let cfg =
-            SpectrogramConfig::new(32, 16, WindowType::Hann, SpectrogramType::PowerDb).unwrap();
-        let s = spectrogram(&x, &cfg).unwrap();
+        let cfg = SpectrogramConfig::new(32, 16, WindowType::Hann, SpectrogramType::PowerDb)
+            .expect("valid spectrogram config");
+        let s = spectrogram(&x, &cfg).expect("power-dB spectrogram computation succeeds");
         assert!(s.iter().all(|v| v.is_finite()));
     }
 
@@ -271,14 +273,16 @@ mod tests {
     #[test]
     fn test_chroma_shape() {
         let power = vec![1.0_f64; 3 * 17]; // 3 frames, 17 bins
-        let chroma = chroma_from_power(&power, 17, 8000.0, 32, 12).unwrap();
+        let chroma =
+            chroma_from_power(&power, 17, 8000.0, 32, 12).expect("chroma computation succeeds");
         assert_eq!(chroma.len(), 3 * 12);
     }
 
     #[test]
     fn test_chroma_l2_normalized() {
         let power = vec![1.0_f64; 3 * 17];
-        let chroma = chroma_from_power(&power, 17, 8000.0, 32, 12).unwrap();
+        let chroma =
+            chroma_from_power(&power, 17, 8000.0, 32, 12).expect("chroma computation succeeds");
         for t in 0..3 {
             let norm: f64 = chroma[t * 12..(t + 1) * 12]
                 .iter()

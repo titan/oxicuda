@@ -292,27 +292,31 @@ mod tests {
 
     #[test]
     fn token_embedding_lookup() {
-        let mut emb = TokenEmbedding::new(4, 3).unwrap();
+        let mut emb = TokenEmbedding::new(4, 3).expect("vocab_size=4 embed_dim=3 should be valid");
         // Set row 2 to [1,2,3]
         emb.weight.data[6] = 1.0;
         emb.weight.data[7] = 2.0;
         emb.weight.data[8] = 3.0;
-        let out = emb.forward(&[2]).unwrap();
+        let out = emb
+            .forward(&[2])
+            .expect("token id 2 within vocab_size=4 should succeed");
         assert_eq!(out, vec![1.0_f32, 2.0, 3.0]);
     }
 
     #[test]
     fn token_embedding_multi_token() {
-        let mut emb = TokenEmbedding::new(3, 2).unwrap();
+        let mut emb = TokenEmbedding::new(3, 2).expect("vocab_size=3 embed_dim=2 should be valid");
         emb.weight.data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         // tokens [0, 2] → [[1,2], [5,6]]
-        let out = emb.forward(&[0, 2]).unwrap();
+        let out = emb
+            .forward(&[0, 2])
+            .expect("token ids 0 and 2 within vocab_size=3 should succeed");
         assert_eq!(out, vec![1.0_f32, 2.0, 5.0, 6.0]);
     }
 
     #[test]
     fn token_embedding_out_of_vocab_error() {
-        let emb = TokenEmbedding::new(4, 3).unwrap();
+        let emb = TokenEmbedding::new(4, 3).expect("vocab_size=4 embed_dim=3 should be valid");
         assert!(matches!(
             emb.forward(&[5]),
             Err(LmError::OutOfVocab { token: 5 })
@@ -321,14 +325,15 @@ mod tests {
 
     #[test]
     fn token_embedding_empty_error() {
-        let emb = TokenEmbedding::new(4, 3).unwrap();
+        let emb = TokenEmbedding::new(4, 3).expect("vocab_size=4 embed_dim=3 should be valid");
         assert!(matches!(emb.forward(&[]), Err(LmError::EmptyInput { .. })));
     }
 
     #[test]
     fn token_embedding_from_weight() {
         let w = WeightTensor::zeros(&[10, 4]);
-        let emb = TokenEmbedding::from_weight(w).unwrap();
+        let emb = TokenEmbedding::from_weight(w)
+            .expect("2-D weight tensor [10,4] should be valid for TokenEmbedding");
         assert_eq!(emb.vocab_size, 10);
         assert_eq!(emb.embed_dim, 4);
     }
@@ -337,29 +342,36 @@ mod tests {
 
     #[test]
     fn pos_embedding_lookup() {
-        let mut pe = LearnedPositionalEmbedding::new(4, 2).unwrap();
+        let mut pe = LearnedPositionalEmbedding::new(4, 2)
+            .expect("max_positions=4 embed_dim=2 should be valid");
         // Set position 1 to [3.0, 4.0]
         pe.weight.data[2] = 3.0;
         pe.weight.data[3] = 4.0;
-        let out = pe.forward(2, 0).unwrap();
+        let out = pe
+            .forward(2, 0)
+            .expect("seq_len=2 offset=0 within max_positions=4 should succeed");
         // pos 0: [0,0], pos 1: [3,4]
         assert_eq!(out, vec![0.0_f32, 0.0, 3.0, 4.0]);
     }
 
     #[test]
     fn pos_embedding_with_offset() {
-        let mut pe = LearnedPositionalEmbedding::new(8, 2).unwrap();
+        let mut pe = LearnedPositionalEmbedding::new(8, 2)
+            .expect("max_positions=8 embed_dim=2 should be valid");
         // positions 4,5 get value 10
         for i in 8..12 {
             pe.weight.data[i] = 10.0;
         }
-        let out = pe.forward(2, 4).unwrap(); // positions 4..6
+        let out = pe
+            .forward(2, 4)
+            .expect("seq_len=2 offset=4 within max_positions=8 should succeed"); // positions 4..6
         assert!(out.iter().all(|&v| v == 10.0));
     }
 
     #[test]
     fn pos_embedding_too_long_error() {
-        let pe = LearnedPositionalEmbedding::new(4, 2).unwrap();
+        let pe = LearnedPositionalEmbedding::new(4, 2)
+            .expect("max_positions=4 embed_dim=2 should be valid");
         assert!(matches!(
             pe.forward(5, 0),
             Err(LmError::SequenceTooLong { .. })
@@ -371,9 +383,11 @@ mod tests {
     #[test]
     fn rope_pos0_is_identity() {
         // At position 0, angle = 0, cos=1, sin=0 → rotation is identity
-        let rope = RotaryEmbedding::new(4, 16, 10_000.0).unwrap();
+        let rope = RotaryEmbedding::new(4, 16, 10_000.0)
+            .expect("even head_dim=4 max_pos=16 should be valid");
         let mut x = vec![1.0_f32, 2.0, 3.0, 4.0]; // 1 token, 1 head, head_dim=4
-        rope.apply(&mut x, 1, 1, 0).unwrap();
+        rope.apply(&mut x, 1, 1, 0)
+            .expect("1 token at offset 0 within max_positions=16 should succeed");
         // All cos=1 at pos=0 for i=0, so x[0]=1*1-2*sin=1-2*0=1, x[1]=1*0+2*1=2
         assert!((x[0] - 1.0).abs() < 1e-5, "x[0]={}", x[0]);
         assert!((x[1] - 2.0).abs() < 1e-5, "x[1]={}", x[1]);
@@ -384,10 +398,12 @@ mod tests {
     #[test]
     fn rope_rotation_preserves_norm() {
         // Rotation is orthogonal → norm preserved.
-        let rope = RotaryEmbedding::new(4, 32, 10_000.0).unwrap();
+        let rope = RotaryEmbedding::new(4, 32, 10_000.0)
+            .expect("even head_dim=4 max_pos=32 should be valid");
         let original = vec![1.0_f32, 2.0, 3.0, 4.0];
         let mut x = original.clone();
-        rope.apply(&mut x, 1, 1, 5).unwrap(); // pos=5
+        rope.apply(&mut x, 1, 1, 5)
+            .expect("1 token at offset 5 within max_positions=32 should succeed"); // pos=5
         let norm_before: f32 = original.iter().map(|&v| v * v).sum::<f32>().sqrt();
         let norm_after: f32 = x.iter().map(|&v| v * v).sum::<f32>().sqrt();
         assert!(
@@ -399,9 +415,11 @@ mod tests {
     #[test]
     fn rope_multi_head_multi_token() {
         // Just check no error and correct output size.
-        let rope = RotaryEmbedding::new(4, 32, 10_000.0).unwrap();
+        let rope = RotaryEmbedding::new(4, 32, 10_000.0)
+            .expect("even head_dim=4 max_pos=32 for multi-head test should be valid");
         let mut x = vec![1.0_f32; 2 * 3 * 4]; // 2 tokens, 3 heads, head_dim=4
-        rope.apply(&mut x, 3, 2, 0).unwrap();
+        rope.apply(&mut x, 3, 2, 0)
+            .expect("2 tokens 3 heads at offset 0 within max_positions=32 should succeed");
         assert_eq!(x.len(), 24);
     }
 
@@ -412,7 +430,8 @@ mod tests {
 
     #[test]
     fn rope_sequence_too_long_error() {
-        let rope = RotaryEmbedding::new(4, 4, 10_000.0).unwrap();
+        let rope = RotaryEmbedding::new(4, 4, 10_000.0)
+            .expect("even head_dim=4 max_pos=4 should be valid");
         let mut x = vec![0.0_f32; 4];
         // offset=3 + seq_len=2 = 5 > max_positions=4
         assert!(matches!(
@@ -423,7 +442,8 @@ mod tests {
 
     #[test]
     fn rope_cos_sin_tables_at_zero() {
-        let rope = RotaryEmbedding::new(4, 8, 10_000.0).unwrap();
+        let rope = RotaryEmbedding::new(4, 8, 10_000.0)
+            .expect("even head_dim=4 max_pos=8 should be valid");
         // At position 0, cos=1, sin=0 for all dims
         assert!((rope.cos_at(0, 0) - 1.0).abs() < 1e-6);
         assert!(rope.sin_at(0, 0).abs() < 1e-6);
@@ -433,7 +453,8 @@ mod tests {
     fn rope_tables_have_correct_dimensions() {
         let head_dim = 8;
         let max_pos = 16;
-        let rope = RotaryEmbedding::new(head_dim, max_pos, 10_000.0).unwrap();
+        let rope = RotaryEmbedding::new(head_dim, max_pos, 10_000.0)
+            .expect("even head_dim and positive max_pos should produce valid RoPE");
         assert_eq!(rope.cos_table.len(), max_pos * (head_dim / 2));
         assert_eq!(rope.sin_table.len(), max_pos * (head_dim / 2));
     }

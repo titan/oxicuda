@@ -5,7 +5,7 @@
 [![CI](https://github.com/cool-japan/oxicuda/workflows/CI/badge.svg)](https://github.com/cool-japan/oxicuda/actions)
 [![License](https://img.shields.io/crates/l/oxicuda.svg)](LICENSE)
 
-**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~260K lines of safe Rust across 28 crates.**
+**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~320K lines of safe Rust across 37 crates.**
 
 OxiCUDA replaces the entire NVIDIA CUDA Toolkit software stack with type-safe,
 memory-safe Rust code. The only runtime dependency is the NVIDIA driver
@@ -249,9 +249,27 @@ fn main() -> Result<(), oxicuda::Error> {
 | `oxicuda-webgpu` | -- | WebGPU backend | 2,334 | 91 |
 | `oxicuda-rocm` | -- | AMD ROCm backend | 1,995 | 105 |
 | `oxicuda-levelzero` | -- | Intel oneAPI / LevelZero backend | 3,914 | 104 |
+| **Vol.17 -- Generative AI** | | | | |
+| `oxicuda-gen` | -- | Diffusion (DDPM/DDIM/DPM-Solver++/Flow Matching), CFG, VAE, LoRA | 5,765 | 221 |
+| **Vol.18 -- Graph Neural Networks** | | | | |
+| `oxicuda-gnn` | -- | CSR/COO/Hetero graphs, GCN/GAT/GraphSAGE/GIN, pooling | 6,406 | 233 |
+| **Vol.19 -- State Space Models** | | | | |
+| `oxicuda-mamba` | -- | HiPPO-NPLR, S4D/S5 selective scan, Mamba SSM, RWKV | 7,255 | 339 |
+| **Vol.20 -- Vision Transformers** | | | | |
+| `oxicuda-vision` | -- | ViT, patch embedding, CLIP towers | 7,230 | 349 |
+| **Vol.21 -- Audio/Speech ML** | | | | |
+| `oxicuda-audio` | -- | Conformer, Wav2Vec2, CTC/RNN-T, WaveNet, SpecAugment, x-vector | 6,537 | 286 |
+| **Vol.22 -- Time-Series Forecasting** | | | | |
+| `oxicuda-timeseries` | -- | TCN, NHiTS, PatchTST, TimesNet, iTransformer, RevIN | 4,939 | 177 |
+| **Vol.23 -- Bayesian Deep Learning** | | | | |
+| `oxicuda-bayes` | -- | Variational inference, MC Dropout, Deep Ensembles, SWAG, Laplace | 2,334 | 85 |
+| **Vol.24 -- Federated Learning** | | | | |
+| `oxicuda-federated` | -- | FedAvg/FedProx/SCAFFOLD/FedAdam, DP, secure aggregation | 3,365 | 145 |
+| **Vol.25 -- Neural Architecture Search** | | | | |
+| `oxicuda-nas` | -- | DARTS, supernet, NSGA-II, hardware-aware FLOPs predictor | 2,864 | 63 |
 | **Umbrella** | | | | |
 | `oxicuda` | -- | Umbrella re-export crate | 19,614 | 496 |
-| | | **Total** | **262,824** | **7,488** |
+| | | **Total** | **318,552** | **9,568** |
 
 ## Feature Flags
 
@@ -342,7 +360,7 @@ cargo nextest run --all-features
 
 ## Roadmap
 
-**Released (v0.1.4) -- 2026-04-18**
+**Released (v0.1.5) -- 2026-05-03**
 - Vol.1: Driver, Memory, Launch, Runtime -- foundation layer (4 crates, 23,025 SLoC)
 - Vol.2: PTX codegen DSL, autotuner engine (2 crates, 43,354 SLoC)
 - Vol.3: Full BLAS L1/L2/L3 with Tensor Core GEMM (21,845 SLoC)
@@ -354,6 +372,15 @@ cargo nextest run --all-features
 - Vol.9: Inference engine -- KV-cache, speculative decode, distributed infer, LM (3 crates, 11,929 SLoC)
 - Vol.10: Reinforcement learning -- replay buffers, policy dists, PPO/DQN/SAC/TD3 (4,522 SLoC)
 - Backends: Metal, Vulkan, WebGPU, ROCm, LevelZero (7 crates, 19,665 SLoC)
+- Vol.17: Generative AI -- diffusion schedulers, CFG, VAE, LoRA (5,765 SLoC)
+- Vol.18: Graph Neural Networks -- CSR/COO/Hetero graphs, GCN/GAT/GraphSAGE/GIN, pooling (6,406 SLoC)
+- Vol.19: State Space Models -- HiPPO-NPLR, S4D/S5, Mamba SSM, RWKV (7,255 SLoC)
+- Vol.20: Vision Transformers & CLIP -- ViT, patch embedding, dual-tower CLIP (7,230 SLoC)
+- Vol.21: Audio/Speech ML -- Conformer, Wav2Vec2, CTC/RNN-T, WaveNet, SpecAugment, x-vector (6,537 SLoC)
+- Vol.22: Time-Series Forecasting -- TCN, NHiTS, PatchTST, TimesNet, iTransformer, RevIN (4,939 SLoC)
+- Vol.23: Bayesian Deep Learning -- variational inference, MC Dropout, Deep Ensembles, SWAG, Laplace (2,334 SLoC)
+- Vol.24: Federated Learning -- FedAvg/FedProx/SCAFFOLD/FedAdam, DP, secure aggregation (3,365 SLoC)
+- Vol.25: Neural Architecture Search -- DARTS, supernet, NSGA-II, hardware-aware predictor (2,864 SLoC)
 
 **Next**
 - Published documentation on docs.rs

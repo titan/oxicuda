@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use half::f16;
+
 use super::{binary_elementwise_f32, get_float_attr, get_required_input, unary_elementwise_f32};
 use crate::onnx_backend::ir::*;
 
@@ -343,12 +345,6 @@ pub fn execute_fma(
 
 // ─── Cast helpers ───────────────────────────────────────────
 
-// ONNX uses specific integer codes for data types; we handle a subset
-// of common int16 as Int32 storage internally (not full Float16 compute).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-enum Int16Placeholder {}
-
 fn cast_tensor(x: &OnnxTensor, target: DataType) -> OnnxResult<Vec<OnnxTensor>> {
     // Fast path: same type
     if x.dtype == target {
@@ -358,13 +354,22 @@ fn cast_tensor(x: &OnnxTensor, target: DataType) -> OnnxResult<Vec<OnnxTensor>> 
     // Get source values as f64 intermediary
     let values = tensor_to_f64(x)?;
 
-    // Convert to target
+    // Convert to target. Saturating-cast semantics:
+    // - integer targets clamp to the destination's representable range
+    //   (Rust's `as` already saturates NaN to 0 and ±∞ to {MIN, MAX}, but
+    //   we explicitly clamp first so finite values match ONNX expectations).
+    // - Float16 targets route through f32, where `f16::from_f32` maps
+    //   out-of-range magnitudes to ±∞ as the ONNX Cast spec requires.
     let out = match target {
         DataType::Float32 => {
             let v: Vec<f32> = values.iter().map(|&x| x as f32).collect();
             OnnxTensor::from_f32(&v, x.shape.clone())
         }
         DataType::Float64 => OnnxTensor::from_f64(&values, x.shape.clone()),
+        DataType::Float16 => {
+            let v: Vec<f16> = values.iter().map(|&x| f16::from_f32(x as f32)).collect();
+            OnnxTensor::from_f16(&v, x.shape.clone())
+        }
         DataType::Int32 => {
             let v: Vec<i32> = values.iter().map(|&x| x as i32).collect();
             OnnxTensor::from_i32(&v, x.shape.clone())
@@ -373,14 +378,23 @@ fn cast_tensor(x: &OnnxTensor, target: DataType) -> OnnxResult<Vec<OnnxTensor>> 
             let v: Vec<i64> = values.iter().map(|&x| x as i64).collect();
             OnnxTensor::from_i64(&v, x.shape.clone())
         }
+        DataType::Int8 => {
+            let v: Vec<i8> = values
+                .iter()
+                .map(|&x| x.clamp(f64::from(i8::MIN), f64::from(i8::MAX)) as i8)
+                .collect();
+            OnnxTensor::from_i8(&v, x.shape.clone())
+        }
+        DataType::Uint8 => {
+            let v: Vec<u8> = values
+                .iter()
+                .map(|&x| x.clamp(f64::from(u8::MIN), f64::from(u8::MAX)) as u8)
+                .collect();
+            OnnxTensor::from_u8(&v, x.shape.clone())
+        }
         DataType::Bool => {
             let v: Vec<bool> = values.iter().map(|&x| x != 0.0).collect();
             OnnxTensor::from_bool(&v, x.shape.clone())
-        }
-        other => {
-            return Err(OnnxError::TypeError(format!(
-                "Cast to {other} not yet implemented"
-            )));
         }
     };
     Ok(vec![out])
@@ -390,16 +404,16 @@ fn tensor_to_f64(x: &OnnxTensor) -> OnnxResult<Vec<f64>> {
     match x.dtype {
         DataType::Float32 => Ok(x.as_f32()?.iter().map(|&v| f64::from(v)).collect()),
         DataType::Float64 => x.as_f64(),
+        DataType::Float16 => Ok(x.as_f16()?.iter().map(|v| f64::from(v.to_f32())).collect()),
         DataType::Int32 => Ok(x.as_i32()?.iter().map(|&v| f64::from(v)).collect()),
         DataType::Int64 => Ok(x.as_i64()?.iter().map(|&v| v as f64).collect()),
+        DataType::Int8 => Ok(x.as_i8()?.iter().map(|&v| f64::from(v)).collect()),
+        DataType::Uint8 => Ok(x.as_u8()?.iter().map(|&v| f64::from(v)).collect()),
         DataType::Bool => Ok(x
             .as_bool()?
             .iter()
             .map(|&v| if v { 1.0 } else { 0.0 })
             .collect()),
-        other => Err(OnnxError::TypeError(format!(
-            "Cast from {other} not implemented"
-        ))),
     }
 }
 
@@ -422,79 +436,132 @@ mod tests {
     fn test_add() {
         let a = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![3]);
         let b = OnnxTensor::from_f32(&[10.0, 20.0, 30.0], vec![3]);
-        let r = execute_add(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![11.0, 22.0, 33.0]);
+        let r = execute_add(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("element-wise add should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("add output should be float32"),
+            vec![11.0, 22.0, 33.0]
+        );
     }
 
     #[test]
     fn test_add_broadcast() {
         let a = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![3]);
         let b = OnnxTensor::from_f32(&[10.0], vec![1]);
-        let r = execute_add(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![11.0, 12.0, 13.0]);
+        let r = execute_add(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("element-wise add should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32()
+                .expect("broadcast add output should be float32"),
+            vec![11.0, 12.0, 13.0]
+        );
     }
 
     #[test]
     fn test_sub() {
         let a = OnnxTensor::from_f32(&[10.0, 20.0], vec![2]);
         let b = OnnxTensor::from_f32(&[1.0, 2.0], vec![2]);
-        let r = execute_sub(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![9.0, 18.0]);
+        let r = execute_sub(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("sub execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![9.0, 18.0]
+        );
     }
 
     #[test]
     fn test_mul() {
         let a = OnnxTensor::from_f32(&[2.0, 3.0], vec![2]);
         let b = OnnxTensor::from_f32(&[4.0, 5.0], vec![2]);
-        let r = execute_mul(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![8.0, 15.0]);
+        let r = execute_mul(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("mul execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![8.0, 15.0]
+        );
     }
 
     #[test]
     fn test_div() {
         let a = OnnxTensor::from_f32(&[10.0, 20.0], vec![2]);
         let b = OnnxTensor::from_f32(&[2.0, 5.0], vec![2]);
-        let r = execute_div(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![5.0, 4.0]);
+        let r = execute_div(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("div execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![5.0, 4.0]
+        );
     }
 
     #[test]
     fn test_relu() {
         let x = OnnxTensor::from_f32(&[-1.0, 0.0, 1.0, 2.0], vec![4]);
-        let r = execute_relu(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![0.0, 0.0, 1.0, 2.0]);
+        let r = execute_relu(&[Some(&x)], &empty_attrs())
+            .expect("relu execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![0.0, 0.0, 1.0, 2.0]
+        );
     }
 
     #[test]
     fn test_sigmoid() {
         let x = OnnxTensor::from_f32(&[0.0], vec![1]);
-        let r = execute_sigmoid(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_f32_near(&r[0].as_f32().unwrap(), &[0.5], 1e-6);
+        let r = execute_sigmoid(&[Some(&x)], &empty_attrs())
+            .expect("sigmoid execution should succeed with valid inputs");
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[0.5],
+            1e-6,
+        );
     }
 
     #[test]
     fn test_tanh() {
         let x = OnnxTensor::from_f32(&[0.0], vec![1]);
-        let r = execute_tanh(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_f32_near(&r[0].as_f32().unwrap(), &[0.0], 1e-6);
+        let r = execute_tanh(&[Some(&x)], &empty_attrs())
+            .expect("tanh execution should succeed with valid inputs");
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[0.0],
+            1e-6,
+        );
     }
 
     #[test]
     fn test_exp_log() {
         let x = OnnxTensor::from_f32(&[1.0], vec![1]);
-        let r = execute_exp(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_f32_near(&r[0].as_f32().unwrap(), &[std::f32::consts::E], 1e-5);
-        let r2 = execute_log(&[Some(&r[0])], &empty_attrs()).unwrap();
-        assert_f32_near(&r2[0].as_f32().unwrap(), &[1.0], 1e-5);
+        let r = execute_exp(&[Some(&x)], &empty_attrs())
+            .expect("exp execution should succeed with valid inputs");
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[std::f32::consts::E],
+            1e-5,
+        );
+        let r2 = execute_log(&[Some(&r[0])], &empty_attrs())
+            .expect("log execution should succeed with valid inputs");
+        assert_f32_near(
+            &r2[0].as_f32().expect("tensor should be float32 type"),
+            &[1.0],
+            1e-5,
+        );
     }
 
     #[test]
     fn test_abs_neg() {
         let x = OnnxTensor::from_f32(&[-3.0, 2.0], vec![2]);
-        let r_abs = execute_abs(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_eq!(r_abs[0].as_f32().unwrap(), vec![3.0, 2.0]);
-        let r_neg = execute_neg(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_eq!(r_neg[0].as_f32().unwrap(), vec![3.0, -2.0]);
+        let r_abs = execute_abs(&[Some(&x)], &empty_attrs())
+            .expect("abs execution should succeed with valid inputs");
+        assert_eq!(
+            r_abs[0].as_f32().expect("tensor should be float32 type"),
+            vec![3.0, 2.0]
+        );
+        let r_neg = execute_neg(&[Some(&x)], &empty_attrs())
+            .expect("neg execution should succeed with valid inputs");
+        assert_eq!(
+            r_neg[0].as_f32().expect("tensor should be float32 type"),
+            vec![3.0, -2.0]
+        );
     }
 
     #[test]
@@ -502,8 +569,13 @@ mod tests {
         let x = OnnxTensor::from_f32(&[-10.0, 5.0], vec![2]);
         let mut attrs = HashMap::new();
         attrs.insert("alpha".into(), AttributeValue::Float(0.1));
-        let r = execute_leaky_relu(&[Some(&x)], &attrs).unwrap();
-        assert_f32_near(&r[0].as_f32().unwrap(), &[-1.0, 5.0], 1e-6);
+        let r = execute_leaky_relu(&[Some(&x)], &attrs)
+            .expect("leaky_relu execution should succeed with valid inputs");
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[-1.0, 5.0],
+            1e-6,
+        );
     }
 
     #[test]
@@ -511,8 +583,12 @@ mod tests {
         let x = OnnxTensor::from_f32(&[-5.0, 0.0, 5.0, 10.0], vec![4]);
         let min_t = OnnxTensor::from_f32(&[0.0], vec![]);
         let max_t = OnnxTensor::from_f32(&[6.0], vec![]);
-        let r = execute_clip(&[Some(&x), Some(&min_t), Some(&max_t)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![0.0, 0.0, 5.0, 6.0]);
+        let r = execute_clip(&[Some(&x), Some(&min_t), Some(&max_t)], &empty_attrs())
+            .expect("clip execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![0.0, 0.0, 5.0, 6.0]
+        );
     }
 
     #[test]
@@ -520,8 +596,12 @@ mod tests {
         let cond = OnnxTensor::from_bool(&[true, false, true], vec![3]);
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![3]);
         let y = OnnxTensor::from_f32(&[10.0, 20.0, 30.0], vec![3]);
-        let r = execute_where(&[Some(&cond), Some(&x), Some(&y)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 20.0, 3.0]);
+        let r = execute_where(&[Some(&cond), Some(&x), Some(&y)], &empty_attrs())
+            .expect("where execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 20.0, 3.0]
+        );
     }
 
     #[test]
@@ -529,9 +609,162 @@ mod tests {
         let x = OnnxTensor::from_f32(&[1.5, 2.7, -3.1], vec![3]);
         let mut attrs = HashMap::new();
         attrs.insert("to".into(), AttributeValue::Int(6)); // INT32
-        let r = execute_cast(&[Some(&x)], &attrs).unwrap();
+        let r = execute_cast(&[Some(&x)], &attrs)
+            .expect("cast execution should succeed with valid inputs");
         assert_eq!(r[0].dtype, DataType::Int32);
-        assert_eq!(r[0].as_i32().unwrap(), vec![1, 2, -3]);
+        assert_eq!(
+            r[0].as_i32().expect("tensor should be int32 type"),
+            vec![1, 2, -3]
+        );
+    }
+
+    // ── Float16/Int8/Uint8 cast coverage ──────────────────────
+
+    fn cast_attrs(to: i64) -> HashMap<String, AttributeValue> {
+        let mut attrs = HashMap::new();
+        attrs.insert("to".into(), AttributeValue::Int(to));
+        attrs
+    }
+
+    #[test]
+    fn test_cast_f32_to_f16_round_trip() {
+        // Values exactly representable in f16 -> exact round-trip.
+        let original = vec![0.0_f32, 1.0, -1.0, 0.5, 1.5, 2.0, 100.0, -100.0];
+        let x = OnnxTensor::from_f32(&original, vec![original.len()]);
+
+        let to_f16 = execute_cast(&[Some(&x)], &cast_attrs(10))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(to_f16[0].dtype, DataType::Float16);
+        assert_eq!(to_f16[0].element_count(), original.len());
+
+        let back = execute_cast(&[Some(&to_f16[0])], &cast_attrs(1))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(back[0].dtype, DataType::Float32);
+        assert_eq!(
+            back[0].as_f32().expect("tensor should be float32 type"),
+            original
+        );
+    }
+
+    #[test]
+    fn test_cast_f32_to_f16_overflow_to_infinity() {
+        // Values outside f16's representable range saturate to ±∞ per ONNX spec.
+        let x = OnnxTensor::from_f32(&[65_504.0, 70_000.0, -70_000.0], vec![3]);
+        let r = execute_cast(&[Some(&x)], &cast_attrs(10))
+            .expect("cast execution should succeed with valid inputs");
+        let halves = r[0].as_f16().expect("tensor should be float16 type");
+        assert!(halves[0].is_finite(), "65504 fits in f16");
+        assert!(halves[1].is_infinite() && halves[1].to_f32() > 0.0);
+        assert!(halves[2].is_infinite() && halves[2].to_f32() < 0.0);
+    }
+
+    #[test]
+    fn test_cast_f32_to_i8_saturates() {
+        // Inside, on the boundaries, and outside i8 range.
+        let x = OnnxTensor::from_f32(&[0.0, 1.5, -1.5, 127.0, 200.0, -128.0, -200.0], vec![7]);
+        let r = execute_cast(&[Some(&x)], &cast_attrs(3))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(r[0].dtype, DataType::Int8);
+        assert_eq!(
+            r[0].as_i8().expect("tensor should be int8 type"),
+            vec![0, 1, -1, 127, i8::MAX, -128, i8::MIN]
+        );
+    }
+
+    #[test]
+    fn test_cast_f32_to_u8_saturates() {
+        let x = OnnxTensor::from_f32(&[0.0, 1.0, 254.5, 255.0, 300.0, -1.0, -50.0], vec![7]);
+        let r = execute_cast(&[Some(&x)], &cast_attrs(2))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(r[0].dtype, DataType::Uint8);
+        assert_eq!(
+            r[0].as_u8().expect("tensor should be uint8 type"),
+            vec![0, 1, 254, 255, u8::MAX, 0, u8::MIN]
+        );
+    }
+
+    #[test]
+    fn test_cast_f16_to_f32_known_value() {
+        let halves = vec![f16::from_f32(1.5), f16::from_f32(-2.0), f16::from_f32(0.25)];
+        let x = OnnxTensor::from_f16(&halves, vec![3]);
+        let r = execute_cast(&[Some(&x)], &cast_attrs(1))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(r[0].dtype, DataType::Float32);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.5_f32, -2.0, 0.25]
+        );
+    }
+
+    #[test]
+    fn test_cast_i8_to_f32_sign_extends() {
+        let x = OnnxTensor::from_i8(&[-128, -1, 0, 1, 127], vec![5]);
+        let r = execute_cast(&[Some(&x)], &cast_attrs(1))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(r[0].dtype, DataType::Float32);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![-128.0, -1.0, 0.0, 1.0, 127.0]
+        );
+    }
+
+    #[test]
+    fn test_cast_u8_to_f32_zero_extends() {
+        let x = OnnxTensor::from_u8(&[0, 1, 128, 200, 255], vec![5]);
+        let r = execute_cast(&[Some(&x)], &cast_attrs(1))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(r[0].dtype, DataType::Float32);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![0.0, 1.0, 128.0, 200.0, 255.0]
+        );
+    }
+
+    #[test]
+    fn test_cast_round_trip_f32_i8_f32() {
+        let original = vec![-128.0_f32, -1.0, 0.0, 1.0, 127.0];
+        let x = OnnxTensor::from_f32(&original, vec![original.len()]);
+        let mid = execute_cast(&[Some(&x)], &cast_attrs(3))
+            .expect("cast execution should succeed with valid inputs");
+        let back = execute_cast(&[Some(&mid[0])], &cast_attrs(1))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(
+            back[0].as_f32().expect("tensor should be float32 type"),
+            original
+        );
+    }
+
+    #[test]
+    fn test_cast_round_trip_f32_u8_f32() {
+        let original = vec![0.0_f32, 1.0, 128.0, 200.0, 255.0];
+        let x = OnnxTensor::from_f32(&original, vec![original.len()]);
+        let mid = execute_cast(&[Some(&x)], &cast_attrs(2))
+            .expect("cast execution should succeed with valid inputs");
+        let back = execute_cast(&[Some(&mid[0])], &cast_attrs(1))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(
+            back[0].as_f32().expect("tensor should be float32 type"),
+            original
+        );
+    }
+
+    #[test]
+    fn test_cast_round_trip_f16_f32_f16() {
+        let halves = vec![
+            f16::from_f32(0.0),
+            f16::from_f32(1.0),
+            f16::from_f32(-2.5),
+            f16::from_f32(100.0),
+        ];
+        let x = OnnxTensor::from_f16(&halves, vec![halves.len()]);
+        let mid = execute_cast(&[Some(&x)], &cast_attrs(1))
+            .expect("cast execution should succeed with valid inputs");
+        let back = execute_cast(&[Some(&mid[0])], &cast_attrs(10))
+            .expect("cast execution should succeed with valid inputs");
+        assert_eq!(
+            back[0].as_f16().expect("tensor should be float16 type"),
+            halves
+        );
     }
 
     #[test]
@@ -539,33 +772,58 @@ mod tests {
         let a = OnnxTensor::from_f32(&[2.0, 3.0], vec![2]);
         let b = OnnxTensor::from_f32(&[4.0, 5.0], vec![2]);
         let c = OnnxTensor::from_f32(&[1.0, 1.0], vec![2]);
-        let r = execute_fma(&[Some(&a), Some(&b), Some(&c)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![9.0, 16.0]);
+        let r = execute_fma(&[Some(&a), Some(&b), Some(&c)], &empty_attrs())
+            .expect("fma execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![9.0, 16.0]
+        );
     }
 
     #[test]
     fn test_pow() {
         let a = OnnxTensor::from_f32(&[2.0, 3.0], vec![2]);
         let b = OnnxTensor::from_f32(&[3.0, 2.0], vec![2]);
-        let r = execute_pow(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
-        assert_f32_near(&r[0].as_f32().unwrap(), &[8.0, 9.0], 1e-5);
+        let r = execute_pow(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("pow execution should succeed with valid inputs");
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[8.0, 9.0],
+            1e-5,
+        );
     }
 
     #[test]
     fn test_ceil_floor_round() {
         let x = OnnxTensor::from_f32(&[1.3, 2.7, -0.5], vec![3]);
-        let rc = execute_ceil(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_eq!(rc[0].as_f32().unwrap(), vec![2.0, 3.0, 0.0]);
-        let rf = execute_floor(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_eq!(rf[0].as_f32().unwrap(), vec![1.0, 2.0, -1.0]);
-        let rr = execute_round(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_eq!(rr[0].as_f32().unwrap(), vec![1.0, 3.0, -1.0]);
+        let rc = execute_ceil(&[Some(&x)], &empty_attrs())
+            .expect("ceil execution should succeed with valid inputs");
+        assert_eq!(
+            rc[0].as_f32().expect("tensor should be float32 type"),
+            vec![2.0, 3.0, 0.0]
+        );
+        let rf = execute_floor(&[Some(&x)], &empty_attrs())
+            .expect("floor execution should succeed with valid inputs");
+        assert_eq!(
+            rf[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 2.0, -1.0]
+        );
+        let rr = execute_round(&[Some(&x)], &empty_attrs())
+            .expect("round execution should succeed with valid inputs");
+        assert_eq!(
+            rr[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 3.0, -1.0]
+        );
     }
 
     #[test]
     fn test_sign() {
         let x = OnnxTensor::from_f32(&[-3.0, 0.0, 5.0], vec![3]);
-        let r = execute_sign(&[Some(&x)], &empty_attrs()).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![-1.0, 0.0, 1.0]);
+        let r = execute_sign(&[Some(&x)], &empty_attrs())
+            .expect("sign execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![-1.0, 0.0, 1.0]
+        );
     }
 }

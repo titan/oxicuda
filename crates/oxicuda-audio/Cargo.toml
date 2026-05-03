@@ -1,0 +1,29 @@
+[package]
+name         = "oxicuda-audio"
+description  = "Audio/Speech ML architectures for OxiCUDA: Conformer encoder, Wav2Vec2 CNN feature extractor, CTC forward+beam-search, WaveNet dilated stack, SpecAugment, speaker embeddings (x-vector/TDNN) — pure Rust, zero CUDA SDK dependency."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+readme                 = "README.md"
+keywords = ["gpu", "audio", "speech", "asr", "conformer"]
+categories = ["science", "algorithms"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name    = "audio_ops"
+harness = false

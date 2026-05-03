@@ -196,12 +196,12 @@ complete API surface with PTX generation delegated to oxicuda-ptx.
 
 | # | Requirement | Target | Status |
 |---|-------------|--------|--------|
-| P1 | GEMM F16 sm_80, M=N=K=4096 | ≥ 95% cuBLAS throughput | [ ] |
-| P2 | GEMM F32 sm_80, M=N=K=4096 | ≥ 95% cuBLAS throughput | [ ] |
-| P3 | GEMM F64 sm_80, M=N=K=4096 | ≥ 95% cuBLAS throughput | [ ] |
-| P4 | Batched GEMM, 1000 × (256×256×256) | ≥ 90% cuBLAS throughput | [ ] |
-| P5 | Softmax, 4096×4096 matrix | ≥ 90% cuDNN throughput | [ ] |
-| P6 | axpy, 10M F32 elements | ≥ 95% cuBLAS throughput | [ ] |
+| P1 | GEMM F16 sm_80, M=N=K=4096 | ≥ 95% cuBLAS throughput | [~] |
+| P2 | GEMM F32 sm_80, M=N=K=4096 | ≥ 95% cuBLAS throughput | [~] |
+| P3 | GEMM F64 sm_80, M=N=K=4096 | ≥ 95% cuBLAS throughput | [~] |
+| P4 | Batched GEMM, 1000 × (256×256×256) | ≥ 90% cuBLAS throughput | [~] |
+| P5 | Softmax, 4096×4096 matrix | ≥ 90% cuDNN throughput | [~] |
+| P6 | axpy, 10M F32 elements | ≥ 95% cuBLAS throughput | [~] |
 
 ---
 
@@ -293,7 +293,8 @@ complete API surface with PTX generation delegated to oxicuda-ptx.
 - [x] Tile config shared memory budget respected for all SM versions
 - [x] BLAS Level 1 formula correctness: axpy, dot, nrm2, scal, asum verified
 - [x] Numerical accuracy test matrix helpers added (test_matrices.rs)
-- [ ] GEMM performance matrix benchmarks run and documented
+- [~] GEMM performance matrix benchmarks run and documented
+  - Per-bench harnesses (P1-P6) implemented; full matrix run + documentation pending Linux+NVIDIA.
 
 ### Implementation Deepening
 - [x] Complex GEMM/GEMV kernel launch implemented: Module::from_ptx + Kernel::from_module, 2D grid for CGEMM (16×16 blocks), 1D grid for CGEMV; macOS gracefully propagates CudaError via BlasError::Cuda
@@ -301,3 +302,12 @@ complete API surface with PTX generation delegated to oxicuda-ptx.
 - [x] Stream-K load balancing verified superior to Split-K for tail-wave scenarios (algorithmic test: `stream_k_superior_to_split_k_in_tail_wave_scenario`, `stream_k_tile_distribution_balanced_for_large_square`)
 - [x] Epilogue fusion saves ≥ 2× memory bandwidth vs separate activation kernel
 - [x] GEMV fallback triggered correctly for M or N < 32 shape classification
+
+## Performance Verification Harness Status (2026-04-26)
+
+- **P1** (GEMM F16 4096³): harness at `benches/gemm_f16_4096.rs`; awaiting Linux+NVIDIA run.
+- **P2** (GEMM F32 4096³): harness at `benches/gemm_f32_4096.rs`; awaiting Linux+NVIDIA run.
+- **P3** (GEMM F64 4096³): harness at `benches/gemm_f64_4096.rs`; awaiting Linux+NVIDIA run.
+- **P4** (Batched GEMM 1000×256³): harness at `benches/batched_gemm_256.rs`; awaiting Linux+NVIDIA run.
+- **P5** (Softmax 4096²): harness at `benches/softmax_4096.rs`; awaiting Linux+NVIDIA run.
+- **P6** (axpy 10M F32): harness at `benches/axpy_10m_f32.rs`; awaiting Linux+NVIDIA run.

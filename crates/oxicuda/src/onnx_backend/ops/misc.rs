@@ -81,18 +81,23 @@ mod tests {
     #[test]
     fn test_identity() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![3]);
-        let r = execute_identity(&[Some(&x)], &HashMap::new()).unwrap();
+        let r = execute_identity(&[Some(&x)], &HashMap::new())
+            .expect("identity execution should succeed with valid inputs");
         assert_eq!(r[0], x);
     }
 
     #[test]
     fn test_dropout_inference() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let r = execute_dropout(&[Some(&x)], &HashMap::new()).unwrap();
+        let r = execute_dropout(&[Some(&x)], &HashMap::new())
+            .expect("dropout execution should succeed with valid inputs");
         assert_eq!(r.len(), 2);
         assert_eq!(r[0], x);
         // Mask should be all true
-        assert_eq!(r[1].as_bool().unwrap(), vec![true; 4]);
+        assert_eq!(
+            r[1].as_bool().expect("tensor should be bool type"),
+            vec![true; 4]
+        );
     }
 
     #[test]
@@ -100,7 +105,8 @@ mod tests {
         let t = OnnxTensor::from_f32(&[1.0, 2.0], vec![2]);
         let mut attrs = HashMap::new();
         attrs.insert("value".into(), AttributeValue::Tensor(t.clone()));
-        let r = execute_constant(&[], &attrs).unwrap();
+        let r = execute_constant(&[], &attrs)
+            .expect("constant execution should succeed with valid inputs");
         assert_eq!(r[0], t);
     }
 
@@ -108,8 +114,9 @@ mod tests {
     fn test_constant_float() {
         let mut attrs = HashMap::new();
         attrs.insert("value_float".into(), AttributeValue::Float(7.125));
-        let r = execute_constant(&[], &attrs).unwrap();
-        let v = r[0].as_f32().unwrap();
+        let r = execute_constant(&[], &attrs)
+            .expect("constant execution should succeed with valid inputs");
+        let v = r[0].as_f32().expect("tensor should be float32 type");
         assert!((v[0] - 7.125).abs() < 1e-3);
     }
 
@@ -117,23 +124,35 @@ mod tests {
     fn test_constant_int() {
         let mut attrs = HashMap::new();
         attrs.insert("value_int".into(), AttributeValue::Int(42));
-        let r = execute_constant(&[], &attrs).unwrap();
-        assert_eq!(r[0].as_i64().unwrap(), vec![42]);
+        let r = execute_constant(&[], &attrs)
+            .expect("constant execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_i64().expect("tensor should be int64 type"),
+            vec![42]
+        );
     }
 
     #[test]
     fn test_shape() {
         let x = OnnxTensor::from_f32(&[0.0; 24], vec![2, 3, 4]);
-        let r = execute_shape(&[Some(&x)], &HashMap::new()).unwrap();
-        assert_eq!(r[0].as_i64().unwrap(), vec![2, 3, 4]);
+        let r = execute_shape(&[Some(&x)], &HashMap::new())
+            .expect("shape execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_i64().expect("tensor should be int64 type"),
+            vec![2, 3, 4]
+        );
         assert_eq!(r[0].shape, vec![3]);
     }
 
     #[test]
     fn test_size() {
         let x = OnnxTensor::from_f32(&[0.0; 24], vec![2, 3, 4]);
-        let r = execute_size(&[Some(&x)], &HashMap::new()).unwrap();
-        assert_eq!(r[0].as_i64().unwrap(), vec![24]);
+        let r = execute_size(&[Some(&x)], &HashMap::new())
+            .expect("size execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_i64().expect("tensor should be int64 type"),
+            vec![24]
+        );
         assert!(r[0].shape.is_empty());
     }
 }

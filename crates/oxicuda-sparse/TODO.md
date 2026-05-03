@@ -93,7 +93,7 @@ The estimation targeted exhaustive format/algorithm coverage with multiple SpMV 
 
 | # | Requirement | Target | Status |
 |---|-------------|--------|--------|
-| P3 | SpMV CSR, typical SciPy-scale sparse matrix | ≥ 85% cuSPARSE throughput | [ ] |
+| P3 | SpMV CSR, typical SciPy-scale sparse matrix | ≥ 85% cuSPARSE throughput | [~] |
 
 ---
 
@@ -131,3 +131,7 @@ The estimation targeted exhaustive format/algorithm coverage with multiple SpMV 
 - [x] SpMV/SpMM numerical accuracy vs dense reference: results within FP64 1e-13 (5 tests)
 - [x] SpMV alpha/beta scaling verified
 - [x] SpMV identity matrix verified
+
+## Performance Verification Harness Status (2026-04-26)
+
+- **P3** (SpMV CSR SciPy-scale): harness at `benches/spmv_csr.rs`; awaiting Linux+NVIDIA run.

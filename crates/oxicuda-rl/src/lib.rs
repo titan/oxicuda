@@ -172,14 +172,20 @@ mod tests {
         let mut env = LinearQuadraticEnv::new(obs_dim, 200);
         let policy = CategoricalPolicy::new(n_actions);
 
-        let mut obs = env.reset().unwrap();
+        let mut obs = env.reset().expect("LQR env reset should not fail");
         // Collect 200 transitions
         for _ in 0..200 {
             // Dummy logits
             let logits = obs.iter().take(n_actions).copied().collect::<Vec<_>>();
-            let probs = policy.softmax(&logits).unwrap();
-            let _action = policy.sample_action(&probs, &mut handle).unwrap();
-            let result = env.step(&[0.0; 4]).unwrap();
+            let probs = policy
+                .softmax(&logits)
+                .expect("logits.len() == n_actions should not fail");
+            let _action = policy
+                .sample_action(&probs, &mut handle)
+                .expect("valid softmax output should sample correctly");
+            let result = env
+                .step(&[0.0; 4])
+                .expect("LQR step with correct action dim should not fail");
             buf.push(
                 obs.clone(),
                 vec![_action as f32],
@@ -188,7 +194,8 @@ mod tests {
                 result.done,
             );
             obs = if result.done {
-                env.reset().unwrap()
+                env.reset()
+                    .expect("LQR env reset on episode end should not fail")
             } else {
                 result.obs
             };
@@ -196,7 +203,9 @@ mod tests {
         assert!(buf.len() >= 32, "should have enough transitions");
 
         // Sample and compute loss
-        let batch = buf.sample(32, &mut handle).unwrap();
+        let batch = buf
+            .sample(32, &mut handle)
+            .expect("buffer has 200 entries, 32 requested");
         let q_sa: Vec<f32> = batch.iter().map(|t| t.reward).collect();
         let rewards: Vec<f32> = batch.iter().map(|t| t.reward).collect();
         let max_q_next: Vec<f32> = batch.iter().map(|_| 0.0).collect();
@@ -213,7 +222,7 @@ mod tests {
             &is_w,
             DqnConfig::default(),
         )
-        .unwrap();
+        .expect("valid equal-length batch slices should produce DQN loss");
         assert!(l.loss.is_finite(), "DQN loss should be finite");
     }
 
@@ -230,7 +239,8 @@ mod tests {
             .map(|i| if i % 10 == 9 { 1.0 } else { 0.0 })
             .collect();
 
-        let gae = compute_gae(&rewards, &values, &next_vals, &dones, GaeConfig::default()).unwrap();
+        let gae = compute_gae(&rewards, &values, &next_vals, &dones, GaeConfig::default())
+            .expect("valid equal-length slices should compute GAE");
         assert_eq!(gae.advantages.len(), t);
 
         // Simulate PPO mini-batch update
@@ -249,7 +259,7 @@ mod tests {
             &ovp,
             PpoConfig::default(),
         )
-        .unwrap();
+        .expect("valid equal-length PPO batch slices should produce loss");
         assert!(
             l.total.is_finite(),
             "PPO loss should be finite: {}",
@@ -272,7 +282,9 @@ mod tests {
                 i % 20 == 19,
             );
         }
-        let batch = buf.sample(32, &mut handle).unwrap();
+        let batch = buf
+            .sample(32, &mut handle)
+            .expect("PER buffer has 256 entries, 32 requested");
         let q: Vec<f32> = batch.iter().map(|s| s.transition.reward).collect();
         let r: Vec<f32> = batch.iter().map(|s| s.transition.reward).collect();
         let d: Vec<f32> = batch
@@ -282,8 +294,8 @@ mod tests {
         let min_qn = vec![0.5_f32; 32];
         let lp_next = vec![-0.5_f32; 32];
         let is_w: Vec<f32> = batch.iter().map(|s| s.weight).collect();
-        let (cl, _) =
-            sac_critic_loss(&q, &r, &d, &min_qn, &lp_next, &is_w, SacConfig::default()).unwrap();
+        let (cl, _) = sac_critic_loss(&q, &r, &d, &min_qn, &lp_next, &is_w, SacConfig::default())
+            .expect("valid equal-length SAC batch should produce critic loss");
         assert!(cl.is_finite(), "SAC critic loss should be finite");
     }
 
@@ -293,15 +305,20 @@ mod tests {
         let envs: Vec<_> = (0..4).map(|_| LinearQuadraticEnv::new(3, 50)).collect();
         let mut ve = VecEnv::new(envs);
         let mut norm = ObservationNormalizer::new(3);
-        let init_obs = ve.reset_all().unwrap();
+        let init_obs = ve.reset_all().expect("VecEnv reset_all should not fail");
         for chunk in init_obs.chunks_exact(3) {
-            norm.process_one(chunk).unwrap();
+            norm.process_one(chunk)
+                .expect("obs_dim=3 matches normalizer dim");
         }
         let actions = vec![0.01_f32; 4 * 3];
         for _ in 0..20 {
-            let result = ve.step(&actions).unwrap();
+            let result = ve
+                .step(&actions)
+                .expect("VecEnv step with correct action length should not fail");
             for chunk in result.obs.chunks_exact(3) {
-                let _norm_obs = norm.process_one(chunk).unwrap();
+                let _norm_obs = norm
+                    .process_one(chunk)
+                    .expect("obs_dim=3 matches normalizer dim");
             }
         }
         assert!(norm.count() > 0);

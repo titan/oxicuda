@@ -213,15 +213,17 @@ mod tests {
 
     #[test]
     fn test_mel_filterbank_shape() {
-        let cfg = MelFilterbankConfig::new(40, 22050.0, 512, 0.0, 8000.0).unwrap();
-        let fb = mel_filterbank(&cfg).unwrap();
+        let cfg = MelFilterbankConfig::new(40, 22050.0, 512, 0.0, 8000.0)
+            .expect("valid mel filterbank config");
+        let fb = mel_filterbank(&cfg).expect("mel filterbank construction succeeds");
         assert_eq!(fb.len(), 40 * cfg.n_bins());
     }
 
     #[test]
     fn test_mel_filterbank_non_negative() {
-        let cfg = MelFilterbankConfig::new(40, 22050.0, 512, 0.0, 8000.0).unwrap();
-        let fb = mel_filterbank(&cfg).unwrap();
+        let cfg = MelFilterbankConfig::new(40, 22050.0, 512, 0.0, 8000.0)
+            .expect("valid mel filterbank config");
+        let fb = mel_filterbank(&cfg).expect("mel filterbank construction succeeds");
         assert!(fb.iter().all(|&v| v >= 0.0));
     }
 
@@ -240,11 +242,12 @@ mod tests {
     #[test]
     fn test_apply_filterbank_dc() {
         // All-ones power frame: mel output = row sums of filterbank.
-        let cfg = MelFilterbankConfig::new(4, 8000.0, 64, 0.0, 4000.0).unwrap();
-        let fb = mel_filterbank(&cfg).unwrap();
+        let cfg = MelFilterbankConfig::new(4, 8000.0, 64, 0.0, 4000.0)
+            .expect("valid mel filterbank config");
+        let fb = mel_filterbank(&cfg).expect("mel filterbank construction succeeds");
         let n_bins = cfg.n_bins();
         let power = vec![1.0_f64; n_bins];
-        let mel_out = apply_filterbank(&fb, &power, 4).unwrap();
+        let mel_out = apply_filterbank(&fb, &power, 4).expect("filterbank apply succeeds");
         assert_eq!(mel_out.len(), 4);
         // Each filter's output should be positive
         assert!(mel_out.iter().all(|&v| v >= 0.0));
@@ -252,11 +255,12 @@ mod tests {
 
     #[test]
     fn test_apply_filterbank_zero_input() {
-        let cfg = MelFilterbankConfig::new(4, 8000.0, 64, 0.0, 4000.0).unwrap();
-        let fb = mel_filterbank(&cfg).unwrap();
+        let cfg = MelFilterbankConfig::new(4, 8000.0, 64, 0.0, 4000.0)
+            .expect("valid mel filterbank config");
+        let fb = mel_filterbank(&cfg).expect("mel filterbank construction succeeds");
         let n_bins = cfg.n_bins();
         let power = vec![0.0_f64; n_bins];
-        let mel_out = apply_filterbank(&fb, &power, 4).unwrap();
+        let mel_out = apply_filterbank(&fb, &power, 4).expect("filterbank apply succeeds");
         assert!(mel_out.iter().all(|&v| v == 0.0));
     }
 

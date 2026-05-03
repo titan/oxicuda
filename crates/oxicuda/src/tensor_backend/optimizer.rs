@@ -639,10 +639,13 @@ mod tests {
     use super::*;
 
     fn make_param(data: &[f64], grad_data: &[f64]) -> GpuTensor {
-        let mut p = GpuTensor::from_host_f64(data, &[data.len()], 0).unwrap();
+        let mut p = GpuTensor::from_host_f64(data, &[data.len()], 0)
+            .expect("GpuTensor creation from host data should succeed");
         p.set_requires_grad(true);
-        let g = GpuTensor::from_host_f64(grad_data, &[grad_data.len()], 0).unwrap();
-        p.accumulate_grad(&g).unwrap();
+        let g = GpuTensor::from_host_f64(grad_data, &[grad_data.len()], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        p.accumulate_grad(&g)
+            .expect("gradient accumulation should succeed");
         p
     }
 
@@ -650,7 +653,8 @@ mod tests {
     fn test_sgd_basic() {
         let mut opt = Sgd::new(0.1);
         let mut params = vec![make_param(&[5.0, 10.0], &[1.0, 2.0])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         // p -= 0.1 * grad => 5 - 0.1 = 4.9, 10 - 0.2 = 9.8
         assert!((params[0].host_data[0] - 4.9).abs() < 1e-10);
         assert!((params[0].host_data[1] - 9.8).abs() < 1e-10);
@@ -660,7 +664,8 @@ mod tests {
     fn test_sgd_with_momentum() {
         let mut opt = Sgd::new(0.1).with_momentum(0.9);
         let mut params = vec![make_param(&[5.0], &[1.0])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         // First step: velocity = grad = 1.0, p -= 0.1 * 1.0 = 4.9
         assert!((params[0].host_data[0] - 4.9).abs() < 1e-10);
     }
@@ -669,7 +674,8 @@ mod tests {
     fn test_adam_basic() {
         let mut opt = Adam::new(0.01);
         let mut params = vec![make_param(&[5.0], &[1.0])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         // After one step, parameter should have decreased
         assert!(params[0].host_data[0] < 5.0);
     }
@@ -681,12 +687,16 @@ mod tests {
         let mut params = vec![make_param(&[3.0], &[6.0])];
 
         for _ in 0..100 {
-            opt.step(&mut params).unwrap();
+            opt.step(&mut params)
+                .expect("optimizer step should succeed with valid params");
             // Recompute grad = 2 * x
             let new_grad = 2.0 * params[0].host_data[0];
             params[0].zero_grad();
-            let g = GpuTensor::from_host_f64(&[new_grad], &[1], 0).unwrap();
-            params[0].accumulate_grad(&g).unwrap();
+            let g = GpuTensor::from_host_f64(&[new_grad], &[1], 0)
+                .expect("GpuTensor creation from host data should succeed");
+            params[0]
+                .accumulate_grad(&g)
+                .expect("gradient accumulation should succeed");
         }
         // Should be close to 0
         assert!(params[0].host_data[0].abs() < 0.5);
@@ -696,7 +706,8 @@ mod tests {
     fn test_adagrad_basic() {
         let mut opt = AdaGrad::new(0.1);
         let mut params = vec![make_param(&[5.0], &[1.0])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         assert!(params[0].host_data[0] < 5.0);
     }
 
@@ -704,7 +715,8 @@ mod tests {
     fn test_rmsprop_basic() {
         let mut opt = RmsProp::new(0.01);
         let mut params = vec![make_param(&[5.0], &[1.0])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         assert!(params[0].host_data[0] < 5.0);
     }
 
@@ -712,7 +724,8 @@ mod tests {
     fn test_lamb_basic() {
         let mut opt = Lamb::new(0.01);
         let mut params = vec![make_param(&[5.0], &[1.0])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         assert!(params[0].host_data[0] < 5.0);
     }
 
@@ -729,7 +742,8 @@ mod tests {
     fn test_adam_with_weight_decay() {
         let mut opt = Adam::new(0.01).with_weight_decay(0.01);
         let mut params = vec![make_param(&[5.0], &[0.0])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         // Even with zero grad, weight decay should shrink the parameter
         assert!(params[0].host_data[0] < 5.0);
     }
@@ -740,11 +754,15 @@ mod tests {
         let mut params = vec![make_param(&[3.0], &[6.0])];
 
         for _ in 0..100 {
-            opt.step(&mut params).unwrap();
+            opt.step(&mut params)
+                .expect("optimizer step should succeed with valid params");
             let new_grad = 2.0 * params[0].host_data[0];
             params[0].zero_grad();
-            let g = GpuTensor::from_host_f64(&[new_grad], &[1], 0).unwrap();
-            params[0].accumulate_grad(&g).unwrap();
+            let g = GpuTensor::from_host_f64(&[new_grad], &[1], 0)
+                .expect("GpuTensor creation from host data should succeed");
+            params[0]
+                .accumulate_grad(&g)
+                .expect("gradient accumulation should succeed");
         }
         assert!(params[0].host_data[0].abs() < 1.0);
     }
@@ -753,7 +771,8 @@ mod tests {
     fn test_sgd_weight_decay() {
         let mut opt = Sgd::new(0.1).with_weight_decay(0.01);
         let mut params = vec![make_param(&[10.0], &[0.0])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         // weight decay adds 0.01*10 = 0.1 to grad, then p -= 0.1 * 0.1 = 9.99
         assert!((params[0].host_data[0] - 9.99).abs() < 1e-10);
     }
@@ -762,10 +781,12 @@ mod tests {
     fn test_no_grad_no_update() {
         let mut opt = Sgd::new(0.1);
         // Parameter without gradient
-        let mut p = GpuTensor::from_host_f64(&[5.0], &[1], 0).unwrap();
+        let mut p = GpuTensor::from_host_f64(&[5.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
         p.set_requires_grad(true);
         let mut params = vec![p];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed with valid params");
         // Should be unchanged
         assert!((params[0].host_data[0] - 5.0).abs() < 1e-10);
     }

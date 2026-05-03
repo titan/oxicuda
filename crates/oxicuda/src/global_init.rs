@@ -267,7 +267,7 @@ pub fn lazy_init() -> CudaResult<&'static OxiCudaRuntime> {
     let result = RUNTIME.get_or_init(|| OxiCudaRuntime::new(OxiCudaRuntimeConfig::default()));
     match result {
         Ok(rt) => Ok(rt),
-        Err(e) => Err(*e),
+        Err(e) => Err(e.clone()),
     }
 }
 
@@ -279,7 +279,7 @@ pub fn init_with(config: OxiCudaRuntimeConfig) -> CudaResult<&'static OxiCudaRun
     let result = RUNTIME.get_or_init(|| OxiCudaRuntime::new(config));
     match result {
         Ok(rt) => Ok(rt),
-        Err(e) => Err(*e),
+        Err(e) => Err(e.clone()),
     }
 }
 

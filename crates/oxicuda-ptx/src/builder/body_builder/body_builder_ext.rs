@@ -21,8 +21,18 @@ impl BodyBuilder<'_> {
     // ════════════════════════════════════════════════════════════════════
 
     /// Atomic add on global memory (f32): returns old value at `[addr]`, stores `old + val`.
+    ///
+    /// Uses the typed [`Instruction::AtomGlobalAddFloat`] variant for correctness
+    /// analysis. Emits `atom.global.add.f32 dst, [addr], val`.
     pub fn atom_global_add_f32(&mut self, addr: Register, val: Register) -> Register {
-        self.atom_typed(MemorySpace::Global, AtomOp::Add, PtxType::F32, addr, val)
+        let dst = self.regs.alloc(PtxType::F32);
+        self.instructions.push(Instruction::AtomGlobalAddFloat {
+            ty: PtxType::F32,
+            dst: dst.clone(),
+            addr: Operand::Register(addr),
+            src: Operand::Register(val),
+        });
+        dst
     }
 
     /// Atomic add on global memory (u32): returns old value at `[addr]`, stores `old + val`.
@@ -36,8 +46,18 @@ impl BodyBuilder<'_> {
     }
 
     /// Atomic add on global memory (f64): returns old value at `[addr]`, stores `old + val`.
+    ///
+    /// Uses the typed [`Instruction::AtomGlobalAddFloat`] variant for correctness
+    /// analysis. Emits `atom.global.add.f64 dst, [addr], val`.
     pub fn atom_global_add_f64(&mut self, addr: Register, val: Register) -> Register {
-        self.atom_typed(MemorySpace::Global, AtomOp::Add, PtxType::F64, addr, val)
+        let dst = self.regs.alloc(PtxType::F64);
+        self.instructions.push(Instruction::AtomGlobalAddFloat {
+            ty: PtxType::F64,
+            dst: dst.clone(),
+            addr: Operand::Register(addr),
+            src: Operand::Register(val),
+        });
+        dst
     }
 
     /// Atomic compare-and-swap on global memory (u32).

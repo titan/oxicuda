@@ -194,8 +194,6 @@ fn generate_symv_ptx<T: GpuFloat>(sm: SmVersion, uplo: FillMode) -> BlasResult<S
                 // Determine row,col for memory access based on fill mode
                 // For upper: if i <= j, read A[i][j]; else read A[j][i]
                 // For lower: if i >= j, read A[i][j]; else read A[j][i]
-                let row = b.alloc_reg(PtxType::U32);
-                let col = b.alloc_reg(PtxType::U32);
                 let swap_pred = b.alloc_reg(PtxType::Pred);
 
                 if is_upper {
@@ -207,8 +205,8 @@ fn generate_symv_ptx<T: GpuFloat>(sm: SmVersion, uplo: FillMode) -> BlasResult<S
                 }
 
                 // If swap: row=j, col=gid; else: row=gid, col=j
-                b.raw_ptx(&format!("selp.u32 {row}, {j}, {gid}, {swap_pred};"));
-                b.raw_ptx(&format!("selp.u32 {col}, {gid}, {j}, {swap_pred};"));
+                let row = b.selp(PtxType::U32, j.clone(), gid.clone(), swap_pred.clone());
+                let col = b.selp(PtxType::U32, gid.clone(), j.clone(), swap_pred);
 
                 // Address: a_ptr + (row * lda + col) * elem_bytes
                 let row_off = b.alloc_reg(PtxType::U32);

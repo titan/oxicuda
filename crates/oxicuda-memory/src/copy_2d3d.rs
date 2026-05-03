@@ -22,10 +22,12 @@
 //!
 //! # Status
 //!
-//! The CUDA driver functions `cuMemcpy2D_v2` and `cuMemcpy3D_v2` are
-//! not yet loaded in `oxicuda-driver`. The validation logic is fully
-//! functional, but actual copies return [`CudaError::NotSupported`]
-//! when a GPU driver is not available.
+//! The CUDA driver function `cuMemcpy2D_v2` is now wired through
+//! `oxicuda-driver`.  All 2D copy variants (DtoD, HtoD, DtoH) build a
+//! [`CUDA_MEMCPY2D`] descriptor and
+//! invoke the driver entry point when available.  `cuMemcpy3D_v2` is
+//! not yet loaded; the 3D copy still returns [`CudaError::NotSupported`]
+//! when a driver is present but the symbol is missing.
 //!
 //! # Example
 //!
@@ -46,7 +48,8 @@
 //! # Ok::<(), oxicuda_driver::error::CudaError>(())
 //! ```
 
-use oxicuda_driver::error::{CudaError, CudaResult};
+use oxicuda_driver::error::{CudaError, CudaResult, check};
+use oxicuda_driver::ffi::{CUDA_MEMCPY2D, CUmemorytype};
 
 use crate::device_buffer::DeviceBuffer;
 
@@ -330,13 +333,22 @@ pub fn copy_2d_dtod<T: Copy>(
     validate_2d_buffer_size(src, params.src_byte_extent())?;
     validate_2d_buffer_size(dst, params.dst_byte_extent())?;
 
-    // TODO: call cuMemcpy2D_v2 when available in DriverApi.
-    // For now, verify the driver is available (will fail on macOS).
-    let _api = oxicuda_driver::loader::try_driver()?;
+    let api = oxicuda_driver::loader::try_driver()?;
+    let f = api.cu_memcpy_2d.ok_or(CudaError::NotSupported)?;
 
-    // On a real implementation we would construct a CUDA_MEMCPY2D struct
-    // and call the driver. For now, return Ok to indicate validation passed.
-    Ok(())
+    let m = CUDA_MEMCPY2D {
+        src_memory_type: CUmemorytype::Device as u32,
+        src_device: src.as_device_ptr(),
+        src_pitch: params.src_pitch,
+        dst_memory_type: CUmemorytype::Device as u32,
+        dst_device: dst.as_device_ptr(),
+        dst_pitch: params.dst_pitch,
+        width_in_bytes: params.width,
+        height: params.height,
+        ..CUDA_MEMCPY2D::default()
+    };
+
+    check(unsafe { f(&m) })
 }
 
 /// Copies a 2D region from host memory to a device buffer.
@@ -359,8 +371,22 @@ pub fn copy_2d_htod<T: Copy>(
     validate_2d_slice_size(src, params.src_byte_extent())?;
     validate_2d_buffer_size(dst, params.dst_byte_extent())?;
 
-    let _api = oxicuda_driver::loader::try_driver()?;
-    Ok(())
+    let api = oxicuda_driver::loader::try_driver()?;
+    let f = api.cu_memcpy_2d.ok_or(CudaError::NotSupported)?;
+
+    let m = CUDA_MEMCPY2D {
+        src_memory_type: CUmemorytype::Host as u32,
+        src_host: src.as_ptr().cast::<std::ffi::c_void>(),
+        src_pitch: params.src_pitch,
+        dst_memory_type: CUmemorytype::Device as u32,
+        dst_device: dst.as_device_ptr(),
+        dst_pitch: params.dst_pitch,
+        width_in_bytes: params.width,
+        height: params.height,
+        ..CUDA_MEMCPY2D::default()
+    };
+
+    check(unsafe { f(&m) })
 }
 
 /// Copies a 2D region from a device buffer to host memory.
@@ -383,8 +409,22 @@ pub fn copy_2d_dtoh<T: Copy>(
     validate_2d_buffer_size(src, params.src_byte_extent())?;
     validate_2d_slice_size(dst, params.dst_byte_extent())?;
 
-    let _api = oxicuda_driver::loader::try_driver()?;
-    Ok(())
+    let api = oxicuda_driver::loader::try_driver()?;
+    let f = api.cu_memcpy_2d.ok_or(CudaError::NotSupported)?;
+
+    let m = CUDA_MEMCPY2D {
+        src_memory_type: CUmemorytype::Device as u32,
+        src_device: src.as_device_ptr(),
+        src_pitch: params.src_pitch,
+        dst_memory_type: CUmemorytype::Host as u32,
+        dst_host: dst.as_mut_ptr().cast::<std::ffi::c_void>(),
+        dst_pitch: params.dst_pitch,
+        width_in_bytes: params.width,
+        height: params.height,
+        ..CUDA_MEMCPY2D::default()
+    };
+
+    check(unsafe { f(&m) })
 }
 
 // ---------------------------------------------------------------------------

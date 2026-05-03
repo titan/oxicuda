@@ -175,16 +175,18 @@ mod tests {
     #[test]
     fn reset_all_length() {
         let mut ve = make_vec_env(4, 3, 50);
-        let obs = ve.reset_all().unwrap();
+        let obs = ve.reset_all().expect("VecEnv reset_all should not fail");
         assert_eq!(obs.len(), 4 * 3);
     }
 
     #[test]
     fn step_output_lengths() {
         let mut ve = make_vec_env(4, 3, 50);
-        let _ = ve.reset_all().unwrap();
+        let _ = ve.reset_all().expect("VecEnv reset_all should not fail");
         let actions = vec![0.0_f32; 4 * 3];
-        let res = ve.step(&actions).unwrap();
+        let res = ve
+            .step(&actions)
+            .expect("VecEnv step with correct action length should not fail");
         assert_eq!(res.obs.len(), 4 * 3);
         assert_eq!(res.rewards.len(), 4);
         assert_eq!(res.dones.len(), 4);
@@ -193,7 +195,7 @@ mod tests {
     #[test]
     fn step_dimension_mismatch() {
         let mut ve = make_vec_env(4, 3, 50);
-        let _ = ve.reset_all().unwrap();
+        let _ = ve.reset_all().expect("VecEnv reset_all should not fail");
         // Wrong total length.
         assert!(ve.step(&[0.0; 10]).is_err());
     }
@@ -202,8 +204,10 @@ mod tests {
     fn auto_reset_on_done() {
         // max_steps=1 so every step triggers a done and auto-reset.
         let mut ve = make_vec_env(2, 2, 1);
-        let _ = ve.reset_all().unwrap();
-        let res = ve.step(&[0.0_f32; 2 * 2]).unwrap();
+        let _ = ve.reset_all().expect("VecEnv reset_all should not fail");
+        let res = ve
+            .step(&[0.0_f32; 2 * 2])
+            .expect("VecEnv step with correct action length should not fail");
         // All dones should be true.
         assert!(res.dones.iter().all(|&d| d));
         // obs should still have the reset observations (length correct).
@@ -220,7 +224,9 @@ mod tests {
     fn empty_vec_env_step() {
         let envs: Vec<LinearQuadraticEnv> = Vec::new();
         let mut ve = VecEnv::new(envs);
-        let res = ve.step(&[]).unwrap();
+        let res = ve
+            .step(&[])
+            .expect("empty VecEnv step should return empty result");
         assert!(res.obs.is_empty());
         assert!(res.rewards.is_empty());
         assert!(res.dones.is_empty());

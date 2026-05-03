@@ -118,7 +118,8 @@ mod tests {
         let r = vec![1.0_f32; 3];
         let v = vec![0.0_f32; 4]; // T+1 values
         let d = vec![0.0_f32; 3];
-        let g = compute_td_lambda(&r, &v, &d, cfg).unwrap();
+        let g = compute_td_lambda(&r, &v, &d, cfg)
+            .expect("valid slices with values.len()==T+1 should not fail");
         // G_t = r_t + γ * v_{t+1} = 1 + 0 = 1 for all t
         for &gi in &g {
             assert!((gi - 1.0).abs() < 1e-5, "λ=0 return={gi}");
@@ -134,7 +135,8 @@ mod tests {
         let r = vec![1.0_f32; 3];
         let v = vec![0.0_f32; 4];
         let d = vec![0.0_f32; 3];
-        let g = compute_td_lambda(&r, &v, &d, cfg).unwrap();
+        let g = compute_td_lambda(&r, &v, &d, cfg)
+            .expect("valid slices with values.len()==T+1 should not fail");
         // G_0 = 1 + 1 + 1 = 3, G_1 = 1 + 1 = 2, G_2 = 1
         assert!((g[0] - 3.0).abs() < 1e-5, "G_0={}", g[0]);
         assert!((g[1] - 2.0).abs() < 1e-5, "G_1={}", g[1]);
@@ -150,7 +152,8 @@ mod tests {
         let r = vec![1.0, 1.0, 1.0];
         let v = vec![0.5, 0.5, 0.5, 0.5];
         let d = vec![0.0, 1.0, 0.0]; // done at t=1
-        let g = compute_td_lambda(&r, &v, &d, cfg).unwrap();
+        let g = compute_td_lambda(&r, &v, &d, cfg)
+            .expect("valid slices with values.len()==T+1 should not fail");
         // At t=1: done=1 → G_1 = r_1 (no future bootstrap)
         // G_2 should be ≈ 1 + 0.99 * 0.5 = 1.495
         // G_1 = 1 (done)
@@ -168,7 +171,8 @@ mod tests {
         let r = vec![1.0_f32; 5];
         let v = vec![0.5_f32; 6];
         let d = vec![0.0_f32; 5];
-        let a = compute_td_advantages(&r, &v, &d, TdConfig::default()).unwrap();
+        let a = compute_td_advantages(&r, &v, &d, TdConfig::default())
+            .expect("valid slices with values.len()==T+1 should not fail");
         assert_eq!(a.len(), 5);
     }
 
@@ -190,7 +194,8 @@ mod tests {
         let r = vec![1.0_f32; 5];
         let v = vec![0.0_f32; 6];
         let d = vec![0.0_f32; 5];
-        let g = compute_td_lambda(&r, &v, &d, cfg).unwrap();
+        let g = compute_td_lambda(&r, &v, &d, cfg)
+            .expect("valid slices with values.len()==T+1 should not fail");
         assert!(
             g[0] > g[1] && g[1] > g[2],
             "returns should decrease for later steps"

@@ -35,6 +35,7 @@ pub mod graph_gen;
 pub mod matrix_gen;
 pub mod monte_carlo;
 pub mod quasi;
+pub mod sde;
 pub mod statistical_tests;
 
 pub use error::{RandError, RandResult};
@@ -52,6 +53,12 @@ pub use monte_carlo::{
     MonteCarloResult, SamplerState,
 };
 pub use quasi::{HaltonGenerator, LatinHypercubeSampler, ScrambledSobolGenerator, SobolGenerator};
+
+pub use sde::{
+    BrownianMotion, BrownianPathResult, EulerMaruyama, EulerMaruyamaResult,
+    GeometricBrownianMotion, HeunResult, Milstein, MilsteinResult, OrnsteinUhlenbeck, PathMatrix,
+    SdeConfig, SdeProcess, StratonovichHeun,
+};
 
 /// Prelude for convenient imports.
 pub mod prelude {
@@ -72,5 +79,9 @@ pub mod prelude {
     };
     pub use crate::quasi::{
         HaltonGenerator, LatinHypercubeSampler, ScrambledSobolGenerator, SobolGenerator,
+    };
+    pub use crate::sde::{
+        BrownianMotion, EulerMaruyama, GeometricBrownianMotion, Milstein, OrnsteinUhlenbeck,
+        PathMatrix, SdeConfig, SdeProcess, StratonovichHeun,
     };
 }

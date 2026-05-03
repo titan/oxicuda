@@ -198,6 +198,9 @@ fn defs(inst: &Instruction) -> Vec<&Register> {
         | Instruction::LoadParam { dst, .. }
         | Instruction::Atom { dst, .. }
         | Instruction::AtomCas { dst, .. }
+        | Instruction::AtomGlobalAddFloat { dst, .. }
+        | Instruction::Addc { dst, .. }
+        | Instruction::Selp { dst, .. }
         | Instruction::Dp4a { dst, .. }
         | Instruction::Dp2a { dst, .. }
         | Instruction::Tex1d { dst, .. }
@@ -267,6 +270,7 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
         | Instruction::Or { a, b, .. }
         | Instruction::Xor { a, b, .. }
         | Instruction::SetP { a, b, .. }
+        | Instruction::Addc { a, b, .. }
         | Instruction::Shl {
             src: a, amount: b, ..
         }
@@ -449,7 +453,9 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
         }
 
         // Atomic: reads addr and src
-        Instruction::Atom { addr, src, .. } | Instruction::Red { addr, src, .. } => {
+        Instruction::Atom { addr, src, .. }
+        | Instruction::Red { addr, src, .. }
+        | Instruction::AtomGlobalAddFloat { addr, src, .. } => {
             let mut regs = operand_regs(addr);
             regs.extend(operand_regs(src));
             regs
@@ -464,6 +470,13 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
             let mut regs = operand_regs(addr);
             regs.extend(operand_regs(compare));
             regs.extend(operand_regs(value));
+            regs
+        }
+
+        Instruction::Selp { a, b, pred, .. } => {
+            let mut regs = operand_regs(a);
+            regs.extend(operand_regs(b));
+            regs.push(pred);
             regs
         }
 

@@ -1,0 +1,22 @@
+[package]
+name         = "oxicuda-bayes"
+description  = "Bayesian deep learning primitives for OxiCUDA: variational inference, Bayesian layers, MC Dropout, Deep Ensembles, SWAG, Laplace approximation, uncertainty calibration — pure Rust, zero CUDA SDK dependency."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+readme                 = "README.md"
+keywords = ["gpu", "bayesian", "uncertainty", "variational-inference", "calibration"]
+categories = ["science", "algorithms"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true

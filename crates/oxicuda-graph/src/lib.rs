@@ -73,13 +73,13 @@
 //!
 //! b.chain(&[upload, k0, k1, download]);
 //!
-//! let graph = b.build().unwrap();
+//! let graph = b.build().expect("graph builder produces a valid DAG");
 //!
 //! // 2. Compile to an execution plan.
-//! let plan = ExecutionPlan::build(&graph, /*max_streams=*/ 4).unwrap();
+//! let plan = ExecutionPlan::build(&graph, /*max_streams=*/ 4).expect("graph is valid for plan compilation");
 //!
 //! // 3. Execute (sequential CPU simulation).
-//! let stats = SequentialExecutor::new(&plan).run().unwrap();
+//! let stats = SequentialExecutor::new(&plan).run().expect("sequential executor runs a valid plan");
 //! assert!(stats.kernels_launched <= 2);  // relu+scale may be fused to 1
 //! ```
 

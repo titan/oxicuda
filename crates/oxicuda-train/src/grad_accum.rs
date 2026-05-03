@@ -187,7 +187,8 @@ mod tests {
 
     fn param_with_grad(g: f32) -> ParamTensor {
         let mut p = ParamTensor::new(vec![1.0_f32; 4], "w");
-        p.set_grad(vec![g; 4]).unwrap();
+        p.set_grad(vec![g; 4])
+            .expect("gradient length matches param data length");
         p
     }
 
@@ -198,15 +199,24 @@ mod tests {
         let mut params = vec![ParamTensor::new(vec![1.0_f32; 4], "w")];
 
         for step_val in [1.0_f32, 2.0, 3.0, 4.0] {
-            params[0].set_grad(vec![step_val; 4]).unwrap();
-            accum.accumulate(&params).unwrap();
+            params[0]
+                .set_grad(vec![step_val; 4])
+                .expect("gradient length matches param data length");
+            accum
+                .accumulate(&params)
+                .expect("accumulate should succeed");
         }
 
         assert!(accum.ready_to_step());
-        accum.finalise(&mut params).unwrap();
+        accum
+            .finalise(&mut params)
+            .expect("finalise should succeed after k accumulations");
 
         // Average of 1+2+3+4 = 10 / 4 = 2.5
-        let g = params[0].grad.as_ref().unwrap();
+        let g = params[0]
+            .grad
+            .as_ref()
+            .expect("gradient must be present after finalise");
         assert_abs_diff_eq!(g[0], 2.5_f32, epsilon = 1e-5);
     }
 
@@ -217,12 +227,21 @@ mod tests {
         let mut params = vec![ParamTensor::new(vec![0.0_f32; 2], "w")];
 
         for _ in 0..k {
-            params[0].set_grad(vec![1.0_f32; 2]).unwrap();
-            accum.accumulate(&params).unwrap();
+            params[0]
+                .set_grad(vec![1.0_f32; 2])
+                .expect("gradient length matches param data length");
+            accum
+                .accumulate(&params)
+                .expect("accumulate should succeed");
         }
 
-        accum.finalise(&mut params).unwrap();
-        let g = params[0].grad.as_ref().unwrap();
+        accum
+            .finalise(&mut params)
+            .expect("finalise should succeed after k accumulations");
+        let g = params[0]
+            .grad
+            .as_ref()
+            .expect("gradient must be present after finalise");
         // sum mode: 1+1+1 = 3
         assert_abs_diff_eq!(g[0], 3.0_f32, epsilon = 1e-5);
     }
@@ -231,7 +250,9 @@ mod tests {
     fn finalise_before_ready_returns_error() {
         let mut accum = GradientAccumulator::new(4);
         let mut params = vec![param_with_grad(1.0)];
-        accum.accumulate(&params).unwrap();
+        accum
+            .accumulate(&params)
+            .expect("accumulate should succeed");
         // Only 1 step done, not ready
         let result = accum.finalise(&mut params);
         assert!(matches!(result, Err(TrainError::Internal { .. })));
@@ -242,7 +263,9 @@ mod tests {
         let k = 2_usize;
         let mut accum = GradientAccumulator::new(k);
         let params = vec![param_with_grad(5.0)];
-        accum.accumulate(&params).unwrap();
+        accum
+            .accumulate(&params)
+            .expect("accumulate should succeed");
         assert_eq!(accum.current_step(), 1);
         accum.reset();
         assert_eq!(accum.current_step(), 0);
@@ -260,15 +283,29 @@ mod tests {
 
         for step in 0..k {
             let g_val = (step + 1) as f32;
-            params[0].set_grad(vec![g_val; 2]).unwrap();
-            params[1].set_grad(vec![g_val * 2.0; 2]).unwrap();
-            accum.accumulate(&params).unwrap();
+            params[0]
+                .set_grad(vec![g_val; 2])
+                .expect("gradient length matches param data length");
+            params[1]
+                .set_grad(vec![g_val * 2.0; 2])
+                .expect("gradient length matches param data length");
+            accum
+                .accumulate(&params)
+                .expect("accumulate should succeed");
         }
-        accum.finalise(&mut params).unwrap();
+        accum
+            .finalise(&mut params)
+            .expect("finalise should succeed after k accumulations");
 
         // param a: (1+2)/2 = 1.5; param b: (2+4)/2 = 3.0
-        let ga = &params[0].grad.as_ref().unwrap()[0];
-        let gb = &params[1].grad.as_ref().unwrap()[0];
+        let ga = &params[0]
+            .grad
+            .as_ref()
+            .expect("gradient must be present after finalise")[0];
+        let gb = &params[1]
+            .grad
+            .as_ref()
+            .expect("gradient must be present after finalise")[0];
         assert_abs_diff_eq!(*ga, 1.5_f32, epsilon = 1e-5);
         assert_abs_diff_eq!(*gb, 3.0_f32, epsilon = 1e-5);
     }

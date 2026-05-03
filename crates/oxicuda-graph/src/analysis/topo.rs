@@ -254,7 +254,7 @@ mod tests {
         for w in ids.windows(2) {
             b.dep(w[0], w[1]);
         }
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         (g, ids)
     }
 
@@ -267,8 +267,10 @@ mod tests {
     #[test]
     fn analyse_single_node() {
         let (g, ids) = make_linear(1);
-        let ta = analyse(&g).unwrap();
-        let info = ta.node_info(ids[0]).unwrap();
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
+        let info = ta
+            .node_info(ids[0])
+            .expect("node registered in topological analysis");
         assert_eq!(info.level, 0);
         assert_eq!(info.asap, 0);
         assert_eq!(info.slack, 0);
@@ -278,16 +280,22 @@ mod tests {
     #[test]
     fn analyse_linear_levels() {
         let (g, ids) = make_linear(5);
-        let ta = analyse(&g).unwrap();
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         for (i, &id) in ids.iter().enumerate() {
-            assert_eq!(ta.node_info(id).unwrap().level, i, "level mismatch at {i}");
+            assert_eq!(
+                ta.node_info(id)
+                    .expect("node registered in topological analysis")
+                    .level,
+                i,
+                "level mismatch at {i}"
+            );
         }
     }
 
     #[test]
     fn analyse_linear_critical_path_edges() {
         let (g, _) = make_linear(4);
-        let ta = analyse(&g).unwrap();
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         assert_eq!(ta.critical_path_edges, 3);
     }
 
@@ -299,19 +307,27 @@ mod tests {
         let c = b.add_barrier("c");
         let d = b.add_barrier("d");
         b.dep(a, b1).dep(a, c).dep(b1, d).dep(c, d);
-        let g = b.build().unwrap();
-        let ta = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         // All nodes have the same depth in the diamond → all on critical path.
         assert_eq!(ta.critical_path_edges, 2);
         // a and d always on critical path.
-        assert!(ta.node_info(a).unwrap().on_critical_path);
-        assert!(ta.node_info(d).unwrap().on_critical_path);
+        assert!(
+            ta.node_info(a)
+                .expect("node a registered in topological analysis")
+                .on_critical_path
+        );
+        assert!(
+            ta.node_info(d)
+                .expect("node d registered in topological analysis")
+                .on_critical_path
+        );
     }
 
     #[test]
     fn analyse_level_widths() {
         let (g, _) = make_linear(3);
-        let ta = analyse(&g).unwrap();
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         // Linear: width at each level = 1.
         let widths = ta.level_widths();
         assert_eq!(widths, vec![1, 1, 1]);
@@ -327,8 +343,8 @@ mod tests {
         let sink = b.add_barrier("sink");
         b.fan_out(src, &[a, c, d]);
         b.fan_in(&[a, c, d], sink);
-        let g = b.build().unwrap();
-        let ta = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         let widths = ta.level_widths();
         // Level 0: src (1), Level 1: a,c,d (3), Level 2: sink (1).
         assert_eq!(widths[0], 1);
@@ -344,14 +360,26 @@ mod tests {
         let bnode = b.add_barrier("b");
         let c = b.add_barrier("c");
         b.dep(a, bnode);
-        let g = b.build().unwrap();
-        let ta = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         let prio = ta.priority_order();
         // Nodes with slack=0 must come before nodes with slack>0.
-        let pos_a = prio.iter().position(|&x| x == a).unwrap();
-        let pos_c = prio.iter().position(|&x| x == c).unwrap();
-        let slack_a = ta.node_info(a).unwrap().slack;
-        let slack_c = ta.node_info(c).unwrap().slack;
+        let pos_a = prio
+            .iter()
+            .position(|&x| x == a)
+            .expect("node a in priority order");
+        let pos_c = prio
+            .iter()
+            .position(|&x| x == c)
+            .expect("node c in priority order");
+        let slack_a = ta
+            .node_info(a)
+            .expect("node a registered in topological analysis")
+            .slack;
+        let slack_c = ta
+            .node_info(c)
+            .expect("node c registered in topological analysis")
+            .slack;
         if slack_a < slack_c {
             assert!(
                 pos_a < pos_c,
@@ -364,7 +392,7 @@ mod tests {
     #[test]
     fn analyse_max_level() {
         let (g, _) = make_linear(7);
-        let ta = analyse(&g).unwrap();
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         assert_eq!(ta.max_level(), 6);
     }
 
@@ -389,17 +417,32 @@ mod tests {
                 .with_name("c"),
         );
         b.dep(a, bnode).dep(bnode, c);
-        let g = b.build().unwrap();
-        let ta = analyse(&g).unwrap();
-        assert_eq!(ta.node_info(a).unwrap().asap, 0);
-        assert_eq!(ta.node_info(bnode).unwrap().asap, 1);
-        assert_eq!(ta.node_info(c).unwrap().asap, 11);
+        let g = b.build().expect("test graph builds successfully");
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
+        assert_eq!(
+            ta.node_info(a)
+                .expect("node a registered in topological analysis")
+                .asap,
+            0
+        );
+        assert_eq!(
+            ta.node_info(bnode)
+                .expect("node bnode registered in topological analysis")
+                .asap,
+            1
+        );
+        assert_eq!(
+            ta.node_info(c)
+                .expect("node c registered in topological analysis")
+                .asap,
+            11
+        );
     }
 
     #[test]
     fn analyse_critical_path_nodes_nonempty() {
         let (g, _) = make_linear(4);
-        let ta = analyse(&g).unwrap();
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         let cp = ta.critical_path_nodes();
         assert!(!cp.is_empty());
     }
@@ -411,9 +454,14 @@ mod tests {
         let compute = b.add_kernel("k", 4, 128, 0).cost(50).finish();
         let download = b.add_memcpy("dn", MemcpyDir::DeviceToHost, 1024);
         b.chain(&[upload, compute, download]);
-        let g = b.build().unwrap();
-        let ta = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let ta = analyse(&g).expect("topological analysis succeeds on valid graph");
         assert_eq!(ta.critical_path_edges, 2);
-        assert!(ta.node_info(compute).unwrap().asap >= 1);
+        assert!(
+            ta.node_info(compute)
+                .expect("compute node registered in topological analysis")
+                .asap
+                >= 1
+        );
     }
 }

@@ -295,7 +295,7 @@ mod tests {
     fn test_nms_greedy_single_box() {
         let boxes = vec![BBox::new(0.0, 0.0, 10.0, 10.0)];
         let scores = vec![0.9_f32];
-        let keep = nms_greedy(&boxes, &scores, 0.5).unwrap();
+        let keep = nms_greedy(&boxes, &scores, 0.5).expect("NMS greedy with valid inputs succeeds");
         assert_eq!(keep, vec![0]);
     }
 
@@ -306,7 +306,7 @@ mod tests {
             BBox::new(0.5, 0.5, 10.5, 10.5), // nearly identical → should be suppressed
         ];
         let scores = vec![0.9_f32, 0.8_f32];
-        let keep = nms_greedy(&boxes, &scores, 0.5).unwrap();
+        let keep = nms_greedy(&boxes, &scores, 0.5).expect("NMS greedy with valid inputs succeeds");
         assert_eq!(keep, vec![0], "expected only box 0 kept");
     }
 
@@ -317,7 +317,7 @@ mod tests {
             BBox::new(10.0, 10.0, 15.0, 15.0),
         ];
         let scores = vec![0.9_f32, 0.8_f32];
-        let keep = nms_greedy(&boxes, &scores, 0.5).unwrap();
+        let keep = nms_greedy(&boxes, &scores, 0.5).expect("NMS greedy with valid inputs succeeds");
         assert_eq!(keep.len(), 2);
     }
 
@@ -343,7 +343,7 @@ mod tests {
             0.5,
             SoftNmsDecay::Gaussian { sigma_sq: 0.5 },
         )
-        .unwrap();
+        .expect("soft NMS with valid inputs succeeds");
         assert!(!results.is_empty());
     }
 
@@ -351,7 +351,7 @@ mod tests {
     fn test_nms_heatmap_local_max() {
         // 3×3 heatmap with maximum at centre.
         let h = vec![0.1, 0.2, 0.1, 0.2, 0.9, 0.2, 0.1, 0.2, 0.1_f32];
-        let mask = nms_heatmap(&h, 3, 3, 1, 0.5).unwrap();
+        let mask = nms_heatmap(&h, 3, 3, 1, 0.5).expect("NMS heatmap with valid inputs succeeds");
         // Only centre should be marked.
         assert_eq!(mask[4], 1, "centre should be kept");
         for i in [0, 1, 2, 3, 5, 6, 7, 8] {
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn test_nms_heatmap_threshold() {
         let h = vec![0.1_f32; 9];
-        let mask = nms_heatmap(&h, 3, 3, 1, 0.5).unwrap(); // all below threshold
+        let mask = nms_heatmap(&h, 3, 3, 1, 0.5).expect("NMS heatmap with valid inputs succeeds"); // all below threshold
         assert!(mask.iter().all(|&v| v == 0));
     }
 

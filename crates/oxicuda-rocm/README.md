@@ -30,7 +30,7 @@ Part of the [OxiCUDA](https://github.com/cool-japan/oxicuda) ecosystem — Pure 
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-oxicuda-rocm = "0.1.4"
+oxicuda-rocm = "0.1.5"
 ```
 
 ```rust
@@ -45,7 +45,7 @@ match backend.init() {
 
 ## Status
 
-- **Version**: 0.1.4 (2026-04-18)
+- **Version**: 0.1.5 (2026-05-01)
 - **Tests**: 105 passing
 
 ## License

@@ -490,7 +490,7 @@ mod tests {
     fn test_erode_uniform_image() {
         // Uniform image → erosion is identity.
         let img = vec![5.0f32; 9];
-        let result = erode(&img, 3, 3, rect3x3()).unwrap();
+        let result = erode(&img, 3, 3, rect3x3()).expect("erosion on valid image succeeds");
         for v in &result {
             assert!((v - 5.0).abs() < 1e-6, "expected 5.0, got {v}");
         }
@@ -500,7 +500,7 @@ mod tests {
     fn test_dilate_uniform_image() {
         // Uniform image → dilation is identity.
         let img = vec![5.0f32; 9];
-        let result = dilate(&img, 3, 3, rect3x3()).unwrap();
+        let result = dilate(&img, 3, 3, rect3x3()).expect("dilation on valid image succeeds");
         for v in &result {
             assert!((v - 5.0).abs() < 1e-6);
         }
@@ -511,7 +511,7 @@ mod tests {
         // 5×5 image; bright spike at centre.
         let mut img = vec![0.0f32; 25];
         img[2 * 5 + 2] = 1.0;
-        let result = erode(&img, 5, 5, rect3x3()).unwrap();
+        let result = erode(&img, 5, 5, rect3x3()).expect("erosion on valid image succeeds");
         // Erosion with 3×3 rect should zero out a single-pixel spike.
         assert!(result.iter().all(|&v| v == 0.0), "spike should be eroded");
     }
@@ -521,7 +521,7 @@ mod tests {
         // Single bright pixel; dilation with 3×3 rect → 3×3 region.
         let mut img = vec![0.0f32; 25];
         img[2 * 5 + 2] = 1.0;
-        let result = dilate(&img, 5, 5, rect3x3()).unwrap();
+        let result = dilate(&img, 5, 5, rect3x3()).expect("dilation on valid image succeeds");
         // The 3×3 neighbourhood of (2,2) should all be 1.
         for dr in 0usize..3 {
             for dc in 0usize..3 {
@@ -535,7 +535,8 @@ mod tests {
         // 5×5 background=1, single noise pixel=10.
         let mut img = vec![1.0f32; 25];
         img[2 * 5 + 2] = 10.0;
-        let result = open(&img, 5, 5, rect3x3()).unwrap();
+        let result =
+            open(&img, 5, 5, rect3x3()).expect("morphological open on valid image succeeds");
         // Opening removes the noise spike; result should be ≈1 everywhere.
         assert!(
             result.iter().all(|&v| (v - 1.0).abs() < 1e-5),
@@ -548,7 +549,8 @@ mod tests {
         // 5×5 background=1, single dark hole=0.
         let mut img = vec![1.0f32; 25];
         img[2 * 5 + 2] = 0.0;
-        let result = close(&img, 5, 5, rect3x3()).unwrap();
+        let result =
+            close(&img, 5, 5, rect3x3()).expect("morphological close on valid image succeeds");
         // Closing fills the hole; result should be ≈1 everywhere.
         assert!(
             result.iter().all(|&v| (v - 1.0).abs() < 1e-5),
@@ -560,7 +562,7 @@ mod tests {
     fn test_tophat_detects_peak() {
         let mut img = vec![0.5f32; 25];
         img[2 * 5 + 2] = 1.0;
-        let th = tophat(&img, 5, 5, rect3x3()).unwrap();
+        let th = tophat(&img, 5, 5, rect3x3()).expect("tophat on valid image succeeds");
         // Top-hat highlights the bright peak.
         assert!(th[2 * 5 + 2] > 0.0);
     }
@@ -569,7 +571,8 @@ mod tests {
     fn test_morphological_gradient_at_edge() {
         // Gradient of a step edge should be non-zero at the transition.
         let img: Vec<f32> = (0..25).map(|i| if i % 5 < 3 { 1.0 } else { 0.0 }).collect();
-        let grad = morphological_gradient(&img, 5, 5, cross3()).unwrap();
+        let grad = morphological_gradient(&img, 5, 5, cross3())
+            .expect("morphological gradient on valid image succeeds");
         let has_nonzero = grad.iter().any(|&v| v > 0.0);
         assert!(has_nonzero, "gradient should be nonzero at step edge");
     }

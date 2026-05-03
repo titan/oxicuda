@@ -3,15 +3,15 @@
 Pure Rust CUDA replacement for the COOLJAPAN ecosystem.
 (C) 2026 COOLJAPAN OU (Team KitaSan)
 
-## Project Status (v0.1.4 — 2026-04-18)
+## Project Status (v0.1.5 — 2026-05-03)
 
-- **Crates**: 28 workspace members (27 library crates + 1 umbrella)
-- **Files**: 769 Rust source files
-- **Code**: 262,824 SLoC (Rust, `tokei` verified)
-- **Tests**: 7,488 passing, 2 skipped (GPU-only on macOS)
+- **Crates**: 37 workspace members (36 library crates + 1 umbrella)
+- **Files**: 1000+ Rust source files
+- **Code**: ~310,000 SLoC (Rust)
+- **Tests**: 9,568 passing (workspace-wide), 2 skipped (GPU-only on macOS)
 - **Warnings**: 0 (clippy + rustc, `-D warnings`)
 - **unwrap() calls**: 0 (no-unwrap policy in library code)
-- **Status**: All 10 volumes complete — Vol.1 Foundation, Vol.2 PTX/Autotune, Vol.3 BLAS, Vol.4 DNN, Vol.5 Scientific Computing, Vol.6 Signal Processing, Vol.7 Computation Graph, Vol.8 GPU Training, Vol.9 Inference Engine, Vol.10 Reinforcement Learning, plus 7 backend crates (Metal/Vulkan/WebGPU/ROCm/LevelZero/primitives/backend) with full compute operations wired
+- **Status**: Vol.1–25 complete — Vol.1 Foundation, Vol.2 PTX/Autotune, Vol.3 BLAS, Vol.4 DNN, Vol.5 Scientific, Vol.6 Signal, Vol.7 Computation Graph, Vol.8 Training, Vol.9 Inference, Vol.10 RL, Vol.11 High-Perf Inference, Vol.12 Distributed, Vol.13 LLM Primitives, Vol.14–16 backend crates, **Vol.17 Generative AI**, **Vol.18 Graph Neural Networks**, **Vol.19 State Space Models (Mamba/S4/RWKV)**, **Vol.20 Vision Transformers & CLIP**, **Vol.21 Audio/Speech ML (Conformer/Wav2Vec2/CTC/WaveNet/SpecAugment/x-vector)**, **Vol.22 Time-Series Forecasting (TCN/NHiTS/PatchTST/TimesNet/iTransformer/RevIN)**, **Vol.23 Bayesian Deep Learning**, **Vol.24 Federated Learning**, **Vol.25 Neural Architecture Search**; SDE samplers added to oxicuda-rand
 
 ## Design Principles
 
@@ -834,6 +834,279 @@ and GPU kernel PTX string generators.
   - [x] Vocab special token round-trip (BOS/EOS)
   - [x] GPT-2 greedy decode loop (5 steps, all IDs in vocab range)
 
+## Vol.14–16: SDE Samplers in oxicuda-rand [COMPLETE]
+
+Added stochastic differential equation (SDE) integration methods as a new `sde` submodule
+in `oxicuda-rand`, providing GPU-simulation building blocks for financial models, physical
+simulations, and score-based generative model training.
+
+### oxicuda-rand SDE additions (4 files, ~1,060 SLoC, 71 new tests)
+
+- [x] **SDE framework** (sde/mod.rs) — shared `SdeProcess` trait, `SdeConfig`, `PathMatrix`, Xoshiro256** PRNG
+- [x] **Brownian motion** (sde/brownian.rs) — `BrownianMotion`, `GeometricBrownianMotion` (exact), `OrnsteinUhlenbeck` (exact), `BrownianPathResult` with covariance check
+- [x] **Euler-Maruyama** (sde/euler_maruyama.rs) — strong order 0.5 scheme for `dX = μ dt + σ dW`; `EulerMaruyamaResult` with mean/std/path statistics; `strong_error()` comparison
+- [x] **Milstein** (sde/milstein.rs) — strong order 1.0 via `½σσ'(ΔW² − Δt)` correction; `convergence_comparison()` verifying EM vs Milstein accuracy on GBM
+- [x] **Stratonovich-Heun** (sde/heun.rs) — predictor-corrector for Stratonovich SDEs; `solve_ito()` with automatic Itô→Stratonovich correction `μ_strat = μ − ½σσ'`
+
+---
+
+## Vol.17: Generative AI Primitives [COMPLETE]
+
+### oxicuda-gen (25 files, ~7,400 SLoC, 221 tests)
+
+Pure-Rust generative AI primitives: diffusion schedulers (DDPM/DDIM/DPM-Solver++/Flow Matching),
+classifier-free guidance, VQ-VAE codec, LoRA adapters, and score-network building blocks.
+
+- [x] **Error types** (error.rs) — `GenError` (15 variants): DimensionMismatch, InvalidBetaRange, InvalidGuidanceScale, UnsupportedDpmOrder, InvalidTimestep, InvalidCodebookSize, WeightShapeMismatch, InvalidLoraRank, and more
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (seed-based, Box-Muller normals), `GenHandle`
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 6 GPU kernels × 6 SM versions (75/80/86/90/100/120)
+  - [x] `ddpm_step_ptx` — `x_{t-1} = (x_t − β/√(1−ᾱ) · ε̂)/√α + σ·z` using `sqrt.approx`, `rcp.approx`
+  - [x] `cfg_combine_ptx` — `out = u + s·(c − u)` classifier-free guidance blend
+  - [x] `lora_apply_ptx` — `y = x·W + (α/r)·x·B·A` low-rank update; grid-stride
+  - [x] `flow_velocity_ptx` — Euler step `x_{t+Δ} = x_t + Δ·v(x_t, t)` for flow ODE
+  - [x] `vae_kl_loss_ptx` — `0.5·Σ(μ² + σ² − 1 − log σ²)` latent KL divergence
+  - [x] `timestep_embed_ptx` — sinusoidal embedding via `sin/cos/lg2/ex2`
+
+- [x] **Schedulers** (scheduler/) — 5 files
+  - [x] `BetaSchedule` (beta_schedule.rs) — linear, cosine (Nichol & Dhariwal), scaled-cosine, sigmoid β schedules; `alphas_bar`, `sqrt_alphas_bar`, `sqrt_one_minus_alphas_bar`
+  - [x] `DdpmScheduler` (ddpm.rs) — `add_noise()` with `q(xₜ|x₀)`, `step()` reverse DDPM update with fixed σ²=βₜ
+  - [x] `DdimScheduler` (ddim.rs) — η-parameterised deterministic/stochastic; η=0 → identical two-call results
+  - [x] `DpmSolverScheduler` (dpm_solver.rs) — exponential integrator on `λₜ = log(αₜ/σₜ)`; 1st/2nd-order multi-step; `num_train_steps()` accessor
+  - [x] `FlowMatchingScheduler` (flow_matching.rs) — linear OT path `xₜ = (1−t)x₀+tx₁`; Euler and Heun ODE solvers; boundary conditions verified in tests
+
+- [x] **Guidance** (guidance/) — 3 files
+  - [x] `CfgGuidance` (cfg.rs) — `ε̂ = uncond + s·(cond − uncond)` with scale-clipping and rescaling
+  - [x] `PerpNegGuidance` (perp_neg.rs) — perpendicular-negative prompt guidance
+  - [x] `AdaptiveCfgScheduler` (adaptive.rs) — constant/linear/cosine/stepwise dynamic scale scheduling
+
+- [x] **VAE** (vae/) — 4 files
+  - [x] `GaussianLatent` (kl.rs) — reparameterised sampling `z = μ + ε·σ`, `kl_loss()`, `standard_normal()`
+  - [x] `VqCodebook` (quantize.rs) — EMA codebook update `eₖ ← γeₖ + (1−γ)∑xⱼ`, nearest-entry lookup, commitment loss
+  - [x] `Encoder` (encoder.rs) — ResNet down-blocks (GELU + GroupNorm); `EncoderWeights::zeros()`
+  - [x] `Decoder` (decoder.rs) — mirrored up-sampling blocks; `DecoderWeights::zeros()`
+
+- [x] **LoRA** (lora/) — 2 files
+  - [x] `LoraLinear` (adapter.rs) — `W' = W + (α/r)·BA`; B∈ℝᵈˣʳ Gaussian init, A=0 init; `forward()` adds rank-r correction
+  - [x] `LoraModel` (adapter.rs) — named adapter collection with `add_adapter()`/`apply()`
+  - [x] Weight merging (merge.rs) — `merge_lora()`, `unmerge_lora()`, `verify_merge_roundtrip()`, `scale_adapter()`, `compose_adapters()`
+
+- [x] **Score networks** (score/) — 2 files
+  - [x] `SinusoidalEmbedding` / `FourierEmbedding` (timestep.rs) — sin+cos pair embedding with sin²+cos²=1 verified
+  - [x] `UNetResBlock`, `SelfAttentionBlock`, `CrossAttentionBlock` (unet_block.rs) — SiLU + time-embedding injection + multi-head attention
+
+- [x] **Integration tests** (lib.rs) — 11 E2E tests covering all modules + PTX × 6 SM versions
+
+---
+
+## Vol.18: Graph Neural Network Primitives [COMPLETE]
+
+### oxicuda-gnn (25 files, ~7,370 SLoC, 233 tests)
+
+Pure-Rust GNN library: sparse graph representations (CSR/COO/heterogeneous), message passing,
+GCN/GAT/GATv2/GraphSAGE/GIN layers, global and hierarchical pooling, Set2Set readout.
+
+- [x] **Error types** (error.rs) — `GnnError` (14 variants): EmptyGraph, NodeIndexOutOfRange, EdgeIndexOutOfRange, InvalidLayerConfig, FeatureDimensionMismatch, InvalidEdgeWeight, InvalidPoolingK, SamplingError, and more
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `GnnHandle`, `LcgRng`
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions
+  - [x] `csr_spmv_ptx` — `y[i] = Σ A[i,j]·x[j]`; warp-per-row with `shfl.sync.down` butterfly reduction
+  - [x] `scatter_add_ptx` — `out[idx[i]] += in[i]`; `atom.global.add.f32`
+  - [x] `gat_attention_ptx` — `LeakyReLU(aᵀ[Wxᵢ‖Wxⱼ])` per edge
+  - [x] `softmax_edge_ptx` — numerically stable per-source softmax over outgoing edges
+  - [x] `aggregate_mean_ptx` — accumulator / `degree[i]` mean reduction
+  - [x] `gin_combine_ptx` — `(1+ε)·xᵢ + Σxⱼ` self-loop aggregator
+  - [x] `topk_score_ptx` — `tanh(pᵀx/‖p‖)` scoring for Top-K node selection
+
+- [x] **Graph representations** (graph/) — 4 files
+  - [x] `CsrGraph` (csr.rs) — `row_ptr/col_idx/edge_weight`; `from_edges()`, `neighbors()`, `degrees()`, `normalized_adjacency()` (D̂⁻¹/²ÂD̂⁻¹/²)
+  - [x] `CooGraph` (coo.rs) — COO format with `to_csr()` conversion; symmetry detection
+  - [x] `HeterogeneousGraph` (heterogeneous.rs) — multi-type node/edge relations
+  - [x] `KHopSubgraph`, random walk, Node2Vec biased walk (sampling.rs)
+
+- [x] **Message passing** (message_passing/) — 3 files
+  - [x] Aggregations (aggregate.rs) — sum/mean/max/min/softmax over neighbor messages
+  - [x] Scatter ops (scatter.rs) — `scatter_add`, `scatter_max`, `scatter_min`, `scatter_mul`, `scatter_softmax`
+  - [x] Update functions (update.rs) — MLP (2-layer), identity, ReLU, SiLU, LeakyReLU
+
+- [x] **GNN Layers** (layers/) — 5 files
+  - [x] `GcnLayer` (gcn.rs) — `H⁽ˡ⁺¹⁾ = σ(D̂⁻¹/²ÂD̂⁻¹/² H⁽ˡ⁾ W⁽ˡ⁾)` (Kipf & Welling 2017)
+  - [x] `GatLayer` (gat.rs) — `αᵢⱼ = softmax(LeakyReLU(aᵀ[Wxᵢ‖Wxⱼ]))`, multi-head concat/mean (Veličković 2018)
+  - [x] `GatV2Layer` (gat_v2.rs) — dynamic attention `aᵀLeakyReLU(W[xᵢ‖xⱼ])` (Brody 2022)
+  - [x] `SageLayer` (sage.rs) — mean/MaxPool/LSTM aggregators; optional L2-norm output (Hamilton 2017)
+  - [x] `GinLayer` (gin.rs) — `(1+ε)·hᵥ + Σhᵤ` with MLP; BatchNorm; trainable ε (Xu 2019)
+
+- [x] **Pooling** (pooling/) — 3 files
+  - [x] `GlobalPool` (global_pool.rs) — mean/max/sum/attention pooling to graph-level repr; batched graphs
+  - [x] `TopKPool` (topk_pool.rs) — Gao & Ji top-k node selection with `tanh(pᵀx/‖p‖)` scoring
+  - [x] `DiffPool` (diff_pool.rs) — differentiable hierarchical: `S=softmax(GNN(A,X))`, `X'=SᵀX, A'=SᵀAS`; LP + entropy regularisation losses
+
+- [x] **Readout** (readout/) — 1 file
+  - [x] `Set2Set` (set2set.rs) — LSTM-based permutation-invariant readout: `qₜ=LSTM(q*_{t-1})`, `αᵢₜ=softmax(xᵢᵀqₜ)`, `q*ₜ=[qₜ‖rₜ]` (Vinyals 2016)
+
+- [x] **Integration tests** (lib.rs) — 12 E2E tests covering CSR, COO, scatter, GCN, SAGE, GIN, DiffPool, Top-K, sampling, Set2Set, PTX × 6 SM versions
+
+---
+
+## Vol.19: State Space Model Primitives [COMPLETE]
+
+### oxicuda-mamba (25 files, ~7,800 SLoC, 339 tests)
+
+Pure-Rust SSM library: S4 (HiPPO-LegS / DPLR), Mamba selective scan (S6), Mamba-2 (SSD),
+and RWKV time-mixing — linear-time alternatives to attention, zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `MambaError` (15 variants): DimensionMismatch, ShapeMismatch, EmptyInput, InvalidSeqLen, InvalidSsmOrder, InvalidModelDim, NonPositiveDelta, InvalidChunkSize, HeadDimMismatch, WeightShapeMismatch, NonFinite, Internal
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Box-Muller normals, Fisher-Yates shuffle), `MambaHandle`
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120)
+  - [x] `selective_scan_ptx` — Mamba S6: `h = Ā·h + B̄·u, y = C·h` per-channel sequential recurrence
+  - [x] `parallel_scan_ptx` — Warp-level `(A,b)` associative prefix scan via `shfl.sync.down.b32` butterfly
+  - [x] `depthwise_conv1d_ptx` — Causal 1D depthwise conv with zero-pad, `fma.rn.f32`
+  - [x] `wkv_forward_ptx` — RWKV WKV with numerically stable running-max pivot; `ex2.approx.f32`
+  - [x] `ssd_chunk_ptx` — Mamba-2 SSD chunk: causal `Π A_k` accumulation per output position
+  - [x] `hippo_legendre_ptx` — HiPPO-LegS forward Euler `c_n' = c_n·(1−Δ(n+1)) + Δ√(2n+1)·u`
+  - [x] `rms_norm_silu_ptx` — Fused RMSNorm + SiLU gate; warp butterfly sum via `shfl.sync.bfly.b32`
+
+- [x] **SSM core** (ssm/) — 3 files
+  - [x] `discretize.rs` — ZOH (`Ā = exp(Δ·A)`), Bilinear (Tustin), Euler; L'Hôpital limit for `|A| ≈ 0`
+  - [x] `parallel_scan.rs` — `ScanPair {a,b}` with associative `⊕` operator, inclusive/exclusive prefix scan, `ssm_state_scan(a_bar, b_bar_u)`
+  - [x] `ssm_kernel.rs` — `SsmKernel`: batch-aware `h[b,t,d,n] = Ā·h_prev + B̄·u` recurrence, ZOH discretization, output `y = Σ C·h`
+
+- [x] **S4 architecture** (s4/) — 3 files
+  - [x] `hippo.rs` — `hippo_legs(n)`: HiPPO-LegS A matrix (lower-triangular, `A[n,k]=−√(2n+1)√(2k+1)`) and B vector; `hippo_legs_diag`; `hippo_nplr` NPLR decomposition (`λ[n]=−(n+0.5)`, `p=q=√(n+0.5)`)
+  - [x] `dplr.rs` — `Dplr {lambda, p, q}`: `A = diag(λ) − p·qᵀ`; `from_hippo`, `to_dense`, ZOH SSM kernel computation via mode decomposition
+  - [x] `s4_layer.rs` — `S4Layer`: multi-channel convolutional mode, `naive_conv1d` O(L²) reference, optional bidirectional averaging, `S4Config` builder
+
+- [x] **Mamba** (mamba/) — 3 files
+  - [x] `selective_scan.rs` — `selective_scan`: input-dependent `Δ=softplus(proj)`, `Ā=exp(Δ⊗A)`, `B̄=Δ⊗B_proj`, sequential state recurrence; `softplus` with ±20 stability clamp
+  - [x] `mamba_block.rs` — `MambaBlock`: in_proj → x/z split → conv1d+SiLU → selective_scan → D skip → SiLU gate → out_proj + residual; `rms_norm`, `linear`, `silu`, `causal_depthwise_conv1d` helpers
+  - [x] `mamba_model.rs` — `MambaModel`: TokenEmbedding → N×MambaBlock → RMSNorm → LM head; `forward` returns logits, `next_token` greedy decode; `MambaConfig::tiny()` test preset
+
+- [x] **Mamba-2 / SSD** (mamba2/) — 3 files
+  - [x] `ssd.rs` — `ssd_naive` O(L²·N) semi-separable matrix-vector product; `ssd_recurrent` O(L·N) state form; `verify_ssd_equivalence` agreement check (tol 1e-4)
+  - [x] `chunk_scan.rs` — `ChunkConfig` with ceiling-division chunks; `chunk_scan`: intra-chunk naive SSD + inter-chunk boundary state propagation; `verify_chunk_equivalence`
+  - [x] `mamba2_block.rs` — `Mamba2Block`: multi-head SSD with `a[t]=sigmoid(−exp(a_h))`, per-head `chunk_scan`, D skip, RMSNorm, out_proj + residual
+
+- [x] **RWKV** (rwkv/) — 3 files
+  - [x] `time_mixing.rs` — `WkvState {a,b,p}` recurrent state; numerically stable WKV via running-max pivot; `TimeMixingLayer` full RWKV-4 pipeline: LN → token-shift → r/k/v projection → WKV → sigmoid gate → output projection; `layer_norm`, `sigmoid` helpers
+  - [x] `channel_mixing.rs` — `ChannelMixingLayer`: token-shift → sigmoid-gated receptance → Square-ReLU expansion → value contraction; `square_relu(x) = max(0,x)²`
+  - [x] `rwkv_block.rs` — `RwkvBlock`: pre-norm residual: `y = x + time_mixing(LN₁(x))`, `y = y + channel_mixing(LN₂(y))`
+
+- [x] **Integration tests** (lib.rs) — 20 E2E tests covering all modules + PTX × 6 SM versions
+
+---
+
+---
+
+## Vol.20: Vision Transformer & CLIP Primitives [COMPLETE]
+
+### oxicuda-vision (25 files, ~7,500 SLoC, 349 tests)
+
+Pure-Rust vision library: ViT patch embedding, multi-head self-attention, CLIP
+contrastive learning, image augmentation, FPN multi-scale features, DETR decoder,
+and bipartite set matching — zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `VisionError` (15 variants): DimensionMismatch, ShapeMismatch, EmptyInput, InvalidImageSize, InvalidPatchSize, InvalidEmbedDim, InvalidNumHeads, HeadDimMismatch, InvalidNumClasses, InvalidProjDim, NonPositiveTemperature, InvalidRoiBox, WeightShapeMismatch, NonFinite, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Box-Muller normals, Fisher-Yates shuffle), `VisionHandle`
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120)
+  - [x] `patch_embed_ptx` — Strided Conv2D: `[C, H, W] → [N_patches, embed_dim]` with `fma.rn.f32`
+  - [x] `bilinear_interp_ptx` — Sub-pixel 4-tap bilinear sampler with half-pixel convention
+  - [x] `contrastive_loss_ptx` — InfoNCE: 3-pass numerically stable row-softmax + diagonal CE
+  - [x] `roi_align_ptx` — Per-bin bilinear RoI feature extraction with `sampling_ratio²` sample averaging
+  - [x] `image_normalize_ptx` — Channel-wise `(x − mean[c]) / std[c]` in-place
+  - [x] `adaptive_avg_pool_ptx` — Adaptive 2D average pool with integer window bounds
+  - [x] `focal_loss_ptx` — Focal loss `−α(1−p)^γ log p` via stable sigmoid + log
+
+- [x] **Patch embedding** (patch_embed/) — 2 files
+  - [x] `conv2d_patch.rs` — `PatchEmbedConfig`, `PatchEmbedWeights` (Xavier init), `PatchEmbed::forward`, `prepend_cls`
+  - [x] `pos_embed.rs` — `pos_2d_sincos` (4-band H/W sinusoidal), `LearnablePosEmbed`, `add_pos_embed`
+
+- [x] **ViT** (vit/) — 3 files
+  - [x] `vit_block.rs` — `ViTBlock`: pre-norm MHSA + GELU MLP + residuals; `layer_norm`, `gelu_exact` (tanh approx), `softmax_rows`, `mhsa`
+  - [x] `vit_encoder.rs` — `ViTEncoder`: N stacked `ViTBlock` + final LayerNorm
+  - [x] `vit_model.rs` — `ViTModel`: PatchEmbed → CLS-prepend → PosEmbed → Encoder → head; `ViTConfig::tiny()` (img=32, p=4, D=64, depth=2, heads=4, classes=10)
+
+- [x] **CLIP** (clip/) — 3 files
+  - [x] `vision_encoder.rs` — `ClipVisionEncoder` wrapping `ViTEncoder`, CLS-pool to `[embed_dim]`
+  - [x] `projection.rs` — `ProjectionHead`: linear + L2-norm; `cosine_sim`
+  - [x] `contrastive.rs` — `info_nce_loss`: symmetric InfoNCE with numerically stable log-sum-exp
+
+- [x] **Augmentation** (augment/) — 3 files
+  - [x] `geometric.rs` — `random_crop`, `center_crop`, `random_horizontal_flip`, `resize_bilinear` (half-pixel bilinear)
+  - [x] `photometric.rs` — `color_jitter` (brightness/contrast/saturation), `random_grayscale` (YIQ luminance)
+  - [x] `normalize.rs` — `normalize_chw`, `IMAGENET_MEAN`/`IMAGENET_STD`; `AugOp` enum + `Pipeline::push` builder
+
+- [x] **FPN** (fpn/) — 2 files
+  - [x] `lateral.rs` — `LateralConv1x1`: 1×1 conv channel reduction (Xavier init)
+  - [x] `top_down.rs` — `Fpn`: lateral → top-down (nearest upsample + add) → 3×3 smooth conv; `FeatureMap {data, channels, h, w}`
+
+- [x] **Detection** (detection/) — 3 files
+  - [x] `roi_align.rs` — CPU reference RoI Align with `bilinear_sample_2d`; validates `x2>x1, y2>y1`
+  - [x] `detr_decoder.rs` — `DetrDecoderLayer`: self-attn + cross-attn + FFN (pre-norm); `DetrDecoder` depth stack; `DetrConfig::tiny()`
+  - [x] `set_match.rs` — `bipartite_match` (greedy + 2-opt); `build_cost_matrix` (class CE + L1 box + GIoU); `giou`
+
+- [x] **Integration tests** (lib.rs) — 19 E2E tests covering all modules + PTX × 6 SM versions
+
+---
+
+## Vol.21: Audio/Speech ML Architectures [COMPLETE]
+
+### oxicuda-audio (28 files, ~7,500 SLoC, 286 tests)
+
+Pure-Rust audio/speech ML library: Conformer encoder, Wav2Vec2 CNN feature extractor,
+CTC forward algorithm + prefix beam search, WaveNet dilated stack, SpecAugment
+augmentation, speaker embeddings (x-vector TDNN, attentive pooling) — zero CUDA SDK
+dependency.
+
+- [x] **Error types** (error.rs) — `AudioError` (17 variants): DimensionMismatch, ShapeMismatch, EmptyInput, InvalidNumMels, InvalidSequenceLength, InvalidEmbedDim, InvalidNumHeads, HeadDimMismatch, InvalidVocabSize, InvalidBeamWidth, InvalidDilation, InvalidKernelSize, InvalidStride, BlankOutOfRange, WeightShapeMismatch, NonFinite, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Box-Muller normals, Fisher-Yates shuffle), `AudioHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120)
+  - [x] `stride_conv1d_ptx` — Strided 1-D conv for Wav2Vec2 CNN feature extractor
+  - [x] `dilated_conv1d_ptx` — Causal dilated conv (WaveNet filter+gate, left-pad)
+  - [x] `ctc_alpha_ptx` — Log-domain CTC forward alpha recursion with `log_sum_exp` via `ex2`/`lg2`
+  - [x] `spec_augment_mask_ptx` — In-place time+freq masking via `setp`/`selp.f32`
+  - [x] `depthwise_conv1d_ptx` — Causal depthwise conv for Conformer conv module
+  - [x] `rel_pos_bias_ptx` — Relative-position bias table lookup with `min/max.u32` clamping
+  - [x] `stats_pool_ptx` — Two-pass mean+std pooling with warp-shuffle reduction
+
+- [x] **Features** (features/) — 3 files
+  - [x] `log_mel_adapter.rs` — `LogMelInput` validated `[T, F]` wrapper for `oxicuda-signal` output
+  - [x] `cmvn.rs` — `CmvnConfig`, `compute_cmvn`, `apply_cmvn` (per-channel zero-mean unit-variance)
+  - [x] `delta.rs` — `compute_delta`, `compute_delta_delta`, `stack_delta_features` (central-difference, edge-pad)
+
+- [x] **Encoder** (encoder/) — 3 files
+  - [x] `wav2vec_cnn.rs` — `Wav2VecCnnEncoder`: 7-layer stride-conv1d + group-norm + GELU; `wav2vec2_base()` and `tiny()` configs
+  - [x] `conv_module.rs` — `ConvModule`: LN → PW-expand → GLU → depthwise-causal → BN → Swish → PW-reduce
+  - [x] `conformer_block.rs` — `ConformerBlock` (macaron ½·FFN + MHSA(rel-pos) + ConvModule + ½·FFN + LN) + `ConformerEncoder`; `ConformerConfig::tiny()` (D=64, heads=4, depth=2, kernel=15)
+
+- [x] **Attention** (attention/) — 2 files
+  - [x] `rel_pos_encoding.rs` — `RelPosEncoding {table: [2*max_len-1]}` with seeded init, `bias(q,k)`, `bias_matrix(Q,K)`
+  - [x] `rel_pos_attention.rs` — `RelPosAttention`: multi-head SDPA + relative-position bias pre-softmax
+
+- [x] **CTC** (ctc/) — 2 files
+  - [x] `forward.rs` — `ctc_forward_log`: log-domain alpha recursion, extended target `l'=[blank,l0,blank,l1,…]`, `log_sum_exp2` stable
+  - [x] `beam_search.rs` — `ctc_beam_search`: CTC prefix beam search with `HashMap<Vec<usize>, (p_blank, p_nb)>` merge and pruning
+
+- [x] **Vocoder** (vocoder/) — 2 files
+  - [x] `wavenet_block.rs` — `WaveNetBlock`: dilated-causal-conv → tanh⊙sigmoid gated activation → skip + residual pointwise convs
+  - [x] `dilated_stack.rs` — `WaveNetStack`: multi-cycle `[1,2,4,…,512]` dilation schedule + 2-layer ReLU head; `tiny()` and `default_config()`
+
+- [x] **Augmentation** (augment/) — 2 files
+  - [x] `spec_augment.rs` — `time_mask`, `freq_mask` (SpecAugment), enum-dispatched `SpecAugOp` + `SpecAugPipeline::push` builder
+  - [x] `time_warp.rs` — `time_warp`: single-anchor bilinear time-axis warping (no-op when T ≤ 2·max_w)
+
+- [x] **Speaker** (speaker/) — 3 files
+  - [x] `stats_pool.rs` — `stats_pool`: two-pass Bessel-corrected temporal mean+std pooling `[T,C] → [2C]`
+  - [x] `attentive_pool.rs` — `AttentivePool`: bottleneck `tanh`-attention softmax over time → weighted mean+std `[2C]`
+  - [x] `x_vector.rs` — `XVectorTdnn`: 5-layer dilated TDNN (Snyder 2018), stats pool, 512-d affine; `default_config()` + `tiny()`
+
+- [x] **Integration tests** (lib.rs) — 21 E2E tests covering all modules + PTX × 6 SM versions
+
 ---
 
 ## Quality Gates
@@ -844,12 +1117,56 @@ and GPU kernel PTX string generators.
 | Clippy warnings | 0 | 0 |
 | unwrap() in library code | 0 | 0 |
 | C/Fortran build deps | 0 | 0 |
-| Test count | >500 | 7,488 |
+| Test count | >500 | 8,980+ |
 | Test pass rate | 100% | 100% |
-| Code lines (SLoC) | >30K | 262,824 |
-| Crate count | 12 | 28 |
+| Code lines (SLoC) | >30K | ~302,500 |
+| Crate count | 12 | 33 |
 | GPU arch coverage | SM 7.5--10.0 | SM 7.5--10.0 |
 | Pure Rust | 100% default features | 100% |
+
+---
+
+## Vol.22: Time-Series Forecasting Architectures [COMPLETE]
+
+### oxicuda-timeseries (30 files, ~8,500 SLoC, 177 tests)
+
+Pure-Rust time-series forecasting and classification library: TCN, NHiTS, PatchTST,
+TimesNet, iTransformer, RevIN, series decomposition — zero CUDA SDK dependency.
+Time-major `[T, C]` layout throughout; all variates channels-last.
+
+- [x] **Error types** (error.rs) — `TsError` (18 variants): DimensionMismatch, ShapeMismatch, EmptyInput, InvalidSequenceLength, InvalidNumVariates, InvalidPatchLen, InvalidStride, InvalidKernelSize, InvalidDilation, InvalidNumHeads, HeadDimMismatch, InvalidEmbedDim, InvalidHorizon, InvalidPoolSize, InvalidTopK, WeightShapeMismatch, NonFinite, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Box-Muller normals, Fisher-Yates shuffle), `TsHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120)
+  - [x] `moving_average_ptx` — Strided centred moving average over time axis
+  - [x] `patch_embed_1d_ptx` — Extract overlapping 1-D patches [N,T]→[N,num_patches,patch_len]
+  - [x] `causal_temporal_conv_ptx` — Dilated causal 1-D conv for TCN residual blocks
+  - [x] `auto_correlation_ptx` — FFT magnitude-squared step for Autoformer/TimesNet
+  - [x] `revin_normalize_ptx` — RevIN normalise with per-(n,c) stats + learnable affine
+  - [x] `multirate_pool_ptx` — Average pool at variable stride for NHiTS multi-rate sampling
+  - [x] `period_detect_ptx` — Top-k FFT magnitude reduction for TimesNet period detection
+
+- [x] **Normalisation** (norm/) — `RevIn` (reversible instance norm with forward+inverse, Bessel-corrected stats), `InstanceNorm1d` (per-variate instance norm with optional affine)
+
+- [x] **Decomposition** (decomp/) — `MovingAvg` (centred, replicate-pad), `SeriesDecomp` (trend + seasonal split matching Autoformer)
+
+- [x] **Patch embedding** (patch/) — `PatchEmbed1d` (overlapping 1-D patches, Xavier init, univariate + multivariate `forward_mv`)
+
+- [x] **TCN** (tcn/) — `TcnBlock` (weight-normalised dilated causal conv, Kaiming He init, optional 1×1 residual projection), `TcnEncoder` (exponential dilation schedule 2^i, tiny/default configs)
+
+- [x] **NHiTS** (nhits/) — `MultiRateSampler` (avg pool + nearest-neighbour upsample), `NHitsBlock` (pool→MLP→backcast+forecast heads), `NHits` (hierarchical residual stacks with pool_sizes=[1,2,4])
+
+- [x] **PatchTST** (patchtst/) — `PatchTst` (channel-independent patches → sinusoidal PE → N×pre-LN TransformerLayer → per-variate linear head), `PatchTstConfig::tiny/base`
+
+- [x] **TimesNet** (timesnet/) — `TimesBlock` (O(T²) DFT period detection → top-k 2-D reshape → depthwise 3×3 conv → weighted sum → residual + LN), `TimesNet` (input proj → blocks → flatten → linear head)
+
+- [x] **iTransformer** (itransformer/) — `InvertedBlock` (attention over C variate tokens), `ITransformer` (variate embedding → N blocks → per-variate head), `ITransformerConfig::tiny/base`
+
+- [x] **Forecasting heads** (head/) — `LinearHead` (in→out, batch + per-variate ts variants), `MlpHead` (in→hidden→out with ReLU, Kaiming init for layer 1)
+
+- [x] **Integration tests** (lib.rs) — 20 E2E tests covering all modules + PTX × 6 SM versions
+- [x] **Benchmarks** (benches/ts_ops.rs) — 7 PTX bench groups × 4 SM versions + 5 architecture forward benches
 
 ---
 
@@ -962,7 +1279,9 @@ All 5 alternative GPU backend crates now have compute operations (GEMM, Conv2D, 
 - [x] ToRSh GPU backend (tensor_backend/) -- tensor, dtype, autograd, ops, optimizer, mixed precision
 - [x] TrustformeRS Transformer GPU backend (transformer_backend/) -- KV-cache, attention, scheduler, speculative decoding, sampling, quantization
 - [x] Benchmarks suite (criterion) with CI regression tracking -- oxicuda/benches/ (ptx_generation, autotune_search, fft_planning, blas_dispatch, backend_operations)
-- [ ] Published documentation on docs.rs
+- [~] Published documentation on docs.rs (2026-05-01)
+  - **Status:** `[package.metadata.docs.rs]` added to all 34 subcrate Cargo.toml files; docs build cleanly with `cargo doc --no-deps --all-features` (zero errors, zero warnings)
+  - **Remaining:** Actual publication requires `cargo publish` — pending `/bump` flow
 
 ### Tooling
 - [x] oxicuda-prof -- GPU profiling and tracing tool (profiling hooks implemented in oxicuda/profiling.rs)
@@ -1080,3 +1399,15 @@ Summary of quality gates from all 5 blueprint volumes. Each crate's TODO.md cont
 | v2.0 | AMD ROCm | HIP backend, same API surface, ROCm 5.x+ | ✓ Done |
 | v2.1 | Intel oneAPI | SYCL backend, Intel GPU (Arc, Ponte Vecchio) | ✓ Done |
 | v3.0 | WASM + WebGPU | Browser GPU compute via WebGPU API | ✓ Done |
+| v3.1 | State Space Models | S4 / Mamba / Mamba-2 (SSD) / RWKV — linear-time attention alternatives | ✓ Done |
+
+---
+
+## Maintenance
+
+- [x] preemptive-splitrs-near-cap (planned 2026-05-01)
+  - **Goal:** Prevent three files from crossing the 2000-line refactoring cap; split now while seams are clean
+  - **Design:** Priority order: (1) `crates/oxicuda-sparse/src/ops/batched.rs` (1950 LoC, 665 test lines) — extract test module; (2) `crates/oxicuda/src/tensor_backend/ops.rs` (1986 LoC, 316-line test block) — extract test module; (3) `crates/oxicuda-blas/src/precision/fp4_fp6_ops.rs` (1955 LoC) — split along FP6/FP4 banner seam; use `splitrs` CLI for each; run clippy -D warnings immediately after each split
+  - **Files:** Driven by `splitrs` output; verify with `rslines 50` post-split
+  - **Tests:** Existing tests must pass unchanged after each split; `cargo nextest run -p <crate> --all-features`
+  - **Risk:** Low for test-module extractions (prefer `mod tests { use super::*; }` pattern); medium for fp4_fp6_ops.rs if internal helpers need `pub(crate)` widening

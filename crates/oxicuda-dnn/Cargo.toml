@@ -24,5 +24,44 @@ half = { workspace = true, optional = true }
 default = []
 f16 = ["dep:half", "oxicuda-blas/f16"]
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "conv2d_resnet50_layer3"
+harness = false
+
+[[bench]]
+name = "flash_attention_2k_d128"
+harness = false
+
+[[bench]]
+name = "paged_attention_decode"
+harness = false
+
+[[bench]]
+name = "moe_mixtral_8x7b"
+harness = false
+
+[[bench]]
+name = "layernorm_d4096"
+harness = false
+
+[[bench]]
+name = "rmsnorm_d4096"
+harness = false
+
+[[bench]]
+name = "batchnorm_inference"
+harness = false
+
+[[bench]]
+name = "fused_conv_bn_relu"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true

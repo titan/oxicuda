@@ -622,7 +622,7 @@ mod tests {
     fn test_tensor_zeros() {
         let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0);
         assert!(t.is_ok());
-        let t = t.unwrap();
+        let t = t.expect("operation should succeed with valid inputs");
         assert_eq!(t.shape(), &[2, 3]);
         assert_eq!(t.numel(), 6);
         assert_eq!(t.ndim(), 2);
@@ -631,7 +631,8 @@ mod tests {
 
     #[test]
     fn test_tensor_ones() {
-        let t = GpuTensor::ones(&[4], TensorDtype::Float32, 0).unwrap();
+        let t = GpuTensor::ones(&[4], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         assert_eq!(t.numel(), 4);
         assert!(t.host_data.iter().all(|&v| v == 1.0));
     }
@@ -639,7 +640,8 @@ mod tests {
     #[test]
     fn test_tensor_from_host_f32() {
         let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let t = GpuTensor::from_host_f32(&data, &[2, 3], 0).unwrap();
+        let t = GpuTensor::from_host_f32(&data, &[2, 3], 0)
+            .expect("GpuTensor creation from host data should succeed");
         assert_eq!(t.shape(), &[2, 3]);
         assert!((t.host_data[0] - 1.0).abs() < 1e-7);
         assert!((t.host_data[5] - 6.0).abs() < 1e-7);
@@ -654,23 +656,30 @@ mod tests {
 
     #[test]
     fn test_tensor_reshape() {
-        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0).unwrap();
-        let r = t.reshape(&[3, 2]).unwrap();
+        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
+        let r = t
+            .reshape(&[3, 2])
+            .expect("tensor reshape with compatible shape should succeed");
         assert_eq!(r.shape(), &[3, 2]);
         assert_eq!(r.numel(), 6);
     }
 
     #[test]
     fn test_tensor_reshape_mismatch() {
-        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0).unwrap();
+        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         assert!(t.reshape(&[4, 2]).is_err());
     }
 
     #[test]
     fn test_tensor_transpose() {
         let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let t = GpuTensor::from_host_f32(&data, &[2, 3], 0).unwrap();
-        let tr = t.transpose(0, 1).unwrap();
+        let t = GpuTensor::from_host_f32(&data, &[2, 3], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        let tr = t
+            .transpose(0, 1)
+            .expect("tensor transpose with valid dims should succeed");
         assert_eq!(tr.shape(), &[3, 2]);
         // Original: [[1,2,3],[4,5,6]] -> Transposed: [[1,4],[2,5],[3,6]]
         let expected = [1.0, 4.0, 2.0, 5.0, 3.0, 6.0];
@@ -681,15 +690,19 @@ mod tests {
 
     #[test]
     fn test_tensor_contiguous() {
-        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0).unwrap();
+        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         assert!(t.is_contiguous());
-        let c = t.contiguous().unwrap();
+        let c = t
+            .contiguous()
+            .expect("making tensor contiguous should succeed");
         assert!(c.is_contiguous());
     }
 
     #[test]
     fn test_tensor_detach() {
-        let mut t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0).unwrap();
+        let mut t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         t.set_requires_grad(true);
         let d = t.detach();
         assert!(!d.requires_grad());
@@ -698,13 +711,21 @@ mod tests {
 
     #[test]
     fn test_tensor_item() {
-        let t = GpuTensor::full(&[1], 42.0, TensorDtype::Float32, 0).unwrap();
-        assert!((t.item().unwrap() - 42.0).abs() < 1e-10);
+        let t = GpuTensor::full(&[1], 42.0, TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
+        assert!(
+            (t.item()
+                .expect("scalar tensor item extraction should succeed")
+                - 42.0)
+                .abs()
+                < 1e-10
+        );
     }
 
     #[test]
     fn test_tensor_item_not_scalar() {
-        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0).unwrap();
+        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         assert!(t.item().is_err());
     }
 
@@ -724,7 +745,8 @@ mod tests {
 
     #[test]
     fn test_tensor_display() {
-        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0).unwrap();
+        let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         let s = format!("{t}");
         assert!(s.contains("GpuTensor"));
         assert!(s.contains("[2, 3]"));
@@ -732,38 +754,56 @@ mod tests {
 
     #[test]
     fn test_accumulate_grad() {
-        let mut t = GpuTensor::zeros(&[2], TensorDtype::Float32, 0).unwrap();
+        let mut t = GpuTensor::zeros(&[2], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         t.set_requires_grad(true);
-        let g1 = GpuTensor::from_host_f64(&[1.0, 2.0], &[2], 0).unwrap();
-        let g2 = GpuTensor::from_host_f64(&[3.0, 4.0], &[2], 0).unwrap();
-        t.accumulate_grad(&g1).unwrap();
-        t.accumulate_grad(&g2).unwrap();
-        let grad = t.grad().unwrap();
+        let g1 = GpuTensor::from_host_f64(&[1.0, 2.0], &[2], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        let g2 = GpuTensor::from_host_f64(&[3.0, 4.0], &[2], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        t.accumulate_grad(&g1)
+            .expect("gradient accumulation should succeed");
+        t.accumulate_grad(&g2)
+            .expect("gradient accumulation should succeed");
+        let grad = t
+            .grad()
+            .expect("gradient should be present after accumulation");
         assert!((grad.host_data[0] - 4.0).abs() < 1e-10);
         assert!((grad.host_data[1] - 6.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_get_set_flat() {
-        let mut t = GpuTensor::zeros(&[3], TensorDtype::Float32, 0).unwrap();
-        t.set_flat(1, 5.0).unwrap();
-        assert!((t.get_flat(1).unwrap() - 5.0).abs() < 1e-10);
+        let mut t = GpuTensor::zeros(&[3], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
+        t.set_flat(1, 5.0)
+            .expect("setting flat element with valid index should succeed");
+        assert!(
+            (t.get_flat(1)
+                .expect("getting flat element with valid index should succeed")
+                - 5.0)
+                .abs()
+                < 1e-10
+        );
         assert!(t.get_flat(10).is_err());
         assert!(t.set_flat(10, 1.0).is_err());
     }
 
     #[test]
     fn test_nbytes() {
-        let t = GpuTensor::zeros(&[100], TensorDtype::Float32, 0).unwrap();
+        let t = GpuTensor::zeros(&[100], TensorDtype::Float32, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         assert_eq!(t.nbytes(), 400);
-        let t64 = GpuTensor::zeros(&[100], TensorDtype::Float64, 0).unwrap();
+        let t64 = GpuTensor::zeros(&[100], TensorDtype::Float64, 0)
+            .expect("GpuTensor creation with valid args should succeed");
         assert_eq!(t64.nbytes(), 800);
     }
 
     #[test]
     fn test_tensor_to_host() {
         let data = vec![1.0f32, 2.0, 3.0];
-        let t = GpuTensor::from_host_f32(&data, &[3], 0).unwrap();
+        let t = GpuTensor::from_host_f32(&data, &[3], 0)
+            .expect("GpuTensor creation from host data should succeed");
         let f32_data = t.to_host_f32();
         assert!((f32_data[0] - 1.0).abs() < 1e-6);
         assert!((f32_data[2] - 3.0).abs() < 1e-6);

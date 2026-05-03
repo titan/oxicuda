@@ -239,7 +239,8 @@ mod tests {
     fn test_apply_wiener_gains_unity() {
         let mut stft = vec![2.0_f64; 8]; // 2 bins, 2 frames
         let gains = vec![1.0, 1.0_f64];
-        apply_wiener_gains(&mut stft, &gains, 2).unwrap();
+        apply_wiener_gains(&mut stft, &gains, 2)
+            .expect("apply_wiener_gains with valid inputs succeeds");
         assert!(stft.iter().all(|&v| (v - 2.0).abs() < 1e-12));
     }
 
@@ -247,7 +248,8 @@ mod tests {
     fn test_apply_wiener_gains_zero() {
         let mut stft = vec![5.0_f64; 8];
         let gains = vec![0.0, 0.0_f64];
-        apply_wiener_gains(&mut stft, &gains, 2).unwrap();
+        apply_wiener_gains(&mut stft, &gains, 2)
+            .expect("apply_wiener_gains with valid inputs succeeds");
         assert!(stft.iter().all(|&v| v.abs() < 1e-12));
     }
 

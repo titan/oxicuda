@@ -17,10 +17,21 @@ oxicuda-memory.workspace = true
 oxicuda-ptx.workspace = true
 tracing = { workspace = true, optional = true }
 
+[dev-dependencies]
+criterion.workspace = true
+
 [features]
 default = []
 gpu-tests = ["oxicuda-driver/gpu-tests"]
 tracing = ["dep:tracing"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true
+
+[[bench]]
+name = "launch_overhead"
+harness = false

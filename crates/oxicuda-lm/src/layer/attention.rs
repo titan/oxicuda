@@ -320,7 +320,8 @@ mod tests {
     use super::*;
 
     fn make_mha(n_heads: usize, hidden_dim: usize) -> MultiHeadAttention {
-        MultiHeadAttention::new(n_heads, n_heads, hidden_dim, true).unwrap()
+        MultiHeadAttention::new(n_heads, n_heads, hidden_dim, true)
+            .expect("valid n_heads and hidden_dim divisible by n_heads")
     }
 
     // ── LayerKvCache ──────────────────────────────────────────────────────
@@ -347,7 +348,9 @@ mod tests {
     fn mha_zero_weights_zero_output() {
         let mha = make_mha(2, 4);
         let x = vec![1.0_f32; 4]; // 1 token
-        let (out, _) = mha.forward(&x, 1, None, None).unwrap();
+        let (out, _) = mha
+            .forward(&x, 1, None, None)
+            .expect("forward with valid 1-token input should succeed");
         // W_o = 0 → output must be 0
         assert!(out.iter().all(|&v| v.abs() < 1e-6), "out={out:?}");
     }
@@ -356,7 +359,9 @@ mod tests {
     fn mha_output_shape_single_token() {
         let mha = make_mha(2, 4);
         let x = vec![0.0_f32; 4];
-        let (out, cache) = mha.forward(&x, 1, None, None).unwrap();
+        let (out, cache) = mha
+            .forward(&x, 1, None, None)
+            .expect("single-token forward should succeed");
         assert_eq!(out.len(), 4);
         assert_eq!(cache.past_len, 1);
     }
@@ -365,7 +370,9 @@ mod tests {
     fn mha_output_shape_multi_token() {
         let mha = make_mha(2, 4);
         let x = vec![0.0_f32; 3 * 4];
-        let (out, cache) = mha.forward(&x, 3, None, None).unwrap();
+        let (out, cache) = mha
+            .forward(&x, 3, None, None)
+            .expect("3-token forward should succeed");
         assert_eq!(out.len(), 3 * 4);
         assert_eq!(cache.past_len, 3);
     }
@@ -374,20 +381,27 @@ mod tests {
     fn mha_kv_cache_extends() {
         let mha = make_mha(2, 4);
         let x1 = vec![0.0_f32; 4];
-        let (_, cache1) = mha.forward(&x1, 1, None, None).unwrap();
+        let (_, cache1) = mha
+            .forward(&x1, 1, None, None)
+            .expect("first token forward should succeed");
         assert_eq!(cache1.past_len, 1);
 
         let x2 = vec![0.0_f32; 4];
-        let (_, cache2) = mha.forward(&x2, 1, Some(&cache1), None).unwrap();
+        let (_, cache2) = mha
+            .forward(&x2, 1, Some(&cache1), None)
+            .expect("second token forward with cache should succeed");
         assert_eq!(cache2.past_len, 2);
     }
 
     #[test]
     fn mha_gqa_forward_shape() {
         // 4 query heads, 2 KV heads (GQA with factor 2)
-        let mha = MultiHeadAttention::new(4, 2, 8, true).unwrap();
+        let mha = MultiHeadAttention::new(4, 2, 8, true)
+            .expect("GQA config 4Q/2KV with hidden_dim=8 should be valid");
         let x = vec![0.0_f32; 3 * 8]; // 3 tokens
-        let (out, _) = mha.forward(&x, 3, None, None).unwrap();
+        let (out, _) = mha
+            .forward(&x, 3, None, None)
+            .expect("GQA 3-token forward should succeed");
         assert_eq!(out.len(), 3 * 8);
     }
 
@@ -406,14 +420,17 @@ mod tests {
     fn mha_w_o_identity_propagates_value() {
         // W_q = I, W_k = I, W_v = I, W_o = I, no causal (x attends to itself fully)
         // With uniform Q=K=V=x and softmax → uniform attention → output ≈ x
-        let mut mha = MultiHeadAttention::new(1, 1, 4, false).unwrap();
+        let mut mha = MultiHeadAttention::new(1, 1, 4, false)
+            .expect("single-head non-causal hidden_dim=4 should be valid");
         mha.w_q = WeightTensor::eye(4, 4);
         mha.w_k = WeightTensor::eye(4, 4);
         mha.w_v = WeightTensor::eye(4, 4);
         mha.w_o = WeightTensor::eye(4, 4);
         // Single token: QK^T is a scalar → softmax → 1.0 → output = V = x
         let x = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let (out, _) = mha.forward(&x, 1, None, None).unwrap();
+        let (out, _) = mha
+            .forward(&x, 1, None, None)
+            .expect("identity-weight forward should succeed");
         for (&o, &xi) in out.iter().zip(x.iter()) {
             assert!((o - xi).abs() < 1e-5, "out={out:?} x={x:?}");
         }
@@ -424,14 +441,17 @@ mod tests {
         // With causal=true, token 0 only sees itself.
         // Token 1 sees tokens 0 and 1.
         // Use identity weights so we can trace values.
-        let mut mha = MultiHeadAttention::new(1, 1, 4, true).unwrap();
+        let mut mha = MultiHeadAttention::new(1, 1, 4, true)
+            .expect("single-head causal hidden_dim=4 should be valid");
         mha.w_q = WeightTensor::eye(4, 4);
         mha.w_k = WeightTensor::eye(4, 4);
         mha.w_v = WeightTensor::eye(4, 4);
         mha.w_o = WeightTensor::eye(4, 4);
         // x: token 0 = [1,0,0,0], token 1 = [0,2,0,0]
         let x = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        let (out, _) = mha.forward(&x, 2, None, None).unwrap();
+        let (out, _) = mha
+            .forward(&x, 2, None, None)
+            .expect("2-token causal forward should succeed");
         // Token 0 attends only to itself → out[0..4] ≈ [1,0,0,0]
         assert!((out[0] - 1.0).abs() < 1e-5, "out[0]={}", out[0]);
         assert!(out[1].abs() < 1e-5);
@@ -446,7 +466,8 @@ mod tests {
     #[test]
     fn mha_rope_applied_no_error() {
         let mha = make_mha(2, 4);
-        let rope = RotaryEmbedding::new(2, 32, 10_000.0).unwrap();
+        let rope =
+            RotaryEmbedding::new(2, 32, 10_000.0).expect("even head_dim=2 RoPE should be valid");
         let x = vec![0.5_f32; 4];
         let result = mha.forward(&x, 1, None, Some(&rope));
         assert!(result.is_ok());
@@ -456,7 +477,8 @@ mod tests {
     fn mha_incremental_vs_full_consistency() {
         // Full pass with 2 tokens should equal two incremental passes
         // (token-0 alone, then token-1 with cache).
-        let mut mha = MultiHeadAttention::new(1, 1, 4, false).unwrap();
+        let mut mha = MultiHeadAttention::new(1, 1, 4, false)
+            .expect("single-head non-causal hidden_dim=4 for incremental test");
         mha.w_q = WeightTensor::eye(4, 4);
         mha.w_k = WeightTensor::eye(4, 4);
         mha.w_v = WeightTensor::eye(4, 4);
@@ -466,12 +488,18 @@ mod tests {
         let full_x = [x0.clone(), x1.clone()].concat();
 
         // Full 2-token pass
-        let (out_full, _) = mha.forward(&full_x, 2, None, None).unwrap();
+        let (out_full, _) = mha
+            .forward(&full_x, 2, None, None)
+            .expect("full 2-token forward should succeed");
 
         // Incremental: token 0
-        let (_, cache0) = mha.forward(&x0, 1, None, None).unwrap();
+        let (_, cache0) = mha
+            .forward(&x0, 1, None, None)
+            .expect("incremental token-0 forward should succeed");
         // Incremental: token 1 with cache
-        let (out_incr_1, _) = mha.forward(&x1, 1, Some(&cache0), None).unwrap();
+        let (out_incr_1, _) = mha
+            .forward(&x1, 1, Some(&cache0), None)
+            .expect("incremental token-1 with cache should succeed");
 
         // Second-token outputs should match
         for (&full_v, &incr_v) in out_full[4..].iter().zip(out_incr_1.iter()) {

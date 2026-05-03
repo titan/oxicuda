@@ -368,7 +368,8 @@ mod tests {
 
     fn param_with_grad(data: Vec<f32>, grad: Vec<f32>) -> ParamTensor {
         let mut p = ParamTensor::new(data, "w");
-        p.set_grad(grad).unwrap();
+        p.set_grad(grad)
+            .expect("gradient length matches param data length");
         p
     }
 
@@ -383,8 +384,10 @@ mod tests {
         let mut p_base = vec![param_with_grad(data.clone(), grad.clone())];
         let mut p_zero = vec![param_with_grad(data.clone(), grad.clone())];
 
-        base.step(&mut p_base).unwrap();
-        zero.step(&mut p_zero).unwrap();
+        base.step(&mut p_base)
+            .expect("base optimizer step should succeed");
+        zero.step(&mut p_zero)
+            .expect("ZeRO optimizer step should succeed");
 
         for (b, z) in p_base[0].data.iter().zip(p_zero[0].data.iter()) {
             assert_abs_diff_eq!(b, z, epsilon = 1e-6);
@@ -405,7 +408,10 @@ mod tests {
         if let Some(g) = &mut params[0].grad {
             g[end..].fill(0.0);
         }
-        let g = params[0].grad.as_ref().unwrap();
+        let g = params[0]
+            .grad
+            .as_ref()
+            .expect("gradient must be present after setting it");
         g[..4]
             .iter()
             .for_each(|&v| assert_abs_diff_eq!(v, 1.0, epsilon = 1e-6));
@@ -439,7 +445,8 @@ mod tests {
         // First: validate() itself should return Err
         let _validation_err = std::panic::catch_unwind(|| {
             let cfg = ZeroConfig::stage1(5, 4); // rank 5 >= world_size 4
-            cfg.validate().unwrap(); // should fail validation
+            cfg.validate()
+                .expect("validate called inside catch_unwind so panic is caught"); // should fail validation
         });
         // ZeroOptimizer::new calls validate().expect(), so it should panic
         let result2 = std::panic::catch_unwind(|| {
@@ -454,7 +461,8 @@ mod tests {
         let cfg = ZeroConfig::stage3(0, 2);
         let mut zero = ZeroOptimizer::new(GpuAdam::new(1e-2), cfg);
         let mut params = vec![param_with_grad(vec![2.0_f32; 4], vec![1.0_f32; 4])];
-        zero.step(&mut params).unwrap();
+        zero.step(&mut params)
+            .expect("ZeRO stage3 optimizer step should succeed");
 
         // Owned shard (0..2) should have been updated
         let owned_changed = params[0].data[0..2].iter().any(|&v| (v - 2.0).abs() > 1e-6);

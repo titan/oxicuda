@@ -313,7 +313,8 @@ mod tests {
     fn first_update_copies_params() {
         let mut ema = ExponentialMovingAverage::new(0.99);
         let params = params_from(&[&[1.0, 2.0, 3.0]]);
-        ema.update(&params).unwrap();
+        ema.update(&params)
+            .expect("EMA update should succeed with valid params");
         // After first update shadows == params exactly
         assert_eq!(ema.collect_shadows()[0], vec![1.0, 2.0, 3.0]);
     }
@@ -322,10 +323,12 @@ mod tests {
     fn second_update_blends() {
         let mut ema = ExponentialMovingAverage::new(0.5).with_fixed_decay();
         let mut params = params_from(&[&[0.0]]);
-        ema.update(&params).unwrap();
+        ema.update(&params)
+            .expect("EMA update should succeed with valid params");
         // shadow = 0.0  (initial)
         params[0].data = vec![2.0];
-        ema.update(&params).unwrap();
+        ema.update(&params)
+            .expect("EMA update should succeed with valid params");
         // shadow = 0.5 * 0.0 + 0.5 * 2.0 = 1.0
         let s = ema.collect_shadows()[0][0];
         assert!((s - 1.0).abs() < 1e-6, "shadow={s}");
@@ -341,7 +344,8 @@ mod tests {
     fn update_count_mismatch_error() {
         let mut ema = ExponentialMovingAverage::new(0.999);
         let p1 = params_from(&[&[1.0]]);
-        ema.update(&p1).unwrap();
+        ema.update(&p1)
+            .expect("EMA update should succeed with valid params");
         let p2 = params_from(&[&[1.0], &[2.0]]);
         assert!(ema.update(&p2).is_err());
     }
@@ -350,7 +354,8 @@ mod tests {
     fn update_shape_mismatch_error() {
         let mut ema = ExponentialMovingAverage::new(0.999);
         let p1 = params_from(&[&[1.0, 2.0]]);
-        ema.update(&p1).unwrap();
+        ema.update(&p1)
+            .expect("EMA update should succeed with valid params");
         let p2 = params_from(&[&[1.0, 2.0, 3.0]]);
         // shape differs: 2 → 3
         assert!(ema.update(&p2).is_err());
@@ -362,12 +367,15 @@ mod tests {
     fn copy_to_overwrites_params() {
         let mut ema = ExponentialMovingAverage::new(0.5).with_fixed_decay();
         let mut params = params_from(&[&[0.0]]);
-        ema.update(&params).unwrap(); // shadow = 0.0
+        ema.update(&params)
+            .expect("EMA update should succeed with valid params"); // shadow = 0.0
         params[0].data = vec![4.0];
-        ema.update(&params).unwrap(); // shadow = 0.5*0.0 + 0.5*4.0 = 2.0
+        ema.update(&params)
+            .expect("EMA update should succeed with valid params"); // shadow = 0.5*0.0 + 0.5*4.0 = 2.0
 
         let mut eval_params = params.clone();
-        ema.copy_to(&mut eval_params).unwrap();
+        ema.copy_to(&mut eval_params)
+            .expect("copy_to should succeed after EMA is initialised");
         assert!((eval_params[0].data[0] - 2.0).abs() < 1e-6);
     }
 
@@ -384,7 +392,8 @@ mod tests {
     fn restore_from_works() {
         let mut params = params_from(&[&[1.0, 2.0]]);
         let backup = vec![vec![5.0_f32, 6.0]];
-        ExponentialMovingAverage::restore_from(&mut params, &backup).unwrap();
+        ExponentialMovingAverage::restore_from(&mut params, &backup)
+            .expect("restore_from should succeed with matching backup shape");
         assert_eq!(params[0].data, vec![5.0, 6.0]);
     }
 
@@ -436,7 +445,8 @@ mod tests {
     fn total_elements_counts_all() {
         let mut ema = ExponentialMovingAverage::new(0.9);
         let params = params_from(&[&[1.0, 2.0], &[3.0, 4.0, 5.0]]);
-        ema.update(&params).unwrap();
+        ema.update(&params)
+            .expect("EMA update should succeed with valid params");
         assert_eq!(ema.total_elements(), 5);
     }
 
@@ -444,7 +454,8 @@ mod tests {
     fn num_params_matches() {
         let mut ema = ExponentialMovingAverage::new(0.9);
         let params = params_from(&[&[1.0], &[2.0], &[3.0]]);
-        ema.update(&params).unwrap();
+        ema.update(&params)
+            .expect("EMA update should succeed with valid params");
         assert_eq!(ema.num_params(), 3);
     }
 
@@ -456,7 +467,8 @@ mod tests {
         let mut ema = ExponentialMovingAverage::new(0.9).with_fixed_decay();
         let params = params_from(&[&[1.0]]);
         for _ in 0..200 {
-            ema.update(&params).unwrap();
+            ema.update(&params)
+                .expect("EMA update should succeed with valid params");
         }
         let s = ema.collect_shadows()[0][0];
         assert!(
@@ -473,14 +485,20 @@ mod tests {
         let mut shadow_vals = Vec::new();
         for i in 0..50_usize {
             params[0].data = vec![i as f32];
-            ema.update(&params).unwrap();
+            ema.update(&params)
+                .expect("EMA update should succeed with valid params");
             shadow_vals.push(ema.collect_shadows()[0][0]);
         }
         // Last shadow should be strictly less than 49.0 (lags behind)
         assert!(
-            *shadow_vals.last().unwrap() < 49.0,
+            *shadow_vals
+                .last()
+                .expect("shadow_vals is populated by the loop")
+                < 49.0,
             "EMA should lag, last shadow={}",
-            shadow_vals.last().unwrap()
+            shadow_vals
+                .last()
+                .expect("shadow_vals is populated by the loop")
         );
     }
 }

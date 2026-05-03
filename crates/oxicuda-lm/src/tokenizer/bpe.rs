@@ -298,76 +298,121 @@ mod tests {
             (vec![b'c'], vec![b'd']),             // rank 1
             (vec![b'a', b'b'], vec![b'c', b'd']), // rank 2
         ];
-        let vocab = Vocab::from_tokens(tokens, HashMap::new()).unwrap();
-        BpeTokenizer::new(vocab, merges).unwrap()
+        let vocab = Vocab::from_tokens(tokens, HashMap::new())
+            .expect("minimal 7-token vocabulary should be valid");
+        BpeTokenizer::new(vocab, merges)
+            .expect("minimal BPE tokenizer with 3 merge rules should be valid")
     }
 
     #[test]
     fn encode_single_char() {
         let t = minimal_tokenizer();
-        assert_eq!(t.encode("a").unwrap(), vec![0u32]);
-        assert_eq!(t.encode("b").unwrap(), vec![1u32]);
+        assert_eq!(
+            t.encode("a").expect("single byte 'a' should encode"),
+            vec![0u32]
+        );
+        assert_eq!(
+            t.encode("b").expect("single byte 'b' should encode"),
+            vec![1u32]
+        );
     }
 
     #[test]
     fn encode_empty_string() {
         let t = minimal_tokenizer();
-        assert_eq!(t.encode("").unwrap(), vec![]);
+        assert_eq!(
+            t.encode("")
+                .expect("empty string should encode to empty vec"),
+            vec![]
+        );
     }
 
     #[test]
     fn encode_ab_merges_to_one_token() {
         let t = minimal_tokenizer();
-        assert_eq!(t.encode("ab").unwrap(), vec![4u32]);
+        assert_eq!(
+            t.encode("ab").expect("'ab' should merge to token 4"),
+            vec![4u32]
+        );
     }
 
     #[test]
     fn encode_cd_merges_to_one_token() {
         let t = minimal_tokenizer();
-        assert_eq!(t.encode("cd").unwrap(), vec![5u32]);
+        assert_eq!(
+            t.encode("cd").expect("'cd' should merge to token 5"),
+            vec![5u32]
+        );
     }
 
     #[test]
     fn encode_abcd_fully_merged() {
         let t = minimal_tokenizer();
-        assert_eq!(t.encode("abcd").unwrap(), vec![6u32]);
+        assert_eq!(
+            t.encode("abcd")
+                .expect("'abcd' should fully merge to token 6"),
+            vec![6u32]
+        );
     }
 
     #[test]
     fn encode_abc_partial_merge() {
         // "abc" → [ab=4, c=2] (cd merge does not apply because no 'd')
         let t = minimal_tokenizer();
-        assert_eq!(t.encode("abc").unwrap(), vec![4u32, 2]);
+        assert_eq!(
+            t.encode("abc")
+                .expect("'abc' should partially merge to [4, 2]"),
+            vec![4u32, 2]
+        );
     }
 
     #[test]
     fn encode_abcdabcd_two_full_merges() {
         let t = minimal_tokenizer();
         // "abcdabcd" → [6, 6]
-        assert_eq!(t.encode("abcdabcd").unwrap(), vec![6u32, 6]);
+        assert_eq!(
+            t.encode("abcdabcd")
+                .expect("'abcdabcd' should merge to [6, 6]"),
+            vec![6u32, 6]
+        );
     }
 
     #[test]
     fn decode_single_token() {
         let t = minimal_tokenizer();
-        assert_eq!(t.decode(&[0]).unwrap(), "a");
-        assert_eq!(t.decode(&[4]).unwrap(), "ab");
-        assert_eq!(t.decode(&[6]).unwrap(), "abcd");
+        assert_eq!(t.decode(&[0]).expect("token 0 should decode to 'a'"), "a");
+        assert_eq!(t.decode(&[4]).expect("token 4 should decode to 'ab'"), "ab");
+        assert_eq!(
+            t.decode(&[6]).expect("token 6 should decode to 'abcd'"),
+            "abcd"
+        );
     }
 
     #[test]
     fn decode_multiple_tokens() {
         let t = minimal_tokenizer();
-        assert_eq!(t.decode(&[4, 2]).unwrap(), "abc");
-        assert_eq!(t.decode(&[6, 6]).unwrap(), "abcdabcd");
+        assert_eq!(
+            t.decode(&[4, 2])
+                .expect("tokens [4,2] should decode to 'abc'"),
+            "abc"
+        );
+        assert_eq!(
+            t.decode(&[6, 6])
+                .expect("tokens [6,6] should decode to 'abcdabcd'"),
+            "abcdabcd"
+        );
     }
 
     #[test]
     fn encode_then_decode_roundtrip() {
         let t = minimal_tokenizer();
         for text in &["a", "ab", "abc", "abcd", "abcdabcd", "ba", "dcba"] {
-            let ids = t.encode(text).unwrap();
-            let decoded = t.decode(&ids).unwrap();
+            let ids = t
+                .encode(text)
+                .unwrap_or_else(|e| panic!("encode '{text}' should succeed: {e}"));
+            let decoded = t
+                .decode(&ids)
+                .unwrap_or_else(|e| panic!("decode of '{text}' ids should succeed: {e}"));
             assert_eq!(&decoded, text, "roundtrip failed for '{text}'");
         }
     }
@@ -392,11 +437,13 @@ mod tests {
         let special: HashMap<String, u32> = [("<bos>".into(), 2u32), ("<eos>".into(), 3u32)]
             .into_iter()
             .collect();
-        let vocab = Vocab::from_tokens(tokens, special).unwrap();
-        let t = BpeTokenizer::new(vocab, vec![]).unwrap();
+        let vocab = Vocab::from_tokens(tokens, special)
+            .expect("4-token vocabulary with valid special ids should succeed");
+        let t =
+            BpeTokenizer::new(vocab, vec![]).expect("BPE tokenizer with no merges should succeed");
         let ids = t
             .encode_with_special("ab", Some("<bos>"), Some("<eos>"))
-            .unwrap();
+            .expect("encode_with_special for 'ab' with valid BOS/EOS should succeed");
         assert_eq!(ids, vec![2, 0, 1, 3]);
     }
 
@@ -404,7 +451,9 @@ mod tests {
     fn encode_with_special_no_bos_eos_absent() {
         // When special token name is not in vocab, skip silently.
         let t = minimal_tokenizer();
-        let ids = t.encode_with_special("ab", Some("<bos>"), None).unwrap();
+        let ids = t
+            .encode_with_special("ab", Some("<bos>"), None)
+            .expect("encode_with_special with absent BOS should skip silently and succeed");
         // <bos> not registered → skip; "ab" → [4]
         assert_eq!(ids, vec![4u32]);
     }
@@ -416,10 +465,16 @@ mod tests {
         let t = BpeBuilder::new()
             .add_merge(b"a", b"b") // "ab" gets id 256
             .build()
-            .unwrap();
+            .expect("BpeBuilder with single merge should produce valid tokenizer");
         assert_eq!(t.vocab_size(), 257);
-        assert_eq!(t.encode("ab").unwrap(), vec![256u32]);
-        assert_eq!(t.decode(&[256]).unwrap(), "ab");
+        assert_eq!(
+            t.encode("ab").expect("'ab' should merge to id 256"),
+            vec![256u32]
+        );
+        assert_eq!(
+            t.decode(&[256]).expect("id 256 should decode to 'ab'"),
+            "ab"
+        );
     }
 
     #[test]
@@ -429,9 +484,15 @@ mod tests {
             .add_merge(b"a", b"b") // id 256: "ab"
             .add_merge(b"ab", b"c") // id 257: "abc"
             .build()
-            .unwrap();
-        assert_eq!(t.encode("abc").unwrap(), vec![257u32]);
-        assert_eq!(t.decode(&[257]).unwrap(), "abc");
+            .expect("BpeBuilder with chained merges a+b→ab then ab+c→abc should succeed");
+        assert_eq!(
+            t.encode("abc").expect("'abc' should chain-merge to id 257"),
+            vec![257u32]
+        );
+        assert_eq!(
+            t.decode(&[257]).expect("id 257 should decode to 'abc'"),
+            "abc"
+        );
     }
 
     #[test]
@@ -439,7 +500,7 @@ mod tests {
         let t = BpeBuilder::new()
             .add_special("<eos>", 10) // byte 10 = 0x0A (newline) repurposed
             .build()
-            .unwrap();
+            .expect("BpeBuilder with special token at valid id 10 should succeed");
         assert_eq!(t.special_id("<eos>"), Some(10));
     }
 
@@ -449,7 +510,7 @@ mod tests {
             .add_merge(b"x", b"y")
             .add_merge(b"xy", b"z")
             .build()
-            .unwrap();
+            .expect("BpeBuilder with x+y and xy+z merges should succeed");
         assert_eq!(t.vocab_size(), 258); // 256 + 2 merged tokens
     }
 
@@ -463,8 +524,10 @@ mod tests {
             .add_merge(b"b", b"c") // rank 0
             .add_merge(b"a", b"b") // rank 1
             .build()
-            .unwrap();
-        let ids = t.encode("abcd").unwrap();
+            .expect("BpeBuilder with priority-order merges b+c then a+b should succeed");
+        let ids = t
+            .encode("abcd")
+            .expect("'abcd' encoding with priority b+c merge should succeed");
         // 'a'=97, 'bc'=256, 'd'=100  (GPT-2 byte tokens use raw byte values)
         assert_eq!(ids, vec![b'a' as u32, 256u32, b'd' as u32]);
     }

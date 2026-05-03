@@ -248,8 +248,8 @@ mod tests {
 
         let mut rng = Rng::new(0);
         let draft_tokens: Vec<u32> = (0..k as u32).collect();
-        let (accepted, _bonus) =
-            speculative_verify(&draft_tokens, &probs, &target_probs, &mut rng).unwrap();
+        let (accepted, _bonus) = speculative_verify(&draft_tokens, &probs, &target_probs, &mut rng)
+            .expect("valid draft and target probs with matching dimensions");
         assert_eq!(accepted.len(), k, "all {k} drafts should be accepted");
     }
 
@@ -265,7 +265,8 @@ mod tests {
 
         let mut rng = Rng::new(123);
         let (accepted, bonus) =
-            speculative_verify(&draft_tokens, &draft_probs, &target_probs, &mut rng).unwrap();
+            speculative_verify(&draft_tokens, &draft_probs, &target_probs, &mut rng)
+                .expect("valid draft and target probs with matching dimensions");
         // With p(0)=0 and q(0)=1, acceptance = 0 → reject immediately.
         assert!(accepted.is_empty(), "should reject first draft immediately");
         // Bonus token should come from correction distribution ∝ max(0, p-q)
@@ -311,7 +312,9 @@ mod tests {
 
         let mut decoder = SpeculativeDecoder::new(k);
         let mut rng = Rng::new(42);
-        decoder.verify_step(&draft, &dp, &tp, &mut rng).unwrap();
+        decoder
+            .verify_step(&draft, &dp, &tp, &mut rng)
+            .expect("valid draft probs and target probs");
         assert!(!decoder.output_tokens.is_empty());
     }
 
@@ -329,7 +332,7 @@ mod tests {
         for _ in 0..10 {
             decoder
                 .verify_step(&draft, &probs, &target, &mut rng)
-                .unwrap();
+                .expect("valid uniform probs for acceptance_rate test");
         }
         let rate = decoder.acceptance_rate();
         assert!(
@@ -347,7 +350,8 @@ mod tests {
         let tp = vec![peaked_probs(vocab, 1); k + 1]; // target prefers token 1
         let draft = vec![0_u32; k];
         let mut r = Rng::new(0);
-        let (accepted, bonus) = speculative_verify(&draft, &dp, &tp, &mut r).unwrap();
+        let (accepted, bonus) =
+            speculative_verify(&draft, &dp, &tp, &mut r).expect("valid draft and target probs");
         // accepted may be 0 (first token rejected) or more if some get through.
         let _ = accepted;
         // bonus must be valid (< vocab)

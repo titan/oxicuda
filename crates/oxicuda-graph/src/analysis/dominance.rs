@@ -325,7 +325,7 @@ mod tests {
         for w in ids.windows(2) {
             b.dep(w[0], w[1]);
         }
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         (g, ids)
     }
 
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn dominance_single_node_is_root() {
         let (g, ids) = make_chain(1);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         assert!(dt.idom(ids[0]).is_none());
         assert_eq!(dt.roots(), vec![ids[0]]);
     }
@@ -347,7 +347,7 @@ mod tests {
     fn dominance_linear_chain() {
         // a→b→c→d: each node has the previous as idom.
         let (g, ids) = make_chain(4);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         assert!(dt.idom(ids[0]).is_none()); // source
         assert_eq!(dt.idom(ids[1]), Some(ids[0]));
         assert_eq!(dt.idom(ids[2]), Some(ids[1]));
@@ -364,8 +364,8 @@ mod tests {
         let c = b.add_barrier("c");
         let d = b.add_barrier("d");
         b.dep(a, bnode).dep(a, c).dep(bnode, d).dep(c, d);
-        let g = b.build().unwrap();
-        let dt = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         assert!(dt.idom(a).is_none());
         assert_eq!(dt.idom(bnode), Some(a));
         assert_eq!(dt.idom(c), Some(a));
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn dominance_dominates_reflexive() {
         let (g, ids) = make_chain(3);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         assert!(dt.dominates(ids[0], ids[0]));
         assert!(dt.dominates(ids[1], ids[1]));
     }
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn dominance_dominates_transitive() {
         let (g, ids) = make_chain(4);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         // ids[0] dominates all subsequent nodes in a chain.
         assert!(dt.dominates(ids[0], ids[1]));
         assert!(dt.dominates(ids[0], ids[2]));
@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn dominance_dominated_by_subtree() {
         let (g, ids) = make_chain(4);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         // ids[1] dominates ids[2] and ids[3] (the rest of the chain).
         let sub = dt.dominated_by(ids[1]);
         assert!(sub.contains(&ids[1]));
@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn dominance_depth_linear() {
         let (g, ids) = make_chain(4);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         assert_eq!(dt.depth(ids[0]), 0);
         assert_eq!(dt.depth(ids[1]), 1);
         assert_eq!(dt.depth(ids[2]), 2);
@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn dominance_lca_same_node() {
         let (g, ids) = make_chain(3);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         assert_eq!(dt.lca(ids[1], ids[1]), ids[1]);
     }
 
@@ -431,8 +431,8 @@ mod tests {
         let c = b.add_barrier("c");
         let d = b.add_barrier("d");
         b.dep(a, bnode).dep(a, c).dep(bnode, d).dep(c, d);
-        let g = b.build().unwrap();
-        let dt = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         // b and c both have idom = a, so lca(b,c) should be a.
         let result = dt.lca(bnode, c);
         // LCA of two siblings in domtree is their common idom = a.
@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn dominance_children() {
         let (g, ids) = make_chain(3);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         // In a linear chain: children of ids[0] = [ids[1]].
         assert_eq!(dt.children(ids[0]), &[ids[1]]);
         assert_eq!(dt.children(ids[1]), &[ids[2]]);
@@ -462,8 +462,8 @@ mod tests {
         let e = b.add_barrier("e");
         b.fan_out(a, &[b1, c, d]);
         b.fan_in(&[b1, c, d], e);
-        let g = b.build().unwrap();
-        let dt = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         // a dominates all; e is dominated by a (convergence point).
         assert!(dt.dominates(a, e));
         // b, c, d each dominated by a.
@@ -478,8 +478,8 @@ mod tests {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         let a = b.add_barrier("a");
         let bnode = b.add_barrier("b");
-        let g = b.build().unwrap();
-        let dt = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         assert!(dt.idom(a).is_none());
         assert!(dt.idom(bnode).is_none());
         let roots = dt.roots();
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn dominance_longer_chain_all_dominated() {
         let (g, ids) = make_chain(8);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         // ids[0] dominates all others.
         for &id in &ids[1..] {
             assert!(dt.dominates(ids[0], id));
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn dominance_dominated_by_includes_self() {
         let (g, ids) = make_chain(3);
-        let dt = analyse(&g).unwrap();
+        let dt = analyse(&g).expect("dominance analysis succeeds on valid graph");
         let sub = dt.dominated_by(ids[0]);
         assert!(sub.contains(&ids[0]));
     }

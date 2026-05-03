@@ -822,10 +822,10 @@ mod tests {
     fn fake_quantize_ptx_generates() {
         let fq = FakeQuantize::new(default_config());
         assert!(fq.is_ok());
-        let fq = fq.unwrap();
+        let fq = fq.expect("valid QAT config should produce PTX without error");
         let ptx = fq.generate_fake_quantize_ptx();
         assert!(ptx.is_ok());
-        let ptx_str = ptx.unwrap();
+        let ptx_str = ptx.expect("valid QAT config should produce PTX without error");
         assert!(ptx_str.contains("qat_fake_quantize"));
         assert!(ptx_str.contains(".entry"));
     }
@@ -834,9 +834,11 @@ mod tests {
     fn ste_backward_ptx_generates() {
         let fq = FakeQuantize::new(default_config());
         assert!(fq.is_ok());
-        let ptx = fq.unwrap().generate_ste_backward_ptx();
+        let ptx = fq
+            .expect("valid QAT config should produce PTX without error")
+            .generate_ste_backward_ptx();
         assert!(ptx.is_ok());
-        let ptx_str = ptx.unwrap();
+        let ptx_str = ptx.expect("valid QAT config should produce PTX without error");
         assert!(ptx_str.contains("qat_ste_backward"));
         assert!(ptx_str.contains("selp.f32"));
     }
@@ -845,9 +847,11 @@ mod tests {
     fn observer_ptx_generates() {
         let fq = FakeQuantize::new(default_config());
         assert!(fq.is_ok());
-        let ptx = fq.unwrap().generate_observer_ptx();
+        let ptx = fq
+            .expect("valid QAT config should produce PTX without error")
+            .generate_observer_ptx();
         assert!(ptx.is_ok());
-        let ptx_str = ptx.unwrap();
+        let ptx_str = ptx.expect("valid QAT config should produce PTX without error");
         assert!(ptx_str.contains("qat_observer_minmax"));
         assert!(ptx_str.contains("smem_min"));
     }
@@ -896,9 +900,11 @@ mod tests {
         config.bit_width = QatBitWidth::Int4;
         let fq = FakeQuantize::new(config);
         assert!(fq.is_ok());
-        let ptx = fq.unwrap().generate_fake_quantize_ptx();
+        let ptx = fq
+            .expect("valid QAT config should produce PTX without error")
+            .generate_fake_quantize_ptx();
         assert!(ptx.is_ok());
-        let ptx_str = ptx.unwrap();
+        let ptx_str = ptx.expect("valid QAT config should produce PTX without error");
         assert!(ptx_str.contains("Int4"));
     }
 
@@ -910,9 +916,11 @@ mod tests {
         config.symmetry = QatSymmetry::Asymmetric;
         let fq = FakeQuantize::new(config);
         assert!(fq.is_ok());
-        let ptx = fq.unwrap().generate_fake_quantize_ptx();
+        let ptx = fq
+            .expect("valid QAT config should produce PTX without error")
+            .generate_fake_quantize_ptx();
         assert!(ptx.is_ok());
-        let ptx_str = ptx.unwrap();
+        let ptx_str = ptx.expect("valid QAT config should produce PTX without error");
         assert!(ptx_str.contains("Asymmetric"));
     }
 }

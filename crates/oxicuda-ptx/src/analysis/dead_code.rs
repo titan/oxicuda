@@ -116,6 +116,7 @@ const fn has_side_effects(inst: &Instruction) -> bool {
         | Instruction::Atom { .. }
         | Instruction::AtomCas { .. }
         | Instruction::Red { .. }
+        | Instruction::AtomGlobalAddFloat { .. }
         | Instruction::SurfStore { .. }
         | Instruction::Stmatrix { .. }
         | Instruction::Setmaxnreg { .. }
@@ -147,6 +148,8 @@ const fn has_side_effects(inst: &Instruction) -> bool {
         | Instruction::Abs { .. }
         | Instruction::Min { .. }
         | Instruction::Max { .. }
+        | Instruction::Addc { .. }
+        | Instruction::Selp { .. }
         | Instruction::Brev { .. }
         | Instruction::Clz { .. }
         | Instruction::Popc { .. }
@@ -235,6 +238,9 @@ fn defs(inst: &Instruction) -> Vec<&Register> {
         | Instruction::LoadParam { dst, .. }
         | Instruction::Atom { dst, .. }
         | Instruction::AtomCas { dst, .. }
+        | Instruction::AtomGlobalAddFloat { dst, .. }
+        | Instruction::Addc { dst, .. }
+        | Instruction::Selp { dst, .. }
         | Instruction::Dp4a { dst, .. }
         | Instruction::Dp2a { dst, .. }
         | Instruction::Tex1d { dst, .. }
@@ -299,6 +305,7 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
         | Instruction::Or { a, b, .. }
         | Instruction::Xor { a, b, .. }
         | Instruction::SetP { a, b, .. }
+        | Instruction::Addc { a, b, .. }
         | Instruction::Shl {
             src: a, amount: b, ..
         }
@@ -470,9 +477,18 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
         }
 
         // Atomic: reads addr and src
-        Instruction::Atom { addr, src, .. } | Instruction::Red { addr, src, .. } => {
+        Instruction::Atom { addr, src, .. }
+        | Instruction::Red { addr, src, .. }
+        | Instruction::AtomGlobalAddFloat { addr, src, .. } => {
             let mut regs = operand_regs(addr);
             regs.extend(operand_regs(src));
+            regs
+        }
+
+        Instruction::Selp { a, b, pred, .. } => {
+            let mut regs = operand_regs(a);
+            regs.extend(operand_regs(b));
+            regs.push(pred);
             regs
         }
         // AtomCas: reads addr, compare, and value

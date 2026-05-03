@@ -351,7 +351,7 @@ mod tests {
         // Constant image has zero horizontal gradient in the interior.
         // Border pixels are affected by zero-padding and may be non-zero.
         let img = vec![3.0f32; 25];
-        let gx = sobel_x(&img, 5, 5).unwrap();
+        let gx = sobel_x(&img, 5, 5).expect("sobel_x on valid image succeeds");
         for r in 1..4 {
             for c in 1..4 {
                 let v = gx[r * 5 + c];
@@ -367,7 +367,7 @@ mod tests {
     fn test_sobel_y_constant_image_zero() {
         // Constant image has zero vertical gradient in the interior.
         let img = vec![3.0f32; 25];
-        let gy = sobel_y(&img, 5, 5).unwrap();
+        let gy = sobel_y(&img, 5, 5).expect("sobel_y on valid image succeeds");
         for r in 1..4 {
             for c in 1..4 {
                 let v = gy[r * 5 + c];
@@ -384,7 +384,7 @@ mod tests {
         // Step edge in column direction: left half = 0, right half = 1.
         // Horizontal Sobel should detect this.
         let img: Vec<f32> = (0..25).map(|i| if i % 5 < 3 { 0.0 } else { 1.0 }).collect();
-        let gx = sobel_x(&img, 5, 5).unwrap();
+        let gx = sobel_x(&img, 5, 5).expect("sobel_x on valid image succeeds");
         let max_abs = gx.iter().cloned().fold(0.0f32, f32::max);
         assert!(max_abs > 0.0, "should detect vertical edge with Gx");
     }
@@ -393,7 +393,7 @@ mod tests {
     fn test_sobel_y_horizontal_edge() {
         // Step edge in row direction: top half = 0, bottom half = 1.
         let img: Vec<f32> = (0..25).map(|i| if i / 5 < 3 { 0.0 } else { 1.0 }).collect();
-        let gy = sobel_y(&img, 5, 5).unwrap();
+        let gy = sobel_y(&img, 5, 5).expect("sobel_y on valid image succeeds");
         let max_abs = gy.iter().cloned().fold(0.0f32, f32::max);
         assert!(max_abs > 0.0, "should detect horizontal edge with Gy");
     }
@@ -402,7 +402,7 @@ mod tests {
     fn test_sobel_x_on_ramp_interior() {
         // A row-ramp p[r][c] = c has Gx ≠ 0 in the interior.
         let img: Vec<f32> = (0..25).map(|i| (i % 5) as f32).collect();
-        let gx = sobel_x(&img, 5, 5).unwrap();
+        let gx = sobel_x(&img, 5, 5).expect("sobel_x on valid image succeeds");
         // At interior pixel (2, 2): Gx = (1 + 2 + 1) = 4 (all taps non-zero).
         // Actually: ne - nw = (0-4) - (0-0) ... let me compute manually.
         // For img[r][c] = c: ne = c+1, nw = c-1, e = c+1, w = c-1, se = c+1, sw = c-1
@@ -424,8 +424,8 @@ mod tests {
     #[test]
     fn test_sobel_magnitude_non_negative() {
         let img: Vec<f32> = (0..25).map(|i| (i as f32).sin()).collect();
-        let gx = sobel_x(&img, 5, 5).unwrap();
-        let gy = sobel_y(&img, 5, 5).unwrap();
+        let gx = sobel_x(&img, 5, 5).expect("sobel_x on valid image succeeds");
+        let gy = sobel_y(&img, 5, 5).expect("sobel_y on valid image succeeds");
         let mag = sobel_magnitude(&gx, &gy);
         assert!(mag.iter().all(|&v| v >= 0.0));
     }
@@ -433,8 +433,8 @@ mod tests {
     #[test]
     fn test_sobel_angle_range() {
         let img: Vec<f32> = (0..25).map(|i| (i as f32 * 0.1).cos()).collect();
-        let gx = sobel_x(&img, 5, 5).unwrap();
-        let gy = sobel_y(&img, 5, 5).unwrap();
+        let gx = sobel_x(&img, 5, 5).expect("sobel_x on valid image succeeds");
+        let gy = sobel_y(&img, 5, 5).expect("sobel_y on valid image succeeds");
         let ang = sobel_angle(&gx, &gy);
         for &a in &ang {
             assert!(
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn test_sobel_returns_four_outputs() {
         let img = vec![1.0f32; 9];
-        let (gx, gy, mag, ang) = sobel(&img, 3, 3).unwrap();
+        let (gx, gy, mag, ang) = sobel(&img, 3, 3).expect("sobel on valid image succeeds");
         assert_eq!(gx.len(), 9);
         assert_eq!(gy.len(), 9);
         assert_eq!(mag.len(), 9);

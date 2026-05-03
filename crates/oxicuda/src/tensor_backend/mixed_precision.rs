@@ -343,26 +343,38 @@ mod tests {
     #[test]
     fn test_grad_scaler_scale_loss() {
         let mut scaler = GradScaler::new(100.0);
-        let loss = GpuTensor::from_host_f64(&[0.5], &[1], 0).unwrap();
-        let scaled = scaler.scale_loss(&loss).unwrap();
+        let loss = GpuTensor::from_host_f64(&[0.5], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        let scaled = scaler
+            .scale_loss(&loss)
+            .expect("loss scaling should succeed with valid loss tensor");
         assert!((scaled.host_data()[0] - 50.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_grad_scaler_unscale() {
         let mut scaler = GradScaler::new(100.0);
-        let _loss = GpuTensor::from_host_f64(&[0.5], &[1], 0).unwrap();
+        let _loss = GpuTensor::from_host_f64(&[0.5], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
 
-        let mut param = GpuTensor::from_host_f64(&[1.0], &[1], 0).unwrap();
+        let mut param = GpuTensor::from_host_f64(&[1.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
         param.set_requires_grad(true);
-        let grad = GpuTensor::from_host_f64(&[200.0], &[1], 0).unwrap();
-        param.accumulate_grad(&grad).unwrap();
+        let grad = GpuTensor::from_host_f64(&[200.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        param
+            .accumulate_grad(&grad)
+            .expect("gradient accumulation should succeed");
 
         let mut params = vec![param];
-        scaler.unscale_gradients(&mut params).unwrap();
+        scaler
+            .unscale_gradients(&mut params)
+            .expect("gradient unscaling should succeed");
 
         // 200 / 100 = 2.0
-        let g = params[0].grad().unwrap();
+        let g = params[0]
+            .grad()
+            .expect("gradient should be present after accumulation");
         assert!((g.host_data()[0] - 2.0).abs() < 1e-10);
         assert!(!scaler.found_inf());
     }
@@ -371,13 +383,19 @@ mod tests {
     fn test_grad_scaler_inf_detection() {
         let mut scaler = GradScaler::new(1.0);
 
-        let mut param = GpuTensor::from_host_f64(&[1.0], &[1], 0).unwrap();
+        let mut param = GpuTensor::from_host_f64(&[1.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
         param.set_requires_grad(true);
-        let grad = GpuTensor::from_host_f64(&[f64::INFINITY], &[1], 0).unwrap();
-        param.accumulate_grad(&grad).unwrap();
+        let grad = GpuTensor::from_host_f64(&[f64::INFINITY], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        param
+            .accumulate_grad(&grad)
+            .expect("gradient accumulation should succeed");
 
         let mut params = vec![param];
-        scaler.unscale_gradients(&mut params).unwrap();
+        scaler
+            .unscale_gradients(&mut params)
+            .expect("gradient unscaling should succeed");
         assert!(scaler.found_inf());
     }
 
@@ -404,7 +422,9 @@ mod tests {
     fn test_grad_scaler_double_unscale_error() {
         let mut scaler = GradScaler::new(100.0);
         let mut params = vec![];
-        scaler.unscale_gradients(&mut params).unwrap();
+        scaler
+            .unscale_gradients(&mut params)
+            .expect("gradient unscaling should succeed");
         // Second unscale should error
         assert!(scaler.unscale_gradients(&mut params).is_err());
     }
@@ -462,7 +482,8 @@ mod tests {
     #[test]
     fn test_autocast_set_low_precision() {
         let mut ac = Autocast::new();
-        ac.set_low_precision(TensorDtype::BFloat16).unwrap();
+        ac.set_low_precision(TensorDtype::BFloat16)
+            .expect("setting low precision mode should succeed");
         assert_eq!(ac.low_precision_dtype(), TensorDtype::BFloat16);
         assert!(ac.set_low_precision(TensorDtype::Float32).is_err());
     }
@@ -474,23 +495,30 @@ mod tests {
             let _guard = enter_autocast(Autocast::new());
             let ac = current_autocast();
             assert!(ac.is_some());
-            assert!(ac.unwrap().is_enabled());
+            assert!(
+                ac.expect("operation should succeed with valid inputs")
+                    .is_enabled()
+            );
         }
         assert!(current_autocast().is_none());
     }
 
     #[test]
     fn test_cast_tensor() {
-        let t = GpuTensor::from_host_f64(&[1.0, 2.0], &[2], 0).unwrap();
-        let casted = Autocast::cast_tensor(&t, TensorDtype::Float16).unwrap();
+        let t = GpuTensor::from_host_f64(&[1.0, 2.0], &[2], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        let casted = Autocast::cast_tensor(&t, TensorDtype::Float16)
+            .expect("tensor cast to compatible dtype should succeed");
         assert_eq!(casted.dtype(), TensorDtype::Float16);
         assert!((casted.host_data()[0] - 1.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_cast_tensor_same_dtype() {
-        let t = GpuTensor::from_host_f64(&[1.0], &[1], 0).unwrap();
-        let casted = Autocast::cast_tensor(&t, TensorDtype::Float64).unwrap();
+        let t = GpuTensor::from_host_f64(&[1.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        let casted = Autocast::cast_tensor(&t, TensorDtype::Float64)
+            .expect("tensor cast to compatible dtype should succeed");
         assert_eq!(casted.dtype(), TensorDtype::Float64);
     }
 
@@ -503,14 +531,20 @@ mod tests {
     #[test]
     fn test_grad_scaler_step_with_inf() {
         let mut scaler = GradScaler::new(1.0);
-        let mut param = GpuTensor::from_host_f64(&[1.0], &[1], 0).unwrap();
+        let mut param = GpuTensor::from_host_f64(&[1.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
         param.set_requires_grad(true);
-        let grad = GpuTensor::from_host_f64(&[f64::NAN], &[1], 0).unwrap();
-        param.accumulate_grad(&grad).unwrap();
+        let grad = GpuTensor::from_host_f64(&[f64::NAN], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
+        param
+            .accumulate_grad(&grad)
+            .expect("gradient accumulation should succeed");
 
         let mut params = vec![param];
         let mut opt = crate::tensor_backend::optimizer::Sgd::new(0.1);
-        let stepped = scaler.step(&mut opt, &mut params).unwrap();
+        let stepped = scaler
+            .step(&mut opt, &mut params)
+            .expect("scaler step should succeed");
         assert!(!stepped); // Should skip
     }
 }

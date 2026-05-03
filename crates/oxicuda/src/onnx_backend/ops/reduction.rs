@@ -171,68 +171,100 @@ mod tests {
         // [[1,2,3],[4,5,6]] -> reduce axis 0 -> [5,7,9]
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let attrs = attrs_with_axes(&[0], false);
-        let r = execute_reduce_sum(&[Some(&x)], &attrs).unwrap();
+        let r = execute_reduce_sum(&[Some(&x)], &attrs)
+            .expect("reduce_sum execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![5.0, 7.0, 9.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![5.0, 7.0, 9.0]
+        );
     }
 
     #[test]
     fn test_reduce_sum_axis1_keepdims() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let attrs = attrs_with_axes(&[1], true);
-        let r = execute_reduce_sum(&[Some(&x)], &attrs).unwrap();
+        let r = execute_reduce_sum(&[Some(&x)], &attrs)
+            .expect("reduce_sum execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![2, 1]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![6.0, 15.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![6.0, 15.0]
+        );
     }
 
     #[test]
     fn test_reduce_mean() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let attrs = attrs_with_axes(&[1], false);
-        let r = execute_reduce_mean(&[Some(&x)], &attrs).unwrap();
+        let r = execute_reduce_mean(&[Some(&x)], &attrs)
+            .expect("reduce_mean execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![2]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.5, 3.5]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.5, 3.5]
+        );
     }
 
     #[test]
     fn test_reduce_max() {
         let x = OnnxTensor::from_f32(&[1.0, 5.0, 3.0, 2.0, 4.0, 0.0], vec![2, 3]);
         let attrs = attrs_with_axes(&[1], false);
-        let r = execute_reduce_max(&[Some(&x)], &attrs).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![5.0, 4.0]);
+        let r = execute_reduce_max(&[Some(&x)], &attrs)
+            .expect("reduce_max execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![5.0, 4.0]
+        );
     }
 
     #[test]
     fn test_reduce_min() {
         let x = OnnxTensor::from_f32(&[1.0, 5.0, 3.0, 2.0, 4.0, 0.0], vec![2, 3]);
         let attrs = attrs_with_axes(&[1], false);
-        let r = execute_reduce_min(&[Some(&x)], &attrs).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 0.0]);
+        let r = execute_reduce_min(&[Some(&x)], &attrs)
+            .expect("reduce_min execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 0.0]
+        );
     }
 
     #[test]
     fn test_reduce_prod() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let attrs = attrs_with_axes(&[1], false);
-        let r = execute_reduce_prod(&[Some(&x)], &attrs).unwrap();
-        assert_eq!(r[0].as_f32().unwrap(), vec![2.0, 12.0]);
+        let r = execute_reduce_prod(&[Some(&x)], &attrs)
+            .expect("reduce_prod execution should succeed with valid inputs");
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![2.0, 12.0]
+        );
     }
 
     #[test]
     fn test_reduce_sum_all_axes() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let attrs = attrs_with_axes(&[0, 1], false);
-        let r = execute_reduce_sum(&[Some(&x)], &attrs).unwrap();
+        let r = execute_reduce_sum(&[Some(&x)], &attrs)
+            .expect("reduce_sum execution should succeed with valid inputs");
         assert!(r[0].shape.is_empty());
-        assert_eq!(r[0].as_f32().unwrap(), vec![10.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![10.0]
+        );
     }
 
     #[test]
     fn test_reduce_negative_axis() {
         let x = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let attrs = attrs_with_axes(&[-1], false);
-        let r = execute_reduce_sum(&[Some(&x)], &attrs).unwrap();
+        let r = execute_reduce_sum(&[Some(&x)], &attrs)
+            .expect("reduce_sum execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![2]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![6.0, 15.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![6.0, 15.0]
+        );
     }
 }

@@ -542,7 +542,8 @@ mod tests {
     use super::*;
 
     fn default_scheduler() -> ContinuousBatchScheduler {
-        ContinuousBatchScheduler::new(SchedulerConfig::default()).unwrap()
+        ContinuousBatchScheduler::new(SchedulerConfig::default())
+            .expect("scheduler creation with default config should succeed")
     }
 
     fn make_prompt(len: usize) -> Vec<u32> {
@@ -626,7 +627,8 @@ mod tests {
             max_num_seqs: 1,
             ..Default::default()
         };
-        let mut sched = ContinuousBatchScheduler::new(config).unwrap();
+        let mut sched = ContinuousBatchScheduler::new(config)
+            .expect("scheduler creation with custom config should succeed");
         sched.add_request(make_prompt(5), SamplingParams::default(), 0.0);
         sched.add_request(make_prompt(5), SamplingParams::default(), 1.0);
 

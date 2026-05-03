@@ -415,11 +415,13 @@ mod tests {
     #[test]
     fn test_int8_roundtrip() {
         let values = vec![1.0, -0.5, 0.25, -1.0, 0.0, 0.75];
-        let quantized = quantize_int8_symmetric(&values).unwrap();
+        let quantized = quantize_int8_symmetric(&values)
+            .expect("int8 symmetric quantization of valid values should succeed");
         assert_eq!(quantized.bits, 8);
         assert_eq!(quantized.num_elements, 6);
 
-        let dequantized = dequantize_int8_symmetric(&quantized).unwrap();
+        let dequantized = dequantize_int8_symmetric(&quantized)
+            .expect("int8 symmetric dequantization should succeed");
         assert_eq!(dequantized.len(), 6);
 
         // Check roundtrip accuracy (should be close)
@@ -431,11 +433,13 @@ mod tests {
     #[test]
     fn test_int4_roundtrip() {
         let values = vec![0.5, -0.3, 0.1, -0.8, 0.0];
-        let quantized = quantize_int4_asymmetric(&values, 4).unwrap();
+        let quantized = quantize_int4_asymmetric(&values, 4)
+            .expect("int4 asymmetric quantization of valid values should succeed");
         assert_eq!(quantized.bits, 4);
         assert_eq!(quantized.num_elements, 5);
 
-        let dequantized = dequantize_int4_asymmetric(&quantized).unwrap();
+        let dequantized = dequantize_int4_asymmetric(&quantized)
+            .expect("int4 asymmetric dequantization should succeed");
         assert_eq!(dequantized.len(), 5);
 
         // INT4 has much lower precision — just verify values are in range
@@ -559,7 +563,8 @@ mod tests {
         let weight_max = vec![2.0, 1.0, 0.5];
         let act_max = vec![1.0, 2.0, 4.0];
 
-        let scales = smooth_quant_scales(&weight_max, &act_max, 0.5).unwrap();
+        let scales = smooth_quant_scales(&weight_max, &act_max, 0.5)
+            .expect("smooth quant scale computation with valid parameters should succeed");
         assert_eq!(scales.len(), 3);
         for &s in &scales {
             assert!(s > 0.0);
@@ -623,8 +628,10 @@ mod tests {
     #[test]
     fn test_quantize_all_zeros() {
         let values = vec![0.0; 10];
-        let quantized = quantize_int8_symmetric(&values).unwrap();
-        let dequantized = dequantize_int8_symmetric(&quantized).unwrap();
+        let quantized = quantize_int8_symmetric(&values)
+            .expect("int8 symmetric quantization of valid values should succeed");
+        let dequantized = dequantize_int8_symmetric(&quantized)
+            .expect("int8 symmetric dequantization should succeed");
         for v in &dequantized {
             assert!(v.abs() < 1e-10);
         }

@@ -283,7 +283,9 @@ mod tests {
     #[test]
     fn single_device_covers_full_range() {
         let d = MultiDeviceDispatcher::single_device(0, "TestGPU");
-        let slices = d.partition(512).unwrap();
+        let slices = d
+            .partition(512)
+            .expect("partition should succeed with valid device configuration");
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].row_end, 512);
         assert_eq!(slices[0].device_id, 0);
@@ -292,7 +294,9 @@ mod tests {
     #[test]
     fn four_gpu_equal_split() {
         let d = MultiDeviceDispatcher::from_devices(make_devices(4), MultiDeviceConfig::default());
-        let slices = d.partition(400).unwrap();
+        let slices = d
+            .partition(400)
+            .expect("partition should succeed with valid device configuration");
         assert_eq!(slices.len(), 4);
         for s in &slices {
             assert_eq!(s.rows(), 100);
@@ -304,11 +308,19 @@ mod tests {
     #[test]
     fn uneven_rows_last_device_gets_remainder() {
         let d = MultiDeviceDispatcher::from_devices(make_devices(3), MultiDeviceConfig::default());
-        let slices = d.partition(100).unwrap();
+        let slices = d
+            .partition(100)
+            .expect("partition should succeed with valid device configuration");
         assert_eq!(slices.len(), 3);
         let sum: usize = slices.iter().map(|s| s.rows()).sum();
         assert_eq!(sum, 100);
-        assert_eq!(slices.last().unwrap().row_end, 100);
+        assert_eq!(
+            slices
+                .last()
+                .expect("partition should succeed with valid device configuration")
+                .row_end,
+            100
+        );
     }
 
     #[test]
@@ -319,15 +331,25 @@ mod tests {
         };
         let d = MultiDeviceDispatcher::from_devices(make_devices(4), cfg);
         assert_eq!(d.active_device_count(), 2);
-        let slices = d.partition(200).unwrap();
+        let slices = d
+            .partition(200)
+            .expect("partition should succeed with valid device configuration");
         assert_eq!(slices.len(), 2);
-        assert_eq!(slices.last().unwrap().row_end, 200);
+        assert_eq!(
+            slices
+                .last()
+                .expect("partition should succeed with valid device configuration")
+                .row_end,
+            200
+        );
     }
 
     #[test]
     fn zero_rows_returns_single_empty_slice() {
         let d = MultiDeviceDispatcher::from_devices(make_devices(2), MultiDeviceConfig::default());
-        let slices = d.partition(0).unwrap();
+        let slices = d
+            .partition(0)
+            .expect("partition should succeed with valid device configuration");
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].rows(), 0);
     }
@@ -363,7 +385,9 @@ mod tests {
             ..Default::default()
         };
         let d = MultiDeviceDispatcher::from_devices(devices, cfg);
-        let slices = d.partition(300).unwrap();
+        let slices = d
+            .partition(300)
+            .expect("partition should succeed with valid device configuration");
         let sum: usize = slices.iter().map(|s| s.rows()).sum();
         assert_eq!(sum, 300);
     }

@@ -249,7 +249,9 @@ mod tests {
     fn step_expands_beams() {
         let mut state = BeamSearchState::new(make_config());
         let logits: Vec<Vec<f32>> = (0..3).map(|_| uniform_logits(8)).collect();
-        state.step(&logits).unwrap();
+        state
+            .step(&logits)
+            .expect("valid logits for beam expansion");
         // Live beams still ≤ beam_width.
         assert!(state.beams.len() + state.completed.len() <= 3);
     }
@@ -259,7 +261,9 @@ mod tests {
         let mut state = BeamSearchState::new(make_config());
         // Peaked logits that always choose token 0 = EOS.
         let logits: Vec<Vec<f32>> = (0..3).map(|_| peaked_logits(8, 0)).collect();
-        let done = state.step(&logits).unwrap();
+        let done = state
+            .step(&logits)
+            .expect("valid peaked logits for eos test");
         assert!(done, "all beams should finish on EOS");
         assert!(!state.completed.is_empty());
     }
@@ -292,7 +296,9 @@ mod tests {
             completed: false,
         });
         // best_hypothesis returns best normalised score across both pools
-        let best = state.best_hypothesis().unwrap();
+        let best = state
+            .best_hypothesis()
+            .expect("beams and completed are non-empty");
         // The live beam with score 100 wins on normalised score.
         // (completed: -1/1^0.6 = -1, live: 100/1^0.6 = 100)
         assert!((best.score - 100.0).abs() < 1e-6);
@@ -314,7 +320,9 @@ mod tests {
             if state.is_done() {
                 break;
             }
-            state.step(&logits).unwrap();
+            state
+                .step(&logits)
+                .expect("valid peaked logits for max_new_tokens test");
         }
         assert!(
             state.is_done(),

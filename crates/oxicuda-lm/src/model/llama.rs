@@ -224,7 +224,8 @@ mod tests {
     use crate::config::LlamaConfig;
 
     fn tiny_model() -> LlamaModel {
-        LlamaModel::new(LlamaConfig::tiny()).unwrap()
+        LlamaModel::new(LlamaConfig::tiny())
+            .expect("tiny LlamaConfig should produce a valid LlamaModel")
     }
 
     #[test]
@@ -237,7 +238,9 @@ mod tests {
     #[test]
     fn llama_forward_output_shape() {
         let m = tiny_model();
-        let (logits, kv) = m.forward(&[0, 1, 2], None).unwrap();
+        let (logits, kv) = m
+            .forward(&[0, 1, 2], None)
+            .expect("3-token LLaMA forward should succeed");
         assert_eq!(logits.len(), 3 * m.config.vocab_size);
         assert_eq!(kv.past_len(), 3);
         assert_eq!(kv.n_layers(), 2);
@@ -256,7 +259,7 @@ mod tests {
     fn llama_forward_too_long_error() {
         let mut cfg = LlamaConfig::tiny();
         cfg.max_position_embeddings = 4;
-        let m = LlamaModel::new(cfg).unwrap();
+        let m = LlamaModel::new(cfg).expect("modified tiny LlamaConfig should still be valid");
         let ids: Vec<u32> = (0..5).collect();
         assert!(matches!(
             m.forward(&ids, None),
@@ -267,8 +270,12 @@ mod tests {
     #[test]
     fn llama_kv_cache_incremental() {
         let m = tiny_model();
-        let (_, kv1) = m.forward(&[0, 1], None).unwrap();
-        let (logits2, kv2) = m.forward(&[2], Some(&kv1)).unwrap();
+        let (_, kv1) = m
+            .forward(&[0, 1], None)
+            .expect("prefill 2-token LLaMA forward should succeed");
+        let (logits2, kv2) = m
+            .forward(&[2], Some(&kv1))
+            .expect("incremental LLaMA decode with cache should succeed");
         assert_eq!(logits2.len(), m.config.vocab_size);
         assert_eq!(kv2.past_len(), 3);
     }
@@ -276,7 +283,9 @@ mod tests {
     #[test]
     fn llama_next_token_valid_id() {
         let m = tiny_model();
-        let (tok, _) = m.next_token(&[0], None).unwrap();
+        let (tok, _) = m
+            .next_token(&[0], None)
+            .expect("next_token on valid LLaMA should succeed");
         assert!((tok as usize) < m.config.vocab_size);
     }
 
@@ -290,11 +299,17 @@ mod tests {
     fn llama_incremental_vs_full_last_position() {
         // Full forward of [0,1] then check token-1 logits match incremental.
         let m = tiny_model();
-        let (logits_full, _) = m.forward(&[0, 1], None).unwrap();
+        let (logits_full, _) = m
+            .forward(&[0, 1], None)
+            .expect("full 2-token LLaMA forward should succeed");
         let last_full = &logits_full[m.config.vocab_size..];
 
-        let (_, kv0) = m.forward(&[0], None).unwrap();
-        let (logits_incr, _) = m.forward(&[1], Some(&kv0)).unwrap();
+        let (_, kv0) = m
+            .forward(&[0], None)
+            .expect("incremental token-0 LLaMA forward should succeed");
+        let (logits_incr, _) = m
+            .forward(&[1], Some(&kv0))
+            .expect("incremental token-1 LLaMA with cache should succeed");
 
         for (&full_v, &incr_v) in last_full.iter().zip(logits_incr.iter()) {
             assert!(
@@ -312,7 +327,9 @@ mod tests {
         m.lm_head.data = vec![1.0_f32; m.config.vocab_size * m.config.hidden_dim];
         // Forward: after all-zero block weights, h ≈ embed(token) = ones
         // Logits ≈ ones · ones^T = sum = hidden_dim
-        let (logits, _) = m.forward(&[0], None).unwrap();
+        let (logits, _) = m
+            .forward(&[0], None)
+            .expect("single-token LLaMA forward with ones weights should succeed");
         // Not all zero
         let all_zero = logits.iter().all(|&v| v.abs() < 1e-6);
         assert!(!all_zero, "expected non-zero logits with ones weights");
@@ -324,6 +341,8 @@ mod tests {
         let m = tiny_model();
         assert_eq!(m.config.gqa_factor(), 2);
         // Model forward should not error
-        let (_, _) = m.forward(&[0], None).unwrap();
+        let (_, _) = m
+            .forward(&[0], None)
+            .expect("GQA consistency check LLaMA forward should succeed");
     }
 }

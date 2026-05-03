@@ -672,14 +672,17 @@ mod tests {
     use super::*;
 
     fn default_sampler() -> TokenSampler {
-        TokenSampler::new(SamplingParams::default()).unwrap()
+        TokenSampler::new(SamplingParams::default())
+            .expect("TokenSampler creation with default params should succeed")
     }
 
     #[test]
     fn test_greedy_sample() {
         let sampler = default_sampler();
         let logits = vec![1.0, 5.0, 2.0, 0.5];
-        let output = sampler.greedy_sample(&logits).unwrap();
+        let output = sampler
+            .greedy_sample(&logits)
+            .expect("greedy sampling should succeed with valid logits");
         assert_eq!(output.token_id, 1); // highest logit
     }
 
@@ -689,9 +692,12 @@ mod tests {
             temperature: 0.0,
             ..Default::default()
         };
-        let mut sampler = TokenSampler::new(params).unwrap();
+        let mut sampler = TokenSampler::new(params)
+            .expect("TokenSampler creation with valid params should succeed");
         let logits = vec![1.0, 5.0, 2.0, 0.5];
-        let output = sampler.sample(&logits, &[]).unwrap();
+        let output = sampler
+            .sample(&logits, &[])
+            .expect("sampling should succeed with valid logits");
         assert_eq!(output.token_id, 1);
     }
 
@@ -708,9 +714,12 @@ mod tests {
             temperature: 0.0, // greedy for determinism
             ..Default::default()
         };
-        let mut sampler = TokenSampler::new(params).unwrap();
+        let mut sampler = TokenSampler::new(params)
+            .expect("TokenSampler creation with valid params should succeed");
         let logits = vec![1.0, 5.0, 4.0, 0.5];
-        let output = sampler.sample(&logits, &[]).unwrap();
+        let output = sampler
+            .sample(&logits, &[])
+            .expect("sampling should succeed with valid logits");
         // Greedy picks the highest logit (token 1)
         assert_eq!(output.token_id, 1);
     }
@@ -722,10 +731,13 @@ mod tests {
             seed: Some(456),
             ..Default::default()
         };
-        let mut sampler = TokenSampler::new(params).unwrap();
+        let mut sampler = TokenSampler::new(params)
+            .expect("TokenSampler creation with valid params should succeed");
         // Token 1 dominates with ~99% after softmax
         let logits = vec![0.0, 10.0, 0.0, 0.0];
-        let output = sampler.sample(&logits, &[]).unwrap();
+        let output = sampler
+            .sample(&logits, &[])
+            .expect("sampling should succeed with valid logits");
         assert_eq!(output.token_id, 1);
     }
 
@@ -736,10 +748,13 @@ mod tests {
             seed: Some(789),
             ..Default::default()
         };
-        let mut sampler = TokenSampler::new(params).unwrap();
+        let mut sampler = TokenSampler::new(params)
+            .expect("TokenSampler creation with valid params should succeed");
         // After softmax, token 1 dominates; others should be filtered
         let logits = vec![0.0, 10.0, 0.0, 0.0];
-        let output = sampler.sample(&logits, &[]).unwrap();
+        let output = sampler
+            .sample(&logits, &[])
+            .expect("sampling should succeed with valid logits");
         assert_eq!(output.token_id, 1);
     }
 
@@ -750,10 +765,13 @@ mod tests {
             seed: Some(100),
             ..Default::default()
         };
-        let mut sampler = TokenSampler::new(params).unwrap();
+        let mut sampler = TokenSampler::new(params)
+            .expect("TokenSampler creation with valid params should succeed");
         // Very low temperature -> nearly greedy
         let logits = vec![1.0, 5.0, 2.0, 0.5];
-        let output = sampler.sample(&logits, &[]).unwrap();
+        let output = sampler
+            .sample(&logits, &[])
+            .expect("sampling should succeed with valid logits");
         assert_eq!(output.token_id, 1);
     }
 
@@ -764,12 +782,15 @@ mod tests {
             temperature: 0.0, // greedy to make deterministic
             ..Default::default()
         };
-        let mut sampler = TokenSampler::new(params).unwrap();
+        let mut sampler = TokenSampler::new(params)
+            .expect("TokenSampler creation with valid params should succeed");
 
         // Without penalty, token 1 would be selected (highest logit)
         // With penalty and token 1 in previous, its logit is halved
         let logits = vec![4.0, 5.0, 4.9, 0.5];
-        let output = sampler.sample(&logits, &[1]).unwrap();
+        let output = sampler
+            .sample(&logits, &[1])
+            .expect("sampling with previous token should succeed");
         // Token 1's logit becomes 5.0/2.0 = 2.5, so token 2 (4.9) wins
         assert_eq!(output.token_id, 2);
     }
@@ -781,11 +802,14 @@ mod tests {
             temperature: 0.0,
             ..Default::default()
         };
-        let mut sampler = TokenSampler::new(params).unwrap();
+        let mut sampler = TokenSampler::new(params)
+            .expect("TokenSampler creation with valid params should succeed");
 
         let logits = vec![3.0, 5.0, 4.0];
         // Token 1 appears 3 times -> penalized by -3.0
-        let output = sampler.sample(&logits, &[1, 1, 1]).unwrap();
+        let output = sampler
+            .sample(&logits, &[1, 1, 1])
+            .expect("sampling with repeated tokens should succeed");
         // Token 1: 5.0 - 3.0 = 2.0, Token 2: 4.0 wins
         assert_eq!(output.token_id, 2);
     }
@@ -797,10 +821,13 @@ mod tests {
             temperature: 0.0,
             ..Default::default()
         };
-        let mut sampler = TokenSampler::new(params).unwrap();
+        let mut sampler = TokenSampler::new(params)
+            .expect("TokenSampler creation with valid params should succeed");
 
         let logits = vec![3.0, 5.0, 4.0];
-        let output = sampler.sample(&logits, &[1]).unwrap();
+        let output = sampler
+            .sample(&logits, &[1])
+            .expect("sampling with previous token should succeed");
         // Token 1: 5.0 - 3.0 = 2.0, Token 2: 4.0 wins
         assert_eq!(output.token_id, 2);
     }
@@ -872,7 +899,7 @@ mod tests {
                 99, // eos
                 |_tokens| vec![0.1, 0.5, 0.3, 0.1],
             )
-            .unwrap();
+            .expect("beam search with valid config should succeed");
 
         assert!(!results.is_empty());
     }
@@ -894,7 +921,7 @@ mod tests {
                 1,                                  // eos = token 1
                 |_tokens| vec![0.1, 0.9, 0.0, 0.0], // EOS token dominates
             )
-            .unwrap();
+            .expect("beam search with early stopping should succeed");
 
         assert!(!results.is_empty());
         assert!(results[0].is_finished);
@@ -917,7 +944,9 @@ mod tests {
         let logits = vec![1.0, 2.0, 3.0, 0.5, 0.1];
         let mut state = MirostatState::default();
 
-        let output = sampler.sample_mirostat(&logits, &mut state).unwrap();
+        let output = sampler
+            .sample_mirostat(&logits, &mut state)
+            .expect("mirostat sampling should succeed with valid logits");
         assert!(output.token_id < 5);
         // mu should have been updated
         assert_ne!(state.mu, 10.0);
@@ -932,7 +961,9 @@ mod tests {
             ..Default::default()
         };
 
-        let output = sampler.sample_mirostat(&logits, &mut state).unwrap();
+        let output = sampler
+            .sample_mirostat(&logits, &mut state)
+            .expect("mirostat sampling should succeed with valid logits");
         assert!(output.token_id < 4);
     }
 
@@ -940,7 +971,9 @@ mod tests {
     fn test_sampling_output_fields() {
         let mut sampler = default_sampler();
         let logits = vec![1.0, 5.0, 2.0];
-        let output = sampler.sample(&logits, &[]).unwrap();
+        let output = sampler
+            .sample(&logits, &[])
+            .expect("sampling should succeed with valid logits");
 
         assert!(output.probability >= 0.0);
         assert!(output.probability <= 1.0);
@@ -962,12 +995,18 @@ mod tests {
             seed: Some(42),
             ..Default::default()
         };
-        let mut s1 = TokenSampler::new(params.clone()).unwrap();
-        let mut s2 = TokenSampler::new(params).unwrap();
+        let mut s1 = TokenSampler::new(params.clone())
+            .expect("TokenSampler creation with seeded params should succeed");
+        let mut s2 = TokenSampler::new(params)
+            .expect("TokenSampler creation with seeded params should succeed");
 
         let logits = vec![1.0, 2.0, 3.0, 1.5];
-        let o1 = s1.sample(&logits, &[]).unwrap();
-        let o2 = s2.sample(&logits, &[]).unwrap();
+        let o1 = s1
+            .sample(&logits, &[])
+            .expect("first sampler should succeed with seeded params");
+        let o2 = s2
+            .sample(&logits, &[])
+            .expect("second sampler should succeed with seeded params");
         assert_eq!(o1.token_id, o2.token_id);
     }
 }

@@ -268,8 +268,9 @@ mod tests {
             cfg.ffn_intermediate,
             cfg.layer_norm_eps,
         )
-        .unwrap();
-        load_gpt2_block(&mut block, &mw, "transformer.h.0", &cfg).unwrap();
+        .expect("GptBlock construction with tiny config should succeed");
+        load_gpt2_block(&mut block, &mw, "transformer.h.0", &cfg)
+            .expect("loading GPT-2 block from complete ModelWeights should succeed");
         // ln_1.weight should now be ones
         assert!(block.ln_1.weight.iter().all(|&v| (v - 1.0).abs() < 1e-6));
     }
@@ -287,8 +288,9 @@ mod tests {
             cfg.rope_theta,
             cfg.rms_norm_eps,
         )
-        .unwrap();
-        load_llama_block(&mut block, &mw, "model.layers.0", &cfg).unwrap();
+        .expect("LlamaBlock construction with tiny config should succeed");
+        load_llama_block(&mut block, &mw, "model.layers.0", &cfg)
+            .expect("loading LLaMA block from complete ModelWeights should succeed");
         assert!(
             block
                 .attn_norm
@@ -308,19 +310,22 @@ mod tests {
             cfg.ffn_intermediate,
             cfg.layer_norm_eps,
         )
-        .unwrap();
+        .expect("GptBlock construction for missing-key test should succeed");
         assert!(load_gpt2_block(&mut block, &mw, "transformer.h.0", &cfg).is_err());
     }
 
     #[test]
     fn slice_rows_correct() {
         // 4×4 weight split into 2×2 top and 2×2 bottom
-        let w = WeightTensor::from_data((0..16).map(|x| x as f32).collect(), vec![4, 4]).unwrap();
-        let top = slice_rows(&w, 0, 2, 4).unwrap();
+        let w = WeightTensor::from_data((0..16).map(|x| x as f32).collect(), vec![4, 4])
+            .expect("16 elements with shape [4,4] should match");
+        let top =
+            slice_rows(&w, 0, 2, 4).expect("slicing rows 0..2 from 4x4 weight should succeed");
         assert_eq!(top.shape, vec![2, 4]);
         assert_eq!(top.data[0], 0.0);
         assert_eq!(top.data[7], 7.0);
-        let bot = slice_rows(&w, 2, 2, 4).unwrap();
+        let bot =
+            slice_rows(&w, 2, 2, 4).expect("slicing rows 2..4 from 4x4 weight should succeed");
         assert_eq!(bot.data[0], 8.0);
     }
 }

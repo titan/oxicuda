@@ -173,7 +173,8 @@ mod tests {
     #[test]
     fn single_update_count_one() {
         let mut rs = RunningStats::new(2);
-        rs.update(&[1.0, 2.0]).unwrap();
+        rs.update(&[1.0, 2.0])
+            .expect("obs_dim=2 matches running_stats dim");
         assert_eq!(rs.count(), 1);
     }
 
@@ -181,7 +182,8 @@ mod tests {
     fn mean_converges_to_true_mean() {
         let mut rs = RunningStats::new(1);
         for _ in 0..1000 {
-            rs.update(&[3.0]).unwrap();
+            rs.update(&[3.0])
+                .expect("obs_dim=1 matches running_stats dim");
         }
         let mean = rs.mean_f32()[0];
         assert!((mean - 3.0).abs() < 0.01, "mean={mean}");
@@ -193,7 +195,8 @@ mod tests {
         let mut rs = RunningStats::new(1);
         for i in 0..2000 {
             let v = if i % 2 == 0 { 1.0 } else { -1.0 };
-            rs.update(&[v]).unwrap();
+            rs.update(&[v])
+                .expect("obs_dim=1 matches running_stats dim");
         }
         let std = rs.std_f32()[0];
         assert!((std - 1.0).abs() < 0.05, "std={std}");
@@ -203,9 +206,12 @@ mod tests {
     fn normalise_close_to_zero_mean() {
         let mut rs = RunningStats::new(1);
         for i in 0..100 {
-            rs.update(&[i as f32]).unwrap();
+            rs.update(&[i as f32])
+                .expect("obs_dim=1 matches running_stats dim");
         }
-        let norm = rs.normalise(&[50.0]).unwrap(); // near mean
+        let norm = rs
+            .normalise(&[50.0])
+            .expect("obs_dim=1 matches running_stats dim"); // near mean
         assert!(
             norm[0].abs() < 0.5,
             "normalised mean should be near 0, got {}",
@@ -223,14 +229,16 @@ mod tests {
     fn update_batch_increments_count() {
         let mut rs = RunningStats::new(2);
         let batch = vec![1.0_f32; 10]; // 5 observations of dim 2
-        rs.update_batch(&batch).unwrap();
+        rs.update_batch(&batch)
+            .expect("batch length divisible by obs_dim=2");
         assert_eq!(rs.count(), 5);
     }
 
     #[test]
     fn reset_zeroes_stats() {
         let mut rs = RunningStats::new(2);
-        rs.update(&[3.0, 4.0]).unwrap();
+        rs.update(&[3.0, 4.0])
+            .expect("obs_dim=2 matches running_stats dim");
         rs.reset();
         assert_eq!(rs.count(), 0);
         let mean = rs.mean_f32();
@@ -240,7 +248,8 @@ mod tests {
     #[test]
     fn std_default_before_two_samples() {
         let mut rs = RunningStats::new(2);
-        rs.update(&[1.0, 2.0]).unwrap();
+        rs.update(&[1.0, 2.0])
+            .expect("obs_dim=2 matches running_stats dim");
         let std = rs.std_f32();
         // With count < 2, returns [1, 1]
         assert_eq!(std, vec![1.0, 1.0]);

@@ -262,8 +262,9 @@ mod tests {
     #[test]
     fn test_multilevel_haar_1level_roundtrip() {
         let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0_f64];
-        let decomp = multilevel_forward(&x, WaveletFamily::Haar, 1).unwrap();
-        let rec = multilevel_inverse(&decomp).unwrap();
+        let decomp = multilevel_forward(&x, WaveletFamily::Haar, 1)
+            .expect("Haar 1-level forward DWT succeeds");
+        let rec = multilevel_inverse(&decomp).expect("Haar 1-level inverse DWT succeeds");
         for (a, b) in x.iter().zip(rec.iter()) {
             assert!((a - b).abs() < 1e-10, "Haar 1-level: {a} vs {b}");
         }
@@ -272,9 +273,10 @@ mod tests {
     #[test]
     fn test_multilevel_haar_3level_roundtrip() {
         let x: Vec<f64> = (0..16).map(|i| i as f64 * 0.5).collect();
-        let decomp = multilevel_forward(&x, WaveletFamily::Haar, 3).unwrap();
+        let decomp = multilevel_forward(&x, WaveletFamily::Haar, 3)
+            .expect("Haar 3-level forward DWT succeeds");
         assert_eq!(decomp.levels, 3);
-        let rec = multilevel_inverse(&decomp).unwrap();
+        let rec = multilevel_inverse(&decomp).expect("Haar 3-level inverse DWT succeeds");
         for (i, (a, b)) in x.iter().zip(rec.iter()).enumerate() {
             assert!(
                 (a - b).abs() < 1e-9,
@@ -286,7 +288,8 @@ mod tests {
     #[test]
     fn test_multilevel_total_len() {
         let x: Vec<f64> = vec![1.0; 16];
-        let decomp = multilevel_forward(&x, WaveletFamily::Haar, 2).unwrap();
+        let decomp = multilevel_forward(&x, WaveletFamily::Haar, 2)
+            .expect("Haar 2-level forward DWT succeeds");
         // Haar: each level halves; 2 levels → approx=4, detail[finest]=8, detail[coarse]=4
         assert_eq!(decomp.approx.len(), 4);
         assert_eq!(decomp.details[0].len(), 8); // finest
@@ -345,7 +348,8 @@ mod tests {
     #[test]
     fn test_approx_len_at_level() {
         let x: Vec<f64> = vec![1.0; 16];
-        let decomp = multilevel_forward(&x, WaveletFamily::Haar, 2).unwrap();
+        let decomp = multilevel_forward(&x, WaveletFamily::Haar, 2)
+            .expect("Haar 2-level forward DWT succeeds");
         assert_eq!(decomp.approx_len_at_level(2), Some(4));
     }
 
@@ -361,20 +365,21 @@ mod tests {
         //   2. Reconstruction length matches input length.
         //   3. Interior approx coefficients of a constant input equal c * √2.
         let x: Vec<f64> = (0..8).map(|i| (i as f64).sin()).collect();
-        let decomp = multilevel_forward(&x, WaveletFamily::Daubechies(2), 2).unwrap();
+        let decomp = multilevel_forward(&x, WaveletFamily::Daubechies(2), 2)
+            .expect("db2 2-level forward DWT succeeds");
         assert_eq!(decomp.levels, 2);
         // Subband lengths: 8 → 4 → 2 (with ceil(n/2) downsampling)
         assert_eq!(decomp.approx.len(), 2);
         assert_eq!(decomp.details[0].len(), 4); // finest (level-1 detail)
         assert_eq!(decomp.details[1].len(), 2); // coarser (level-2 detail)
         // Reconstruction produces correct output length (2 * approx_len at each level)
-        let rec = multilevel_inverse(&decomp).unwrap();
+        let rec = multilevel_inverse(&decomp).expect("db2 2-level inverse DWT succeeds");
         assert_eq!(rec.len(), x.len(), "reconstruction length mismatch");
         // For a long constant signal the interior approx at the final level = c * √2^J.
         let c = 1.0_f64;
         let long_const: Vec<f64> = vec![c; 32];
-        let decomp_const =
-            multilevel_forward(&long_const, WaveletFamily::Daubechies(2), 2).unwrap();
+        let decomp_const = multilevel_forward(&long_const, WaveletFamily::Daubechies(2), 2)
+            .expect("db2 2-level forward DWT on constant signal succeeds");
         // After 2 levels: approx should be ≈ c * (√2)^2 = 2c in the interior.
         // Skip the first 2 outputs per level due to boundary effects: skip first 4.
         let expected = c * 2.0; // (√2)^2

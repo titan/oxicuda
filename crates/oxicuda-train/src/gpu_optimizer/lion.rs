@@ -175,7 +175,8 @@ mod tests {
 
     fn make_param(data: Vec<f32>, grad: Vec<f32>) -> ParamTensor {
         let mut p = ParamTensor::new(data, "w");
-        p.set_grad(grad).unwrap();
+        p.set_grad(grad)
+            .expect("gradient length matches param data length");
         p
     }
 
@@ -183,7 +184,8 @@ mod tests {
     fn lion_positive_grad_decreases_param() {
         let mut opt = GpuLion::new(1e-3);
         let mut params = vec![make_param(vec![1.0_f32; 4], vec![1.0_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         // sign(c) > 0, so p decreases
         for &v in &params[0].data {
             assert!(v < 1.0, "param should decrease, got {v}");
@@ -194,7 +196,8 @@ mod tests {
     fn lion_negative_grad_increases_param() {
         let mut opt = GpuLion::new(1e-3);
         let mut params = vec![make_param(vec![0.0_f32; 4], vec![-1.0_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         // sign(c) < 0, so p increases
         for &v in &params[0].data {
             assert!(v > 0.0, "param should increase, got {v}");
@@ -207,7 +210,8 @@ mod tests {
         let lr = 1e-2_f64;
         let mut opt = GpuLion::new(lr);
         let mut params = vec![make_param(vec![5.0_f32], vec![1.0_f32])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         // c = 0 + (1-beta1)*1.0 > 0, so sign = 1
         // p = p - lr * 1 = 5 - 0.01 = 4.99 (approximately — weight_decay=0)
         let expected = 5.0_f32 - lr as f32;
@@ -223,7 +227,8 @@ mod tests {
         // zero gradient + zero weight decay → parameter should not change
         let mut opt = GpuLion::new(1e-3).with_weight_decay(0.0);
         let mut params = vec![make_param(vec![3.0_f32; 4], vec![0.0_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         for &v in &params[0].data {
             // sign(c) = sign(0) = 0, so p unchanged
             assert!((v - 3.0).abs() < 1e-6, "param should be unchanged, got {v}");
@@ -234,7 +239,8 @@ mod tests {
     fn lion_only_one_moment_buffer() {
         let mut opt = GpuLion::new(1e-3);
         let mut params = vec![make_param(vec![1.0_f32; 8], vec![0.5_f32; 8])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         // Only exp_avg should be populated (no exp_avg_sq)
         assert_eq!(opt.exp_avg.len(), 1);
         assert_eq!(opt.exp_avg[0].len(), 8);
@@ -249,8 +255,11 @@ mod tests {
         let mut params = vec![make_param(vec![5.0_f32], vec![0.0_f32])];
         for _ in 0..500 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         let x = params[0].data[0].abs();
         assert!(x < 0.5, "should converge near 0, got |x|={x}");

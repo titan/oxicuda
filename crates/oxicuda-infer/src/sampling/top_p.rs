@@ -141,14 +141,14 @@ mod tests {
     fn p_one_no_filter() {
         let orig = vec![1.0_f32, 2.0, 3.0];
         let mut l = orig.clone();
-        top_p_filter(&mut l, 1.0).unwrap();
+        top_p_filter(&mut l, 1.0).expect("p=1.0 is valid and logits are non-empty");
         assert_eq!(l, orig);
     }
 
     #[test]
     fn p_zero_keeps_only_top() {
         let mut l = vec![1.0_f32, 10.0, 2.0];
-        top_p_filter(&mut l, 0.0).unwrap();
+        top_p_filter(&mut l, 0.0).expect("p=0.0 is valid and logits are non-empty");
         assert!(l[1].is_finite());
         // Others may be filtered (depends on probability mass)
     }
@@ -176,7 +176,9 @@ mod tests {
         let logits = vec![1.0_f32; 5];
         let mut rng = Rng::new(0);
         let seen: std::collections::HashSet<u32> = (0..500)
-            .map(|_| top_p_sample(&logits, 1.0, &mut rng).unwrap())
+            .map(|_| {
+                top_p_sample(&logits, 1.0, &mut rng).expect("p=1.0 sample from uniform logits")
+            })
             .collect();
         // Should see all 5 tokens eventually.
         assert!(
@@ -192,7 +194,8 @@ mod tests {
         let logits = vec![0.0_f32, 100.0, 0.0, 0.0];
         let mut rng = Rng::new(0);
         for _ in 0..50 {
-            let t = top_p_sample(&logits, 0.01, &mut rng).unwrap();
+            let t =
+                top_p_sample(&logits, 0.01, &mut rng).expect("p=0.01 sample with dominant token");
             assert_eq!(t, 1, "expected token 1 to dominate");
         }
     }

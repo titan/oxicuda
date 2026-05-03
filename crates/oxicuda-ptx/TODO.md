@@ -221,3 +221,11 @@ PTX generation is CPU-bound and should be fast enough for JIT scenarios:
   - **Goal:** Add `PerAxisReductionTemplate` struct to `src/templates/reduction.rs` and add `Mean` variant to `ReductionOp`. Kernel: one block per `(outer, inner)` output pair, 256 threads, loop over axis chunks, shared-memory tree reduce + warp shuffle final 32 elements. Kernel signature: `(input: u64, output: u64, axis_len: u32, inner: u32)` plus `inv_axis_len: f32` for Mean. Kernel name pattern: `reduce_axis_{op}_{type}`.
   - **Files:** `src/templates/reduction.rs`
   - **Tests:** PTX for Sum contains `.entry reduce_axis_sum_f32`, `shfl.sync.down`, `.shared`; for Mean also checks `mul.f32`.
+
+- [x] ptx-typed-variants-tier1 (completed 2026-05-01)
+  - **Goal:** Add 3 highest-leverage `Instruction` variants for ops currently expressed via `raw_ptx()`: `Addc` (carry-add), `Selp` (predicated select), `AtomGlobalAddFloat` (atom.global.add.f32/.f64). Migrate ≥2 representative call sites per variant (6 total) from `raw_ptx()` to the typed form. The 3,581 existing `Raw()` callers are NOT bulk-migrated; `Raw` is retained as the documented escape hatch.
+  - **Design:** Add to `Instruction` enum in `src/ir/instruction.rs`: `Addc { ty: PtxIntegerType, dst, a, b }`, `Selp { ty: PtxType, dst, a, b, p }`, `AtomGlobalAddFloat { ty: PtxFloatType, dst, addr, value }`. Update `Raw` doc-comment to say it's an escape hatch for the long tail. Add 3 emit branches in `src/ir/instruction_emit.rs`: `addc.<ty> {dst}, {a}, {b};` / `selp.<ty> {dst}, {a}, {b}, {p};` / `atom.global.add.<ty> {dst}, [{addr}], {value};`. Find 6 representative `raw_ptx(` / `raw_ptx!` call sites in oxicuda-rand, oxicuda-fft, oxicuda-blas, oxicuda-dnn and migrate them.
+  - **Files:** `src/ir/instruction.rs` (3 variants + Raw doc-comment), `src/ir/instruction_emit.rs` (3 emit branches), 6 call sites in rand/fft/blas/dnn crates
+  - **Tests (in oxicuda-ptx, text comparison):** `emit_addc_u32`, `emit_addc_u64`, `emit_selp_b32`, `emit_selp_f32`, `emit_atom_global_add_f32`, `emit_atom_global_add_f64`; regression: existing kernel tests in migrated crates must still pass.
+  - **Risk:** PTX text drift from migration breaking text-comparison tests. Mitigated by matching spacing of existing emit branches; impl subagent diffs per-site before committing.
+  - **Prerequisites:** None.

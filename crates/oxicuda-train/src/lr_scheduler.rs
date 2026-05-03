@@ -905,20 +905,20 @@ mod tests {
     #[test]
     fn reduce_on_plateau_reduces_after_patience() {
         let mut sched = ReduceLROnPlateau::new(1.0, 0.1, 3);
-        sched.step_metric(1.0).unwrap(); // best = 1.0
-        sched.step_metric(1.0).unwrap(); // no improvement #1
-        sched.step_metric(1.0).unwrap(); // no improvement #2
-        let reduced = sched.step_metric(1.0).unwrap(); // no improvement #3 → reduce
+        sched.step_metric(1.0).expect("step_metric should succeed"); // best = 1.0
+        sched.step_metric(1.0).expect("step_metric should succeed"); // no improvement #1
+        sched.step_metric(1.0).expect("step_metric should succeed"); // no improvement #2
+        let reduced = sched.step_metric(1.0).expect("step_metric should succeed"); // no improvement #3 → reduce
         assert_abs_diff_eq!(reduced, 0.1, epsilon = 1e-8);
     }
 
     #[test]
     fn reduce_on_plateau_resets_on_improvement() {
         let mut sched = ReduceLROnPlateau::new(1.0, 0.1, 3);
-        sched.step_metric(1.0).unwrap();
-        sched.step_metric(0.5).unwrap(); // improvement: reset counter
-        sched.step_metric(0.5).unwrap(); // no improvement #1
-        sched.step_metric(0.5).unwrap(); // no improvement #2
+        sched.step_metric(1.0).expect("step_metric should succeed");
+        sched.step_metric(0.5).expect("step_metric should succeed"); // improvement: reset counter
+        sched.step_metric(0.5).expect("step_metric should succeed"); // no improvement #1
+        sched.step_metric(0.5).expect("step_metric should succeed"); // no improvement #2
         // Still 2 bad steps, not yet reduced
         assert_abs_diff_eq!(sched.get_lr(), 1.0, epsilon = 1e-8);
     }

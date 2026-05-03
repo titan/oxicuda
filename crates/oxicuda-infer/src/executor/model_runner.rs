@@ -200,7 +200,7 @@ mod tests {
         let r = make_runner();
         let logits = r
             .decode(&[0, 1, 2], &[vec![], vec![], vec![]], &[0, 1, 2])
-            .unwrap();
+            .expect("valid decode inputs with 3 sequences");
         assert_eq!(logits.len(), 3);
         assert_eq!(logits[0].len(), 32);
     }
@@ -209,13 +209,15 @@ mod tests {
     fn decode_peaks_at_expected_token() {
         let r = MockModelRunner::new(8, 3);
         // token_id=2, bias=3 → hot = (2+3)%8 = 5
-        let logits = r.decode(&[2], &[vec![]], &[0]).unwrap();
+        let logits = r
+            .decode(&[2], &[vec![]], &[0])
+            .expect("valid decode with token_id=2");
         let argmax = logits[0]
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("logits row is non-empty");
         assert_eq!(argmax, 5);
     }
 
@@ -241,7 +243,9 @@ mod tests {
         let tokens = vec![0_u32, 1, 2, 3, 4];
         let starts = vec![0, 3, 5];
         let btables = vec![vec![], vec![]];
-        let logits = r.prefill(&tokens, &starts, &btables).unwrap();
+        let logits = r
+            .prefill(&tokens, &starts, &btables)
+            .expect("valid prefill with 2 sequences");
         assert_eq!(logits.len(), 2);
     }
 
@@ -252,13 +256,15 @@ mod tests {
         let tokens = vec![10_u32, 20, 99];
         let starts = vec![0, 3];
         let btables = vec![vec![]];
-        let logits = r.prefill(&tokens, &starts, &btables).unwrap();
+        let logits = r
+            .prefill(&tokens, &starts, &btables)
+            .expect("valid prefill with single sequence");
         let argmax = logits[0]
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("logits row is non-empty");
         assert_eq!(argmax, 99 % 32);
     }
 

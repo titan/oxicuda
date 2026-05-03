@@ -339,7 +339,8 @@ mod tests {
         };
 
         let execution_order = vec![0, 1, 2];
-        let plan = MemoryPlanner::plan(&graph, &execution_order, None).unwrap();
+        let plan = MemoryPlanner::plan(&graph, &execution_order, None)
+            .expect("memory planning with valid graph should succeed");
 
         assert!(!plan.allocations.is_empty());
         assert!(plan.peak_memory > 0);
@@ -367,7 +368,8 @@ mod tests {
             .map(|&(k, v)| (k.to_string(), v))
             .collect();
 
-        let plan = MemoryPlanner::plan(&graph, &execution_order, Some(&sizes)).unwrap();
+        let plan = MemoryPlanner::plan(&graph, &execution_order, Some(&sizes))
+            .expect("memory planning with provided sizes should succeed");
 
         // With buffer reuse, peak should be less than total
         assert!(
@@ -393,7 +395,8 @@ mod tests {
         };
 
         let execution_order = vec![0, 1, 2];
-        let plan = MemoryPlanner::plan(&graph, &execution_order, None).unwrap();
+        let plan = MemoryPlanner::plan(&graph, &execution_order, None)
+            .expect("memory planning with valid graph should succeed");
 
         // L and R are both live at step 2, so they can't share a buffer
         assert!(plan.peak_memory > 0);
@@ -421,7 +424,8 @@ mod tests {
                 .map(|&(k, v)| (k.to_string(), v))
                 .collect();
 
-        let plan = MemoryPlanner::plan(&graph, &execution_order, Some(&sizes)).unwrap();
+        let plan = MemoryPlanner::plan(&graph, &execution_order, Some(&sizes))
+            .expect("memory planning with provided sizes should succeed");
         // At step 2, X, A, B, C are all live = 1600 bytes peak
         // With reuse after step 2, it might be less
         assert!(plan.peak_memory >= 400); // at minimum one tensor
@@ -436,7 +440,8 @@ mod tests {
             outputs: vec![],
             initializers: HashMap::new(),
         };
-        let plan = MemoryPlanner::plan(&graph, &[], None).unwrap();
+        let plan = MemoryPlanner::plan(&graph, &[], None)
+            .expect("memory planning for empty graph should succeed");
         assert_eq!(plan.peak_memory, 0);
     }
 }

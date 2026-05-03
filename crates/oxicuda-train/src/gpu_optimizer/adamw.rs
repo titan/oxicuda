@@ -205,7 +205,8 @@ mod tests {
 
     fn make_param(data: Vec<f32>, grad: Vec<f32>) -> ParamTensor {
         let mut p = ParamTensor::new(data, "w");
-        p.set_grad(grad).unwrap();
+        p.set_grad(grad)
+            .expect("gradient length matches param data length");
         p
     }
 
@@ -213,7 +214,8 @@ mod tests {
     fn adamw_step_decreases_param() {
         let mut opt = GpuAdamW::new(1e-3);
         let mut params = vec![make_param(vec![1.0_f32; 4], vec![0.5_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         for &v in &params[0].data {
             assert!(v < 1.0, "param should decrease");
         }
@@ -224,7 +226,8 @@ mod tests {
         // With large weight decay, even a zero gradient should shrink params.
         let mut opt = GpuAdamW::new(1.0).with_weight_decay(0.1);
         let mut params = vec![make_param(vec![10.0_f32; 4], vec![0.0_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         // p *= (1 - 1.0*0.1) = 0.9, so p shrinks from 10 to < 10
         for &v in &params[0].data {
             assert!(
@@ -248,8 +251,11 @@ mod tests {
         let mut p_adam = vec![make_param(data.clone(), grad.clone())];
         let mut p_adamw = vec![make_param(data.clone(), grad.clone())];
 
-        adam.step(&mut p_adam).unwrap();
-        adamw.step(&mut p_adamw).unwrap();
+        adam.step(&mut p_adam)
+            .expect("Adam optimizer step should succeed");
+        adamw
+            .step(&mut p_adamw)
+            .expect("AdamW optimizer step should succeed");
 
         // Results should differ due to decoupled vs coupled weight decay.
         let differ = p_adam[0]
@@ -269,8 +275,11 @@ mod tests {
 
         for _ in 0..300 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         assert!(
             params[0].data[0].abs() < 0.1,

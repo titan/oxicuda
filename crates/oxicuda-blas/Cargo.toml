@@ -20,11 +20,43 @@ oxicuda-autotune = { workspace = true, optional = true }
 thiserror.workspace = true
 half = { workspace = true, optional = true }
 
+[dev-dependencies]
+criterion.workspace = true
+
 [features]
 default = []
 f16 = ["dep:half"]
 tensor-core = []
 all-precisions = ["f16"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true
+
+[[bench]]
+name = "gemm_f16_4096"
+harness = false
+required-features = ["f16"]
+
+[[bench]]
+name = "gemm_f32_4096"
+harness = false
+
+[[bench]]
+name = "gemm_f64_4096"
+harness = false
+
+[[bench]]
+name = "batched_gemm_256"
+harness = false
+
+[[bench]]
+name = "softmax_4096"
+harness = false
+
+[[bench]]
+name = "axpy_10m_f32"
+harness = false

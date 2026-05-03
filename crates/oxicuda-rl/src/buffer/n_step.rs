@@ -250,7 +250,7 @@ mod tests {
         buf.push([1.0], [0.0], 1.0, [2.0], false);
         let t = buf.push([2.0], [0.0], 1.0, [3.0], false);
         assert!(t.is_some(), "should return transition at n=3");
-        let t = t.unwrap();
+        let t = t.expect("transition must be Some after n steps");
         // R = 1 + 0.99*1 + 0.99²*1 = 1 + 0.99 + 0.9801 = 2.9701
         assert!(
             (t.n_step_return - (1.0 + 0.99 + 0.99_f32 * 0.99)).abs() < 1e-4,
@@ -265,7 +265,7 @@ mod tests {
         let mut buf = make_buf(2, 0.5);
         buf.push([0.0], [0.0], 2.0, [1.0], false);
         let t = buf.push([1.0], [0.0], 4.0, [2.0], false);
-        let t = t.unwrap();
+        let t = t.expect("transition must be Some after n=2 steps");
         // R = 2 + 0.5 * 4 = 4.0
         assert!(
             (t.n_step_return - 4.0).abs() < 1e-5,
@@ -284,7 +284,7 @@ mod tests {
         buf.push([0.0], [0.0], 1.0, [1.0], false);
         let t = buf.push([1.0], [0.0], 2.0, [2.0], true); // done
         assert!(t.is_some(), "terminal step should emit transition early");
-        let t = t.unwrap();
+        let t = t.expect("terminal step must emit a transition");
         assert!(t.done, "done flag should be set");
         // R = 1 + 0.99 * 2 = 2.98
         assert!(
@@ -352,7 +352,7 @@ mod tests {
     fn obs_preserved_correctly() {
         let mut buf = make_buf(1, 0.9);
         let t = buf.push([7.0, 8.0], [3.0], 5.0, [9.0, 10.0], false);
-        let t = t.unwrap();
+        let t = t.expect("n=1 buffer must emit transition on first push");
         assert_eq!(t.obs, vec![7.0, 8.0]);
         assert_eq!(t.action, vec![3.0]);
         assert_eq!(t.bootstrap_obs, vec![9.0, 10.0]);

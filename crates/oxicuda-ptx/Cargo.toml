@@ -15,5 +15,9 @@ categories = ["development-tools", "hardware-support"]
 oxicuda-driver.workspace = true
 thiserror.workspace = true
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true

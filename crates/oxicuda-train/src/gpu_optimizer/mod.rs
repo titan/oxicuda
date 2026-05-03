@@ -197,8 +197,9 @@ mod tests {
     #[test]
     fn param_tensor_set_grad_ok() {
         let mut p = ParamTensor::zeros(4, "w");
-        p.set_grad(vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        assert_eq!(p.grad.as_ref().unwrap()[2], 3.0);
+        p.set_grad(vec![1.0, 2.0, 3.0, 4.0])
+            .expect("gradient length matches param data length");
+        assert_eq!(p.grad.as_ref().expect("gradient must be set")[2], 3.0);
     }
 
     #[test]
@@ -210,9 +211,11 @@ mod tests {
     #[test]
     fn param_tensor_accumulate_grad() {
         let mut p = ParamTensor::zeros(3, "w");
-        p.accumulate_grad(&[1.0, 2.0, 3.0]).unwrap();
-        p.accumulate_grad(&[0.5, 0.5, 0.5]).unwrap();
-        let g = p.grad.unwrap();
+        p.accumulate_grad(&[1.0, 2.0, 3.0])
+            .expect("accumulate_grad should succeed when lengths match");
+        p.accumulate_grad(&[0.5, 0.5, 0.5])
+            .expect("accumulate_grad should succeed when lengths match");
+        let g = p.grad.expect("gradient must be set after accumulate_grad");
         assert!((g[0] - 1.5).abs() < 1e-6);
         assert!((g[1] - 2.5).abs() < 1e-6);
         assert!((g[2] - 3.5).abs() < 1e-6);
@@ -221,9 +224,12 @@ mod tests {
     #[test]
     fn param_tensor_zero_grad() {
         let mut p = ParamTensor::zeros(3, "w");
-        p.set_grad(vec![1.0, 2.0, 3.0]).unwrap();
+        p.set_grad(vec![1.0, 2.0, 3.0])
+            .expect("gradient length matches param data length");
         p.zero_grad();
-        let g = p.grad.unwrap();
+        let g = p
+            .grad
+            .expect("gradient must be set after zero_grad initialises it");
         assert_eq!(g, vec![0.0, 0.0, 0.0]);
     }
 

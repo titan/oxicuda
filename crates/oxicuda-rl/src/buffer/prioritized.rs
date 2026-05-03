@@ -358,7 +358,9 @@ mod tests {
         let mut buf = make_per(64);
         fill_per(&mut buf, 64);
         let mut handle = RlHandle::default_handle();
-        let batch = buf.sample(16, &mut handle).unwrap();
+        let batch = buf
+            .sample(16, &mut handle)
+            .expect("buffer has 64 entries, 16 requested");
         assert_eq!(batch.len(), 16);
     }
 
@@ -367,7 +369,9 @@ mod tests {
         let mut buf = make_per(64);
         fill_per(&mut buf, 64);
         let mut handle = RlHandle::default_handle();
-        let batch = buf.sample(32, &mut handle).unwrap();
+        let batch = buf
+            .sample(32, &mut handle)
+            .expect("buffer has 64 entries, 32 requested");
         for s in &batch {
             assert!(s.weight > 0.0 && s.weight <= 1.0, "weight={}", s.weight);
         }
@@ -383,7 +387,9 @@ mod tests {
         let mut handle = RlHandle::default_handle();
         let mut counts = [0_usize; 16];
         for _ in 0..200 {
-            let batch = buf.sample(1, &mut handle).unwrap();
+            let batch = buf
+                .sample(1, &mut handle)
+                .expect("buffer has 16 entries, 1 requested");
             counts[batch[0].index] += 1;
         }
         // Index 0 should be sampled much more than average

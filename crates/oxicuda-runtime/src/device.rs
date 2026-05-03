@@ -374,7 +374,10 @@ mod tests {
             Ok(n) => {
                 // Real GPU: set device 0 and verify round-trip.
                 set_device(0).expect("set_device(0) failed");
-                assert_eq!(get_device().unwrap(), 0);
+                assert_eq!(
+                    get_device().expect("get_device should succeed after successful set_device"),
+                    0
+                );
                 // Out-of-range device must fail.
                 assert!(matches!(set_device(n), Err(CudaRtError::InvalidDevice)));
             }

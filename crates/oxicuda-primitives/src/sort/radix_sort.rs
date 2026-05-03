@@ -449,7 +449,9 @@ mod tests {
     #[test]
     fn count_ptx_has_shared_histogram_and_atomics() {
         let t = RadixSortTemplate::new(cfg(PtxType::U32));
-        let ptx = t.generate_count_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_count_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("cnt_hist"), "PTX: {ptx}");
         assert!(ptx.contains("atom.shared.add.u32"), "PTX: {ptx}");
         assert!(ptx.contains("shr.u32"), "PTX: {ptx}");
@@ -459,14 +461,18 @@ mod tests {
     #[test]
     fn count_ptx_u64_uses_shr_u64() {
         let t = RadixSortTemplate::new(cfg(PtxType::U64));
-        let ptx = t.generate_count_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_count_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("shr.u64"), "PTX: {ptx}");
     }
 
     #[test]
     fn scan_ptx_has_sequential_scan_loop() {
         let t = RadixSortTemplate::new(cfg(PtxType::U32));
-        let ptx = t.generate_scan_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_scan_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("SCAN_LOOP"), "PTX: {ptx}");
         assert!(ptx.contains("SCAN_DONE"), "PTX: {ptx}");
         // Exclusive: write prefix BEFORE adding count.
@@ -477,7 +483,9 @@ mod tests {
     #[test]
     fn scatter_ptx_has_shared_offsets_and_atomic_ranking() {
         let t = RadixSortTemplate::new(cfg(PtxType::U32));
-        let ptx = t.generate_scatter_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_scatter_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("block_offs"), "PTX: {ptx}");
         assert!(ptx.contains("atom.shared.add.u32"), "PTX: {ptx}");
         assert!(ptx.contains("ld.global.u32"), "PTX: {ptx}");
@@ -487,7 +495,9 @@ mod tests {
     #[test]
     fn generate_all_three_kernels_succeeds() {
         let t = RadixSortTemplate::new(cfg(PtxType::U32));
-        let (count_ptx, scan_ptx, scatter_ptx) = t.generate(SmVersion::Sm80).unwrap();
+        let (count_ptx, scan_ptx, scatter_ptx) = t
+            .generate(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(!count_ptx.is_empty());
         assert!(!scan_ptx.is_empty());
         assert!(!scatter_ptx.is_empty());
@@ -496,7 +506,9 @@ mod tests {
     #[test]
     fn scatter_ptx_u64_uses_shr_u64_and_8byte_stride() {
         let t = RadixSortTemplate::new(cfg(PtxType::U64));
-        let ptx = t.generate_scatter_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_scatter_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("shr.u64"), "PTX: {ptx}");
         assert!(ptx.contains("ld.global.u64"), "PTX: {ptx}");
         assert!(ptx.contains("st.global.u64"), "PTX: {ptx}");

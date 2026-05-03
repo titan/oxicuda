@@ -604,16 +604,21 @@ mod tests {
     fn test_reshape() {
         let data = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let shape = OnnxTensor::from_i64(&[3, 2], vec![2]);
-        let r = execute_reshape(&[Some(&data), Some(&shape)], &HashMap::new()).unwrap();
+        let r = execute_reshape(&[Some(&data), Some(&shape)], &HashMap::new())
+            .expect("reshape execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3, 2]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        );
     }
 
     #[test]
     fn test_reshape_with_neg1() {
         let data = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let shape = OnnxTensor::from_i64(&[-1, 2], vec![2]);
-        let r = execute_reshape(&[Some(&data), Some(&shape)], &HashMap::new()).unwrap();
+        let r = execute_reshape(&[Some(&data), Some(&shape)], &HashMap::new())
+            .expect("reshape execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3, 2]);
     }
 
@@ -631,16 +636,21 @@ mod tests {
         let data = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let mut attrs = HashMap::new();
         attrs.insert("perm".into(), AttributeValue::Ints(vec![1, 0]));
-        let r = execute_transpose(&[Some(&data)], &attrs).unwrap();
+        let r = execute_transpose(&[Some(&data)], &attrs)
+            .expect("transpose execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3, 2]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]
+        );
     }
 
     #[test]
     fn test_squeeze() {
         let data = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![1, 3, 1]);
         let axes = OnnxTensor::from_i64(&[0, 2], vec![2]);
-        let r = execute_squeeze(&[Some(&data), Some(&axes)], &HashMap::new()).unwrap();
+        let r = execute_squeeze(&[Some(&data), Some(&axes)], &HashMap::new())
+            .expect("squeeze execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3]);
     }
 
@@ -648,7 +658,8 @@ mod tests {
     fn test_unsqueeze() {
         let data = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![3]);
         let axes = OnnxTensor::from_i64(&[0, 2], vec![2]);
-        let r = execute_unsqueeze(&[Some(&data), Some(&axes)], &HashMap::new()).unwrap();
+        let r = execute_unsqueeze(&[Some(&data), Some(&axes)], &HashMap::new())
+            .expect("unsqueeze execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 3, 1]);
     }
 
@@ -657,7 +668,8 @@ mod tests {
         let data = OnnxTensor::from_f32(&[1.0; 24], vec![2, 3, 4]);
         let mut attrs = HashMap::new();
         attrs.insert("axis".into(), AttributeValue::Int(1));
-        let r = execute_flatten(&[Some(&data)], &attrs).unwrap();
+        let r = execute_flatten(&[Some(&data)], &attrs)
+            .expect("flatten execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![2, 12]);
     }
 
@@ -667,9 +679,13 @@ mod tests {
         let b = OnnxTensor::from_f32(&[3.0, 4.0], vec![1, 2]);
         let mut attrs = HashMap::new();
         attrs.insert("axis".into(), AttributeValue::Int(0));
-        let r = execute_concat(&[Some(&a), Some(&b)], &attrs).unwrap();
+        let r = execute_concat(&[Some(&a), Some(&b)], &attrs)
+            .expect("concat execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![2, 2]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 2.0, 3.0, 4.0]
+        );
     }
 
     #[test]
@@ -678,9 +694,13 @@ mod tests {
         let b = OnnxTensor::from_f32(&[3.0], vec![1, 1]);
         let mut attrs = HashMap::new();
         attrs.insert("axis".into(), AttributeValue::Int(1));
-        let r = execute_concat(&[Some(&a), Some(&b)], &attrs).unwrap();
+        let r = execute_concat(&[Some(&a), Some(&b)], &attrs)
+            .expect("concat execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 3]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 2.0, 3.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 2.0, 3.0]
+        );
     }
 
     #[test]
@@ -689,19 +709,30 @@ mod tests {
         let split = OnnxTensor::from_i64(&[2, 4], vec![2]);
         let mut attrs = HashMap::new();
         attrs.insert("axis".into(), AttributeValue::Int(0));
-        let r = execute_split(&[Some(&data), Some(&split)], &attrs).unwrap();
+        let r = execute_split(&[Some(&data), Some(&split)], &attrs)
+            .expect("split execution should succeed with valid inputs");
         assert_eq!(r.len(), 2);
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 2.0]);
-        assert_eq!(r[1].as_f32().unwrap(), vec![3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            r[1].as_f32().expect("tensor should be float32 type"),
+            vec![3.0, 4.0, 5.0, 6.0]
+        );
     }
 
     #[test]
     fn test_gather() {
         let data = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![4]);
         let indices = OnnxTensor::from_i64(&[0, 3, 1], vec![3]);
-        let r = execute_gather(&[Some(&data), Some(&indices)], &HashMap::new()).unwrap();
+        let r = execute_gather(&[Some(&data), Some(&indices)], &HashMap::new())
+            .expect("gather execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 4.0, 2.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 4.0, 2.0]
+        );
     }
 
     #[test]
@@ -714,19 +745,23 @@ mod tests {
             &[Some(&data), Some(&starts), Some(&ends), Some(&axes)],
             &HashMap::new(),
         )
-        .unwrap();
+        .expect("operation should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![2.0, 3.0, 4.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![2.0, 3.0, 4.0]
+        );
     }
 
     #[test]
     fn test_pad() {
         let data = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let pads = OnnxTensor::from_i64(&[1, 0, 0, 1], vec![4]); // before=[1,0], after=[0,1]
-        let r = execute_pad(&[Some(&data), Some(&pads)], &HashMap::new()).unwrap();
+        let r = execute_pad(&[Some(&data), Some(&pads)], &HashMap::new())
+            .expect("pad execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3, 3]);
         assert_eq!(
-            r[0].as_f32().unwrap(),
+            r[0].as_f32().expect("tensor should be float32 type"),
             vec![0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 3.0, 4.0, 0.0]
         );
     }
@@ -735,10 +770,11 @@ mod tests {
     fn test_expand() {
         let data = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![1, 3]);
         let shape = OnnxTensor::from_i64(&[3, 3], vec![2]);
-        let r = execute_expand(&[Some(&data), Some(&shape)], &HashMap::new()).unwrap();
+        let r = execute_expand(&[Some(&data), Some(&shape)], &HashMap::new())
+            .expect("expand execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![3, 3]);
         assert_eq!(
-            r[0].as_f32().unwrap(),
+            r[0].as_f32().expect("tensor should be float32 type"),
             vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0]
         );
     }
@@ -747,8 +783,12 @@ mod tests {
     fn test_tile() {
         let data = OnnxTensor::from_f32(&[1.0, 2.0], vec![2]);
         let repeats = OnnxTensor::from_i64(&[3], vec![1]);
-        let r = execute_tile(&[Some(&data), Some(&repeats)], &HashMap::new()).unwrap();
+        let r = execute_tile(&[Some(&data), Some(&repeats)], &HashMap::new())
+            .expect("tile execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![6]);
-        assert_eq!(r[0].as_f32().unwrap(), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
+        assert_eq!(
+            r[0].as_f32().expect("tensor should be float32 type"),
+            vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
+        );
     }
 }

@@ -231,7 +231,8 @@ mod tests {
 
     fn param_with_grad(data: Vec<f32>, grad: Vec<f32>) -> ParamTensor {
         let mut p = ParamTensor::new(data, "w");
-        p.set_grad(grad).unwrap();
+        p.set_grad(grad)
+            .expect("gradient length matches param data length");
         p
     }
 
@@ -242,21 +243,30 @@ mod tests {
         let grad = vec![3.0_f32, 4.0_f32]; // norm = 5
         let mut params = vec![param_with_grad(vec![1.0; 2], grad.clone())];
         let clipper = GlobalNormClip::new(10.0);
-        let pre_norm = clipper.clip(&mut params).unwrap();
+        let pre_norm = clipper
+            .clip(&mut params)
+            .expect("clip should succeed with non-empty params");
         assert_abs_diff_eq!(pre_norm, 5.0_f32, epsilon = 1e-4);
         // Gradients should be unchanged
-        assert_abs_diff_eq!(params[0].grad.as_ref().unwrap()[0], grad[0], epsilon = 1e-5);
+        assert_abs_diff_eq!(
+            params[0].grad.as_ref().expect("gradient must be set")[0],
+            grad[0],
+            epsilon = 1e-5
+        );
     }
 
     #[test]
     fn global_norm_clip_scales_down_large_grads() {
         let mut params = vec![param_with_grad(vec![1.0; 2], vec![3.0_f32, 4.0_f32])]; // norm=5
         let clipper = GlobalNormClip::new(1.0);
-        let pre_norm = clipper.clip(&mut params).unwrap();
+        let pre_norm = clipper
+            .clip(&mut params)
+            .expect("clip should succeed with non-empty params");
         assert_abs_diff_eq!(pre_norm, 5.0_f32, epsilon = 1e-3);
 
         // After clip, norm should be ≤ max_norm
-        let after_norm = GlobalNormClip::compute_norm(&params).unwrap();
+        let after_norm = GlobalNormClip::compute_norm(&params)
+            .expect("compute_norm should succeed with non-empty params");
         assert!(
             after_norm <= 1.05,
             "clipped norm should be ≤ max_norm, got {after_norm}"
@@ -272,8 +282,11 @@ mod tests {
         ];
         let max_norm = 1.0_f32;
         let clipper = GlobalNormClip::new(max_norm);
-        clipper.clip(&mut params).unwrap();
-        let after = GlobalNormClip::compute_norm(&params).unwrap();
+        clipper
+            .clip(&mut params)
+            .expect("clip should succeed with non-empty params");
+        let after = GlobalNormClip::compute_norm(&params)
+            .expect("compute_norm should succeed with non-empty params");
         assert!(
             after <= max_norm + 1e-3,
             "after_norm={after} should be ≤ {max_norm}"
@@ -296,14 +309,27 @@ mod tests {
             param_with_grad(vec![1.0; 1], vec![0.1_f32]),
         ];
         let clipper = PerLayerNormClip::new(1.0);
-        clipper.clip(&mut params).unwrap();
+        clipper
+            .clip(&mut params)
+            .expect("per-layer clip should succeed");
         // Layer 0 should be clipped to ≈ 1.0
         assert!(
-            params[0].grad.as_ref().unwrap()[0] <= 1.1,
+            params[0]
+                .grad
+                .as_ref()
+                .expect("gradient must be set after clip")[0]
+                <= 1.1,
             "layer 0 should be clipped"
         );
         // Layer 1 should be unchanged (0.1 < 1.0)
-        assert_abs_diff_eq!(params[1].grad.as_ref().unwrap()[0], 0.1_f32, epsilon = 1e-5);
+        assert_abs_diff_eq!(
+            params[1]
+                .grad
+                .as_ref()
+                .expect("gradient must be set after clip")[0],
+            0.1_f32,
+            epsilon = 1e-5
+        );
     }
 
     // ── ValueClip ────────────────────────────────────────────────────────
@@ -314,8 +340,13 @@ mod tests {
             vec![0.0; 4],
             vec![10.0, -10.0, 0.5, -0.3_f32],
         )];
-        ValueClip::new(1.0).clip(&mut params).unwrap();
-        let g = params[0].grad.as_ref().unwrap();
+        ValueClip::new(1.0)
+            .clip(&mut params)
+            .expect("value clip should succeed");
+        let g = params[0]
+            .grad
+            .as_ref()
+            .expect("gradient must be set after clip");
         assert_abs_diff_eq!(g[0], 1.0_f32, epsilon = 1e-5);
         assert_abs_diff_eq!(g[1], -1.0_f32, epsilon = 1e-5);
         assert_abs_diff_eq!(g[2], 0.5_f32, epsilon = 1e-5);
@@ -327,16 +358,19 @@ mod tests {
     #[test]
     fn clip_grad_norm_function() {
         let mut params = vec![param_with_grad(vec![1.0; 2], vec![3.0_f32, 4.0_f32])];
-        clip_grad_norm(&mut params, 1.0).unwrap();
-        let norm = GlobalNormClip::compute_norm(&params).unwrap();
+        clip_grad_norm(&mut params, 1.0).expect("clip_grad_norm should succeed");
+        let norm = GlobalNormClip::compute_norm(&params).expect("compute_norm should succeed");
         assert!(norm <= 1.1, "norm should be clipped to ≤ 1.0, got {norm}");
     }
 
     #[test]
     fn clip_grad_value_function() {
         let mut params = vec![param_with_grad(vec![0.0; 3], vec![5.0, -5.0, 0.5_f32])];
-        clip_grad_value(&mut params, 2.0).unwrap();
-        let g = params[0].grad.as_ref().unwrap();
+        clip_grad_value(&mut params, 2.0).expect("clip_grad_value should succeed");
+        let g = params[0]
+            .grad
+            .as_ref()
+            .expect("gradient must be set after clip");
         assert_abs_diff_eq!(g[0], 2.0_f32, epsilon = 1e-5);
         assert_abs_diff_eq!(g[1], -2.0_f32, epsilon = 1e-5);
         assert_abs_diff_eq!(g[2], 0.5_f32, epsilon = 1e-5);

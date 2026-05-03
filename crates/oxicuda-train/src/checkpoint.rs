@@ -342,8 +342,11 @@ mod tests {
     #[test]
     fn save_and_retrieve() {
         let mut mgr = CheckpointManager::new(CheckpointPolicy::Uniform { interval: 1 });
-        mgr.save_input("seg_0", vec![1.0, 2.0, 3.0]).unwrap();
-        let inp = mgr.get_input("seg_0").unwrap();
+        mgr.save_input("seg_0", vec![1.0, 2.0, 3.0])
+            .expect("save_input should succeed");
+        let inp = mgr
+            .get_input("seg_0")
+            .expect("seg_0 was just saved and must be retrievable");
         assert_eq!(inp, &[1.0_f32, 2.0, 3.0]);
     }
 
@@ -387,8 +390,10 @@ mod tests {
     #[test]
     fn max_segments_overflow_error() {
         let mut mgr = CheckpointManager::new(CheckpointPolicy::Offload).with_max_segments(2);
-        mgr.save_input("s0", vec![1.0]).unwrap();
-        mgr.save_input("s1", vec![2.0]).unwrap();
+        mgr.save_input("s0", vec![1.0])
+            .expect("save_input should succeed");
+        mgr.save_input("s1", vec![2.0])
+            .expect("save_input should succeed");
         let result = mgr.save_input("s2", vec![3.0]);
         assert!(matches!(
             result,
@@ -399,7 +404,8 @@ mod tests {
     #[test]
     fn clear_resets_all() {
         let mut mgr = CheckpointManager::new(CheckpointPolicy::Offload);
-        mgr.save_input("x", vec![1.0, 2.0]).unwrap();
+        mgr.save_input("x", vec![1.0, 2.0])
+            .expect("save_input should succeed");
         assert_eq!(mgr.num_segments(), 1);
         mgr.clear();
         assert_eq!(mgr.num_segments(), 0);
@@ -409,8 +415,10 @@ mod tests {
     #[test]
     fn stats_are_correct() {
         let mut mgr = CheckpointManager::new(CheckpointPolicy::Offload);
-        mgr.save_input("a", vec![1.0_f32; 100]).unwrap();
-        mgr.save_input("b", vec![2.0_f32; 200]).unwrap();
+        mgr.save_input("a", vec![1.0_f32; 100])
+            .expect("save_input should succeed");
+        mgr.save_input("b", vec![2.0_f32; 200])
+            .expect("save_input should succeed");
         let stats = mgr.stats();
         assert_eq!(stats.num_segments, 2);
         assert_eq!(stats.total_elements, 300);
@@ -427,9 +435,12 @@ mod tests {
     #[test]
     fn segment_order_preserved() {
         let mut mgr = CheckpointManager::new(CheckpointPolicy::Offload);
-        mgr.save_input("first", vec![1.0]).unwrap();
-        mgr.save_input("second", vec![2.0]).unwrap();
-        mgr.save_input("third", vec![3.0]).unwrap();
+        mgr.save_input("first", vec![1.0])
+            .expect("save_input should succeed");
+        mgr.save_input("second", vec![2.0])
+            .expect("save_input should succeed");
+        mgr.save_input("third", vec![3.0])
+            .expect("save_input should succeed");
         let names = mgr.segment_names();
         assert_eq!(names, &["first", "second", "third"]);
     }
@@ -437,8 +448,11 @@ mod tests {
     #[test]
     fn get_shaped_buffer() {
         let mut mgr = CheckpointManager::new(CheckpointPolicy::Offload);
-        mgr.save_shaped("layer", vec![1.0; 12], vec![3, 4]).unwrap();
-        let buf = mgr.get_buffer("layer").unwrap();
+        mgr.save_shaped("layer", vec![1.0; 12], vec![3, 4])
+            .expect("save_shaped should succeed");
+        let buf = mgr
+            .get_buffer("layer")
+            .expect("layer was just saved and must be retrievable");
         assert_eq!(buf.shape, vec![3, 4]);
         assert_eq!(buf.numel(), 12);
     }

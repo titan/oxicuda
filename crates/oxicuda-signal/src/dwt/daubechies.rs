@@ -298,14 +298,14 @@ mod tests {
 
     #[test]
     fn test_db2_lowpass_length() {
-        let h = db_lowpass(2).unwrap();
+        let h = db_lowpass(2).expect("db2 filter is supported");
         assert_eq!(h.len(), 4);
     }
 
     #[test]
     fn test_db2_lowpass_energy() {
         // For an orthonormal wavelet: ||h||² = 1
-        let h = db_lowpass(2).unwrap();
+        let h = db_lowpass(2).expect("db2 filter is supported");
         let energy: f64 = h.iter().map(|v| v * v).sum();
         assert!((energy - 1.0).abs() < 1e-12, "energy = {energy}");
     }
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn test_db2_lowpass_alternating_sign_sum() {
         // QMF condition: Σ (-1)^k h[k] = 0
-        let h = db_lowpass(2).unwrap();
+        let h = db_lowpass(2).expect("db2 filter is supported");
         let sum: f64 = h
             .iter()
             .enumerate()
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn test_db_highpass_qmf() {
         // g = QMF of h: Σ g[k]² = 1
-        let h = db_lowpass(3).unwrap();
+        let h = db_lowpass(3).expect("db3 filter is supported");
         let g = db_highpass(&h);
         let energy: f64 = g.iter().map(|v| v * v).sum();
         assert!((energy - 1.0).abs() < 1e-12, "g energy = {energy}");
@@ -350,7 +350,7 @@ mod tests {
         // Interior = indices ≥ 2 (first 2 outputs are zero-boundary affected).
         let c = 1.0_f64;
         let x = vec![c; 16];
-        let (a, d) = db_forward(&x, 2).unwrap();
+        let (a, d) = db_forward(&x, 2).expect("db2 forward DWT succeeds");
         let sqrt2 = 2.0_f64.sqrt();
         for (i, &av) in a.iter().enumerate().skip(2) {
             assert!(
@@ -371,8 +371,8 @@ mod tests {
         // Causal convolution introduces a group delay of L-1 = 3 samples (L=4 for db2).
         // So rec[i] ≈ x[i-3] for interior i ≥ 3.
         let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0_f64];
-        let (a, d) = db_forward(&x, 2).unwrap();
-        let rec = db_inverse(&a, &d, 2).unwrap();
+        let (a, d) = db_forward(&x, 2).expect("db2 forward DWT succeeds");
+        let rec = db_inverse(&a, &d, 2).expect("db2 inverse DWT succeeds");
         // Compare delayed output to original input.
         let delay = 3usize;
         for i in delay..rec.len().min(x.len() + delay - 3) {

@@ -137,7 +137,7 @@ mod tests {
     #[test]
     #[ignore = "requires GPU"]
     fn handle_from_parts_round_trip() {
-        let handle = TrainHandle::new().unwrap();
+        let handle = TrainHandle::new().expect("TrainHandle creation should succeed on GPU");
         let sm = handle.sm_version();
         assert!(sm >= 750, "expected at least sm_75, got {sm}");
     }
@@ -146,7 +146,7 @@ mod tests {
     #[test]
     #[ignore = "requires GPU"]
     fn handle_debug() {
-        let handle = TrainHandle::new().unwrap();
+        let handle = TrainHandle::new().expect("TrainHandle creation should succeed on GPU");
         let _ = format!("{handle:?}");
     }
 }

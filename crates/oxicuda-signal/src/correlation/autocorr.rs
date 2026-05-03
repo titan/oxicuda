@@ -172,14 +172,14 @@ mod tests {
     fn test_autocorr_biased_lag0_variance() {
         // R[0] (biased) = E[x²] = variance for zero-mean signal
         let x = vec![1.0, -1.0, 1.0, -1.0_f64];
-        let r = autocorr_biased(&x, 0).unwrap();
+        let r = autocorr_biased(&x, 0).expect("autocorr_biased with valid lag succeeds");
         assert!((r[0] - 1.0).abs() < 1e-12, "R[0]={}", r[0]);
     }
 
     #[test]
     fn test_autocorr_biased_length() {
         let x = vec![1.0_f64; 8];
-        let r = autocorr_biased(&x, 3).unwrap();
+        let r = autocorr_biased(&x, 3).expect("autocorr_biased with valid lag succeeds");
         assert_eq!(r.len(), 4);
     }
 
@@ -193,21 +193,21 @@ mod tests {
     fn test_autocorr_white_noise_decorrelated() {
         // For white noise (alternating), lag-1 autocorr should be -1.
         let x = vec![1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0_f64];
-        let r = autocorr_biased(&x, 1).unwrap();
+        let r = autocorr_biased(&x, 1).expect("autocorr_biased with valid lag succeeds");
         assert!(r[1] < 0.0, "white noise lag-1 autocorr = {}", r[1]);
     }
 
     #[test]
     fn test_autocorr_normalised_lag0_is_one() {
         let x = vec![3.0, 1.0, 4.0, 1.0, 5.0_f64];
-        let r = autocorr_normalised(&x, 2).unwrap();
+        let r = autocorr_normalised(&x, 2).expect("autocorr_normalised with valid lag succeeds");
         assert!((r[0] - 1.0).abs() < 1e-12);
     }
 
     #[test]
     fn test_autocorr_normalised_range() {
         let x: Vec<f64> = (0..16).map(|i| (i as f64 * 0.1).sin()).collect();
-        let r = autocorr_normalised(&x, 8).unwrap();
+        let r = autocorr_normalised(&x, 8).expect("autocorr_normalised with valid lag succeeds");
         for &v in &r {
             assert!(v.abs() <= 1.0 + 1e-10, "correlation > 1: {v}");
         }
@@ -217,7 +217,7 @@ mod tests {
     fn test_autocovariance_constant_signal() {
         // Constant signal has zero variance → autocovariance at all lags = 0.
         let x = vec![5.0_f64; 8];
-        let cv = autocovariance(&x, 3).unwrap();
+        let cv = autocovariance(&x, 3).expect("autocovariance with valid lag succeeds");
         for v in cv {
             assert!(v.abs() < 1e-12);
         }
@@ -226,21 +226,21 @@ mod tests {
     #[test]
     fn test_pacf_length() {
         let x: Vec<f64> = (0..20).map(|i| (i as f64 * 0.5).sin()).collect();
-        let p = pacf(&x, 4).unwrap();
+        let p = pacf(&x, 4).expect("PACF with valid max lag succeeds");
         assert_eq!(p.len(), 5);
     }
 
     #[test]
     fn test_pacf_lag0_is_one() {
         let x = vec![1.0, 2.0, 3.0, 4.0, 5.0_f64];
-        let p = pacf(&x, 2).unwrap();
+        let p = pacf(&x, 2).expect("PACF with valid max lag succeeds");
         assert!((p[0] - 1.0).abs() < 1e-12);
     }
 
     #[test]
     fn test_ljung_box_q_positive() {
         let x: Vec<f64> = (0..32).map(|i| (i as f64 / 8.0 * PI).sin()).collect();
-        let q = ljung_box_q(&x, 4).unwrap();
+        let q = ljung_box_q(&x, 4).expect("Ljung-Box Q with valid lag succeeds");
         assert!(q >= 0.0);
     }
 
@@ -250,7 +250,7 @@ mod tests {
         let x: Vec<f64> = (0..50)
             .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
             .collect();
-        let q = ljung_box_q(&x, 4).unwrap();
+        let q = ljung_box_q(&x, 4).expect("Ljung-Box Q with valid lag succeeds");
         assert!(q.is_finite());
     }
 }

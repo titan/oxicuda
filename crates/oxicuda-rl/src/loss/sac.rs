@@ -229,7 +229,8 @@ mod tests {
         let min_q_next = vec![1.0_f32; 4];
         let lp_next = vec![0.0_f32; 4];
         let w = vec![1.0_f32; 4];
-        let (loss, _) = sac_critic_loss(&q, &r, &d, &min_q_next, &lp_next, &w, cfg).unwrap();
+        let (loss, _) = sac_critic_loss(&q, &r, &d, &min_q_next, &lp_next, &w, cfg)
+            .expect("valid equal-length SAC slices should compute critic loss");
         assert!(loss.abs() < 1e-5, "critic loss={loss}");
     }
 
@@ -242,7 +243,8 @@ mod tests {
         };
         let log_pi = vec![-1.0_f32; 4];
         let min_q = vec![10.0_f32; 4];
-        let l = sac_actor_loss(&log_pi, &min_q, cfg).unwrap();
+        let l = sac_actor_loss(&log_pi, &min_q, cfg)
+            .expect("equal-length SAC actor slices should compute loss");
         assert!(l < 0.0, "actor loss should be negative with high Q");
     }
 
@@ -255,7 +257,8 @@ mod tests {
             ..SacConfig::default()
         };
         let log_pi = vec![-1.0_f32; 4]; // mean_lp = -1.0 = -H̄
-        let l = sac_temperature_loss(&log_pi, 0.0_f32.ln().max(-10.0), cfg).unwrap();
+        let l = sac_temperature_loss(&log_pi, 0.0_f32.ln().max(-10.0), cfg)
+            .expect("non-empty log_pi should compute temperature loss");
         // log_alpha = 0 → alpha = 1.0; loss = -(mean_lp + H̄) = -(-1 + (-1)) = 2 (no: +(-1)=-1)
         // Actually loss = -alpha*(mean_lp + target_entropy) = -1*(-1 + (-1)) = 2
         // That's not zero. The zero happens when policy entropy = -target_entropy
@@ -290,7 +293,7 @@ mod tests {
             0.0_f32.ln().max(-10.0),
             SacConfig::default(),
         )
-        .unwrap();
+        .expect("valid equal-length SAC all-loss slices should compute");
         assert!(l.critic_loss.is_finite());
         assert!(l.actor_loss.is_finite());
         assert!(l.alpha_loss.is_finite());

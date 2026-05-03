@@ -225,14 +225,14 @@ Fused MoE, Winograd convolution) are all present.
 
 | # | Requirement | Target | Status |
 |---|-------------|--------|--------|
-| P1 | Conv2D ResNet-50 layer3 | ≥ 90% cuDNN throughput | [ ] |
-| P2 | FlashAttention seq=2048, d=128, FP16 | ≥ 90% FlashAttention-2 throughput | [ ] |
-| P3 | PagedAttention decode, batch=32, seq=4096 | ≥ 85% vLLM throughput | [ ] |
-| P4 | MoE Mixtral-8x7B pattern | ≥ 90% FlashInfer throughput | [ ] |
-| P5 | LayerNorm D=4096, FP16 | ≥ 95% cuDNN throughput | [ ] |
-| P6 | RMSNorm D=4096, FP16 | ≥ 95% cuDNN throughput | [ ] |
-| P7 | BatchNorm inference | ≥ 95% cuDNN throughput | [ ] |
-| P8 | Conv + BN + ReLU fused vs unfused | ≥ 2× speedup | [ ] |
+| P1 | Conv2D ResNet-50 layer3 | ≥ 90% cuDNN throughput | [~] |
+| P2 | FlashAttention seq=2048, d=128, FP16 | ≥ 90% FlashAttention-2 throughput | [~] |
+| P3 | PagedAttention decode, batch=32, seq=4096 | ≥ 85% vLLM throughput | [~] |
+| P4 | MoE Mixtral-8x7B pattern | ≥ 90% FlashInfer throughput | [~] |
+| P5 | LayerNorm D=4096, FP16 | ≥ 95% cuDNN throughput | [~] |
+| P6 | RMSNorm D=4096, FP16 | ≥ 95% cuDNN throughput | [~] |
+| P7 | BatchNorm inference | ≥ 95% cuDNN throughput | [~] |
+| P8 | Conv + BN + ReLU fused vs unfused | ≥ 2× speedup | [~] |
 
 ---
 
@@ -307,3 +307,30 @@ Fused MoE, Winograd convolution) are all present.
 - [x] FlashAttention causal mask: triangular mask correctness vs unfused reference < 2e-2 FP16
 - [x] FlashAttention-3 Hopper kernel bodies implemented: real MMA (mma.sync.aligned.m16n8k16), ldmatrix, warp shuffle, TMA (cp.async.bulk), wgmma.mma_async instructions emitted
 - [x] PTX generation verified: tests assert real instruction mnemonics present (not pseudocode)
+
+## Performance Verification Harness Status (2026-04-26)
+
+Criterion bench files for the P1–P8 performance gates compile cleanly on
+macOS (no GPU) and skip at runtime via `oxicuda_driver::init()` /
+`Device::count()` checks. Each bench builds tensors and device buffers
+outside `b.iter()` and invokes the real DNN API once per iteration. Awaiting
+Linux+NVIDIA execution to populate the actual throughput numbers; the table
+markers above remain `[~]` until then.
+
+- **P1** (Conv2D ResNet-50 layer3): harness at `benches/conv2d_resnet50_layer3.rs` — input `[1,256,14,14]`, filter `[256,256,3,3]`, stride 1 pad 1, NCHW f32; awaiting Linux+NVIDIA run.
+- **P2** (FlashAttention seq=2048, d=128): harness at `benches/flash_attention_2k_d128.rs` — `[1,16,2048,128]`, non-causal, f32; awaiting Linux+NVIDIA run.
+- **P3** (PagedAttention decode, batch=32, seq=4096): harness at `benches/paged_attention_decode.rs` — `B=32, H=32, KV-H=8, D=128, block=16`, page table all-zero (single shared physical page) for footprint; awaiting Linux+NVIDIA run.
+- **P4** (MoE Mixtral-8x7B pattern): harness at `benches/moe_mixtral_8x7b.rs` — `experts=8, top_k=2, hidden=4096, intermediate=14336, num_tokens=4` (token-parallel strategy), SiLU activation; awaiting Linux+NVIDIA run.
+- **P5** (LayerNorm D=4096): harness at `benches/layernorm_d4096.rs` — `[1024, 4096]` rows, f32; awaiting Linux+NVIDIA run.
+- **P6** (RMSNorm D=4096): harness at `benches/rmsnorm_d4096.rs` — `[1024, 4096]`, f32; awaiting Linux+NVIDIA run.
+- **P7** (BatchNorm inference): harness at `benches/batchnorm_inference.rs` — NCHW `[64, 256, 28, 28]`, training=false, f32; awaiting Linux+NVIDIA run.
+- **P8** (fused conv+BN+ReLU vs unfused): harness at `benches/fused_conv_bn_relu.rs` — two groups (`fused`, `unfused`), `[8,128,28,28]` 3×3 stride-1 pad-1, ratio recovered offline; awaiting Linux+NVIDIA run.
+
+> Notes:
+> - Benches use f32 throughout; the FP16 path requires the `f16` feature
+>   gate (see `[features] f16 = ...` in `Cargo.toml`). Switching is a
+>   throughput tuning knob — the harness layout is unchanged.
+> - The skip preamble uses `oxicuda_driver::init()` + `Device::count()`
+>   rather than the spec-suggested `Device::current()`, which is not part
+>   of the public driver API today (the matching pattern is the one used by
+>   `crates/oxicuda-memory/benches/bandwidth_copy.rs`).

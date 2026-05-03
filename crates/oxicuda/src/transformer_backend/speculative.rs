@@ -436,7 +436,8 @@ mod tests {
 
     #[test]
     fn test_create_decoder() {
-        let decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
         assert_eq!(decoder.num_speculative_tokens(), 5);
     }
 
@@ -453,7 +454,8 @@ mod tests {
 
     #[test]
     fn test_verify_all_accept() {
-        let mut decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let mut decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
 
         let draft_tokens = vec![1, 2, 3];
         let draft_probs = vec![0.3, 0.4, 0.5];
@@ -467,7 +469,7 @@ mod tests {
 
         let output = decoder
             .verify(&draft_tokens, &draft_probs, &target_probs)
-            .unwrap();
+            .expect("verify with all-accepting target probs should succeed");
         assert_eq!(output.num_accepted, 3);
         assert!(output.beneficial);
         assert!(output.correction_token.is_some());
@@ -475,7 +477,8 @@ mod tests {
 
     #[test]
     fn test_verify_partial_accept() {
-        let mut decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let mut decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
 
         let draft_tokens = vec![1, 2, 3];
         let draft_probs = vec![0.3, 0.8, 0.5];
@@ -488,14 +491,15 @@ mod tests {
 
         let output = decoder
             .verify(&draft_tokens, &draft_probs, &target_probs)
-            .unwrap();
+            .expect("verify with partially accepting target probs should succeed");
         assert!(output.num_accepted >= 1);
         assert!(output.num_accepted < 3);
     }
 
     #[test]
     fn test_verify_none_accept() {
-        let mut decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let mut decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
 
         let draft_tokens = vec![1];
         let draft_probs = vec![0.9];
@@ -507,7 +511,7 @@ mod tests {
 
         let output = decoder
             .verify(&draft_tokens, &draft_probs, &target_probs)
-            .unwrap();
+            .expect("verify with rejecting target probs should succeed");
         assert_eq!(output.num_accepted, 0);
     }
 
@@ -517,7 +521,8 @@ mod tests {
             acceptance_method: AcceptanceMethod::TypicalAcceptance,
             ..default_config()
         };
-        let mut decoder = SpeculativeDecoder::new(cfg).unwrap();
+        let mut decoder = SpeculativeDecoder::new(cfg)
+            .expect("SpeculativeDecoder creation with typical acceptance config should succeed");
 
         let draft_tokens = vec![1, 2];
         let draft_probs = vec![0.3, 0.3];
@@ -529,7 +534,7 @@ mod tests {
 
         let output = decoder
             .verify(&draft_tokens, &draft_probs, &target_probs)
-            .unwrap();
+            .expect("verify with typical acceptance should succeed");
         // Should accept at least first token (similar entropy)
         assert!(output.num_drafted == 2);
     }
@@ -549,7 +554,8 @@ mod tests {
 
     #[test]
     fn test_stats_tracking() {
-        let mut decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let mut decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
 
         let draft_tokens = vec![1, 2];
         let draft_probs = vec![0.3, 0.3];
@@ -563,7 +569,8 @@ mod tests {
 
     #[test]
     fn test_stats_reset() {
-        let mut decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let mut decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
         let _ = decoder.verify(&[1], &[0.5], &[vec![0.0, 0.8], vec![0.5, 0.5]]);
         assert!(decoder.stats().total_steps > 0);
 
@@ -573,22 +580,27 @@ mod tests {
 
     #[test]
     fn test_build_tree() {
-        let decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
         let probs = vec![0.1, 0.4, 0.3, 0.2];
-        let paths = decoder.build_tree(&probs, 3).unwrap();
+        let paths = decoder
+            .build_tree(&probs, 3)
+            .expect("build_tree with valid probs should succeed");
         assert!(!paths.is_empty());
         assert!(paths.len() <= 3); // max_tree_width
     }
 
     #[test]
     fn test_build_tree_empty() {
-        let decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
         assert!(decoder.build_tree(&[], 3).is_err());
     }
 
     #[test]
     fn test_verify_mismatched_lengths() {
-        let mut decoder = SpeculativeDecoder::new(default_config()).unwrap();
+        let mut decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
         assert!(decoder.verify(&[1, 2], &[0.5], &[]).is_err());
     }
 

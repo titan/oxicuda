@@ -556,7 +556,9 @@ mod tests {
     #[test]
     fn init_kernel_ptx_stores_zero() {
         let t = DeviceHistogramTemplate::new(cfg(PtxType::U32, 256, DeviceHistogramMode::Modulo));
-        let ptx = t.generate_init_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_init_kernel(SmVersion::Sm80)
+            .expect("init kernel generation must succeed");
         assert!(ptx.contains("st.global.u32"), "PTX: {ptx}");
         assert!(ptx.contains("histogram_init"), "PTX: {ptx}");
     }
@@ -564,7 +566,9 @@ mod tests {
     #[test]
     fn count_ptx_modulo_u32_has_private_histogram() {
         let t = DeviceHistogramTemplate::new(cfg(PtxType::U32, 256, DeviceHistogramMode::Modulo));
-        let ptx = t.generate_count_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_count_kernel(SmVersion::Sm80)
+            .expect("count kernel generation must succeed");
         assert!(ptx.contains("hist_smem"), "PTX: {ptx}");
         assert!(ptx.contains("atom.shared.add.u32"), "PTX: {ptx}");
         assert!(ptx.contains("atom.global.add.u32"), "PTX: {ptx}");
@@ -573,7 +577,9 @@ mod tests {
     #[test]
     fn count_ptx_modulo_u32_has_rem_instruction() {
         let t = DeviceHistogramTemplate::new(cfg(PtxType::U32, 256, DeviceHistogramMode::Modulo));
-        let ptx = t.generate_count_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_count_kernel(SmVersion::Sm80)
+            .expect("count kernel generation must succeed");
         assert!(ptx.contains("rem.u32"), "PTX: {ptx}");
     }
 
@@ -581,7 +587,9 @@ mod tests {
     fn count_ptx_even_f32_has_fp_scaling_params() {
         let t =
             DeviceHistogramTemplate::new(cfg(PtxType::F32, 100, DeviceHistogramMode::EvenRange));
-        let ptx = t.generate_count_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_count_kernel(SmVersion::Sm80)
+            .expect("count kernel generation must succeed");
         assert!(ptx.contains("sub.f32"), "PTX: {ptx}");
         assert!(ptx.contains("mul.f32"), "PTX: {ptx}");
         assert!(ptx.contains("param_lo"), "PTX: {ptx}");
@@ -591,7 +599,9 @@ mod tests {
     #[test]
     fn count_ptx_even_u32_has_div_bin_width() {
         let t = DeviceHistogramTemplate::new(cfg(PtxType::U32, 16, DeviceHistogramMode::EvenRange));
-        let ptx = t.generate_count_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_count_kernel(SmVersion::Sm80)
+            .expect("count kernel generation must succeed");
         assert!(ptx.contains("div.u32"), "PTX: {ptx}");
         assert!(ptx.contains("param_lo"), "PTX: {ptx}");
     }
@@ -599,14 +609,18 @@ mod tests {
     #[test]
     fn count_ptx_has_bar_sync() {
         let t = DeviceHistogramTemplate::new(cfg(PtxType::U32, 256, DeviceHistogramMode::Modulo));
-        let ptx = t.generate_count_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_count_kernel(SmVersion::Sm80)
+            .expect("count kernel generation must succeed");
         assert!(ptx.contains("bar.sync"), "PTX: {ptx}");
     }
 
     #[test]
     fn count_ptx_has_strided_init_loop() {
         let t = DeviceHistogramTemplate::new(cfg(PtxType::U32, 1024, DeviceHistogramMode::Modulo));
-        let ptx = t.generate_count_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_count_kernel(SmVersion::Sm80)
+            .expect("count kernel generation must succeed");
         assert!(ptx.contains("HIST_INIT_LOOP"), "PTX: {ptx}");
         assert!(ptx.contains("HIST_MERGE_LOOP"), "PTX: {ptx}");
     }
@@ -614,7 +628,9 @@ mod tests {
     #[test]
     fn generate_both_kernels_succeeds() {
         let t = DeviceHistogramTemplate::new(cfg(PtxType::U32, 256, DeviceHistogramMode::Modulo));
-        let (init_ptx, count_ptx) = t.generate(SmVersion::Sm80).unwrap();
+        let (init_ptx, count_ptx) = t
+            .generate(SmVersion::Sm80)
+            .expect("both histogram kernels must generate successfully");
         assert!(!init_ptx.is_empty());
         assert!(!count_ptx.is_empty());
     }

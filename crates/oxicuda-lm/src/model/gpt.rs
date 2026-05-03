@@ -245,7 +245,7 @@ mod tests {
     use crate::config::GptConfig;
 
     fn tiny_model() -> Gpt2Model {
-        Gpt2Model::new(GptConfig::tiny()).unwrap()
+        Gpt2Model::new(GptConfig::tiny()).expect("tiny GptConfig should produce a valid Gpt2Model")
     }
 
     #[test]
@@ -257,7 +257,9 @@ mod tests {
     #[test]
     fn gpt2_forward_output_shape() {
         let m = tiny_model();
-        let (logits, kv) = m.forward(&[0, 1, 2], None).unwrap();
+        let (logits, kv) = m
+            .forward(&[0, 1, 2], None)
+            .expect("3-token GPT-2 forward should succeed");
         assert_eq!(logits.len(), 3 * m.config.vocab_size);
         assert_eq!(kv.n_layers(), 2);
         assert_eq!(kv.past_len(), 3);
@@ -276,7 +278,7 @@ mod tests {
     fn gpt2_forward_sequence_too_long_error() {
         let mut cfg = GptConfig::tiny();
         cfg.n_positions = 4;
-        let m = Gpt2Model::new(cfg).unwrap();
+        let m = Gpt2Model::new(cfg).expect("modified tiny GptConfig should still be valid");
         let ids: Vec<u32> = (0..5).collect();
         assert!(matches!(
             m.forward(&ids, None),
@@ -287,8 +289,12 @@ mod tests {
     #[test]
     fn gpt2_forward_kv_cache_incremental() {
         let m = tiny_model();
-        let (_, kv1) = m.forward(&[0, 1], None).unwrap();
-        let (logits2, kv2) = m.forward(&[2], Some(&kv1)).unwrap();
+        let (_, kv1) = m
+            .forward(&[0, 1], None)
+            .expect("prefill 2-token GPT-2 forward should succeed");
+        let (logits2, kv2) = m
+            .forward(&[2], Some(&kv1))
+            .expect("incremental decode with cache should succeed");
         assert_eq!(logits2.len(), m.config.vocab_size);
         assert_eq!(kv2.past_len(), 3);
     }
@@ -296,18 +302,23 @@ mod tests {
     #[test]
     fn gpt2_next_token_returns_valid_id() {
         let m = tiny_model();
-        let (tok, _) = m.next_token(&[0], None).unwrap();
+        let (tok, _) = m
+            .next_token(&[0], None)
+            .expect("next_token on valid GPT-2 should succeed");
         assert!((tok as usize) < m.config.vocab_size);
     }
 
     #[test]
     fn gpt2_weight_tied_lm_head() {
         // If embedding weight = ones, logits for each vocab item = sum of h row
-        let mut m = Gpt2Model::new(GptConfig::tiny()).unwrap();
+        let mut m = Gpt2Model::new(GptConfig::tiny())
+            .expect("tiny GptConfig for weight-tie test should be valid");
         // set embedding to ones
         m.token_embed.weight.data = vec![1.0_f32; m.config.vocab_size * m.config.n_embd];
         // set all block weights to zero (already done) so h = tok+pos emb = 0
-        let (logits, _) = m.forward(&[0], None).unwrap();
+        let (logits, _) = m
+            .forward(&[0], None)
+            .expect("single-token weight-tied GPT-2 forward should succeed");
         // h = 0, logits = 0 @ embed = 0
         assert!(logits.iter().all(|&v| v.abs() < 1e-5));
     }
@@ -324,11 +335,17 @@ mod tests {
         // with incremental [0] then [1] with cache.
         // Both should be identical for the token-1 position.
         let m = tiny_model();
-        let (logits_full, _) = m.forward(&[0, 1], None).unwrap();
+        let (logits_full, _) = m
+            .forward(&[0, 1], None)
+            .expect("full 2-token GPT-2 forward should succeed");
         let last_full = &logits_full[m.config.vocab_size..];
 
-        let (_, kv0) = m.forward(&[0], None).unwrap();
-        let (logits_incr, _) = m.forward(&[1], Some(&kv0)).unwrap();
+        let (_, kv0) = m
+            .forward(&[0], None)
+            .expect("incremental token-0 GPT-2 forward should succeed");
+        let (logits_incr, _) = m
+            .forward(&[1], Some(&kv0))
+            .expect("incremental token-1 GPT-2 with cache should succeed");
 
         for (&full_v, &incr_v) in last_full.iter().zip(logits_incr.iter()) {
             assert!(
@@ -340,8 +357,14 @@ mod tests {
 
     #[test]
     fn argmax_f32_correct() {
-        assert_eq!(argmax_f32(&[0.1, 0.9, 0.5]).unwrap(), 1);
-        assert_eq!(argmax_f32(&[5.0, 3.0]).unwrap(), 0);
+        assert_eq!(
+            argmax_f32(&[0.1, 0.9, 0.5]).expect("non-empty slice argmax should succeed"),
+            1
+        );
+        assert_eq!(
+            argmax_f32(&[5.0, 3.0]).expect("non-empty slice argmax should succeed"),
+            0
+        );
     }
 
     #[test]

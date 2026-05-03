@@ -102,8 +102,8 @@ The gap reflects the estimation targeting full cuFFT feature parity with exhaust
 
 | # | Requirement | Target | Status |
 |---|-------------|--------|--------|
-| P1 | FFT 1D C2C, N=2²⁰ (1M elements) | ≥ 90% cuFFT throughput | [ ] |
-| P2 | FFT 2D, 1024×1024 | ≥ 85% cuFFT throughput | [ ] |
+| P1 | FFT 1D C2C, N=2²⁰ (1M elements) | ≥ 90% cuFFT throughput | [~] |
+| P2 | FFT 2D, 1024×1024 | ≥ 85% cuFFT throughput | [~] |
 
 ---
 
@@ -140,3 +140,8 @@ where ε_machine = 1.19e-7 for FP32, 2.22e-16 for FP64.
 - [ ] Performance benchmarks P1 and P2 measured and documented
 - [x] Pruned FFT: only compute non-zero output elements (useful for zero-padded signals)
 - [x] Out-of-core FFT: N larger than GPU memory via host-device streaming
+
+## Performance Verification Harness Status (2026-04-26)
+
+- **P1** (FFT 1D C2C N=2²⁰): harness at `benches/fft_throughput.rs::fft_1d_c2c_2_20`; awaiting Linux+NVIDIA run.
+- **P2** (FFT 2D 1024×1024): harness at `benches/fft_throughput.rs::fft_2d_1024`; awaiting Linux+NVIDIA run.

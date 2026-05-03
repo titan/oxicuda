@@ -128,7 +128,20 @@ Driver layer is latency-sensitive (microsecond-scale API calls). Key targets:
 - [x] Multi-threaded context migration test (concurrent context push/pop across threads) for F3
 - [x] Intentional error injection test suite covering all ~100 CUDA error codes (F9)
 - [x] Scope-exit / Drop resource release verification under OOM conditions (F10)
-- [ ] Launch overhead microbenchmark: `launch!()` vs raw `cuLaunchKernel` < 1 μs delta (NF3)
+- [~] launch-overhead-driver-crate — see canonical plan at oxicuda-launch/TODO.md (launch-overhead-launch-crate)
+- [x] gpu-tests-feature-gate-platforms (completed 2026-05-01)
+  - **Goal:** Lock down the macOS stub contract — every `gpu-tests`-gated public entrypoint returns the expected `Err` variant on macOS rather than panicking, hanging, or silently succeeding
+  - **Design:** New `crates/oxicuda-driver/tests/macos_stub.rs` gated `#[cfg(all(target_os = "macos", feature = "gpu-tests"))]`; covers 9 `gpu-tests` sites: oxicuda-launch/{params.rs:436,grid.rs:403}, oxicuda-driver/{multi_gpu.rs:289,primary_context.rs:237}, oxicuda-memory/{host_registered.rs:675,peer_copy.rs:227}, oxicuda/src/global_init.rs:552, oxicuda-sparse/src/ops/spgemm_estimate.rs:{461,577}; use `matches!` for variant assertions; tighten device_attrs.rs to assert variant; drop dead `gpu-tests` feature from oxicuda-rand/oxicuda-runtime Cargo.toml if confirmed unused
+  - **Files:** `crates/oxicuda-driver/tests/macos_stub.rs` (new ~150 LoC), `crates/oxicuda-driver/tests/device_attrs.rs`, `crates/oxicuda-rand/Cargo.toml`, `crates/oxicuda-runtime/Cargo.toml` (conditional)
+  - **Tests:** The new file is the test; run `cargo nextest run -p oxicuda-driver --features gpu-tests --test macos_stub`
+  - **Risk:** Low — stub behavior already implemented; `matches!` keeps assertions non-brittle
+- [x] jit-diagnostic-on-failure (planned 2026-05-01)
+  - **Goal:** Surface the parsed JIT diagnostic log on failure paths that currently swallow it. `JitDiagnostic`/`JitLog`/`parse_ptxas_line` already exist at `module.rs:114-325`; this item wires them into `Linker::complete()` (`link.rs:~612`) and `Module::from_ptx_with_options` (`module.rs:~436-450`) so a JIT failure carries its full structured log instead of a bare error code.
+  - **Design:** Add `CudaError::JitFailed { log: Box<JitLog>, #[source] source: Box<CudaError> }` variant to `error.rs`. Add `pub(crate) fn jit_failure(source, info_buf, error_buf) -> CudaError` helper near the existing parser in `module.rs` — iterates over buf bytes, calls existing `parse_ptxas_line`, produces a `JitLog`, wraps into `JitFailed`. Wire `Linker::complete()` failure branch and `from_ptx_with_options` failure path to call `jit_failure(err, &info_buf, &error_buf)`. Success paths unchanged (we do not return JitLog on success in this pass).
+  - **Files:** `src/error.rs` (add variant), `src/module.rs` (helper + wire ~436-450), `src/link.rs:~612` (wire failure branch)
+  - **Tests (unit, macOS-runnable):** `jit_failure_parses_ptxas_log`, `jit_failure_unparseable_falls_through_to_raw`, `jit_failed_display_includes_diagnostic_count`, `jit_failed_source_chain_intact`
+  - **Risk:** Adding `CudaError` variant is minor API change; project is unreleased (0.1.5), no external consumers. Variant uses `#[source]` so error chains remain printable.
+  - **Prerequisites:** None — parser already exists at `module.rs:114-325`.
 
 ### Coverage
 - [x] Windows `nvcuda.dll` load path tested in CI (currently Linux-only) — CI infrastructure item; Windows path is conditionally compiled (#[cfg(target_os = "windows")])

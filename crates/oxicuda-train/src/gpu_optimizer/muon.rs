@@ -266,7 +266,8 @@ mod tests {
 
     fn make_param(data: Vec<f32>, grad: Vec<f32>) -> ParamTensor {
         let mut p = ParamTensor::new(data, "w");
-        p.set_grad(grad).unwrap();
+        p.set_grad(grad)
+            .expect("gradient length matches param data length");
         p
     }
 
@@ -274,7 +275,8 @@ mod tests {
     fn muon_positive_grad_decreases_param() {
         let mut opt = GpuMuon::new(1e-3).with_ns_steps(0); // no NS for 1-D
         let mut params = vec![make_param(vec![1.0_f32; 4], vec![0.5_f32; 4])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         for &v in &params[0].data {
             assert!(v < 1.0, "param should decrease, got {v}");
         }
@@ -310,7 +312,8 @@ mod tests {
             vec![0.1_f32; n],
             (0..n).map(|i| (i as f32 + 1.0) * 0.01).collect(),
         )];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
         // Should not panic; params should change
         let any_changed = params[0].data.iter().any(|&v| (v - 0.1_f32).abs() > 1e-7);
         assert!(any_changed, "params should change after step");
@@ -326,7 +329,8 @@ mod tests {
 
         let mut opt = GpuMuon::new(lr).with_momentum(mu as f64).with_ns_steps(0);
         let mut params = vec![make_param(vec![p0], vec![g])];
-        opt.step(&mut params).unwrap();
+        opt.step(&mut params)
+            .expect("optimizer step should succeed");
 
         // Manual Nesterov: v = 0 + (1-0)*1 = 1; update = g + mu*v = 1 + 0.9*1 = 1.9
         // p = 2 - 0.01 * 1.9 = 1.981
@@ -344,8 +348,11 @@ mod tests {
         let mut params = vec![make_param(vec![3.0_f32], vec![0.0_f32])];
         for _ in 0..500 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         let x = params[0].data[0].abs();
         assert!(x < 0.2, "should converge near 0, got |x|={x}");

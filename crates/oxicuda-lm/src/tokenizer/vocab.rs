@@ -151,7 +151,8 @@ mod tests {
             vec![b'a', b'b', b'c'],
         ];
         let special: HashMap<String, u32> = [("<eos>".into(), 2u32)].into_iter().collect();
-        Vocab::from_tokens(tokens, special).unwrap()
+        Vocab::from_tokens(tokens, special)
+            .expect("5-token small vocabulary with valid special token should succeed")
     }
 
     #[test]
@@ -175,8 +176,14 @@ mod tests {
     #[test]
     fn id_to_bytes_ok() {
         let v = small_vocab();
-        assert_eq!(v.id_to_bytes(0).unwrap(), b"a");
-        assert_eq!(v.id_to_bytes(4).unwrap(), b"abc");
+        assert_eq!(
+            v.id_to_bytes(0).expect("token 0 should have bytes 'a'"),
+            b"a"
+        );
+        assert_eq!(
+            v.id_to_bytes(4).expect("token 4 should have bytes 'abc'"),
+            b"abc"
+        );
     }
 
     #[test]
@@ -191,15 +198,22 @@ mod tests {
     #[test]
     fn decode_token_ascii() {
         let v = small_vocab();
-        assert_eq!(v.decode_token(0).unwrap(), "a");
-        assert_eq!(v.decode_token(3).unwrap(), "ab");
+        assert_eq!(
+            v.decode_token(0).expect("token 0 should decode to 'a'"),
+            "a"
+        );
+        assert_eq!(
+            v.decode_token(3).expect("token 3 should decode to 'ab'"),
+            "ab"
+        );
     }
 
     #[test]
     fn decode_token_utf8_error() {
         // Build a vocab with a token whose bytes are not valid UTF-8.
         let tokens = vec![vec![0xFF_u8]];
-        let v = Vocab::from_tokens(tokens, HashMap::new()).unwrap();
+        let v = Vocab::from_tokens(tokens, HashMap::new())
+            .expect("single 0xFF-byte token vocabulary should succeed");
         assert!(matches!(
             v.decode_token(0),
             Err(LmError::Utf8Decode { token: 0 })
@@ -226,7 +240,9 @@ mod tests {
         let base = Vocab::gpt2_byte_vocab();
         let extra = vec![vec![b'a', b'b']]; // "ab" → id 256
         let extra_special: HashMap<String, u32> = [("<eos>".into(), 256u32)].into_iter().collect();
-        let v = base.with_extra_tokens(extra, extra_special).unwrap();
+        let v = base
+            .with_extra_tokens(extra, extra_special)
+            .expect("extending byte vocab with 'ab' token at id 256 should succeed");
         assert_eq!(v.size(), 257);
         assert_eq!(v.bytes_to_id(b"ab"), Some(256));
         assert_eq!(v.special_id("<eos>"), Some(256));

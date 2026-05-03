@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-03
+
+### Added
+
+- macOS stub integration test suite (`crates/oxicuda-driver/tests/macos_stub.rs`) — 9 tests asserting every `gpu-tests`-gated entrypoint returns `Err(UnsupportedPlatform)` or `Err(NotInitialized)` on macOS
+- `[package.metadata.docs.rs]` configuration added to all 34 subcrate `Cargo.toml` files; `cargo doc --all-features` now builds cleanly workspace-wide
+- Vol.17 `oxicuda-gen` (Generative AI: DDPM/DDIM/DPM-Solver++/Flow Matching schedulers, classifier-free guidance, VAE codec, LoRA adapters, score-network blocks)
+- Vol.18 `oxicuda-gnn` (Graph Neural Networks: CSR/COO/Heterogeneous graphs, scatter / gather / aggregate primitives, GCN / GAT / GAT-v2 / GraphSAGE / GIN layers, global / Top-K / DiffPool pooling, Set2Set readout)
+- Vol.19 `oxicuda-mamba` (State Space Models: HiPPO-NPLR initialization, S4D / S5 selective scan, Mamba SSM block, RWKV channel-mixing, gated SSM)
+- Vol.20 `oxicuda-vision` (Vision Transformers & CLIP: patch embedding, ViT encoder blocks, learnable positional embeddings, CLS token, CLIP-style image / text tower scaffolding)
+- Vol.21 `oxicuda-audio` (Audio / Speech ML: Conformer encoder, Wav2Vec2 feature extractor, CTC / RNN-T loss, WaveNet causal stack, SpecAugment, x-vector speaker embedding)
+- Vol.22 `oxicuda-timeseries` (Time-Series Forecasting: TCN, NHiTS, PatchTST, TimesNet, iTransformer, RevIN reversible normalization)
+- Vol.23 `oxicuda-bayes` (Bayesian deep learning: variational inference, Bayesian linear / conv layers, Flipout, ELBO / IWAE, normalizing flows, MC Dropout, Deep Ensembles, SWAG, Laplace approximation, calibration / ECE)
+- Vol.24 `oxicuda-federated` (Federated learning: FedAvg / FedProx / SCAFFOLD / FedAdam, PowerSGD / QSGD / Top-K / Random-K compression, Gaussian / Laplacian / Moments / RDP / PATE differential privacy, Shamir-based secure aggregation, random / stratified client selection)
+- Vol.25 `oxicuda-nas` (Neural Architecture Search: DARTS bilevel optimizer with derived discrete cells, one-shot weight-shared Supernet with path sampling and Slimmable widths, evolutionary NSGA-II with non-dominated sort and crowding distance, hardware-aware FLOPs predictor)
+- All three new leaf crates carry `[dependencies] thiserror.workspace = true` only — no internal `oxicuda-*` dependencies, fully standalone, 100% Pure Rust
+- 8 missing per-crate `README.md` files created (`oxicuda-bayes`, `oxicuda-federated`, `oxicuda-gen`, `oxicuda-gnn`, `oxicuda-mamba`, `oxicuda-nas`, `oxicuda-timeseries`, `oxicuda-vision`) so `cargo publish` no longer errors on `readme = "README.md"`
+
+### Changed
+
+- Preemptive `splitrs` of 5 near-cap source files: `batched.rs` (1950→1288 LoC), `tensor_backend/ops.rs` (1986→1673 LoC), `fp4_fp6_ops.rs` (1955→1587 LoC), `ir/instruction.rs` (1973→1244 LoC), `tui_explorer.rs` (1931→1438 LoC); test blocks extracted to sibling `*/tests.rs` files
+- `device_attrs.rs` integration test tightened to assert error variant (not just `is_err()`)
+- `launch-overhead-driver-crate` TODO entry collapsed to canonical cross-reference
+- All internal dependency versions bumped to 0.1.5
+- Workspace test count: **9,568 passing**, 2 skipped (GPU-gated on macOS) — up from prior ~9,000-something
+- Repaired 22 clippy warnings without introducing any `#[allow]` attributes — `needless_range_loop` ×15, `useless_vec` ×3, `manual_repeat_n` ×3, `ptr_arg` ×1, `nonminimal_bool` ×1
+- Fixed 6 pre-existing compile errors — `unused-named-args` in `format!` PTX templates ×4, deprecated `std::f32::LN_2` reference, two `explicit-deref-pattern` lints
+- Statistical test `compression::randomk::tests::random_sparsify_unbiased` retuned from `n_trials=500` (1.1σ) to `n_trials=5_000` (3.6σ) — eliminates the historical flake
+
 ## [0.1.4] - 2026-04-18
 
 ### Added

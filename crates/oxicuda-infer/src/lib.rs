@@ -72,7 +72,7 @@
 //!     }).collect())
 //! };
 //!
-//! let output = batcher.step(model_fn).unwrap();
+//! let output = batcher.step(model_fn).expect("model_fn is infallible in this example");
 //! assert!(!output.is_empty());
 //! ```
 
@@ -139,7 +139,7 @@ mod tests {
                     .collect())
             };
 
-        let outputs = b.step(model_fn).unwrap();
+        let outputs = b.step(model_fn).expect("greedy EOS model step succeeds");
         assert_eq!(outputs.len(), 1);
         assert_eq!(outputs[0].finish_reason, FinishReason::EosToken(5));
         assert!(!b.has_unfinished());
@@ -165,7 +165,7 @@ mod tests {
                 Ok(tokens.iter().map(|_| vec![1.0_f32; 16]).collect())
             };
 
-        let outputs = b.step(model_fn).unwrap();
+        let outputs = b.step(model_fn).expect("uniform logit model step succeeds");
         assert_eq!(outputs[0].finish_reason, FinishReason::MaxLength);
     }
 
@@ -187,7 +187,7 @@ mod tests {
                 v
             })
             .collect();
-        let done = state.step(&logits).unwrap();
+        let done = state.step(&logits).expect("valid beam search logits");
         assert!(done);
         assert!(!state.completed.is_empty());
     }
@@ -212,7 +212,8 @@ mod tests {
         });
         let draft: Vec<u32> = (0..k as u32).map(|i| i % vocab as u32).collect();
         let mut rng = Rng::new(0);
-        let (accepted, _bonus) = speculative_verify(&draft, &probs, &target, &mut rng).unwrap();
+        let (accepted, _bonus) = speculative_verify(&draft, &probs, &target, &mut rng)
+            .expect("matching draft and target prob dimensions");
         assert_eq!(accepted.len(), k);
     }
 
@@ -223,11 +224,14 @@ mod tests {
         let hd = 4;
         let bs = 4;
         let mut cache = PagedKvCache::new(1, n_h, hd, bs, 4);
-        let id = cache.alloc_block().unwrap();
+        let id = cache.alloc_block().expect("4-block cache has free blocks");
         let kv = vec![1.0_f32; n_h * hd];
-        cache.append_token(id, 0, &kv, &kv).unwrap();
+        cache
+            .append_token(id, 0, &kv, &kv)
+            .expect("layer 0 exists and slot is free");
         let q = vec![1.0_f32; n_h * hd];
-        let out = paged_attention_cpu(&q, &cache, &[id], 1, 0, n_h, n_h, hd, bs, 1.0).unwrap();
+        let out = paged_attention_cpu(&q, &cache, &[id], 1, 0, n_h, n_h, hd, bs, 1.0)
+            .expect("valid paged attention inputs");
         for &v in &out {
             assert!((v - 1.0_f32).abs() < 1e-5, "expected 1.0, got {v}");
         }
@@ -256,7 +260,7 @@ mod tests {
         let runner = MockModelRunner::new(64, 0);
         let logits = runner
             .decode(&[1, 2, 3], &[vec![], vec![], vec![]], &[0, 0, 0])
-            .unwrap();
+            .expect("valid decode inputs with 3 sequences");
         assert_eq!(logits.len(), 3);
         assert!(logits.iter().all(|row| row.len() == 64));
     }

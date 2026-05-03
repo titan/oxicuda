@@ -201,7 +201,8 @@ mod tests {
         let max_q_next = vec![1.0_f32; 4];
         let done = vec![0.0_f32; 4];
         let w = vec![1.0_f32; 4];
-        let l = dqn_loss(&q, &r, &max_q_next, &done, &w, cfg).unwrap();
+        let l = dqn_loss(&q, &r, &max_q_next, &done, &w, cfg)
+            .expect("valid equal-length slices should compute DQN loss");
         assert!(l.loss.abs() < 1e-5, "loss should be 0, got {}", l.loss);
     }
 
@@ -213,7 +214,8 @@ mod tests {
         let max_q_next = vec![1.0_f32; 4];
         let done = vec![0.0_f32; 4];
         let w = vec![1.0_f32; 4];
-        let l = dqn_loss(&q, &r, &max_q_next, &done, &w, cfg).unwrap();
+        let l = dqn_loss(&q, &r, &max_q_next, &done, &w, cfg)
+            .expect("valid equal-length slices should compute DQN loss");
         assert!(l.loss > 0.0, "loss should be > 0");
     }
 
@@ -230,7 +232,8 @@ mod tests {
         let max_q_next = vec![100.0_f32]; // should be ignored
         let done = vec![1.0_f32];
         let w = vec![1.0_f32];
-        let l = dqn_loss(&q, &r, &max_q_next, &done, &w, cfg).unwrap();
+        let l = dqn_loss(&q, &r, &max_q_next, &done, &w, cfg)
+            .expect("valid equal-length slices should compute DQN loss");
         // target=2, delta=2, MSE=2.0
         assert!((l.loss - 2.0).abs() < 1e-5, "loss={}", l.loss);
     }
@@ -244,7 +247,8 @@ mod tests {
         let max_q = vec![0.5_f32; n];
         let done = vec![0.0_f32; n];
         let w = vec![1.0_f32; n];
-        let l = dqn_loss(&q, &r, &max_q, &done, &w, cfg).unwrap();
+        let l = dqn_loss(&q, &r, &max_q, &done, &w, cfg)
+            .expect("valid equal-length slices should compute DQN loss");
         assert_eq!(l.td_errors.len(), n);
     }
 
@@ -264,7 +268,8 @@ mod tests {
         let q_next_tgt = vec![10.0, 3.0, 10.0];
         let done = vec![0.0_f32];
         let w = vec![1.0_f32];
-        let l = double_dqn_loss(&q_sa, &r, &q_next_on, &q_next_tgt, 3, &done, &w, cfg).unwrap();
+        let l = double_dqn_loss(&q_sa, &r, &q_next_on, &q_next_tgt, 3, &done, &w, cfg)
+            .expect("valid slices for double DQN should compute loss");
         // target = 0 + 1.0 * 3.0 = 3.0; loss = 0.5 * (0 - 3)^2 = 4.5
         assert!((l.loss - 4.5).abs() < 1e-4, "loss={}", l.loss);
     }

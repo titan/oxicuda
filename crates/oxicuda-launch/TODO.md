@@ -96,7 +96,8 @@ Launch overhead must be minimal to avoid becoming a bottleneck for small kernels
 > Items marked `[x]` above represent API surface coverage. These represent the gap between current implementation depth and blueprint-grade production requirements.
 
 ### Benchmark / Verification Gaps
-- [ ] Launch overhead microbenchmark: `launch!()` vs raw `cuLaunchKernel` — verified < 1 μs delta (NF3)
+- [~] Launch overhead microbenchmark: `launch!()` vs raw `cuLaunchKernel` — verified < 1 μs delta (NF3)
+  - Harness implemented 2026-04-26 at `benches/launch_overhead.rs`; awaiting Linux+NVIDIA verification run.
 - [x] E2E vector_add integration test: PTX load via `oxicuda-ptx` → `launch!()` → verify results (F5) — CPU-side parameter chain verified; full GPU E2E requires NVIDIA hardware
 - [x] Zero-allocation verified: named args same memory footprint as positional tuple
 - [x] Order preservation verified in named args

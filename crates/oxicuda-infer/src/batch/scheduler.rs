@@ -391,7 +391,7 @@ mod tests {
                 log_prob: -0.6,
             },
         ])
-        .unwrap();
+        .expect("both sequence ids are valid running sequences");
         let b2 = s.schedule();
         assert_eq!(b2.decode_ids.len(), 2, "both should be in decode");
         assert!(b2.prefill_ids.is_empty());
@@ -413,7 +413,7 @@ mod tests {
             token: 2,
             log_prob: 0.0,
         }])
-        .unwrap();
+        .expect("sequence id is valid running sequence");
         let finished = s.take_finished();
         assert_eq!(finished.len(), 1);
         assert!(finished[0].status.is_finished());
@@ -434,14 +434,14 @@ mod tests {
             token: 5,
             log_prob: 0.0,
         }])
-        .unwrap();
+        .expect("sequence id is valid for first step");
         s.schedule();
         s.on_step_complete(vec![StepResult {
             seq_id: id,
             token: 6,
             log_prob: 0.0,
         }])
-        .unwrap();
+        .expect("sequence id is valid for second step");
         assert!(
             !s.has_unfinished(),
             "sequence should be finished after max tokens"
@@ -492,7 +492,7 @@ mod tests {
             token: 0,
             log_prob: 0.0,
         }])
-        .unwrap();
+        .expect("sequence id is valid running sequence for take_finished test");
         let f1 = s.take_finished();
         assert_eq!(f1.len(), 1);
         let f2 = s.take_finished();

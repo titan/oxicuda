@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn bior11_symmetric() {
-        let (h_dec, h_rec) = bior_lowpass_pair(1, 1).unwrap();
+        let (h_dec, h_rec) = bior_lowpass_pair(1, 1).expect("bior1.1 lowpass pair is supported");
         // bior1.1 is symmetric (same as Haar filters)
         assert_eq!(h_dec.len(), h_rec.len());
         for (&d, &r) in h_dec.iter().zip(h_rec.iter()) {
@@ -324,7 +324,7 @@ mod tests {
         let n = 32;
         let mut x = vec![0.0_f64; n];
         x[0] = 1.0;
-        let (approx, detail) = bior_forward(&x, 1, 3).unwrap();
+        let (approx, detail) = bior_forward(&x, 1, 3).expect("bior1.3 forward DWT succeeds");
         let energy_in: f64 = x.iter().map(|v| v * v).sum();
         let energy_approx: f64 = approx.iter().map(|v| v * v).sum();
         let energy_detail: f64 = detail.iter().map(|v| v * v).sum();
@@ -342,8 +342,8 @@ mod tests {
     fn bior11_forward_inverse_identity() {
         // bior1.1 (Haar-like) should be numerically close to identity for smooth input
         let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0_f64];
-        let (approx, detail) = bior_forward(&x, 1, 1).unwrap();
-        let recon = bior_inverse(&approx, &detail, 1, 1).unwrap();
+        let (approx, detail) = bior_forward(&x, 1, 1).expect("bior1.1 forward DWT succeeds");
+        let recon = bior_inverse(&approx, &detail, 1, 1).expect("bior1.1 inverse DWT succeeds");
         // For bior1.1 (orthogonal Haar), reconstruction should match original length
         assert_eq!(recon.len(), x.len());
     }

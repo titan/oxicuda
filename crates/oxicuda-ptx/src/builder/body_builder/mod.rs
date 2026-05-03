@@ -1579,6 +1579,43 @@ impl<'a> BodyBuilder<'a> {
         self.emit(Instruction::Comment(text.to_string()));
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    //  Typed-variant helpers — tier 1
+    // ════════════════════════════════════════════════════════════════════
+
+    /// Emits `addc{.cc}.u32 dst, a, b`.
+    ///
+    /// Adds `a`, `b`, and the implicit carry-in. When `carry_out` is `true`
+    /// the carry-out flag is written back to the condition-code register
+    /// (`addc.cc.u32`); otherwise the carry is consumed silently (`addc.u32`).
+    pub fn addc_u32(&mut self, a: Register, b: Register, carry_out: bool) -> Register {
+        let dst = self.regs.alloc(PtxType::U32);
+        self.emit(Instruction::Addc {
+            ty: PtxType::U32,
+            dst: dst.clone(),
+            a: Operand::Register(a),
+            b: Operand::Register(b),
+            carry_out,
+        });
+        dst
+    }
+
+    /// Emits `selp.{ty} dst, a, b, pred` — select between `a` and `b` based on
+    /// the predicate register `pred`.
+    ///
+    /// Returns `dst = if pred { a } else { b }`.
+    pub fn selp(&mut self, ty: PtxType, a: Register, b: Register, pred: Register) -> Register {
+        let dst = self.regs.alloc(ty);
+        self.emit(Instruction::Selp {
+            ty,
+            dst: dst.clone(),
+            a: Operand::Register(a),
+            b: Operand::Register(b),
+            pred,
+        });
+        dst
+    }
+
     /// Emits raw PTX text verbatim. Use as an escape hatch for instructions
     /// not yet modeled in the IR.
     ///

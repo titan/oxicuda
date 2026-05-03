@@ -195,10 +195,7 @@ impl AuxLossPlan {
                 b.raw_ptx(&format!("mul.rn.f32 {scaled}, {scaled}, {partial};"));
 
                 // Atomic add to loss_out[0]
-                let _old = b.alloc_reg(PtxType::F32);
-                b.raw_ptx(&format!(
-                    "atom.global.add.f32 {_old}, [{loss_ptr}], {scaled};"
-                ));
+                let _old = b.atom_global_add_f32(loss_ptr.clone(), scaled);
 
                 b.label(&skip_write);
                 b.label(&exit_lbl);
@@ -334,10 +331,7 @@ impl AuxLossPlan {
                 b.raw_ptx(&format!("div.rn.f32 {contribution}, {z_sq}, {ntok_f};"));
 
                 // Atomic add to loss_out
-                let _old = b.alloc_reg(PtxType::F32);
-                b.raw_ptx(&format!(
-                    "atom.global.add.f32 {_old}, [{loss_ptr}], {contribution};"
-                ));
+                let _old = b.atom_global_add_f32(loss_ptr.clone(), contribution);
 
                 b.label(&exit_lbl);
                 b.ret();

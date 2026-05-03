@@ -236,7 +236,9 @@ mod tests {
     #[test]
     fn to_std_positive() {
         let p = policy();
-        let std = p.to_std(&[0.0, 1.0, -1.0]).unwrap();
+        let std = p
+            .to_std(&[0.0, 1.0, -1.0])
+            .expect("log_std.len()==action_dim=3 should compute std");
         for &s in &std {
             assert!(s > 0.0, "std must be > 0");
         }
@@ -245,7 +247,9 @@ mod tests {
     #[test]
     fn to_std_clamps_log_std() {
         let p = GaussianPolicy::new(1, false).with_log_std_bounds(-5.0, 0.0);
-        let std = p.to_std(&[-100.0]).unwrap(); // clamped to -5
+        let std = p
+            .to_std(&[-100.0])
+            .expect("log_std.len()==action_dim=1 should compute clamped std"); // clamped to -5
         assert!((std[0] - (-5.0_f32).exp()).abs() < 1e-5);
     }
 
@@ -255,7 +259,9 @@ mod tests {
     fn sample_correct_dim() {
         let p = policy();
         let mut handle = RlHandle::default_handle();
-        let (a, e) = p.sample(&[0.0; 3], &[1.0; 3], &mut handle).unwrap();
+        let (a, e) = p
+            .sample(&[0.0; 3], &[1.0; 3], &mut handle)
+            .expect("mu.len()==std.len()==action_dim=3 should sample");
         assert_eq!(a.len(), 3);
         assert_eq!(e.len(), 3);
     }
@@ -265,7 +271,9 @@ mod tests {
         let p = GaussianPolicy::new(4, true);
         let mut handle = RlHandle::default_handle();
         for _ in 0..50 {
-            let (a, _) = p.sample(&[0.0; 4], &[1.0; 4], &mut handle).unwrap();
+            let (a, _) = p
+                .sample(&[0.0; 4], &[1.0; 4], &mut handle)
+                .expect("mu.len()==std.len()==action_dim=4 should sample");
             for v in a {
                 assert!(
                     (-1.0..=1.0).contains(&v),
@@ -285,7 +293,9 @@ mod tests {
         let mut sum = 0.0_f32;
         let n = 500;
         for _ in 0..n {
-            let (a, _) = p.sample(&[mu], &[sigma], &mut handle).unwrap();
+            let (a, _) = p
+                .sample(&[mu], &[sigma], &mut handle)
+                .expect("mu.len()==std.len()==action_dim=1 should sample");
             sum += a[0];
         }
         let mean = sum / n as f32;
@@ -302,8 +312,12 @@ mod tests {
         let p = GaussianPolicy::new(1, false);
         let mu = [2.0];
         let std = [1.0];
-        let lp_mode = p.log_prob(&mu, &mu, &std).unwrap();
-        let lp_off = p.log_prob(&[5.0], &mu, &std).unwrap();
+        let lp_mode = p
+            .log_prob(&mu, &mu, &std)
+            .expect("action/mu/std all dim=1 should compute log_prob");
+        let lp_off = p
+            .log_prob(&[5.0], &mu, &std)
+            .expect("action/mu/std all dim=1 should compute log_prob");
         assert!(lp_mode > lp_off, "mode should have higher log-prob");
     }
 
@@ -318,15 +332,21 @@ mod tests {
     #[test]
     fn entropy_positive() {
         let p = GaussianPolicy::new(2, false);
-        let h = p.entropy(&[1.0, 2.0]).unwrap();
+        let h = p
+            .entropy(&[1.0, 2.0])
+            .expect("std.len()==action_dim=2 should compute entropy");
         assert!(h > 0.0, "entropy of Gaussian should be > 0");
     }
 
     #[test]
     fn entropy_larger_std_more_entropy() {
         let p = GaussianPolicy::new(1, false);
-        let h1 = p.entropy(&[1.0]).unwrap();
-        let h2 = p.entropy(&[2.0]).unwrap();
+        let h1 = p
+            .entropy(&[1.0])
+            .expect("std.len()==action_dim=1 should compute entropy");
+        let h2 = p
+            .entropy(&[2.0])
+            .expect("std.len()==action_dim=1 should compute entropy");
         assert!(h2 > h1, "larger std should have more entropy");
     }
 }

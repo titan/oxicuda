@@ -247,8 +247,20 @@ mod tests {
             assert_eq!(s.rows(), 64, "tile {i} expected 64 rows");
         }
         // Coverage must span [0, 256).
-        assert_eq!(slices.first().unwrap().row_start, 0);
-        assert_eq!(slices.last().unwrap().row_end, 256);
+        assert_eq!(
+            slices
+                .first()
+                .expect("partition slice access should be valid in test context")
+                .row_start,
+            0
+        );
+        assert_eq!(
+            slices
+                .last()
+                .expect("partition slice access should be valid in test context")
+                .row_end,
+            256
+        );
     }
 
     #[test]
@@ -279,7 +291,13 @@ mod tests {
         assert_eq!(d.tile_count(), 2);
         let slices = d.partition(200);
         assert_eq!(slices.len(), 2);
-        assert_eq!(slices.last().unwrap().row_end, 200);
+        assert_eq!(
+            slices
+                .last()
+                .expect("partition slice access should be valid in test context")
+                .row_end,
+            200
+        );
     }
 
     #[test]

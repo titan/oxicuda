@@ -321,9 +321,13 @@ mod tests {
             &[Some(&x), Some(&scale), Some(&bias), Some(&mean), Some(&var)],
             &HashMap::new(),
         )
-        .unwrap();
+        .expect("operation should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 2, 1, 1]);
-        assert_f32_near(&r[0].as_f32().unwrap(), &[2.0, 4.0], 1e-4);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[2.0, 4.0],
+            1e-4,
+        );
     }
 
     #[test]
@@ -339,9 +343,13 @@ mod tests {
             &[Some(&x), Some(&scale), Some(&bias), Some(&mean), Some(&var)],
             &attrs,
         )
-        .unwrap();
+        .expect("operation should succeed with valid inputs");
         // (10 - 10) / sqrt(4) * 2 + 1 = 0 * 1 + 1 = 1
-        assert_f32_near(&r[0].as_f32().unwrap(), &[1.0], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[1.0],
+            1e-5,
+        );
     }
 
     #[test]
@@ -352,9 +360,9 @@ mod tests {
         let bias = OnnxTensor::from_f32(&[0.0, 0.0, 0.0, 0.0], vec![4]);
         let r =
             execute_layer_normalization(&[Some(&x), Some(&scale), Some(&bias)], &HashMap::new())
-                .unwrap();
+                .expect("operation should succeed with valid inputs");
         // mean=2.5, var=1.25,  output ~= [-1.342, -0.447, 0.447, 1.342]
-        let out = r[0].as_f32().unwrap();
+        let out = r[0].as_f32().expect("tensor should be float32 type");
         assert!((out[0] + out[3]).abs() < 1e-5); // symmetric
         assert!(out[0] < 0.0 && out[3] > 0.0);
     }
@@ -366,8 +374,8 @@ mod tests {
         let bias = OnnxTensor::from_f32(&[0.0, 0.0], vec![2]);
         let r =
             execute_instance_normalization(&[Some(&x), Some(&scale), Some(&bias)], &HashMap::new())
-                .unwrap();
-        let out = r[0].as_f32().unwrap();
+                .expect("operation should succeed with valid inputs");
+        let out = r[0].as_f32().expect("tensor should be float32 type");
         // Each channel normalized independently over spatial dims
         assert_f32_near(&out[0..2], &[-1.0, 1.0], 1e-4);
         assert_f32_near(&out[2..4], &[-1.0, 1.0], 1e-4);
@@ -380,9 +388,9 @@ mod tests {
         let bias = OnnxTensor::from_f32(&[0.0, 0.0], vec![2]);
         let mut attrs = HashMap::new();
         attrs.insert("num_groups".into(), AttributeValue::Int(1)); // all channels in 1 group
-        let r =
-            execute_group_normalization(&[Some(&x), Some(&scale), Some(&bias)], &attrs).unwrap();
-        let out = r[0].as_f32().unwrap();
+        let r = execute_group_normalization(&[Some(&x), Some(&scale), Some(&bias)], &attrs)
+            .expect("group_normalization execution should succeed with valid inputs");
+        let out = r[0].as_f32().expect("tensor should be float32 type");
         // All 4 values normalized together
         let mean: f32 = out.iter().sum::<f32>() / 4.0;
         assert!(mean.abs() < 1e-4);
@@ -394,10 +402,11 @@ mod tests {
         let q = OnnxTensor::from_f32(&[1.0, 0.0, 0.0, 1.0], vec![1, 2, 2]);
         let k = OnnxTensor::from_f32(&[1.0, 0.0, 0.0, 1.0], vec![1, 2, 2]);
         let v = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]);
-        let r = execute_flash_attention(&[Some(&q), Some(&k), Some(&v)], &HashMap::new()).unwrap();
+        let r = execute_flash_attention(&[Some(&q), Some(&k), Some(&v)], &HashMap::new())
+            .expect("flash_attention execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![1, 2, 2]);
         // Attention should weight V rows by softmax of Q*K^T/sqrt(2)
-        let out = r[0].as_f32().unwrap();
+        let out = r[0].as_f32().expect("tensor should be float32 type");
         assert_eq!(out.len(), 4);
     }
 }

@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn test_crosscorr_self_is_autocorr() {
         let x = vec![1.0, 2.0, 3.0_f64];
-        let r = crosscorr(&x, &x, 2).unwrap();
+        let r = crosscorr(&x, &x, 2).expect("cross-correlation with valid lag succeeds");
         // R_xx[0] at centre
         assert!((r[2] - (1.0 + 4.0 + 9.0)).abs() < 1e-10);
     }
@@ -226,7 +226,7 @@ mod tests {
     fn test_crosscorr_length() {
         let x = vec![1.0_f64; 5];
         let y = vec![1.0_f64; 5];
-        let r = crosscorr(&x, &y, 2).unwrap();
+        let r = crosscorr(&x, &y, 2).expect("cross-correlation with valid lag succeeds");
         assert_eq!(r.len(), 5); // 2*2+1
     }
 
@@ -241,7 +241,7 @@ mod tests {
     fn test_crosscorr_normalised_lag0_self() {
         // Self cross-correlation at lag 0 should be 1.
         let x = vec![1.0, 2.0, 3.0_f64];
-        let r = crosscorr_normalised(&x, &x, 2).unwrap();
+        let r = crosscorr_normalised(&x, &x, 2).expect("normalised cross-correlation succeeds");
         assert!((r[2] - 1.0).abs() < 1e-10);
     }
 
@@ -250,7 +250,7 @@ mod tests {
         // y = x shifted by 2 samples: peak should be at lag 2.
         let x = vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0_f64];
         let y = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0_f64];
-        let (lag, _) = find_delay(&x, &y, 4).unwrap();
+        let (lag, _) = find_delay(&x, &y, 4).expect("find_delay with valid max lag succeeds");
         assert_eq!(lag, 2, "expected lag=2, got {lag}");
     }
 
@@ -284,7 +284,8 @@ mod tests {
         let x = vec![1.0, 2.0, 3.0, 4.0_f64];
         let mut h = vec![0.0_f64; n];
         h[0] = 1.0; // impulse
-        let y = convolve_circular(&x, &h).unwrap();
+        let y = convolve_circular(&x, &h)
+            .expect("circular convolution with same-length inputs succeeds");
         assert_eq!(y, x);
     }
 
@@ -292,7 +293,7 @@ mod tests {
     fn test_gcc_phat_no_delay() {
         // If x == y, delay should be 0.
         let x: Vec<f64> = (0..8).map(|i| (i as f64).sin()).collect();
-        let lag = gcc_phat(&x, &x).unwrap();
+        let lag = gcc_phat(&x, &x).expect("GCC-PHAT with identical signals succeeds");
         assert_eq!(lag, 0);
     }
 }

@@ -234,7 +234,9 @@ mod tests {
     #[test]
     fn softmax_sums_to_one() {
         let p = policy();
-        let probs = p.softmax(&[1.0, 2.0, 3.0, 4.0]).unwrap();
+        let probs = p
+            .softmax(&[1.0, 2.0, 3.0, 4.0])
+            .expect("logits.len()==n_actions=4 should compute softmax");
         let s: f32 = probs.iter().sum();
         assert!((s - 1.0).abs() < 1e-5, "softmax sum={s}");
     }
@@ -242,13 +244,15 @@ mod tests {
     #[test]
     fn softmax_max_logit_has_max_prob() {
         let p = policy();
-        let probs = p.softmax(&[1.0, 5.0, 2.0, 3.0]).unwrap();
+        let probs = p
+            .softmax(&[1.0, 5.0, 2.0, 3.0])
+            .expect("logits.len()==n_actions=4 should compute softmax");
         let max_idx = probs
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("non-empty probs iterator must have a max");
         assert_eq!(max_idx, 1, "max logit at idx=1 should have max prob");
     }
 
@@ -263,10 +267,14 @@ mod tests {
     #[test]
     fn sample_in_range() {
         let p = policy();
-        let probs = p.softmax(&[1.0, 2.0, 3.0, 4.0]).unwrap();
+        let probs = p
+            .softmax(&[1.0, 2.0, 3.0, 4.0])
+            .expect("logits.len()==n_actions=4 should compute softmax");
         let mut handle = RlHandle::default_handle();
         for _ in 0..100 {
-            let a = p.sample_action(&probs, &mut handle).unwrap();
+            let a = p
+                .sample_action(&probs, &mut handle)
+                .expect("valid softmax output should sample correctly");
             assert!(a < 4, "action out of range: {a}");
         }
     }
@@ -275,11 +283,15 @@ mod tests {
     fn sample_deterministic_peaked() {
         // Peaked distribution → almost always sample action 2
         let p = CategoricalPolicy::new(3).with_temperature(0.01);
-        let probs = p.softmax(&[0.0, 0.0, 10.0]).unwrap();
+        let probs = p
+            .softmax(&[0.0, 0.0, 10.0])
+            .expect("logits.len()==n_actions=3 should compute softmax");
         let mut handle = RlHandle::default_handle();
         let mut counts = [0_usize; 3];
         for _ in 0..50 {
-            let a = p.sample_action(&probs, &mut handle).unwrap();
+            let a = p
+                .sample_action(&probs, &mut handle)
+                .expect("valid softmax output should sample correctly");
             counts[a] += 1;
         }
         assert!(
@@ -302,7 +314,9 @@ mod tests {
     fn log_prob_uniform_distribution() {
         let p = CategoricalPolicy::new(4);
         let probs = vec![0.25; 4];
-        let lp = p.log_prob(&probs, 0).unwrap();
+        let lp = p
+            .log_prob(&probs, 0)
+            .expect("valid probs with correct dim should compute log_prob");
         assert!((lp - (-2.0_f32.ln() * 2.0)).abs() < 1e-5, "log_prob={lp}");
     }
 
@@ -311,7 +325,9 @@ mod tests {
         let p = CategoricalPolicy::new(2);
         let probs = vec![0.7, 0.3, 0.4, 0.6]; // 2 examples, 2 classes
         let actions = vec![0_usize, 1];
-        let lps = p.log_prob_batch(&probs, &actions).unwrap();
+        let lps = p
+            .log_prob_batch(&probs, &actions)
+            .expect("valid probs_batch and actions should compute batch log_probs");
         assert!((lps[0] - 0.7_f32.ln()).abs() < 1e-5);
         assert!((lps[1] - 0.6_f32.ln()).abs() < 1e-5);
     }
@@ -323,8 +339,12 @@ mod tests {
         let p = CategoricalPolicy::new(4);
         let uniform = vec![0.25; 4];
         let peaked = vec![0.97, 0.01, 0.01, 0.01];
-        let h_u = p.entropy(&uniform).unwrap();
-        let h_p = p.entropy(&peaked).unwrap();
+        let h_u = p
+            .entropy(&uniform)
+            .expect("probs.len()==n_actions=4 should compute entropy");
+        let h_p = p
+            .entropy(&peaked)
+            .expect("probs.len()==n_actions=4 should compute entropy");
         assert!(h_u > h_p, "uniform entropy {h_u} should be > peaked {h_p}");
     }
 
@@ -332,7 +352,9 @@ mod tests {
     fn entropy_deterministic_is_zero() {
         let p = CategoricalPolicy::new(2);
         let probs = vec![1.0, 0.0];
-        let h = p.entropy(&probs).unwrap();
+        let h = p
+            .entropy(&probs)
+            .expect("probs.len()==n_actions=2 should compute entropy");
         assert!(
             h.abs() < 1e-6,
             "deterministic entropy should be ≈0, got {h}"
@@ -345,7 +367,9 @@ mod tests {
     fn greedy_selects_max() {
         let p = policy();
         let probs = vec![0.1, 0.5, 0.3, 0.1];
-        let a = p.greedy_action(&probs).unwrap();
+        let a = p
+            .greedy_action(&probs)
+            .expect("non-empty probs should compute greedy action");
         assert_eq!(a, 1, "greedy should pick idx=1");
     }
 
@@ -355,7 +379,9 @@ mod tests {
     fn kl_div_identical_distributions_zero() {
         let p = policy();
         let probs = vec![0.25; 4];
-        let kl = p.kl_divergence(&probs, &probs).unwrap();
+        let kl = p
+            .kl_divergence(&probs, &probs)
+            .expect("equal-length probs should compute KL divergence");
         assert!(kl.abs() < 1e-5, "KL(p||p) should be 0, got {kl}");
     }
 
@@ -364,7 +390,9 @@ mod tests {
         let p = policy();
         let p_dist = vec![0.4, 0.3, 0.2, 0.1];
         let q_dist = vec![0.1, 0.2, 0.3, 0.4];
-        let kl = p.kl_divergence(&p_dist, &q_dist).unwrap();
+        let kl = p
+            .kl_divergence(&p_dist, &q_dist)
+            .expect("equal-length distributions should compute KL divergence");
         assert!(kl > 0.0, "KL divergence should be > 0");
     }
 }

@@ -82,9 +82,11 @@ mod tests {
     fn e2e_gpt2_tiny_forward() {
         // Minimal GPT-2: 2 layers, 2 heads, hidden=8, vocab=16, max_pos=32
         let cfg = GptConfig::tiny();
-        let m = Gpt2Model::new(cfg).unwrap();
+        let m = Gpt2Model::new(cfg).expect("tiny GptConfig should produce a valid Gpt2Model");
         let token_ids: Vec<u32> = vec![0, 3, 7, 2, 5];
-        let (logits, kv) = m.forward(&token_ids, None).unwrap();
+        let (logits, kv) = m
+            .forward(&token_ids, None)
+            .expect("5-token GPT-2 forward should succeed");
         // logits shape: [seq_len × vocab_size] = [5 × 16]
         assert_eq!(logits.len(), 5 * 16);
         assert_eq!(kv.past_len(), 5);
@@ -98,9 +100,11 @@ mod tests {
     #[test]
     fn e2e_llama_tiny_forward() {
         let cfg = LlamaConfig::tiny();
-        let m = LlamaModel::new(cfg).unwrap();
+        let m = LlamaModel::new(cfg).expect("tiny LlamaConfig should produce a valid LlamaModel");
         let token_ids: Vec<u32> = vec![0, 1, 2, 3];
-        let (logits, kv) = m.forward(&token_ids, None).unwrap();
+        let (logits, kv) = m
+            .forward(&token_ids, None)
+            .expect("4-token LLaMA forward should succeed");
         assert_eq!(logits.len(), 4 * 16);
         assert_eq!(kv.past_len(), 4);
         assert_eq!(kv.n_layers(), 2);
@@ -112,18 +116,27 @@ mod tests {
     fn e2e_gpt2_incremental_decode_consistent() {
         // Full 3-token pass vs token-by-token with KV cache:
         // The last-position logits must match.
-        let m = Gpt2Model::new(GptConfig::tiny()).unwrap();
+        let m = Gpt2Model::new(GptConfig::tiny())
+            .expect("tiny GptConfig for incremental decode test should be valid");
 
         // Full pass
         let full_ids = vec![1u32, 2, 3];
-        let (logits_full, _) = m.forward(&full_ids, None).unwrap();
+        let (logits_full, _) = m
+            .forward(&full_ids, None)
+            .expect("full 3-token GPT-2 forward should succeed");
         let vs = m.config.vocab_size;
         let last_full = logits_full[2 * vs..].to_vec();
 
         // Incremental
-        let (_, kv0) = m.forward(&[1u32], None).unwrap();
-        let (_, kv1) = m.forward(&[2u32], Some(&kv0)).unwrap();
-        let (logits_3, _) = m.forward(&[3u32], Some(&kv1)).unwrap();
+        let (_, kv0) = m
+            .forward(&[1u32], None)
+            .expect("incremental token-1 GPT-2 forward should succeed");
+        let (_, kv1) = m
+            .forward(&[2u32], Some(&kv0))
+            .expect("incremental token-2 GPT-2 with cache should succeed");
+        let (logits_3, _) = m
+            .forward(&[3u32], Some(&kv1))
+            .expect("incremental token-3 GPT-2 with cache should succeed");
 
         assert_eq!(logits_3.len(), vs);
         for (&full_v, &incr_v) in last_full.iter().zip(logits_3.iter()) {
@@ -138,16 +151,25 @@ mod tests {
 
     #[test]
     fn e2e_llama_incremental_decode_consistent() {
-        let m = LlamaModel::new(LlamaConfig::tiny()).unwrap();
+        let m = LlamaModel::new(LlamaConfig::tiny())
+            .expect("tiny LlamaConfig for incremental decode test should be valid");
 
         let full_ids = vec![0u32, 5, 10];
-        let (logits_full, _) = m.forward(&full_ids, None).unwrap();
+        let (logits_full, _) = m
+            .forward(&full_ids, None)
+            .expect("full 3-token LLaMA forward should succeed");
         let vs = m.config.vocab_size;
         let last_full = logits_full[2 * vs..].to_vec();
 
-        let (_, kv0) = m.forward(&[0u32], None).unwrap();
-        let (_, kv1) = m.forward(&[5u32], Some(&kv0)).unwrap();
-        let (logits_3, _) = m.forward(&[10u32], Some(&kv1)).unwrap();
+        let (_, kv0) = m
+            .forward(&[0u32], None)
+            .expect("incremental token-0 LLaMA forward should succeed");
+        let (_, kv1) = m
+            .forward(&[5u32], Some(&kv0))
+            .expect("incremental token-5 LLaMA with cache should succeed");
+        let (logits_3, _) = m
+            .forward(&[10u32], Some(&kv1))
+            .expect("incremental token-10 LLaMA with cache should succeed");
 
         for (&full_v, &incr_v) in last_full.iter().zip(logits_3.iter()) {
             assert!(
@@ -168,11 +190,13 @@ mod tests {
             .add_merge(b"he", b"ll") // "hell" → id 258
             .add_merge(b"hell", b"o") // "hello" → id 259
             .build()
-            .unwrap();
+            .expect("BpeBuilder with 4 chained hello merges should succeed");
 
         let original = "hello";
-        let ids = t.encode(original).unwrap();
-        let decoded = t.decode(&ids).unwrap();
+        let ids = t.encode(original).expect("encoding 'hello' should succeed");
+        let decoded = t
+            .decode(&ids)
+            .expect("decoding 'hello' token ids should produce valid UTF-8");
         assert_eq!(
             &decoded, original,
             "BPE round-trip failed: '{original}' → {ids:?} → '{decoded}'"
@@ -197,8 +221,10 @@ mod tests {
         // [-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]
 
         // RMSNorm with weight=1: rms = sqrt(mean(x^2)) = sqrt(10.5) ≈ 3.240
-        let rms_norm = RmsNorm::new(dim, 1e-8).unwrap();
-        let rms_out = rms_norm.forward(&x, 1).unwrap();
+        let rms_norm = RmsNorm::new(dim, 1e-8).expect("dim=8 RmsNorm should be valid");
+        let rms_out = rms_norm
+            .forward(&x, 1)
+            .expect("1-token RmsNorm forward with matching dim should succeed");
         let expected_rms = 1.0 / (x.iter().map(|&v| v * v).sum::<f32>() / dim as f32 + 1e-8).sqrt();
         for (&o, &xi) in rms_out.iter().zip(x.iter()) {
             assert!(
@@ -209,8 +235,10 @@ mod tests {
         }
 
         // LayerNorm with weight=1, bias=0: output should have mean≈0, var≈1
-        let ln = LayerNorm::new(dim, 1e-8).unwrap();
-        let ln_out = ln.forward(&x, 1).unwrap();
+        let ln = LayerNorm::new(dim, 1e-8).expect("dim=8 LayerNorm should be valid");
+        let ln_out = ln
+            .forward(&x, 1)
+            .expect("1-token LayerNorm forward with matching dim should succeed");
         let mu: f32 = ln_out.iter().sum::<f32>() / dim as f32;
         let var: f32 = ln_out.iter().map(|&v| (v - mu) * (v - mu)).sum::<f32>() / dim as f32;
         assert!(mu.abs() < 1e-5, "LayerNorm mean={mu}");
@@ -249,16 +277,21 @@ mod tests {
 
     #[test]
     fn e2e_llama_gqa_multistep_decode() {
-        let m = LlamaModel::new(LlamaConfig::tiny()).unwrap();
+        let m = LlamaModel::new(LlamaConfig::tiny())
+            .expect("tiny LlamaConfig for GQA multistep test should be valid");
         // Prefill phase: 4 tokens
         let prefill_ids = vec![0u32, 1, 2, 3];
-        let (_, kv) = m.forward(&prefill_ids, None).unwrap();
+        let (_, kv) = m
+            .forward(&prefill_ids, None)
+            .expect("4-token prefill LLaMA forward should succeed");
         assert_eq!(kv.past_len(), 4);
 
         // Decode: 3 more tokens one at a time
         let mut cur_kv = kv;
         for step_tok in [4u32, 5, 6] {
-            let (logits, new_kv) = m.forward(&[step_tok], Some(&cur_kv)).unwrap();
+            let (logits, new_kv) = m
+                .forward(&[step_tok], Some(&cur_kv))
+                .expect("single-step LLaMA decode should succeed");
             assert_eq!(logits.len(), m.config.vocab_size);
             cur_kv = new_kv;
         }
@@ -274,11 +307,15 @@ mod tests {
         let special: HashMap<String, u32> = [("<bos>".into(), 2u32), ("<eos>".into(), 3u32)]
             .into_iter()
             .collect();
-        let v = Vocab::from_tokens(tokens, special).unwrap();
+        let v = Vocab::from_tokens(tokens, special)
+            .expect("4-token vocabulary with BOS/EOS specials should succeed");
         assert_eq!(v.special_id("<bos>"), Some(2));
         assert_eq!(v.special_id("<eos>"), Some(3));
         assert_eq!(v.bytes_to_id(b"a"), Some(0));
-        assert_eq!(v.decode_token(0).unwrap(), "a");
+        assert_eq!(
+            v.decode_token(0).expect("token 0 should decode to 'a'"),
+            "a"
+        );
     }
 
     // ── E2E 10: GPT-2 next_token greedy decode loop ───────────────────────
@@ -286,13 +323,20 @@ mod tests {
     #[test]
     fn e2e_gpt2_greedy_decode_loop() {
         // Run 5 steps of greedy decode with KV cache.
-        let m = Gpt2Model::new(GptConfig::tiny()).unwrap();
+        let m = Gpt2Model::new(GptConfig::tiny())
+            .expect("tiny GptConfig for greedy decode loop test should be valid");
         let mut token_ids = vec![0u32]; // start token
-        let (_, mut kv) = m.forward(&token_ids, None).unwrap();
+        let (_, mut kv) = m
+            .forward(&token_ids, None)
+            .expect("initial GPT-2 forward for greedy decode should succeed");
 
         for _ in 0..4 {
-            let last_tok = *token_ids.last().unwrap();
-            let (next_tok, new_kv) = m.next_token(&[last_tok], Some(&kv)).unwrap();
+            let last_tok = *token_ids
+                .last()
+                .expect("token_ids is never empty during greedy decode loop");
+            let (next_tok, new_kv) = m
+                .next_token(&[last_tok], Some(&kv))
+                .expect("greedy next_token step should succeed");
             token_ids.push(next_tok);
             kv = new_kv;
         }

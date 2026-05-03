@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn validate_batch_ok() {
-        RlHandle::validate_batch(32, 1024).unwrap();
+        RlHandle::validate_batch(32, 1024).expect("32 <= 1024 and 32 > 0, should be valid");
     }
 
     #[test]

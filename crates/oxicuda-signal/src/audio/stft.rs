@@ -349,13 +349,13 @@ mod tests {
 
     #[test]
     fn test_stft_config_num_bins_onesided() {
-        let cfg = StftConfig::new(16, 16, 8, WindowType::Hann).unwrap();
+        let cfg = StftConfig::new(16, 16, 8, WindowType::Hann).expect("valid STFT config");
         assert_eq!(cfg.num_bins(), 9); // N/2 + 1
     }
 
     #[test]
     fn test_stft_config_num_frames() {
-        let cfg = StftConfig::new(16, 16, 8, WindowType::Hann).unwrap();
+        let cfg = StftConfig::new(16, 16, 8, WindowType::Hann).expect("valid STFT config");
         // signal of length 32: (32 - 16) / 8 + 1 = 3
         assert_eq!(cfg.num_frames(32), 3);
     }
@@ -376,8 +376,8 @@ mod tests {
     fn test_stft_reference_dc_input() {
         // A constant signal → only the DC bin (k=0) should have energy.
         let x = vec![1.0_f64; 32];
-        let cfg = StftConfig::new(8, 8, 4, WindowType::Rectangular).unwrap();
-        let out = stft_reference(&x, &cfg).unwrap();
+        let cfg = StftConfig::new(8, 8, 4, WindowType::Rectangular).expect("valid STFT config");
+        let out = stft_reference(&x, &cfg).expect("STFT of DC signal succeeds");
         let _n_bins = cfg.num_bins();
         // DC energy in first frame: Re[0] = sum(window) = N = 8
         let dc_re = out[0];
@@ -387,8 +387,8 @@ mod tests {
     #[test]
     fn test_magnitude_spectrogram_shape() {
         let x = vec![1.0_f64; 32];
-        let cfg = StftConfig::new(8, 8, 4, WindowType::Hann).unwrap();
-        let stft_out = stft_reference(&x, &cfg).unwrap();
+        let cfg = StftConfig::new(8, 8, 4, WindowType::Hann).expect("valid STFT config");
+        let stft_out = stft_reference(&x, &cfg).expect("STFT computation succeeds");
         let mag = magnitude_spectrogram(&stft_out, cfg.num_bins());
         let n_frames = cfg.num_frames(32);
         assert_eq!(mag.len(), n_frames * cfg.num_bins());
@@ -397,8 +397,8 @@ mod tests {
     #[test]
     fn test_power_spectrogram_non_negative() {
         let x: Vec<f64> = (0..32).map(|i| (i as f64 / 8.0 * PI).sin()).collect();
-        let cfg = StftConfig::new(8, 8, 4, WindowType::Hann).unwrap();
-        let stft_out = stft_reference(&x, &cfg).unwrap();
+        let cfg = StftConfig::new(8, 8, 4, WindowType::Hann).expect("valid STFT config");
+        let stft_out = stft_reference(&x, &cfg).expect("STFT computation succeeds");
         let pow = power_spectrogram(&stft_out, cfg.num_bins());
         assert!(pow.iter().all(|&v| v >= 0.0));
     }

@@ -11,6 +11,10 @@ readme                 = "README.md"
 keywords = ["gpu", "inference", "neural-network", "cuda", "deep-learning"]
 categories = ["science", "algorithms"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true
 

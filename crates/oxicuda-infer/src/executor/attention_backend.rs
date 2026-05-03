@@ -186,10 +186,12 @@ mod tests {
     ) -> (PagedKvCache, Vec<BlockId>) {
         // 1 layer, 1 KV head, head_dim, block_size=4
         let mut cache = PagedKvCache::new(1, n_heads, head_dim, block_size, 4);
-        let id = cache.alloc_block().unwrap();
+        let id = cache.alloc_block().expect("4-block cache has free blocks");
         // Write one token with all-kv_val K and V
         let kv = vec![kv_val; n_heads * head_dim];
-        cache.append_token(id, 0, &kv, &kv).unwrap();
+        cache
+            .append_token(id, 0, &kv, &kv)
+            .expect("layer 0 exists and block has free slots");
         (cache, vec![id])
     }
 
@@ -207,7 +209,7 @@ mod tests {
         let out = paged_attention_cpu(
             &q, &cache, &btable, 1, 0, n_heads, n_heads, head_dim, block_size, 1.0,
         )
-        .unwrap();
+        .expect("valid single-token paged attention inputs");
 
         assert_eq!(out.len(), n_heads * head_dim);
         for &v in &out {
@@ -221,16 +223,16 @@ mod tests {
         let head_dim = 2;
         let block_size = 4;
         let mut cache = PagedKvCache::new(1, n_heads, head_dim, block_size, 4);
-        let id = cache.alloc_block().unwrap();
+        let id = cache.alloc_block().expect("4-block cache has free blocks");
 
         // Token 0: k=[1,0], v=[1,0]
         // Token 1: k=[0,1], v=[0,1]
         cache
             .append_token(id, 0, &[1.0_f32, 0.0], &[1.0_f32, 0.0])
-            .unwrap();
+            .expect("first token fits in block_size=4");
         cache
             .append_token(id, 0, &[0.0_f32, 1.0], &[0.0_f32, 1.0])
-            .unwrap();
+            .expect("second token fits in block_size=4");
 
         // Query q=[1,0]: dot(q, k0)=1 > dot(q, k1)=0 → mostly attend to token 0
         let q = vec![1.0_f32, 0.0];
@@ -246,7 +248,7 @@ mod tests {
             block_size,
             1.0,
         )
-        .unwrap();
+        .expect("valid two-token paged attention inputs");
         // Output should be close to V[0] = [1, 0] since q strongly attends to token 0
         assert!(
             out[0] > 0.5,
@@ -277,7 +279,9 @@ mod tests {
         let n_heads = 2;
         let head_dim = 4;
         let mut cache = PagedKvCache::new(1, n_heads, head_dim, 4, 4);
-        let id = cache.alloc_block().unwrap();
+        let id = cache
+            .alloc_block()
+            .expect("4-block cache has free blocks for wrong_q test");
         let q = vec![0.0_f32; 3]; // wrong: should be n_heads * head_dim = 8
         assert!(matches!(
             paged_attention_cpu(&q, &cache, &[id], 1, 0, n_heads, n_heads, head_dim, 4, 1.0),
@@ -293,11 +297,13 @@ mod tests {
         let head_dim = 2;
         let block_size = 4;
         let mut cache = PagedKvCache::new(1, n_kv_heads, head_dim, block_size, 4);
-        let id = cache.alloc_block().unwrap();
+        let id = cache
+            .alloc_block()
+            .expect("4-block cache has free blocks for GQA test");
         // One token: K=[1,1], V=[2,2]
         cache
             .append_token(id, 0, &[1.0_f32, 1.0], &[2.0_f32, 2.0])
-            .unwrap();
+            .expect("first token fits in GQA block");
         // Query: [q0, q1] = [[1,0], [0,1]]
         let q = vec![1.0_f32, 0.0, 0.0, 1.0]; // [n_heads, head_dim]
         let out = paged_attention_cpu(
@@ -312,7 +318,7 @@ mod tests {
             block_size,
             1.0,
         )
-        .unwrap();
+        .expect("valid GQA paged attention inputs");
         // Both Q heads see the same KV, output = V[0] = [2,2] for each head
         assert_eq!(out.len(), n_heads * head_dim);
         for &v in &out {
@@ -328,13 +334,15 @@ mod tests {
         let head_dim = 2;
         let block_size = 4;
         let mut cache = PagedKvCache::new(1, n_heads, head_dim, block_size, 4);
-        let id = cache.alloc_block().unwrap();
+        let id = cache
+            .alloc_block()
+            .expect("4-block cache has free blocks for scale test");
         cache
             .append_token(id, 0, &[1.0_f32, 0.0], &[2.0_f32, 0.0])
-            .unwrap();
+            .expect("first token fits for scale test");
         cache
             .append_token(id, 0, &[0.0_f32, 1.0], &[0.0_f32, 4.0])
-            .unwrap();
+            .expect("second token fits for scale test");
 
         let q = vec![1.0_f32, 0.0];
         let out = paged_attention_cpu(
@@ -349,7 +357,7 @@ mod tests {
             block_size,
             0.0,
         )
-        .unwrap();
+        .expect("valid scale=0 paged attention inputs");
         // scale=0: all scores=0 → uniform softmax (0.5 each)
         assert_abs_diff_eq!(out[0], 1.0, epsilon = 1e-5); // 0.5*2 + 0.5*0
         assert_abs_diff_eq!(out[1], 2.0, epsilon = 1e-5); // 0.5*0 + 0.5*4

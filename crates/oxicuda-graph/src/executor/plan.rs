@@ -459,7 +459,7 @@ mod tests {
         b.chain(&[upload, k0, k1, download]);
         b.set_outputs(upload, [inp]);
         b.set_inputs(download, [inp]);
-        b.build().unwrap()
+        b.build().expect("test graph builds successfully")
     }
 
     #[test]
@@ -474,14 +474,14 @@ mod tests {
     #[test]
     fn plan_builds_without_error() {
         let g = build_simple_inference_graph();
-        let plan = ExecutionPlan::build(&g, 4).unwrap();
+        let plan = ExecutionPlan::build(&g, 4).expect("execution plan builds from valid graph");
         assert!(plan.total_steps() > 0);
     }
 
     #[test]
     fn plan_covers_all_nodes() {
         let g = build_simple_inference_graph();
-        let plan = ExecutionPlan::build(&g, 4).unwrap();
+        let plan = ExecutionPlan::build(&g, 4).expect("execution plan builds from valid graph");
         // 4 original nodes; steps may include event records/waits too.
         // At minimum, each non-fused node must appear in at least one step.
         assert!(plan.total_steps() >= 2); // at least upload and download
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn plan_fused_kernels_reduce_compute_steps() {
         let g = build_simple_inference_graph();
-        let plan = ExecutionPlan::build(&g, 4).unwrap();
+        let plan = ExecutionPlan::build(&g, 4).expect("execution plan builds from valid graph");
         // relu and scale are fusible and in a chain → fused to 1 step.
         assert!(plan.compute_steps() <= 2);
         // kernel_count_fused ≤ kernel_count_original.
@@ -503,8 +503,8 @@ mod tests {
         let a = b.add_barrier("a");
         let bnode = b.add_barrier("b");
         b.dep(a, bnode);
-        let g = b.build().unwrap();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
         // With max_streams=1, no cross-stream syncs.
         let event_steps: Vec<_> = plan
             .steps
@@ -520,8 +520,8 @@ mod tests {
     fn plan_steps_on_stream() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         b.add_barrier("n");
-        let g = b.build().unwrap();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
         let on_s0 = plan.steps_on(StreamId(0));
         assert!(!on_s0.is_empty());
     }
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn plan_display_output() {
         let g = build_simple_inference_graph();
-        let plan = ExecutionPlan::build(&g, 4).unwrap();
+        let plan = ExecutionPlan::build(&g, 4).expect("execution plan builds from valid graph");
         let s = plan.to_string();
         assert!(s.contains("ExecutionPlan"));
         assert!(s.contains("streams"));
@@ -541,8 +541,8 @@ mod tests {
         let up = b.add_memcpy("up", MemcpyDir::HostToDevice, 1024);
         let ms = b.add_memset("zero", 4096, 0x00);
         b.dep(up, ms);
-        let g = b.build().unwrap();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
         let has_memcpy = plan
             .steps
             .iter()
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn plan_pool_bytes_reported() {
         let g = build_simple_inference_graph();
-        let plan = ExecutionPlan::build(&g, 4).unwrap();
+        let plan = ExecutionPlan::build(&g, 4).expect("execution plan builds from valid graph");
         // Pool bytes ≥ size of at least one internal buffer.
         // Two internal buffers of 4096 bytes; pool may be shared.
         // pool_bytes is usize, always non-negative; just verify the field is accessible (non-crash)
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn plan_kernel_count_fields_valid() {
         let g = build_simple_inference_graph();
-        let plan = ExecutionPlan::build(&g, 4).unwrap();
+        let plan = ExecutionPlan::build(&g, 4).expect("execution plan builds from valid graph");
         assert_eq!(plan.kernel_count_original, 2); // relu, scale
         assert!(plan.kernel_count_fused <= plan.kernel_count_original);
     }

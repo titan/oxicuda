@@ -1,0 +1,22 @@
+[package]
+name         = "oxicuda-nas"
+description  = "Neural Architecture Search primitives for OxiCUDA: DARTS, one-shot supernet, evolutionary NAS, hardware-aware predictor — pure Rust, zero CUDA SDK dependency."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+readme                 = "README.md"
+keywords = ["gpu", "neural-architecture-search", "darts", "nas", "automl"]
+categories = ["science", "algorithms"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true

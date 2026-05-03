@@ -136,3 +136,10 @@ Autotuning overhead is amortized -- invest time once, benefit at every subsequen
 - [x] ResultDb persistence round-trip test (save, reload, verify identical) (A3) — 3 round-trip tests
 - [x] Dispatcher 3-tier fallback tested independently (exact, nearest, default) (A4) — 4 tests
 - [x] Genetic algorithm crossover never violates search space constraints — 3 crossover tests
+
+- [x] autotune-adaptive-warmup (planned 2026-05-01)
+  - **Goal:** Replace the fixed 5-iteration warmup in `BenchmarkConfig` with an adaptive convergence detector that warms up until the relative delta between two consecutive timing samples is below a configurable tolerance, or a max-iteration cap is hit.
+  - **Design:** New `WarmupStrategy { Fixed(usize), Adaptive { min_iterations, max_iterations, tolerance } }` enum. Replace `warmup_runs: usize` field with `warmup: WarmupStrategy` (default `Fixed(5)` for parity). Adaptive loop: iterate, compare consecutive `Duration` samples by relative delta `|t - t_prev| / t_prev`; break on convergence or hit `max_iterations` with `tracing::warn!`. Wire CLI `--warmup` flag at `cli.rs:464` (currently dead `_warmup` param) with a `clap` value_parser parsing `fixed:N` or `adaptive:TOL[,min=N,max=N]`.
+  - **Files:** `src/benchmark.rs` (enum + field + loop at lines ~157, ~229), `src/cli.rs:~464`, `src/power_aware.rs:~385`, `src/parallel_bench.rs` (test ctor updates)
+  - **Tests:** `warmup_strategy_fixed_runs_exact_count`, `warmup_strategy_adaptive_converges_on_stable_input`, `warmup_strategy_adaptive_caps_at_max`, `warmup_strategy_adaptive_respects_min`, `cli_warmup_parser_roundtrip`
+  - **Risk:** Adaptive tolerance too tight on noisy hardware → runaway warmup. Mitigated by `max_iterations` cap (default 20) + `tracing::warn!` on cap-hit. Default stays `Fixed(5)` so existing behavior is preserved unless callers opt in.

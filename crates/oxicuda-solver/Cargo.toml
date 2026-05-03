@@ -28,5 +28,9 @@ f16 = ["dep:half", "oxicuda-blas/f16"]
 sparse-solvers = ["dep:oxicuda-sparse"]
 full = ["f16", "sparse-solvers"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints]
 workspace = true

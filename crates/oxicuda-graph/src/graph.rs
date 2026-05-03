@@ -612,7 +612,13 @@ mod tests {
         let mut g = ComputeGraph::new();
         let id = g.add_node(kernel_node("add"));
         assert!(g.node(id).is_ok());
-        assert_eq!(g.node(id).unwrap().kind.function_name(), Some("add"));
+        assert_eq!(
+            g.node(id)
+                .expect("node registered in graph")
+                .kind
+                .function_name(),
+            Some("add")
+        );
     }
 
     #[test]
@@ -628,8 +634,8 @@ mod tests {
     fn node_mut_allows_modification() {
         let mut g = ComputeGraph::new();
         let id = g.add_node(barrier_node());
-        g.node_mut(id).unwrap().cost_hint = 42;
-        assert_eq!(g.node(id).unwrap().cost_hint, 42);
+        g.node_mut(id).expect("node registered in graph").cost_hint = 42;
+        assert_eq!(g.node(id).expect("node registered in graph").cost_hint, 42);
     }
 
     // --- Buffer management ---
@@ -659,8 +665,8 @@ mod tests {
         let b = g.add_node(kernel_node("b"));
         assert!(g.add_edge(a, b).is_ok());
         assert_eq!(g.edge_count(), 1);
-        assert_eq!(g.successors(a).unwrap(), &[b]);
-        assert_eq!(g.predecessors(b).unwrap(), &[a]);
+        assert_eq!(g.successors(a).expect("node a registered in graph"), &[b]);
+        assert_eq!(g.predecessors(b).expect("node b registered in graph"), &[a]);
     }
 
     #[test]
@@ -678,7 +684,7 @@ mod tests {
         let mut g = ComputeGraph::new();
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
         assert!(matches!(
             g.add_edge(b, a),
             Err(GraphError::CycleDetected { .. })
@@ -704,8 +710,8 @@ mod tests {
         let mut g = ComputeGraph::new();
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(a, b).unwrap(); // second call must succeed and NOT duplicate
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(a, b).expect("valid DAG edge from a to b"); // second call must succeed and NOT duplicate
         assert_eq!(g.edge_count(), 1);
     }
 
@@ -715,8 +721,8 @@ mod tests {
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(a, c).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(a, c).expect("valid DAG edge from a to c");
         let mut edges = g.edges();
         edges.sort();
         assert_eq!(edges, vec![(a, b), (a, c)]);
@@ -729,7 +735,7 @@ mod tests {
         let mut g = ComputeGraph::new();
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
         assert!(g.is_reachable(a, b));
         assert!(!g.is_reachable(b, a));
     }
@@ -740,8 +746,8 @@ mod tests {
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(b, c).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(b, c).expect("valid DAG edge from b to c");
         assert!(g.is_reachable(a, c));
         assert!(!g.is_reachable(c, a));
     }
@@ -763,8 +769,8 @@ mod tests {
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(b, c).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(b, c).expect("valid DAG edge from b to c");
         let sources = g.sources();
         let sinks = g.sinks();
         assert_eq!(sources, vec![a]);
@@ -778,10 +784,10 @@ mod tests {
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
         let d = g.add_node(barrier_node()); // sink
-        g.add_edge(a, b).unwrap();
-        g.add_edge(a, c).unwrap();
-        g.add_edge(b, d).unwrap();
-        g.add_edge(c, d).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(a, c).expect("valid DAG edge from a to c");
+        g.add_edge(b, d).expect("valid DAG edge from b to d");
+        g.add_edge(c, d).expect("valid DAG edge from c to d");
         assert_eq!(g.sources(), vec![a]);
         assert_eq!(g.sinks(), vec![d]);
     }
@@ -794,12 +800,23 @@ mod tests {
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(b, c).unwrap();
-        let order = g.topological_order().unwrap();
-        let pos_a = order.iter().position(|&x| x == a).unwrap();
-        let pos_b = order.iter().position(|&x| x == b).unwrap();
-        let pos_c = order.iter().position(|&x| x == c).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(b, c).expect("valid DAG edge from b to c");
+        let order = g
+            .topological_order()
+            .expect("topological sort of valid DAG");
+        let pos_a = order
+            .iter()
+            .position(|&x| x == a)
+            .expect("node a present in topological order");
+        let pos_b = order
+            .iter()
+            .position(|&x| x == b)
+            .expect("node b present in topological order");
+        let pos_c = order
+            .iter()
+            .position(|&x| x == c)
+            .expect("node c present in topological order");
         assert!(pos_a < pos_b && pos_b < pos_c);
     }
 
@@ -810,13 +827,20 @@ mod tests {
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
         let d = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(a, c).unwrap();
-        g.add_edge(b, d).unwrap();
-        g.add_edge(c, d).unwrap();
-        let order = g.topological_order().unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(a, c).expect("valid DAG edge from a to c");
+        g.add_edge(b, d).expect("valid DAG edge from b to d");
+        g.add_edge(c, d).expect("valid DAG edge from c to d");
+        let order = g
+            .topological_order()
+            .expect("topological sort of valid DAG");
         assert_eq!(order.len(), 4);
-        let pos = |n: NodeId| order.iter().position(|&x| x == n).unwrap();
+        let pos = |n: NodeId| {
+            order
+                .iter()
+                .position(|&x| x == n)
+                .expect("node present in topological order")
+        };
         assert!(pos(a) < pos(b));
         assert!(pos(a) < pos(c));
         assert!(pos(b) < pos(d));
@@ -835,7 +859,9 @@ mod tests {
         g.add_node(barrier_node());
         g.add_node(barrier_node());
         g.add_node(barrier_node());
-        let order = g.topological_order().unwrap();
+        let order = g
+            .topological_order()
+            .expect("topological sort of valid DAG");
         assert_eq!(order.len(), 3);
     }
 
@@ -847,7 +873,8 @@ mod tests {
         let buf = g.add_buffer(BufferDescriptor::new(BufferId(0), 1024));
         let writer = g.add_node(GraphNode::new(NodeId(0), NodeKind::Barrier).with_outputs([buf]));
         let reader = g.add_node(GraphNode::new(NodeId(0), NodeKind::Barrier).with_inputs([buf]));
-        g.infer_data_edges().unwrap();
+        g.infer_data_edges()
+            .expect("data edge inference on valid graph");
         assert!(g.is_reachable(writer, reader));
     }
 
@@ -858,7 +885,8 @@ mod tests {
         let writer = g.add_node(GraphNode::new(NodeId(0), NodeKind::Barrier).with_outputs([buf]));
         let r1 = g.add_node(GraphNode::new(NodeId(0), NodeKind::Barrier).with_inputs([buf]));
         let r2 = g.add_node(GraphNode::new(NodeId(0), NodeKind::Barrier).with_inputs([buf]));
-        g.infer_data_edges().unwrap();
+        g.infer_data_edges()
+            .expect("data edge inference on valid graph");
         assert!(g.is_reachable(writer, r1));
         assert!(g.is_reachable(writer, r2));
     }
@@ -872,10 +900,14 @@ mod tests {
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
         let d = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(b, c).unwrap();
-        g.add_edge(c, d).unwrap();
-        assert_eq!(g.critical_path_length().unwrap(), 3);
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(b, c).expect("valid DAG edge from b to c");
+        g.add_edge(c, d).expect("valid DAG edge from c to d");
+        assert_eq!(
+            g.critical_path_length()
+                .expect("critical path length of valid DAG"),
+            3
+        );
     }
 
     #[test]
@@ -885,11 +917,15 @@ mod tests {
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
         let d = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(a, c).unwrap();
-        g.add_edge(b, d).unwrap();
-        g.add_edge(c, d).unwrap();
-        assert_eq!(g.critical_path_length().unwrap(), 2);
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(a, c).expect("valid DAG edge from a to c");
+        g.add_edge(b, d).expect("valid DAG edge from b to d");
+        g.add_edge(c, d).expect("valid DAG edge from c to d");
+        assert_eq!(
+            g.critical_path_length()
+                .expect("critical path length of valid DAG"),
+            2
+        );
     }
 
     #[test]
@@ -899,9 +935,9 @@ mod tests {
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
         let d = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(a, c).unwrap();
-        g.add_edge(a, d).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(a, c).expect("valid DAG edge from a to c");
+        g.add_edge(a, d).expect("valid DAG edge from a to d");
         assert_eq!(g.max_out_degree(), 3);
         assert_eq!(g.max_in_degree(), 1);
     }
@@ -915,8 +951,8 @@ mod tests {
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
         let d = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(b, c).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(b, c).expect("valid DAG edge from b to c");
         // d is isolated
         let reach = g.reachable_from(&[a]);
         assert!(reach.contains(&a));
@@ -931,8 +967,8 @@ mod tests {
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(b, c).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(b, c).expect("valid DAG edge from b to c");
         let reaching = g.reaching(&[c]);
         assert!(reaching.contains(&a));
         assert!(reaching.contains(&b));
@@ -975,9 +1011,13 @@ mod tests {
         let a = g.add_node(barrier_node());
         let b = g.add_node(barrier_node());
         let c = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
-        g.add_edge(b, c).unwrap();
-        assert_eq!(g.parallelism_width().unwrap(), 1);
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
+        g.add_edge(b, c).expect("valid DAG edge from b to c");
+        assert_eq!(
+            g.parallelism_width()
+                .expect("parallelism width of valid DAG"),
+            1
+        );
     }
 
     #[test]
@@ -988,13 +1028,17 @@ mod tests {
         let c = g.add_node(barrier_node());
         let d = g.add_node(barrier_node());
         let sink = g.add_node(barrier_node());
-        g.add_edge(src, b).unwrap();
-        g.add_edge(src, c).unwrap();
-        g.add_edge(src, d).unwrap();
-        g.add_edge(b, sink).unwrap();
-        g.add_edge(c, sink).unwrap();
-        g.add_edge(d, sink).unwrap();
-        assert_eq!(g.parallelism_width().unwrap(), 3);
+        g.add_edge(src, b).expect("valid DAG edge from src to b");
+        g.add_edge(src, c).expect("valid DAG edge from src to c");
+        g.add_edge(src, d).expect("valid DAG edge from src to d");
+        g.add_edge(b, sink).expect("valid DAG edge from b to sink");
+        g.add_edge(c, sink).expect("valid DAG edge from c to sink");
+        g.add_edge(d, sink).expect("valid DAG edge from d to sink");
+        assert_eq!(
+            g.parallelism_width()
+                .expect("parallelism width of valid DAG"),
+            3
+        );
     }
 
     // --- DOT output ---
@@ -1004,7 +1048,7 @@ mod tests {
         let mut g = ComputeGraph::new();
         let a = g.add_node(kernel_node("my_kernel").with_name("k0"));
         let b = g.add_node(barrier_node());
-        g.add_edge(a, b).unwrap();
+        g.add_edge(a, b).expect("valid DAG edge from a to b");
         let dot = g.to_dot();
         assert!(dot.contains("digraph"));
         assert!(dot.contains("k0"));

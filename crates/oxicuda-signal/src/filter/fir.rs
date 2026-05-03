@@ -316,7 +316,7 @@ mod tests {
     #[test]
     fn test_design_lowpass_length() {
         let w = make_window(21, WindowType::Hann);
-        let h = design_lowpass(21, 0.5, &w).unwrap();
+        let h = design_lowpass(21, 0.5, &w).expect("valid lowpass design parameters");
         assert_eq!(h.len(), 21);
     }
 
@@ -326,7 +326,7 @@ mod tests {
         // The sinc-windowed lowpass filter passes DC with unit gain.
         let n = 63usize;
         let w = make_window(n, WindowType::Hann);
-        let h = design_lowpass(n, 0.5, &w).unwrap();
+        let h = design_lowpass(n, 0.5, &w).expect("valid lowpass design parameters");
         let dc_gain: f64 = h.iter().sum();
         assert!((dc_gain - 1.0).abs() < 0.05, "DC gain = {dc_gain}");
     }
@@ -342,7 +342,7 @@ mod tests {
     fn test_design_highpass_dc_rejection() {
         let n = 63usize;
         let w = make_window(n, WindowType::Hann);
-        let h = design_highpass(n, 0.5, &w).unwrap();
+        let h = design_highpass(n, 0.5, &w).expect("valid highpass design parameters");
         let dc_gain: f64 = h.iter().sum();
         assert!(dc_gain.abs() < 0.02, "HP DC gain = {dc_gain}");
     }
@@ -353,7 +353,7 @@ mod tests {
         let h = vec![1.0, 2.0, 3.0_f64];
         let mut x = vec![0.0_f64; 5];
         x[0] = 1.0;
-        let y = fir_apply(&x, &h, PadMode::Zero).unwrap();
+        let y = fir_apply(&x, &h, PadMode::Zero).expect("valid FIR apply with zero padding");
         // y[0] = h[0]*x[0] + h[1]*x[-1] + h[2]*x[-2] = h[0]
         assert!((y[0] - 1.0).abs() < 1e-12);
         // y[1] = h[0]*x[1] + h[1]*x[0] = h[1]
@@ -367,7 +367,8 @@ mod tests {
         // 3-tap averaging filter on a constant signal should return the constant.
         let h = vec![1.0 / 3.0; 3];
         let x = vec![6.0_f64; 10];
-        let y = fir_apply(&x, &h, PadMode::Replicate).unwrap();
+        let y =
+            fir_apply(&x, &h, PadMode::Replicate).expect("valid FIR apply with replicate padding");
         for (i, &v) in y.iter().enumerate() {
             assert!((v - 6.0).abs() < 1e-10, "y[{i}]={v}");
         }
@@ -392,7 +393,7 @@ mod tests {
     fn test_design_bandpass_length() {
         let n = 63usize;
         let w = make_window(n, WindowType::Hann);
-        let h = design_bandpass(n, 0.2, 0.6, &w).unwrap();
+        let h = design_bandpass(n, 0.2, 0.6, &w).expect("valid bandpass design parameters");
         assert_eq!(h.len(), n);
     }
 

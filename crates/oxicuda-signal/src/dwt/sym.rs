@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_sym2_length() {
-        let h = sym_lowpass(2).unwrap();
+        let h = sym_lowpass(2).expect("sym2 filter is supported");
         assert_eq!(h.len(), 4);
     }
 
@@ -222,14 +222,14 @@ mod tests {
     #[test]
     fn test_sym2_energy() {
         // ||h||² = 1 for orthonormal wavelet
-        let h = sym_lowpass(2).unwrap();
+        let h = sym_lowpass(2).expect("sym2 filter is supported");
         let energy: f64 = h.iter().map(|v| v * v).sum();
         assert!((energy - 1.0).abs() < 1e-12, "energy = {energy}");
     }
 
     #[test]
     fn test_sym4_energy() {
-        let h = sym_lowpass(4).unwrap();
+        let h = sym_lowpass(4).expect("sym4 filter is supported");
         let energy: f64 = h.iter().map(|v| v * v).sum();
         assert!((energy - 1.0).abs() < 1e-12);
     }
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn test_sym_forward_output_lengths() {
         let x = vec![1.0_f64; 8];
-        let (a, d) = sym_forward(&x, 2).unwrap();
+        let (a, d) = sym_forward(&x, 2).expect("sym2 forward DWT succeeds");
         // Output length = ceil(8/2) = 4
         assert_eq!(a.len(), 4);
         assert_eq!(d.len(), 4);
@@ -253,7 +253,7 @@ mod tests {
     fn test_sym_near_symmetry() {
         // Symlets should be approximately symmetric (time-reversed self).
         // Asymmetry metric: max |h[k] - h[L-1-k]| < max |h[k] - (-h[L-1-k])|
-        let h = sym_lowpass(4).unwrap();
+        let h = sym_lowpass(4).expect("sym4 filter is supported");
         let len = h.len();
         let sym_err: f64 = (0..len)
             .map(|k| (h[k] - h[len - 1 - k]).abs())

@@ -228,10 +228,10 @@ mod tests {
         // 0.5 seconds of 440 Hz sine at 16 kHz.
         let sr = 8000.0_f64;
         let x = sine_signal(440.0, sr, 0.5);
-        let cfg = MfccConfig::new(13, 40, 256, 128, sr).unwrap();
-        let out = mfcc(&x, &cfg).unwrap();
+        let cfg = MfccConfig::new(13, 40, 256, 128, sr).expect("valid MFCC config");
+        let out = mfcc(&x, &cfg).expect("MFCC computation succeeds");
         let n_frames = StftConfig::new(256, 256, 128, WindowType::Hann)
-            .unwrap()
+            .expect("valid STFT config for frame count")
             .num_frames(x.len());
         assert_eq!(out.len(), n_frames * 13);
     }
@@ -240,8 +240,8 @@ mod tests {
     fn test_mfcc_finite_values() {
         let sr = 8000.0_f64;
         let x = sine_signal(440.0, sr, 0.2);
-        let cfg = MfccConfig::new(13, 40, 256, 128, sr).unwrap();
-        let out = mfcc(&x, &cfg).unwrap();
+        let cfg = MfccConfig::new(13, 40, 256, 128, sr).expect("valid MFCC config");
+        let out = mfcc(&x, &cfg).expect("MFCC computation succeeds");
         assert!(
             out.iter().all(|v| v.is_finite()),
             "MFCC contains non-finite values"

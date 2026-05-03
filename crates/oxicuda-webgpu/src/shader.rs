@@ -502,6 +502,121 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     )
 }
 
+/// Generate WGSL source for an N-D reduction along a single axis.
+///
+/// The tensor is logically reshaped to `[outer, dk, inner]`, where the reduce
+/// axis spans `dk` elements, `outer` is the product of dimensions before the
+/// axis, and `inner` is the product of dimensions after the axis.
+///
+/// Output shape is `[outer, inner]` (flattened to a 1-D buffer of length
+/// `outer * inner`).  Each output slot is computed by a full workgroup of
+/// 256 threads, which cooperatively reduce the `dk` elements via a strided
+/// loop and a shared-memory tree reduction.
+///
+/// Dispatch must be 2-D: `(grid_x, ceil((outer * inner) / grid_x), 1)` to
+/// stay below WebGPU's per-axis limit of 65 535 workgroups.  The shader
+/// decodes its slot via `wgid.y * params.grid_x + wgid.x` and early-returns
+/// if `slot >= outer * inner`.
+///
+/// For `Mean`, the shader divides each output by `dk` directly (no host-side
+/// post-processing required).
+///
+/// # Arguments
+///
+/// * `op` — one of: `"sum"`, `"max"`, `"min"`, `"mean"`.  Unknown ops fall
+///   back to `"sum"`.
+pub fn reduction_nd_wgsl(op: &str) -> String {
+    // The first form combines `acc` with `val` (per-thread strided loop).
+    // The second form combines `acc2` with `val` (in-shared-memory tree
+    // reduction).  Listing both explicitly is more robust than string-
+    // substitution for future ops.
+    let (neutral, combine, combine_alias) = match op {
+        "max" => ("f32(-1e38)", "max(acc, val)", "max(acc2, val)"),
+        "min" => ("f32(1e38)", "min(acc, val)", "min(acc2, val)"),
+        // "sum" and "mean" use the same combine; "mean" divides at the end.
+        _ => ("f32(0.0)", "acc + val", "acc2 + val"),
+    };
+
+    // For "mean", divide the final reduced value by dk; otherwise pass-through.
+    let final_expr = if op == "mean" {
+        "shared_data[0] / f32(params.dk)"
+    } else {
+        "shared_data[0]"
+    };
+
+    format!(
+        r#"
+struct ReduceNdParams {{
+    outer:        u32,
+    dk:           u32,
+    inner:        u32,
+    outer_stride: u32,
+    dk_stride:    u32,
+    inner_stride: u32,
+    grid_x:       u32,
+    _pad:         u32,
+}}
+
+@group(0) @binding(0) var<storage, read>       input:  array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+@group(0) @binding(2) var<uniform>             params: ReduceNdParams;
+
+var<workgroup> shared_data: array<f32, 256>;
+
+@compute @workgroup_size(256)
+fn main(
+    @builtin(local_invocation_id) lid:  vec3<u32>,
+    @builtin(workgroup_id)        wgid: vec3<u32>,
+) {{
+    let tid = lid.x;
+    let total = params.outer * params.inner;
+
+    // Decode 2-D workgroup id back to a linear output slot.
+    let slot = wgid.y * params.grid_x + wgid.x;
+    if (slot >= total) {{ return; }}
+
+    let o = slot / params.inner;
+    let j = slot % params.inner;
+    let base = o * params.outer_stride + j * params.inner_stride;
+
+    // Strided per-thread reduction across the dk axis.
+    var acc: f32 = {neutral};
+    var i: u32 = tid;
+    loop {{
+        if (i >= params.dk) {{ break; }}
+        let val = input[base + i * params.dk_stride];
+        acc = {combine};
+        i = i + 256u;
+    }}
+
+    shared_data[tid] = acc;
+    workgroupBarrier();
+
+    // Tree reduction within the workgroup.
+    var stride: u32 = 128u;
+    loop {{
+        if (stride == 0u) {{ break; }}
+        if (tid < stride) {{
+            let acc2 = shared_data[tid];
+            let val  = shared_data[tid + stride];
+            shared_data[tid] = {combine_alias};
+        }}
+        workgroupBarrier();
+        stride = stride >> 1u;
+    }}
+
+    if (tid == 0u) {{
+        output[slot] = {final_expr};
+    }}
+}}
+"#,
+        neutral = neutral,
+        combine = combine,
+        combine_alias = combine_alias,
+        final_expr = final_expr,
+    )
+}
+
 /// Generate WGSL for the final scalar reduction of partial sums.
 ///
 /// Takes a `partial_sums` array of length `num_groups` and reduces it to a
@@ -633,6 +748,57 @@ mod tests {
         let src = reduction_final_wgsl("sum");
         assert!(src.contains("num_groups"));
         assert!(src.contains("output[0]"));
+    }
+
+    // ── reduction_nd_wgsl tests ───────────────────────────────────────────
+
+    #[test]
+    fn wgsl_reduction_nd_sum_contains_addition() {
+        let src = reduction_nd_wgsl("sum");
+        assert!(src.contains("acc + val"));
+        // Tree-step reuses the same combine with renamed lhs.
+        assert!(src.contains("acc2 + val"));
+        assert!(src.contains("workgroupBarrier"));
+        assert!(src.contains("ReduceNdParams"));
+    }
+
+    #[test]
+    fn wgsl_reduction_nd_max_uses_max_fn() {
+        let src = reduction_nd_wgsl("max");
+        assert!(src.contains("max(acc, val)"));
+        assert!(src.contains("max(acc2, val)"));
+    }
+
+    #[test]
+    fn wgsl_reduction_nd_min_uses_min_fn() {
+        let src = reduction_nd_wgsl("min");
+        assert!(src.contains("min(acc, val)"));
+        assert!(src.contains("min(acc2, val)"));
+    }
+
+    #[test]
+    fn wgsl_reduction_nd_mean_divides_by_dk() {
+        let src = reduction_nd_wgsl("mean");
+        assert!(src.contains("shared_data[0] / f32(params.dk)"));
+        assert!(src.contains("acc + val"));
+    }
+
+    #[test]
+    fn wgsl_reduction_nd_sum_does_not_divide() {
+        let src = reduction_nd_wgsl("sum");
+        assert!(!src.contains("/ f32(params.dk)"));
+    }
+
+    #[test]
+    fn wgsl_reduction_nd_decodes_2d_dispatch() {
+        let src = reduction_nd_wgsl("sum");
+        assert!(src.contains("wgid.y * params.grid_x + wgid.x"));
+    }
+
+    #[test]
+    fn wgsl_reduction_nd_uses_strided_loop() {
+        let src = reduction_nd_wgsl("sum");
+        assert!(src.contains("i = i + 256u"));
     }
 
     // ── binary_wgsl tests ─────────────────────────────────────────────────

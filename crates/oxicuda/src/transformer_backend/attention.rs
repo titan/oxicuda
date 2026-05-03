@@ -351,7 +351,8 @@ mod tests {
         assert_eq!(cfg.num_kv_heads(), 32);
         assert_eq!(cfg.group_size(), 1);
         assert!((cfg.kv_memory_ratio() - 1.0).abs() < 1e-10);
-        cfg.validate().unwrap();
+        cfg.validate()
+            .expect("HeadConfig validation with valid parameters should succeed");
     }
 
     #[test]
@@ -364,7 +365,8 @@ mod tests {
         assert_eq!(cfg.num_kv_heads(), 8);
         assert_eq!(cfg.group_size(), 4);
         assert!((cfg.kv_memory_ratio() - 0.25).abs() < 1e-10);
-        cfg.validate().unwrap();
+        cfg.validate()
+            .expect("HeadConfig validation with valid parameters should succeed");
     }
 
     #[test]
@@ -373,7 +375,8 @@ mod tests {
         assert_eq!(cfg.num_query_heads(), 32);
         assert_eq!(cfg.num_kv_heads(), 1);
         assert_eq!(cfg.group_size(), 32);
-        cfg.validate().unwrap();
+        cfg.validate()
+            .expect("HeadConfig validation with valid parameters should succeed");
     }
 
     #[test]
@@ -405,7 +408,8 @@ mod tests {
             max_seq_len_hint: Some(64),
             ..Default::default()
         };
-        let dispatch = AttentionDispatch::new(config).unwrap();
+        let dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
         assert_eq!(dispatch.current_kernel(), AttentionKind::Standard);
     }
 
@@ -416,7 +420,8 @@ mod tests {
             max_seq_len_hint: Some(2048),
             ..Default::default()
         };
-        let dispatch = AttentionDispatch::new(config).unwrap();
+        let dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
         assert_eq!(dispatch.current_kernel(), AttentionKind::Flash);
     }
 
@@ -427,7 +432,8 @@ mod tests {
             max_seq_len_hint: Some(16384),
             ..Default::default()
         };
-        let dispatch = AttentionDispatch::new(config).unwrap();
+        let dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
         assert_eq!(dispatch.current_kernel(), AttentionKind::FlashHopper);
     }
 
@@ -437,7 +443,8 @@ mod tests {
             use_paged_cache: true,
             ..Default::default()
         };
-        let dispatch = AttentionDispatch::new(config).unwrap();
+        let dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
         assert_eq!(dispatch.current_kernel(), AttentionKind::Paged);
     }
 
@@ -447,7 +454,8 @@ mod tests {
             sliding_window: Some(4096),
             ..Default::default()
         };
-        let dispatch = AttentionDispatch::new(config).unwrap();
+        let dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
         assert_eq!(
             dispatch.current_kernel(),
             AttentionKind::SlidingWindow(4096)
@@ -460,7 +468,8 @@ mod tests {
             compute_tier: ComputeTier::Ampere,
             ..Default::default()
         };
-        let mut dispatch = AttentionDispatch::new(config).unwrap();
+        let mut dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
 
         // Short sequence -> standard
         let k = dispatch.select_kernel(64);
@@ -477,7 +486,8 @@ mod tests {
             head_dim: 64,
             ..Default::default()
         };
-        let dispatch = AttentionDispatch::new(config).unwrap();
+        let dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
         let expected = 1.0 / 64.0_f64.sqrt();
         assert!((dispatch.scale() - expected).abs() < 1e-10);
     }
@@ -488,14 +498,16 @@ mod tests {
             scale: Some(0.5),
             ..Default::default()
         };
-        let dispatch = AttentionDispatch::new(config).unwrap();
+        let dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
         assert!((dispatch.scale() - 0.5).abs() < 1e-10);
     }
 
     #[test]
     fn test_memory_estimate() {
         let config = AttentionConfig::default();
-        let dispatch = AttentionDispatch::new(config).unwrap();
+        let dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
         let mem = dispatch.memory_estimate(1024, 0);
         assert!(mem > 0);
     }
@@ -513,13 +525,16 @@ mod tests {
     #[test]
     fn test_update_config() {
         let config = AttentionConfig::default();
-        let mut dispatch = AttentionDispatch::new(config).unwrap();
+        let mut dispatch = AttentionDispatch::new(config)
+            .expect("AttentionDispatch creation with valid config should succeed");
 
         let new_config = AttentionConfig {
             use_paged_cache: true,
             ..Default::default()
         };
-        dispatch.update_config(new_config).unwrap();
+        dispatch
+            .update_config(new_config)
+            .expect("updating AttentionDispatch config with valid parameters should succeed");
         assert_eq!(dispatch.current_kernel(), AttentionKind::Paged);
     }
 

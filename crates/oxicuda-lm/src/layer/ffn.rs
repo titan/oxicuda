@@ -300,7 +300,8 @@ mod tests {
     fn linear_vec_identity() {
         // W = I_2, x = [3,4] → out = [3,4]
         let w = WeightTensor::eye(2, 2);
-        let out = linear_vec(&w, None, &[3.0, 4.0]).unwrap();
+        let out = linear_vec(&w, None, &[3.0, 4.0])
+            .expect("identity 2x2 weight with 2-element input should succeed");
         assert!((out[0] - 3.0).abs() < 1e-6);
         assert!((out[1] - 4.0).abs() < 1e-6);
     }
@@ -309,7 +310,8 @@ mod tests {
     fn linear_vec_with_bias() {
         let w = WeightTensor::eye(2, 2);
         let bias = vec![10.0_f32, 20.0];
-        let out = linear_vec(&w, Some(&bias), &[1.0, 2.0]).unwrap();
+        let out = linear_vec(&w, Some(&bias), &[1.0, 2.0])
+            .expect("identity weight with matching bias and input should succeed");
         assert!((out[0] - 11.0).abs() < 1e-6);
         assert!((out[1] - 22.0).abs() < 1e-6);
     }
@@ -318,9 +320,11 @@ mod tests {
 
     #[test]
     fn mlp_ffn_zero_weights_zero_output() {
-        let ffn = MlpFfn::new(4, 8).unwrap();
+        let ffn = MlpFfn::new(4, 8).expect("hidden_dim=4 intermediate_dim=8 should be valid");
         let x = vec![1.0_f32; 4];
-        let out = ffn.forward(&x, 1).unwrap();
+        let out = ffn
+            .forward(&x, 1)
+            .expect("single-token MLP forward should succeed");
         // W=0, b=0 → h=gelu(0)=0 → out=0
         assert!(out.iter().all(|&v| v.abs() < 1e-6));
     }
@@ -329,11 +333,13 @@ mod tests {
     fn mlp_ffn_identity_chain() {
         // w_fc = I (4×4 intermediate=4), w_proj = I, biases = 0
         // → gelu applied, then back through identity
-        let mut ffn = MlpFfn::new(4, 4).unwrap();
+        let mut ffn = MlpFfn::new(4, 4).expect("hidden_dim=4 intermediate_dim=4 should be valid");
         ffn.w_fc = WeightTensor::eye(4, 4);
         ffn.w_proj = WeightTensor::eye(4, 4);
         let x = vec![1.0_f32; 4];
-        let out = ffn.forward(&x, 1).unwrap();
+        let out = ffn
+            .forward(&x, 1)
+            .expect("identity-weight MLP forward should succeed");
         // gelu(1.0) ≈ 0.841
         let expected = gelu(1.0);
         for &v in &out {
@@ -343,9 +349,12 @@ mod tests {
 
     #[test]
     fn mlp_ffn_batch_tokens() {
-        let ffn = MlpFfn::new(4, 8).unwrap();
+        let ffn = MlpFfn::new(4, 8)
+            .expect("hidden_dim=4 intermediate_dim=8 should be valid for batch test");
         let x = vec![0.0_f32; 2 * 4]; // 2 tokens
-        let out = ffn.forward(&x, 2).unwrap();
+        let out = ffn
+            .forward(&x, 2)
+            .expect("2-token batch MLP forward should succeed");
         assert_eq!(out.len(), 2 * 4);
     }
 
@@ -358,9 +367,12 @@ mod tests {
 
     #[test]
     fn swiglu_ffn_zero_weights_zero_output() {
-        let ffn = SwiGluFfn::new(4, 8).unwrap();
+        let ffn =
+            SwiGluFfn::new(4, 8).expect("hidden_dim=4 intermediate_dim=8 SwiGLU should be valid");
         let x = vec![1.0_f32; 4];
-        let out = ffn.forward(&x, 1).unwrap();
+        let out = ffn
+            .forward(&x, 1)
+            .expect("single-token SwiGLU forward should succeed");
         assert!(out.iter().all(|&v| v.abs() < 1e-6));
     }
 
@@ -368,12 +380,15 @@ mod tests {
     fn swiglu_ffn_gate_identity() {
         // w_gate = I (4×4 intermediate=4), w_up = I, w_down = I
         // gate = x, up = x → h = silu(x)*x → out = w_down @ h = h
-        let mut ffn = SwiGluFfn::new(4, 4).unwrap();
+        let mut ffn =
+            SwiGluFfn::new(4, 4).expect("hidden_dim=4 intermediate_dim=4 SwiGLU should be valid");
         ffn.w_gate = WeightTensor::eye(4, 4);
         ffn.w_up = WeightTensor::eye(4, 4);
         ffn.w_down = WeightTensor::eye(4, 4);
         let x = vec![2.0_f32; 4];
-        let out = ffn.forward(&x, 1).unwrap();
+        let out = ffn
+            .forward(&x, 1)
+            .expect("identity-weight SwiGLU forward should succeed");
         let expected = silu(2.0) * 2.0;
         for &v in &out {
             assert!((v - expected).abs() < 1e-5, "v={v} expected={expected}");
@@ -382,9 +397,12 @@ mod tests {
 
     #[test]
     fn swiglu_ffn_batch_tokens() {
-        let ffn = SwiGluFfn::new(4, 8).unwrap();
+        let ffn = SwiGluFfn::new(4, 8)
+            .expect("hidden_dim=4 intermediate_dim=8 SwiGLU for batch test should be valid");
         let x = vec![0.0_f32; 3 * 4];
-        let out = ffn.forward(&x, 3).unwrap();
+        let out = ffn
+            .forward(&x, 3)
+            .expect("3-token batch SwiGLU forward should succeed");
         assert_eq!(out.len(), 3 * 4);
     }
 

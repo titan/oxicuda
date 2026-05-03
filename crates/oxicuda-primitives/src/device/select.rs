@@ -399,7 +399,9 @@ mod tests {
     #[test]
     fn flag_ptx_nonzero_f32_contains_setp_ne() {
         let t = DeviceSelectTemplate::new(cfg(PtxType::F32, SelectPredicate::NonZero));
-        let ptx = t.generate_flag_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_flag_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("setp.ne.f32"), "PTX: {ptx}");
         assert!(ptx.contains("0f00000000"), "PTX: {ptx}");
     }
@@ -407,14 +409,18 @@ mod tests {
     #[test]
     fn flag_ptx_positive_s32_contains_setp_gt() {
         let t = DeviceSelectTemplate::new(cfg(PtxType::S32, SelectPredicate::Positive));
-        let ptx = t.generate_flag_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_flag_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("setp.gt.s32"), "PTX: {ptx}");
     }
 
     #[test]
     fn flag_ptx_negative_u32_is_always_false() {
         let t = DeviceSelectTemplate::new(cfg(PtxType::U32, SelectPredicate::Negative));
-        let ptx = t.generate_flag_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_flag_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         // Unsigned Negative uses setp.ne.u32 0,0 → always false.
         assert!(ptx.contains("setp.ne.u32 %select_pred, 0, 0"), "PTX: {ptx}");
     }
@@ -422,7 +428,9 @@ mod tests {
     #[test]
     fn flag_ptx_flagarray_reads_u32() {
         let t = DeviceSelectTemplate::new(cfg(PtxType::F32, SelectPredicate::FlagArray));
-        let ptx = t.generate_flag_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_flag_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("param_in_flags"), "PTX: {ptx}");
         assert!(ptx.contains("ld.global.u32"), "PTX: {ptx}");
         assert!(ptx.contains("setp.ne.u32"), "PTX: {ptx}");
@@ -431,7 +439,9 @@ mod tests {
     #[test]
     fn gather_ptx_loads_flag_and_offset() {
         let t = DeviceSelectTemplate::new(cfg(PtxType::F32, SelectPredicate::NonZero));
-        let ptx = t.generate_gather_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_gather_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("param_flags"), "PTX: {ptx}");
         assert!(ptx.contains("param_offsets"), "PTX: {ptx}");
         assert!(ptx.contains("ld.global.u32"), "PTX: {ptx}");
@@ -443,7 +453,9 @@ mod tests {
     #[test]
     fn generate_both_kernels_succeeds() {
         let t = DeviceSelectTemplate::new(cfg(PtxType::U32, SelectPredicate::NonZero));
-        let (flag_ptx, gather_ptx) = t.generate(SmVersion::Sm80).unwrap();
+        let (flag_ptx, gather_ptx) = t
+            .generate(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(!flag_ptx.is_empty());
         assert!(!gather_ptx.is_empty());
     }
@@ -451,7 +463,9 @@ mod tests {
     #[test]
     fn gather_ptx_f64_uses_8byte_stride() {
         let t = DeviceSelectTemplate::new(cfg(PtxType::F64, SelectPredicate::NonZero));
-        let ptx = t.generate_gather_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_gather_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("ld.global.f64"), "PTX: {ptx}");
         assert!(ptx.contains("st.global.f64"), "PTX: {ptx}");
     }

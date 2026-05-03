@@ -279,7 +279,9 @@ mod tests {
         let mut cache = PrefixCache::new(16);
         let t = vec![7_u32, 8];
         cache.insert(&t, fake_blocks(2));
-        let blocks = cache.remove(&t).unwrap();
+        let blocks = cache
+            .remove(&t)
+            .expect("entry was inserted and not yet removed");
         assert_eq!(blocks.len(), 2);
         assert_eq!(cache.n_entries(), 0);
     }

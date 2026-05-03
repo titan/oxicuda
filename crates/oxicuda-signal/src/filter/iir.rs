@@ -285,7 +285,7 @@ mod tests {
     fn test_iir_apply_identity() {
         // b=[1], a=[1]: identity filter.
         let x = vec![1.0, 2.0, 3.0_f64];
-        let y = iir_apply(&x, &[1.0], &[1.0]).unwrap();
+        let y = iir_apply(&x, &[1.0], &[1.0]).expect("identity IIR filter is valid");
         assert_eq!(y, x);
     }
 
@@ -304,8 +304,8 @@ mod tests {
         let peak_idx = mag
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-            .unwrap()
+            .max_by(|a, b| a.1.partial_cmp(b.1).expect("magnitude values are finite"))
+            .expect("freq_response returns non-empty vec")
             .0;
         // fc=0.25 corresponds to ω=π/2, which maps to bin (n-1)/2 ≈ 127.
         let expected_idx = (2.0 * 0.25 * (256 - 1) as f64) as usize;

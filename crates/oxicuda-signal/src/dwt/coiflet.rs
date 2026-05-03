@@ -240,12 +240,15 @@ mod tests {
 
     #[test]
     fn coif1_lowpass_len() {
-        assert_eq!(coif_lowpass(1).unwrap().len(), 6);
+        assert_eq!(coif_lowpass(1).expect("coif1 filter is supported").len(), 6);
     }
 
     #[test]
     fn coif5_lowpass_len() {
-        assert_eq!(coif_lowpass(5).unwrap().len(), 30);
+        assert_eq!(
+            coif_lowpass(5).expect("coif5 filter is supported").len(),
+            30
+        );
     }
 
     #[test]
@@ -260,8 +263,8 @@ mod tests {
         let n = 32;
         let mut x = vec![0.0_f64; n];
         x[0] = 1.0;
-        let (approx, detail) = coif_forward(&x, 1).unwrap();
-        let recon = coif_inverse(&approx, &detail, 1).unwrap();
+        let (approx, detail) = coif_forward(&x, 1).expect("coif1 forward DWT succeeds");
+        let recon = coif_inverse(&approx, &detail, 1).expect("coif1 inverse DWT succeeds");
         // Verify energy is preserved (not exact reconstruction due to boundary)
         let energy_in: f64 = x.iter().map(|v| v * v).sum();
         let energy_out: f64 = recon.iter().map(|v| v * v).sum();
@@ -273,7 +276,7 @@ mod tests {
 
     #[test]
     fn coif2_lowpass_sum_sqrt2() {
-        let h = coif_lowpass(2).unwrap();
+        let h = coif_lowpass(2).expect("coif2 filter is supported");
         let sum: f64 = h.iter().sum();
         assert!((sum - 2.0_f64.sqrt()).abs() < 1e-6, "sum={sum}");
     }

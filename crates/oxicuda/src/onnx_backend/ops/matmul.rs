@@ -248,10 +248,15 @@ mod tests {
         // [2,3] x [3,2] -> [2,2]
         let a = OnnxTensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let b = OnnxTensor::from_f32(&[7.0, 8.0, 9.0, 10.0, 11.0, 12.0], vec![3, 2]);
-        let r = execute_matmul(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
+        let r = execute_matmul(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("matmul execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![2, 2]);
         // [1*7+2*9+3*11, 1*8+2*10+3*12, 4*7+5*9+6*11, 4*8+5*10+6*12]
-        assert_f32_near(&r[0].as_f32().unwrap(), &[58.0, 64.0, 139.0, 154.0], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[58.0, 64.0, 139.0, 154.0],
+            1e-5,
+        );
     }
 
     #[test]
@@ -267,7 +272,8 @@ mod tests {
             ],
             vec![2, 3, 2],
         );
-        let r = execute_matmul(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
+        let r = execute_matmul(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("matmul execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![2, 2, 2]);
     }
 
@@ -275,9 +281,14 @@ mod tests {
     fn test_matmul_1d_dot() {
         let a = OnnxTensor::from_f32(&[1.0, 2.0, 3.0], vec![3]);
         let b = OnnxTensor::from_f32(&[4.0, 5.0, 6.0], vec![3]);
-        let r = execute_matmul(&[Some(&a), Some(&b)], &empty_attrs()).unwrap();
+        let r = execute_matmul(&[Some(&a), Some(&b)], &empty_attrs())
+            .expect("matmul execution should succeed with valid inputs");
         assert!(r[0].shape.is_empty());
-        assert_f32_near(&r[0].as_f32().unwrap(), &[32.0], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[32.0],
+            1e-5,
+        );
     }
 
     #[test]
@@ -289,10 +300,15 @@ mod tests {
         let mut attrs = HashMap::new();
         attrs.insert("alpha".into(), AttributeValue::Float(1.0));
         attrs.insert("beta".into(), AttributeValue::Float(1.0));
-        let r = execute_gemm(&[Some(&a), Some(&b), Some(&c)], &attrs).unwrap();
+        let r = execute_gemm(&[Some(&a), Some(&b), Some(&c)], &attrs)
+            .expect("gemm execution should succeed with valid inputs");
         assert_eq!(r[0].shape, vec![2, 2]);
         // [1*5+2*7+1, 1*6+2*8+1, 3*5+4*7+1, 3*6+4*8+1] = [20, 23, 44, 51]
-        assert_f32_near(&r[0].as_f32().unwrap(), &[20.0, 23.0, 44.0, 51.0], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[20.0, 23.0, 44.0, 51.0],
+            1e-5,
+        );
     }
 
     #[test]
@@ -301,9 +317,14 @@ mod tests {
         let b = OnnxTensor::from_f32(&[5.0, 7.0, 6.0, 8.0], vec![2, 2]); // transposed
         let mut attrs = HashMap::new();
         attrs.insert("transB".into(), AttributeValue::Int(1));
-        let r = execute_gemm(&[Some(&a), Some(&b)], &attrs).unwrap();
+        let r = execute_gemm(&[Some(&a), Some(&b)], &attrs)
+            .expect("gemm execution should succeed with valid inputs");
         // A * B^T: same result as A * [[5,6],[7,8]]
-        assert_f32_near(&r[0].as_f32().unwrap(), &[19.0, 22.0, 43.0, 50.0], 1e-5);
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[19.0, 22.0, 43.0, 50.0],
+            1e-5,
+        );
     }
 
     #[test]
@@ -313,7 +334,12 @@ mod tests {
         let c = OnnxTensor::from_f32(&[10.0, 20.0], vec![1, 2]); // broadcast
         let mut attrs = HashMap::new();
         attrs.insert("beta".into(), AttributeValue::Float(1.0));
-        let r = execute_gemm(&[Some(&a), Some(&b), Some(&c)], &attrs).unwrap();
-        assert_f32_near(&r[0].as_f32().unwrap(), &[11.0, 22.0, 13.0, 24.0], 1e-5);
+        let r = execute_gemm(&[Some(&a), Some(&b), Some(&c)], &attrs)
+            .expect("gemm execution should succeed with valid inputs");
+        assert_f32_near(
+            &r[0].as_f32().expect("tensor should be float32 type"),
+            &[11.0, 22.0, 13.0, 24.0],
+            1e-5,
+        );
     }
 }

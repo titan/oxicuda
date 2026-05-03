@@ -464,7 +464,8 @@ mod tests {
 
     fn make_params(vals: &[f32]) -> Vec<ParamTensor> {
         let mut p = ParamTensor::new(vals.to_vec(), "w");
-        p.set_grad(vec![0.1_f32; vals.len()]).unwrap();
+        p.set_grad(vec![0.1_f32; vals.len()])
+            .expect("gradient length matches param data length");
         vec![p]
     }
 
@@ -486,18 +487,32 @@ mod tests {
         });
         let mut params = make_params(&[1.0]);
         // set grad = 8.0 (= 4.0 * 2.0 simulating scale applied in backward)
-        params[0].set_grad(vec![8.0_f32]).unwrap();
-        scaler.unscale(&mut params).unwrap();
+        params[0]
+            .set_grad(vec![8.0_f32])
+            .expect("gradient length matches param length");
+        scaler.unscale(&mut params).expect("unscale should succeed");
         // after unscale grad should be 8.0 / 4.0 = 2.0
-        assert!((params[0].grad.as_ref().unwrap()[0] - 2.0_f32).abs() < 1e-6);
+        assert!(
+            (params[0]
+                .grad
+                .as_ref()
+                .expect("gradient must be set after unscale")[0]
+                - 2.0_f32)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]
     fn unscale_detects_inf() {
         let mut scaler = GradScaler::default();
         let mut params = make_params(&[1.0]);
-        params[0].set_grad(vec![f32::INFINITY]).unwrap();
-        scaler.unscale(&mut params).unwrap();
+        params[0]
+            .set_grad(vec![f32::INFINITY])
+            .expect("gradient length matches param length");
+        scaler
+            .unscale(&mut params)
+            .expect("unscale should succeed even with overflow");
         assert!(scaler.found_overflow());
     }
 
@@ -505,8 +520,12 @@ mod tests {
     fn unscale_detects_nan() {
         let mut scaler = GradScaler::default();
         let mut params = make_params(&[1.0]);
-        params[0].set_grad(vec![f32::NAN]).unwrap();
-        scaler.unscale(&mut params).unwrap();
+        params[0]
+            .set_grad(vec![f32::NAN])
+            .expect("gradient length matches param length");
+        scaler
+            .unscale(&mut params)
+            .expect("unscale should succeed even with NaN");
         assert!(scaler.found_overflow());
     }
 
@@ -514,7 +533,9 @@ mod tests {
     fn double_unscale_returns_error() {
         let mut scaler = GradScaler::default();
         let mut params = make_params(&[1.0]);
-        scaler.unscale(&mut params).unwrap();
+        scaler
+            .unscale(&mut params)
+            .expect("first unscale should succeed");
         let err = scaler.unscale(&mut params);
         assert!(err.is_err());
     }
@@ -527,9 +548,15 @@ mod tests {
         let mut opt = GpuAdamW::new(1e-3);
         let mut params = make_params(&[1.0]);
         // inject inf gradient
-        params[0].set_grad(vec![f32::INFINITY]).unwrap();
-        scaler.unscale(&mut params).unwrap();
-        let did_step = scaler.step(&mut opt, &mut params).unwrap();
+        params[0]
+            .set_grad(vec![f32::INFINITY])
+            .expect("gradient length matches param length");
+        scaler
+            .unscale(&mut params)
+            .expect("unscale should succeed even with overflow");
+        let did_step = scaler
+            .step(&mut opt, &mut params)
+            .expect("step should return Ok indicating skip");
         assert!(!did_step, "should skip on overflow");
         assert_eq!(scaler.steps_skipped(), 1);
         assert_eq!(scaler.steps_taken(), 0);
@@ -543,9 +570,13 @@ mod tests {
         });
         let mut opt = GpuAdamW::new(1e-3);
         let mut params = make_params(&[1.0]);
-        params[0].set_grad(vec![0.5_f32]).unwrap();
-        scaler.unscale(&mut params).unwrap();
-        let did_step = scaler.step(&mut opt, &mut params).unwrap();
+        params[0]
+            .set_grad(vec![0.5_f32])
+            .expect("gradient length matches param length");
+        scaler.unscale(&mut params).expect("unscale should succeed");
+        let did_step = scaler
+            .step(&mut opt, &mut params)
+            .expect("step should return Ok");
         assert!(did_step, "should take step on finite grads");
         assert_eq!(scaler.steps_taken(), 1);
     }
@@ -569,10 +600,14 @@ mod tests {
             ..GradScalerConfig::default()
         });
         let mut params = make_params(&[1.0]);
-        params[0].set_grad(vec![f32::INFINITY]).unwrap();
-        scaler.unscale(&mut params).unwrap();
+        params[0]
+            .set_grad(vec![f32::INFINITY])
+            .expect("gradient length matches param length");
+        scaler
+            .unscale(&mut params)
+            .expect("unscale should succeed even with overflow");
         let _ = scaler.step(&mut GpuAdamW::new(1e-3), &mut params);
-        scaler.update().unwrap();
+        scaler.update().expect("update should succeed");
         assert!(
             (scaler.scale() - 512.0).abs() < 1e-9,
             "scale={}",
@@ -592,10 +627,14 @@ mod tests {
         // 3 clean steps → scale doubles
         for _ in 0..3 {
             let mut params = make_params(&[1.0]);
-            params[0].set_grad(vec![0.1_f32]).unwrap();
-            scaler.unscale(&mut params).unwrap();
-            scaler.step(&mut opt, &mut params).unwrap();
-            scaler.update().unwrap();
+            params[0]
+                .set_grad(vec![0.1_f32])
+                .expect("gradient length matches param length");
+            scaler.unscale(&mut params).expect("unscale should succeed");
+            scaler
+                .step(&mut opt, &mut params)
+                .expect("step should succeed");
+            scaler.update().expect("update should succeed");
         }
         assert!(
             (scaler.scale() - 2.0).abs() < 1e-9,
@@ -614,15 +653,23 @@ mod tests {
         });
         let mut params = make_params(&[1.0]);
         // Trigger two overflows: 2→1→error
-        params[0].set_grad(vec![f32::INFINITY]).unwrap();
-        scaler.unscale(&mut params).unwrap();
+        params[0]
+            .set_grad(vec![f32::INFINITY])
+            .expect("gradient length matches param length");
+        scaler
+            .unscale(&mut params)
+            .expect("unscale should succeed even with overflow");
         let _ = scaler.step(&mut GpuAdamW::new(1e-3), &mut params);
-        scaler.update().unwrap(); // scale: 2 → 1
+        scaler.update().expect("first update should succeed"); // scale: 2 → 1
         assert!((scaler.scale() - 1.0).abs() < 1e-9);
 
         let mut params2 = make_params(&[1.0]);
-        params2[0].set_grad(vec![f32::INFINITY]).unwrap();
-        scaler.unscale(&mut params2).unwrap();
+        params2[0]
+            .set_grad(vec![f32::INFINITY])
+            .expect("gradient length matches param length");
+        scaler
+            .unscale(&mut params2)
+            .expect("unscale should succeed even with overflow");
         let _ = scaler.step(&mut GpuAdamW::new(1e-3), &mut params2);
         let err = scaler.update(); // scale would go to 0.5 < min_scale
         assert!(err.is_err(), "should error at min_scale");
@@ -637,10 +684,14 @@ mod tests {
             ..GradScalerConfig::default()
         });
         let mut params = make_params(&[1.0]);
-        params[0].set_grad(vec![f32::INFINITY]).unwrap();
-        scaler.unscale(&mut params).unwrap();
+        params[0]
+            .set_grad(vec![f32::INFINITY])
+            .expect("gradient length matches param length");
+        scaler
+            .unscale(&mut params)
+            .expect("unscale should succeed even with overflow");
         let _ = scaler.step(&mut GpuAdamW::new(1e-3), &mut params);
-        scaler.update().unwrap();
+        scaler.update().expect("update should succeed");
         assert!(scaler.scale() < 128.0);
 
         scaler.reset();
@@ -718,10 +769,14 @@ mod tests {
             let x = params[0].data[0];
             // scaled grad = scale * 2x
             let g = scaler.scale() as f32 * 2.0 * x;
-            params[0].set_grad(vec![g]).unwrap();
-            scaler.unscale(&mut params).unwrap();
-            let _ = scaler.step(&mut opt, &mut params).unwrap();
-            scaler.update().unwrap();
+            params[0]
+                .set_grad(vec![g])
+                .expect("gradient length matches param length");
+            scaler.unscale(&mut params).expect("unscale should succeed");
+            let _ = scaler
+                .step(&mut opt, &mut params)
+                .expect("step should return Ok");
+            scaler.update().expect("update should succeed");
         }
         let x = params[0].data[0].abs();
         assert!(x < 0.5, "AMP loop should converge x→0, got |x|={x}");

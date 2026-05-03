@@ -1316,7 +1316,8 @@ mod tests {
 
     #[test]
     fn nvlink_plan_creates_correct_stages() {
-        let plan = NvLinkOverlapPlan::new(4, 1024, true).unwrap();
+        let plan = NvLinkOverlapPlan::new(4, 1024, true)
+            .expect("NvLink overlap plan should succeed for valid device count and size");
         assert_eq!(plan.num_devices, 4);
         assert_eq!(plan.num_stages, 8);
         assert_eq!(plan.half_slab_elements, 128); // (1024/4)/2
@@ -1325,7 +1326,8 @@ mod tests {
 
     #[test]
     fn nvlink_plan_stage_names() {
-        let plan = NvLinkOverlapPlan::new(2, 256, true).unwrap();
+        let plan = NvLinkOverlapPlan::new(2, 256, true)
+            .expect("NvLink overlap plan should succeed for valid device count and size");
         assert!(plan.stages[0].name.contains("FFT ping"));
         assert!(plan.stages[1].name.contains("NVLink send pong"));
         assert!(plan.stages[2].name.contains("FFT ping"));
@@ -1333,21 +1335,24 @@ mod tests {
 
     #[test]
     fn nvlink_plan_total_elements() {
-        let plan = NvLinkOverlapPlan::new(2, 256, true).unwrap();
+        let plan = NvLinkOverlapPlan::new(2, 256, true)
+            .expect("NvLink overlap plan should succeed for valid device count and size");
         // 4 stages × 64 elements each = 256
         assert_eq!(plan.total_elements(), 256);
     }
 
     #[test]
     fn nvlink_plan_is_overlapped_when_available() {
-        let plan = NvLinkOverlapPlan::new(2, 256, true).unwrap();
+        let plan = NvLinkOverlapPlan::new(2, 256, true)
+            .expect("NvLink overlap plan should succeed for valid device count and size");
         assert!(plan.is_overlapped());
         assert!(plan.estimated_speedup() > 1.0);
     }
 
     #[test]
     fn nvlink_plan_not_overlapped_without_hw() {
-        let plan = NvLinkOverlapPlan::new(2, 256, false).unwrap();
+        let plan = NvLinkOverlapPlan::new(2, 256, false)
+            .expect("NvLink overlap plan should succeed for valid device count and size");
         assert!(!plan.is_overlapped());
         assert_eq!(plan.estimated_speedup(), 1.0);
     }

@@ -146,6 +146,26 @@ define_handle! {
     CUmulticastObject
 }
 
+define_handle! {
+    /// Opaque handle to a CUDA JIT linker state (`CUlinkState`).
+    ///
+    /// Created by `cuLinkCreate_v2`, populated by repeated calls to
+    /// `cuLinkAddData_v2`, finalised by `cuLinkComplete`, and freed by
+    /// `cuLinkDestroy`.
+    CUlinkState
+}
+
+// =========================================================================
+// CUmemGenericAllocationHandle — VMM allocation handle (CUDA 11.2+)
+// =========================================================================
+
+/// Opaque handle to a generic memory allocation managed by the CUDA virtual
+/// memory management (VMM) APIs (`cuMemCreate`, `cuMemRelease`, `cuMemMap`).
+///
+/// Although the CUDA header types this as `unsigned long long`, it is an opaque
+/// driver-side identifier and must not be interpreted as a numeric address.
+pub type CUmemGenericAllocationHandle = u64;
+
 // =========================================================================
 // CUmemorytype — memory type identifiers
 // =========================================================================
@@ -911,6 +931,314 @@ pub enum CUjitInputType {
 }
 
 // =========================================================================
+// CUmemLocationType — location-type discriminant (CUDA 11.2+ VMM)
+// =========================================================================
+
+/// Specifies the kind of location described by a [`CUmemLocation`].
+///
+/// Mirrors `CUmemLocationType` in `cuda.h`.  Used by the virtual-memory
+/// management APIs to identify where a memory allocation resides or which
+/// device should be granted access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum CUmemLocationType {
+    /// Invalid / uninitialised location type.
+    Invalid = 0,
+    /// Location is a CUDA device (the `id` field is a device ordinal).
+    Device = 1,
+    /// Location is the host (CPU) memory.
+    Host = 2,
+    /// Location is a specific NUMA node on the host.
+    HostNuma = 3,
+    /// Location is the NUMA node currently bound to the calling thread.
+    HostNumaCurrent = 4,
+}
+
+// =========================================================================
+// CUmemAllocationType — allocation-kind discriminant (CUDA 11.2+ VMM)
+// =========================================================================
+
+/// Type of memory allocation requested via the VMM APIs.
+///
+/// Mirrors `CUmemAllocationType` in `cuda.h`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum CUmemAllocationType {
+    /// Invalid / uninitialised allocation type.
+    Invalid = 0,
+    /// Pinned (page-locked) GPU memory backed by physical device frames.
+    Pinned = 1,
+    /// Sentinel value used by the CUDA driver to mark forward-compatible
+    /// extensions; always equal to the maximum 32-bit signed integer.
+    Max = 0x7fff_ffff,
+}
+
+// =========================================================================
+// CUmemAllocationHandleType — exportable handle bitfield (CUDA 11.2+ VMM)
+// =========================================================================
+
+/// Set of operating-system handle types that the driver may export for a
+/// VMM allocation.  Treated as a bitfield in the CUDA C API.
+///
+/// Mirrors `CUmemAllocationHandleType` in `cuda.h`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum CUmemAllocationHandleType {
+    /// No exportable handle is requested.
+    None = 0,
+    /// POSIX file descriptor (Linux).
+    PosixFileDescriptor = 1,
+    /// Win32 NT handle.
+    Win32 = 2,
+    /// Win32 KMT handle (legacy kernel-mode-thunk).
+    Win32Kmt = 4,
+    /// Fabric handle for multi-host shared memory (CUDA 12.0+).
+    Fabric = 8,
+}
+
+// =========================================================================
+// CUmemAccessFlags — peer-access permissions for VMM allocations
+// =========================================================================
+
+/// Access flags applied via `cuMemSetAccess` to a VMM allocation, controlling
+/// whether a particular [`CUmemLocation`] may read or write the mapping.
+///
+/// Mirrors `CUmemAccess_flags` in `cuda.h`.  Renamed to follow Rust naming
+/// conventions; the discriminant values are unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum CUmemAccessFlags {
+    /// No access permitted from the location.
+    None = 0,
+    /// Read-only access permitted.
+    Read = 1,
+    /// Read-write access permitted.
+    ReadWrite = 3,
+    /// Sentinel value used by the CUDA driver for forward compatibility.
+    Max = 0x7fff_ffff,
+}
+
+// =========================================================================
+// CUmemLocation — memory-location descriptor (CUDA 11.2+ VMM)
+// =========================================================================
+
+/// Describes a physical memory location for the VMM and pool APIs.
+///
+/// Mirrors `CUmemLocation` in `cuda.h`.  The interpretation of `id` depends on
+/// `loc_type`: for [`CUmemLocationType::Device`] it is a device ordinal, for
+/// [`CUmemLocationType::HostNuma`] it is a NUMA node identifier, and for the
+/// other variants it must be set to `0`.
+///
+/// The `loc_type` field is stored as a raw `u32` so that any forward-compatible
+/// value emitted by a future driver can be round-tripped without UB; convert
+/// to / from [`CUmemLocationType`] manually when interpreting it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(C)]
+pub struct CUmemLocation {
+    /// Location type; see [`CUmemLocationType`].
+    pub loc_type: u32,
+    /// Identifier whose meaning depends on `loc_type`.
+    pub id: i32,
+}
+
+// =========================================================================
+// CUmemAllocationProp — properties of a VMM allocation request
+// =========================================================================
+
+/// Properties passed to `cuMemCreate` to describe a new VMM allocation.
+///
+/// Mirrors `CUmemAllocationProp` in `cuda.h`.
+///
+/// The `alloc_type`, `requested_handle_types` and `alloc_flags` fields are
+/// stored as raw integers so that future driver extensions cannot trigger UB
+/// via unknown discriminants; convert them to / from
+/// [`CUmemAllocationType`] / [`CUmemAllocationHandleType`] when interpreting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct CUmemAllocationProp {
+    /// Allocation type; see [`CUmemAllocationType`].
+    pub alloc_type: u32,
+    /// Bitfield of OS handle types to export; see
+    /// [`CUmemAllocationHandleType`].
+    pub requested_handle_types: u32,
+    /// Physical location of the allocation.
+    pub location: CUmemLocation,
+    /// Win32 security attributes pointer; null on non-Windows platforms or
+    /// when no specific security descriptor is required.
+    pub win32_handle_meta_data: *mut c_void,
+    /// Reserved for future allocation flags; must be `0` on current drivers.
+    pub alloc_flags: u64,
+}
+
+// SAFETY: The struct contains a raw pointer (`win32_handle_meta_data`) that
+// callers are responsible for managing.  The CUDA driver treats the pointer
+// as opaque, so the struct itself is logically Send+Sync.
+unsafe impl Send for CUmemAllocationProp {}
+unsafe impl Sync for CUmemAllocationProp {}
+
+impl Default for CUmemAllocationProp {
+    fn default() -> Self {
+        Self {
+            alloc_type: 0,
+            requested_handle_types: 0,
+            location: CUmemLocation::default(),
+            win32_handle_meta_data: std::ptr::null_mut(),
+            alloc_flags: 0,
+        }
+    }
+}
+
+// =========================================================================
+// CUmemAccessDesc — per-location access permissions for `cuMemSetAccess`
+// =========================================================================
+
+/// Per-location access descriptor for `cuMemSetAccess`.
+///
+/// Mirrors `CUmemAccessDesc` in `cuda.h`.  The `flags` field stores a
+/// [`CUmemAccessFlags`] value as a raw `u32` for FFI safety.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(C)]
+pub struct CUmemAccessDesc {
+    /// Memory location whose access permission is being changed.
+    pub location: CUmemLocation,
+    /// Access flags; see [`CUmemAccessFlags`].
+    pub flags: u32,
+}
+
+// =========================================================================
+// CUmemPoolProps — properties of a stream-ordered memory pool
+// =========================================================================
+
+/// Properties passed to `cuMemPoolCreate`.
+///
+/// Mirrors `CUmemPoolProps` in `cuda.h`.  The trailing `reserved` field is
+/// part of the public ABI: the CUDA driver expects 56 zero bytes there to
+/// preserve forward compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct CUmemPoolProps {
+    /// Allocation type to use when servicing pool requests; see
+    /// [`CUmemAllocationType`].
+    pub alloc_type: u32,
+    /// Bitfield of OS handle types to export; see
+    /// [`CUmemAllocationHandleType`].
+    pub handle_types: u32,
+    /// Physical location backing the pool.
+    pub location: CUmemLocation,
+    /// Win32 security-attributes pointer; null on non-Windows platforms or
+    /// when no specific security descriptor is required.
+    pub win32_security_attributes: *mut c_void,
+    /// Maximum aggregate size (bytes) the pool may hold.  `0` means
+    /// unlimited.
+    pub max_size: usize,
+    /// Reserved padding required by the CUDA ABI; must remain zeroed.
+    pub reserved: [u8; 56],
+}
+
+// SAFETY: The struct contains a raw pointer (`win32_security_attributes`) that
+// callers are responsible for managing.  The CUDA driver treats the pointer
+// as opaque, so the struct itself is logically Send+Sync.
+unsafe impl Send for CUmemPoolProps {}
+unsafe impl Sync for CUmemPoolProps {}
+
+impl Default for CUmemPoolProps {
+    fn default() -> Self {
+        Self {
+            alloc_type: 0,
+            handle_types: 0,
+            location: CUmemLocation::default(),
+            win32_security_attributes: std::ptr::null_mut(),
+            max_size: 0,
+            reserved: [0u8; 56],
+        }
+    }
+}
+
+// =========================================================================
+// CUDA_MEMCPY2D — descriptor for `cuMemcpy2D_v2`
+// =========================================================================
+
+/// Descriptor for a 2-D memory copy executed via `cuMemcpy2D_v2`.
+///
+/// Mirrors `CUDA_MEMCPY2D` in `cuda.h`.  The CUDA driver inspects only the
+/// fields appropriate for the source / destination memory types; the
+/// remaining fields **must** be zeroed.  Use [`CUDA_MEMCPY2D::default`] to
+/// obtain a zero-initialised descriptor and only set the fields you need.
+///
+/// `src_memory_type` and `dst_memory_type` are stored as raw `u32` for FFI
+/// safety; convert to / from [`CUmemorytype`] manually.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct CUDA_MEMCPY2D {
+    /// Source X offset in bytes.
+    pub src_x_in_bytes: usize,
+    /// Source Y offset in rows.
+    pub src_y: usize,
+    /// Source memory type; see [`CUmemorytype`].
+    pub src_memory_type: u32,
+    /// Source host pointer (only valid when `src_memory_type == Host`).
+    pub src_host: *const c_void,
+    /// Source device pointer (only valid when `src_memory_type == Device`).
+    pub src_device: CUdeviceptr,
+    /// Source CUDA array (only valid when `src_memory_type == Array`).
+    pub src_array: crate::ffi::CUarray,
+    /// Source pitch in bytes (`0` selects a tightly-packed layout).
+    pub src_pitch: usize,
+    /// Destination X offset in bytes.
+    pub dst_x_in_bytes: usize,
+    /// Destination Y offset in rows.
+    pub dst_y: usize,
+    /// Destination memory type; see [`CUmemorytype`].
+    pub dst_memory_type: u32,
+    /// Destination host pointer (only valid when `dst_memory_type == Host`).
+    pub dst_host: *mut c_void,
+    /// Destination device pointer (only valid when `dst_memory_type == Device`).
+    pub dst_device: CUdeviceptr,
+    /// Destination CUDA array (only valid when `dst_memory_type == Array`).
+    pub dst_array: crate::ffi::CUarray,
+    /// Destination pitch in bytes (`0` selects a tightly-packed layout).
+    pub dst_pitch: usize,
+    /// Width of the copied region in bytes.
+    pub width_in_bytes: usize,
+    /// Height of the copied region in rows.
+    pub height: usize,
+}
+
+// SAFETY: The struct contains raw pointers and a CUDA array handle; callers
+// are responsible for managing the underlying memory and handles.  Treating
+// the descriptor itself as Send+Sync mirrors the C-side struct, which the
+// driver may inspect from any thread.
+unsafe impl Send for CUDA_MEMCPY2D {}
+unsafe impl Sync for CUDA_MEMCPY2D {}
+
+impl Default for CUDA_MEMCPY2D {
+    fn default() -> Self {
+        Self {
+            src_x_in_bytes: 0,
+            src_y: 0,
+            src_memory_type: 0,
+            src_host: std::ptr::null(),
+            src_device: 0,
+            src_array: crate::ffi::CUarray::default(),
+            src_pitch: 0,
+            dst_x_in_bytes: 0,
+            dst_y: 0,
+            dst_memory_type: 0,
+            dst_host: std::ptr::null_mut(),
+            dst_device: 0,
+            dst_array: crate::ffi::CUarray::default(),
+            dst_pitch: 0,
+            width_in_bytes: 0,
+            height: 0,
+        }
+    }
+}
+
+// =========================================================================
 // Submodules — extracted per refactoring policy (<2000 lines per file)
 // =========================================================================
 
@@ -1154,5 +1482,125 @@ mod tests {
             CUfunction_attribute::PreferredSharedMemoryCarveout as i32,
             9
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // VMM / Pool / Linker FFI types — added by Wave 1
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn test_link_state_handle_is_pointer_sized_and_default_null() {
+        assert_eq!(
+            std::mem::size_of::<CUlinkState>(),
+            std::mem::size_of::<*mut c_void>()
+        );
+        assert!(CUlinkState::default().is_null());
+    }
+
+    #[test]
+    fn test_mem_generic_allocation_handle_is_u64() {
+        assert_eq!(
+            std::mem::size_of::<CUmemGenericAllocationHandle>(),
+            std::mem::size_of::<u64>()
+        );
+        let _: CUmemGenericAllocationHandle = 0u64;
+    }
+
+    #[test]
+    fn test_mem_location_type_repr() {
+        assert_eq!(CUmemLocationType::Invalid as u32, 0);
+        assert_eq!(CUmemLocationType::Device as u32, 1);
+        assert_eq!(CUmemLocationType::Host as u32, 2);
+        assert_eq!(CUmemLocationType::HostNuma as u32, 3);
+        assert_eq!(CUmemLocationType::HostNumaCurrent as u32, 4);
+    }
+
+    #[test]
+    fn test_mem_allocation_type_repr() {
+        assert_eq!(CUmemAllocationType::Invalid as u32, 0);
+        assert_eq!(CUmemAllocationType::Pinned as u32, 1);
+        assert_eq!(CUmemAllocationType::Max as u32, 0x7fff_ffff);
+    }
+
+    #[test]
+    fn test_mem_allocation_handle_type_repr() {
+        assert_eq!(CUmemAllocationHandleType::None as u32, 0);
+        assert_eq!(CUmemAllocationHandleType::PosixFileDescriptor as u32, 1);
+        assert_eq!(CUmemAllocationHandleType::Win32 as u32, 2);
+        assert_eq!(CUmemAllocationHandleType::Win32Kmt as u32, 4);
+        assert_eq!(CUmemAllocationHandleType::Fabric as u32, 8);
+    }
+
+    #[test]
+    fn test_mem_access_flags_repr() {
+        assert_eq!(CUmemAccessFlags::None as u32, 0);
+        assert_eq!(CUmemAccessFlags::Read as u32, 1);
+        assert_eq!(CUmemAccessFlags::ReadWrite as u32, 3);
+        assert_eq!(CUmemAccessFlags::Max as u32, 0x7fff_ffff);
+    }
+
+    #[test]
+    fn test_mem_location_layout() {
+        // Two consecutive 4-byte fields → 8 bytes, alignment 4.
+        assert_eq!(std::mem::size_of::<CUmemLocation>(), 8);
+        assert_eq!(std::mem::align_of::<CUmemLocation>(), 4);
+        let loc = CUmemLocation::default();
+        assert_eq!(loc.loc_type, 0);
+        assert_eq!(loc.id, 0);
+    }
+
+    #[test]
+    fn test_mem_access_desc_layout() {
+        // CUmemLocation (8) + flags (u32 = 4) → 12 bytes, alignment 4.
+        assert_eq!(std::mem::size_of::<CUmemAccessDesc>(), 12);
+        assert_eq!(std::mem::align_of::<CUmemAccessDesc>(), 4);
+        let desc = CUmemAccessDesc::default();
+        assert_eq!(desc.flags, 0);
+    }
+
+    #[test]
+    fn test_mem_allocation_prop_default_zeroed() {
+        let prop = CUmemAllocationProp::default();
+        assert_eq!(prop.alloc_type, 0);
+        assert_eq!(prop.requested_handle_types, 0);
+        assert_eq!(prop.location.loc_type, 0);
+        assert_eq!(prop.location.id, 0);
+        assert!(prop.win32_handle_meta_data.is_null());
+        assert_eq!(prop.alloc_flags, 0);
+    }
+
+    #[test]
+    fn test_mem_pool_props_default_zeroed_and_padded() {
+        let props = CUmemPoolProps::default();
+        assert_eq!(props.alloc_type, 0);
+        assert_eq!(props.handle_types, 0);
+        assert_eq!(props.location.loc_type, 0);
+        assert_eq!(props.location.id, 0);
+        assert!(props.win32_security_attributes.is_null());
+        assert_eq!(props.max_size, 0);
+        assert!(props.reserved.iter().all(|&b| b == 0));
+        // The CUDA ABI mandates 56 reserved bytes.
+        assert_eq!(props.reserved.len(), 56);
+    }
+
+    #[test]
+    fn test_memcpy2d_default_zeroed() {
+        let m = CUDA_MEMCPY2D::default();
+        assert_eq!(m.src_x_in_bytes, 0);
+        assert_eq!(m.src_y, 0);
+        assert_eq!(m.src_memory_type, 0);
+        assert!(m.src_host.is_null());
+        assert_eq!(m.src_device, 0);
+        assert!(m.src_array.is_null());
+        assert_eq!(m.src_pitch, 0);
+        assert_eq!(m.dst_x_in_bytes, 0);
+        assert_eq!(m.dst_y, 0);
+        assert_eq!(m.dst_memory_type, 0);
+        assert!(m.dst_host.is_null());
+        assert_eq!(m.dst_device, 0);
+        assert!(m.dst_array.is_null());
+        assert_eq!(m.dst_pitch, 0);
+        assert_eq!(m.width_in_bytes, 0);
+        assert_eq!(m.height, 0);
     }
 }

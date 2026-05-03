@@ -229,8 +229,11 @@ mod tests {
         let mut params = vec![ParamTensor::new(vec![3.0_f32], "x")];
         for _ in 0..3 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         assert!(params[0].data[0] < 3.0, "RAdam should reduce param");
     }
@@ -242,8 +245,11 @@ mod tests {
         let mut params = vec![ParamTensor::new(vec![3.0_f32], "x")];
         for _ in 0..500 {
             let x = params[0].data[0];
-            params[0].set_grad(vec![2.0 * x]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![2.0 * x])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         let x = params[0].data[0].abs();
         assert!(x < 0.5, "RAdam should converge x→0, |x|={x}");
@@ -255,8 +261,11 @@ mod tests {
         // → SGD warmup path
         let mut opt = GpuRAdam::new(0.01).with_beta2(0.9999);
         let mut params = vec![ParamTensor::new(vec![1.0_f32], "x")];
-        params[0].set_grad(vec![1.0]).unwrap();
-        opt.step(&mut params).unwrap(); // step 1 — SGD warmup
+        params[0]
+            .set_grad(vec![1.0])
+            .expect("gradient length matches param length");
+        opt.step(&mut params)
+            .expect("optimizer step should succeed"); // step 1 — SGD warmup
         // Just check it doesn't blow up and reduces param
         let x = params[0].data[0];
         assert!(
@@ -272,10 +281,18 @@ mod tests {
         let mut p_wd = vec![ParamTensor::new(vec![2.0_f32], "p")];
         let mut p_no = vec![ParamTensor::new(vec![2.0_f32], "p")];
         for _ in 0..10 {
-            p_wd[0].set_grad(vec![0.1_f32]).unwrap();
-            p_no[0].set_grad(vec![0.1_f32]).unwrap();
-            opt_wd.step(&mut p_wd).unwrap();
-            opt_no.step(&mut p_no).unwrap();
+            p_wd[0]
+                .set_grad(vec![0.1_f32])
+                .expect("gradient length matches param length");
+            p_no[0]
+                .set_grad(vec![0.1_f32])
+                .expect("gradient length matches param length");
+            opt_wd
+                .step(&mut p_wd)
+                .expect("optimizer step should succeed");
+            opt_no
+                .step(&mut p_no)
+                .expect("optimizer step should succeed");
         }
         // With weight decay the param should be smaller
         assert!(
@@ -304,8 +321,11 @@ mod tests {
         let mut opt = GpuRAdam::new(0.01).with_beta2(0.9);
         let mut params = vec![ParamTensor::new(vec![1.0_f32], "p")];
         for _ in 0..4 {
-            params[0].set_grad(vec![0.5]).unwrap();
-            opt.step(&mut params).unwrap();
+            params[0]
+                .set_grad(vec![0.5])
+                .expect("gradient length matches param length");
+            opt.step(&mut params)
+                .expect("optimizer step should succeed");
         }
         assert_eq!(opt.step_count(), 4);
     }

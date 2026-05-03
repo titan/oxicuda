@@ -152,23 +152,23 @@ mod tests {
         let k = b.add_kernel("gemm", 4, 256, 0).fusible(false).finish();
         let dn = b.add_memcpy("dn", MemcpyDir::DeviceToHost, 1024);
         b.chain(&[up, k, dn]);
-        b.build().unwrap()
+        b.build().expect("test graph builds successfully")
     }
 
     #[test]
     fn cuda_graph_capture_no_panic() {
         let g = simple_graph();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
-        let dg = capture(&plan).unwrap();
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
+        let dg = capture(&plan).expect("CUDA graph capture succeeds on valid execution plan");
         assert!(dg.node_count() > 0);
     }
 
     #[test]
     fn cuda_graph_node_count_matches_steps() {
         let g = simple_graph();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
         let step_count = plan.steps.len();
-        let dg = capture(&plan).unwrap();
+        let dg = capture(&plan).expect("CUDA graph capture succeeds on valid execution plan");
         assert_eq!(dg.node_count(), step_count);
     }
 
@@ -176,16 +176,16 @@ mod tests {
     fn cuda_graph_has_dependencies() {
         // Linear chain → must have edges.
         let g = simple_graph();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
-        let dg = capture(&plan).unwrap();
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
+        let dg = capture(&plan).expect("CUDA graph capture succeeds on valid execution plan");
         assert!(dg.dependency_count() > 0);
     }
 
     #[test]
     fn cuda_graph_is_dag_instantiatable() {
         let g = simple_graph();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
-        let dg = capture(&plan).unwrap();
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
+        let dg = capture(&plan).expect("CUDA graph capture succeeds on valid execution plan");
         // The graph should be a valid DAG (instantiate runs topological sort).
         let exec = dg.instantiate();
         assert!(exec.is_ok(), "captured graph must be a valid DAG");
@@ -224,7 +224,7 @@ mod tests {
             kernel_count_fused: 2,
             event_count: 1,
         };
-        let dg = capture(&plan).unwrap();
+        let dg = capture(&plan).expect("CUDA graph capture succeeds on valid execution plan");
         // The EventWait node must depend on the EventRecord node.
         assert!(dg.dependency_count() >= 1);
         let exec = dg.instantiate();
@@ -235,9 +235,9 @@ mod tests {
     fn cuda_graph_memset_node_recorded() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         b.add_memset("zero", 4096, 0x00);
-        let g = b.build().unwrap();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
-        let dg = capture(&plan).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
+        let dg = capture(&plan).expect("CUDA graph capture succeeds on valid execution plan");
         assert_eq!(dg.node_count(), 1);
         // Should be a Memset node in the driver graph.
         let nodes = dg.nodes();
@@ -251,9 +251,9 @@ mod tests {
     fn cuda_graph_barrier_becomes_empty_node() {
         let mut b = GraphBuilder::new().with_auto_infer_edges(false);
         b.add_barrier("sync");
-        let g = b.build().unwrap();
-        let plan = ExecutionPlan::build(&g, 1).unwrap();
-        let dg = capture(&plan).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let plan = ExecutionPlan::build(&g, 1).expect("execution plan builds from valid graph");
+        let dg = capture(&plan).expect("CUDA graph capture succeeds on valid execution plan");
         let nodes = dg.nodes();
         // Barrier → Empty node.
         assert!(matches!(nodes[0], oxicuda_driver::graph::GraphNode::Empty));

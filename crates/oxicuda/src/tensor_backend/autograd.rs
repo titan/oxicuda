@@ -1441,9 +1441,11 @@ mod tests {
     fn test_backward_add() {
         // y = a + b, dy/da = 1, dy/db = 1
         let mut tape = AutogradTape::new();
-        let mut a = GpuTensor::from_host_f64(&[2.0, 3.0], &[2], 0).unwrap();
+        let mut a = GpuTensor::from_host_f64(&[2.0, 3.0], &[2], 0)
+            .expect("GpuTensor creation from host data should succeed");
         a.set_requires_grad(true);
-        let mut b = GpuTensor::from_host_f64(&[4.0, 5.0], &[2], 0).unwrap();
+        let mut b = GpuTensor::from_host_f64(&[4.0, 5.0], &[2], 0)
+            .expect("GpuTensor creation from host data should succeed");
         b.set_requires_grad(true);
 
         let c_data: Vec<f64> = a
@@ -1486,7 +1488,8 @@ mod tests {
         tensors.insert(c.id(), c);
         tensors.insert(loss.id(), loss.clone());
 
-        tape.backward(loss.id(), &mut tensors).unwrap();
+        tape.backward(loss.id(), &mut tensors)
+            .expect("backward pass should succeed with valid graph");
 
         let a_grad = tensors.get(&TensorId(1)).map(|t| t.grad());
         // Gradient of sum(a+b) w.r.t. a and b should be [1, 1]
@@ -1500,9 +1503,11 @@ mod tests {
     fn test_backward_mul() {
         // y = a * b => dy/da = b, dy/db = a
         let mut tape = AutogradTape::new();
-        let mut a = GpuTensor::from_host_f64(&[3.0], &[1], 0).unwrap();
+        let mut a = GpuTensor::from_host_f64(&[3.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
         a.set_requires_grad(true);
-        let mut b = GpuTensor::from_host_f64(&[5.0], &[1], 0).unwrap();
+        let mut b = GpuTensor::from_host_f64(&[5.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
         b.set_requires_grad(true);
 
         let c_val = a.host_data()[0] * b.host_data()[0];
@@ -1526,7 +1531,8 @@ mod tests {
         tensors.insert(b_id, b);
         tensors.insert(c_id, c);
 
-        tape.backward(c_id, &mut tensors).unwrap();
+        tape.backward(c_id, &mut tensors)
+            .expect("backward pass should succeed with valid graph");
 
         // da = b = 5, db = a = 3
         let a_grad = tensors.get(&a_id).and_then(|t| t.grad());
@@ -1558,7 +1564,8 @@ mod tests {
     #[test]
     fn test_backward_sigmoid() {
         let mut tape = AutogradTape::new();
-        let mut a = GpuTensor::from_host_f64(&[0.0], &[1], 0).unwrap();
+        let mut a = GpuTensor::from_host_f64(&[0.0], &[1], 0)
+            .expect("GpuTensor creation from host data should succeed");
         a.set_requires_grad(true);
 
         let sig_val = 1.0 / (1.0 + (-a.host_data()[0]).exp());
@@ -1578,7 +1585,8 @@ mod tests {
         tensors.insert(a_id, a);
         tensors.insert(c_id, c);
 
-        tape.backward(c_id, &mut tensors).unwrap();
+        tape.backward(c_id, &mut tensors)
+            .expect("backward pass should succeed with valid graph");
 
         // sigmoid'(0) = 0.5 * 0.5 = 0.25
         let a_grad = tensors.get(&a_id).and_then(|t| t.grad());
@@ -1590,7 +1598,8 @@ mod tests {
     #[test]
     fn test_backward_relu() {
         let mut tape = AutogradTape::new();
-        let mut a = GpuTensor::from_host_f64(&[-1.0, 2.0, 0.0], &[3], 0).unwrap();
+        let mut a = GpuTensor::from_host_f64(&[-1.0, 2.0, 0.0], &[3], 0)
+            .expect("GpuTensor creation from host data should succeed");
         a.set_requires_grad(true);
 
         let relu_data: Vec<f64> = a.host_data().iter().map(|&x| x.max(0.0)).collect();
@@ -1639,7 +1648,8 @@ mod tests {
         tensors.insert(c.id(), c);
         tensors.insert(loss.id(), loss.clone());
 
-        tape.backward(loss.id(), &mut tensors).unwrap();
+        tape.backward(loss.id(), &mut tensors)
+            .expect("backward pass should succeed with valid graph");
 
         let a_grad = tensors.get(&a_id).and_then(|t| t.grad());
         if let Some(g) = a_grad {
@@ -1658,11 +1668,13 @@ mod tests {
             &[1, 1, 3, 3],
             0,
         )
-        .unwrap();
+        .expect("operation should succeed with valid inputs");
         input.set_requires_grad(true);
-        let weight = GpuTensor::from_host_f64(&[1.0, 1.0, 1.0, 1.0], &[1, 1, 2, 2], 0).unwrap();
+        let weight = GpuTensor::from_host_f64(&[1.0, 1.0, 1.0, 1.0], &[1, 1, 2, 2], 0)
+            .expect("GpuTensor creation from host data should succeed");
 
-        let output = conv2d(&input, &weight, None, (1, 1), (0, 0), Some(&mut tape)).unwrap();
+        let output = conv2d(&input, &weight, None, (1, 1), (0, 0), Some(&mut tape))
+            .expect("operation should succeed with valid inputs");
         let input_id = input.id();
         let output_id = output.id();
 
@@ -1670,13 +1682,14 @@ mod tests {
         tensors.insert(input_id, input);
         tensors.insert(output_id, output);
 
-        tape.backward(output_id, &mut tensors).unwrap();
+        tape.backward(output_id, &mut tensors)
+            .expect("backward pass should succeed with valid graph");
 
         let input_grad = tensors
             .get(&input_id)
             .and_then(GpuTensor::grad)
             .map(|grad| grad.host_data().to_vec())
-            .unwrap();
+            .expect("operation should succeed with valid inputs");
         assert_eq!(
             input_grad,
             vec![1.0, 2.0, 1.0, 2.0, 4.0, 2.0, 1.0, 2.0, 1.0]

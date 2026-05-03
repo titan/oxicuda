@@ -18,7 +18,7 @@
 //!
 //! b.dep(upload, compute).dep(compute, download);
 //!
-//! let graph = b.build().unwrap();
+//! let graph = b.build().expect("graph builder produces a valid DAG");
 //! assert_eq!(graph.node_count(), 3);
 //! ```
 
@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn builder_empty_build() {
         let b = GraphBuilder::new();
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         assert!(g.is_empty());
     }
 
@@ -365,9 +365,12 @@ mod tests {
         let buf1 = b.alloc_buffer("output", 2048);
         assert_eq!(buf0, BufferId(0));
         assert_eq!(buf1, BufferId(1));
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         assert_eq!(g.buffer_count(), 2);
-        assert_eq!(g.buffer(buf0).unwrap().size_bytes, 1024);
+        assert_eq!(
+            g.buffer(buf0).expect("buf0 registered in graph").size_bytes,
+            1024
+        );
     }
 
     #[test]
@@ -377,7 +380,7 @@ mod tests {
         let k1 = b.add_kernel("k1", 4, 256, 0).finish();
         let k2 = b.add_kernel("k2", 4, 256, 0).finish();
         b.chain(&[k0, k1, k2]);
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         assert_eq!(g.node_count(), 3);
         assert_eq!(g.edge_count(), 2);
         assert!(g.is_reachable(k0, k2));
@@ -387,17 +390,22 @@ mod tests {
     fn builder_kernel_fusible_flag() {
         let mut b = GraphBuilder::new();
         let id = b.add_kernel("custom", 1, 32, 0).fusible(false).finish();
-        let g = b.build().unwrap();
-        assert!(!g.node(id).unwrap().kind.is_fusible());
+        let g = b.build().expect("test graph builds successfully");
+        assert!(
+            !g.node(id)
+                .expect("node registered in graph")
+                .kind
+                .is_fusible()
+        );
     }
 
     #[test]
     fn builder_add_memcpy() {
         let mut b = GraphBuilder::new();
         let up = b.add_memcpy("upload", MemcpyDir::HostToDevice, 4096);
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         assert_eq!(g.node_count(), 1);
-        let node = g.node(up).unwrap();
+        let node = g.node(up).expect("memcpy node registered in graph");
         assert!(node.kind.is_memory_op());
     }
 
@@ -405,8 +413,8 @@ mod tests {
     fn builder_add_memset() {
         let mut b = GraphBuilder::new();
         let ms = b.add_memset("zero", 8192, 0x00);
-        let g = b.build().unwrap();
-        let node = g.node(ms).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let node = g.node(ms).expect("memset node registered in graph");
         if let NodeKind::Memset { value, .. } = node.kind {
             assert_eq!(value, 0x00);
         } else {
@@ -421,7 +429,7 @@ mod tests {
         let ev = b.add_event_record("ev0");
         let ew = b.add_event_wait("ew0");
         b.chain(&[barrier, ev, ew]);
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         assert_eq!(g.node_count(), 3);
     }
 
@@ -435,7 +443,7 @@ mod tests {
         let sink = b.add_barrier("sink");
         b.fan_out(src, &[a, c, d]);
         b.fan_in(&[a, c, d], sink);
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         assert_eq!(g.edge_count(), 6);
         assert!(g.is_reachable(src, sink));
         assert_eq!(g.sources(), vec![src]);
@@ -449,7 +457,7 @@ mod tests {
         let b_node = b.add_barrier("b");
         let c = b.add_barrier("c");
         b.dep(a, b_node).dep(b_node, c);
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         assert_eq!(g.edge_count(), 2);
     }
 
@@ -461,7 +469,7 @@ mod tests {
         let reader = b.add_barrier("reader");
         b.set_outputs(writer, [buf]);
         b.set_inputs(reader, [buf]);
-        let g = b.build().unwrap(); // auto_infer_edges=true
+        let g = b.build().expect("test graph builds successfully"); // auto_infer_edges=true
         assert!(g.is_reachable(writer, reader));
     }
 
@@ -473,7 +481,7 @@ mod tests {
         let reader = b.add_barrier("reader");
         b.set_outputs(writer, [buf]);
         b.set_inputs(reader, [buf]);
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         // No inferred edges, so no reachability unless explicitly added.
         assert!(!g.is_reachable(writer, reader));
     }
@@ -485,16 +493,18 @@ mod tests {
             .with_name("raw_barrier")
             .with_cost(42);
         let id = b.add_raw(n);
-        let g = b.build().unwrap();
-        assert_eq!(g.node(id).unwrap().cost_hint, 42);
+        let g = b.build().expect("test graph builds successfully");
+        assert_eq!(g.node(id).expect("node registered in graph").cost_hint, 42);
     }
 
     #[test]
     fn builder_add_host_callback() {
         let mut b = GraphBuilder::new();
         let cb = b.add_host_callback("sync_point");
-        let g = b.build().unwrap();
-        if let NodeKind::HostCallback { label } = &g.node(cb).unwrap().kind {
+        let g = b.build().expect("test graph builds successfully");
+        if let NodeKind::HostCallback { label } =
+            &g.node(cb).expect("callback node registered in graph").kind
+        {
             assert_eq!(label, "sync_point");
         } else {
             panic!("expected HostCallback");
@@ -509,8 +519,8 @@ mod tests {
         let node = b.add_barrier("n");
         b.set_inputs(node, [buf0]);
         b.set_outputs(node, [buf1]);
-        let g = b.build().unwrap();
-        let n = g.node(node).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let n = g.node(node).expect("barrier node registered in graph");
         assert!(n.inputs.contains(&buf0));
         assert!(n.outputs.contains(&buf1));
     }
@@ -519,8 +529,10 @@ mod tests {
     fn builder_add_kernel_with_3d_grid() {
         let mut b = GraphBuilder::new();
         let id = b.add_kernel_3d("conv2d", (4, 4, 1), (8, 8, 1), 0);
-        let g = b.build().unwrap();
-        if let NodeKind::KernelLaunch { config, .. } = g.node(id).unwrap().kind {
+        let g = b.build().expect("test graph builds successfully");
+        if let NodeKind::KernelLaunch { config, .. } =
+            g.node(id).expect("kernel node registered in graph").kind
+        {
             assert_eq!(config.grid, (4, 4, 1));
             assert_eq!(config.block, (8, 8, 1));
         } else {
@@ -532,8 +544,12 @@ mod tests {
     fn builder_alloc_external_buffer() {
         let mut b = GraphBuilder::new();
         let id = b.alloc_external_buffer("model_weights", 65536);
-        let g = b.build().unwrap();
-        assert!(g.buffer(id).unwrap().external);
+        let g = b.build().expect("test graph builds successfully");
+        assert!(
+            g.buffer(id)
+                .expect("external buffer registered in graph")
+                .external
+        );
     }
 
     #[test]
@@ -547,8 +563,8 @@ mod tests {
             .outputs([out])
             .cost(100)
             .finish();
-        let g = b.build().unwrap();
-        let n = g.node(id).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let n = g.node(id).expect("node registered in graph");
         assert_eq!(n.cost_hint, 100);
         assert!(n.inputs.contains(&inp));
         assert!(n.outputs.contains(&out));

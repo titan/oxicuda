@@ -500,7 +500,9 @@ mod tests {
     #[test]
     fn sort_ptx_has_bitonic_network_and_bar_sync() {
         let t = MergeSortTemplate::new(cfg(PtxType::U32));
-        let ptx = t.generate_sort_blocks_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_sort_blocks_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("bsort_smem"), "PTX: {ptx}");
         assert!(ptx.contains("bar.sync 0"), "PTX: {ptx}");
         assert!(ptx.contains("xor.b32"), "PTX: {ptx}"); // partner = tid XOR j
@@ -511,7 +513,9 @@ mod tests {
     #[test]
     fn sort_ptx_has_global_load_and_store() {
         let t = MergeSortTemplate::new(cfg(PtxType::U32));
-        let ptx = t.generate_sort_blocks_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_sort_blocks_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("ld.global.u32"), "PTX: {ptx}");
         assert!(ptx.contains("st.global.u32"), "PTX: {ptx}");
     }
@@ -519,14 +523,18 @@ mod tests {
     #[test]
     fn sort_ptx_f32_uses_setp_lt_f32() {
         let t = MergeSortTemplate::new(cfg(PtxType::F32));
-        let ptx = t.generate_sort_blocks_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_sort_blocks_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("setp.lt.f32"), "PTX: {ptx}");
     }
 
     #[test]
     fn merge_ptx_has_binary_search_loop() {
         let t = MergeSortTemplate::new(cfg(PtxType::U32));
-        let ptx = t.generate_merge_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_merge_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("MERGE_BSEARCH"), "PTX: {ptx}");
         assert!(ptx.contains("MERGE_BSEARCH_DONE"), "PTX: {ptx}");
         assert!(ptx.contains("param_merge_len"), "PTX: {ptx}");
@@ -535,7 +543,9 @@ mod tests {
     #[test]
     fn merge_ptx_has_global_memory_accesses() {
         let t = MergeSortTemplate::new(cfg(PtxType::F32));
-        let ptx = t.generate_merge_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_merge_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("ld.global.f32"), "PTX: {ptx}");
         assert!(ptx.contains("st.global.f32"), "PTX: {ptx}");
     }
@@ -543,7 +553,9 @@ mod tests {
     #[test]
     fn generate_both_kernels_succeeds() {
         let t = MergeSortTemplate::new(cfg(PtxType::U32));
-        let (sort_ptx, merge_ptx) = t.generate(SmVersion::Sm80).unwrap();
+        let (sort_ptx, merge_ptx) = t
+            .generate(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(!sort_ptx.is_empty());
         assert!(!merge_ptx.is_empty());
     }
@@ -551,7 +563,9 @@ mod tests {
     #[test]
     fn sort_ptx_u64_uses_8byte_elem_size() {
         let t = MergeSortTemplate::new(cfg(PtxType::U64));
-        let ptx = t.generate_sort_blocks_kernel(SmVersion::Sm80).unwrap();
+        let ptx = t
+            .generate_sort_blocks_kernel(SmVersion::Sm80)
+            .expect("PTX generation should succeed in test");
         assert!(ptx.contains("ld.global.u64"), "PTX: {ptx}");
         assert!(ptx.contains("st.global.u64"), "PTX: {ptx}");
     }

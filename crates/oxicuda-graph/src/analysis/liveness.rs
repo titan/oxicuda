@@ -276,7 +276,7 @@ mod tests {
         b.set_outputs(writer, [buf]);
         b.set_inputs(reader, [buf]);
         b.dep(writer, reader);
-        let g = b.build().unwrap();
+        let g = b.build().expect("test graph builds successfully");
         (g, buf, writer, reader)
     }
 
@@ -289,11 +289,19 @@ mod tests {
     #[test]
     fn liveness_buffer_def_and_use() {
         let (g, buf, writer, reader) = build_linear_graph();
-        let la = analyse(&g).unwrap();
-        let iv = la.interval(buf).unwrap();
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
+        let iv = la
+            .interval(buf)
+            .expect("buffer registered in liveness analysis");
         let order = &la.order;
-        let wpos = order.iter().position(|&x| x == writer).unwrap();
-        let rpos = order.iter().position(|&x| x == reader).unwrap();
+        let wpos = order
+            .iter()
+            .position(|&x| x == writer)
+            .expect("writer node present in topological order");
+        let rpos = order
+            .iter()
+            .position(|&x| x == reader)
+            .expect("reader node present in topological order");
         assert_eq!(iv.def_pos, Some(wpos));
         assert_eq!(iv.last_use_pos, Some(rpos));
         assert!(!iv.is_dead());
@@ -305,9 +313,11 @@ mod tests {
         let buf = b.alloc_buffer("dead", 512);
         let writer = b.add_barrier("w");
         b.set_outputs(writer, [buf]);
-        let g = b.build().unwrap();
-        let la = analyse(&g).unwrap();
-        let iv = la.interval(buf).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
+        let iv = la
+            .interval(buf)
+            .expect("buffer registered in liveness analysis");
         assert!(iv.is_dead());
     }
 
@@ -317,8 +327,8 @@ mod tests {
         let ext = b.alloc_external_buffer("ext", 65536);
         let reader = b.add_barrier("r");
         b.set_inputs(reader, [ext]);
-        let g = b.build().unwrap();
-        let la = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
         // External buffer should not count toward live bytes.
         assert_eq!(la.max_live_bytes(), 0);
     }
@@ -336,8 +346,8 @@ mod tests {
         b.set_outputs(bnode, [buf1]);
         b.set_inputs(c, [buf0, buf1]);
         b.dep(a, c).dep(bnode, c);
-        let g = b.build().unwrap();
-        let la = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
         let pairs = la.interference_pairs();
         // buf0 and buf1 both live until c, so they interfere.
         assert!(pairs.contains(&(BufferId(0), BufferId(1))));
@@ -364,11 +374,15 @@ mod tests {
         b.set_outputs(n2, [buf1]);
         b.set_inputs(n3, [buf1]);
         b.chain(&[n0, n1, n2, n3]);
-        let g = b.build().unwrap();
-        let la = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
         // buf0: [0,1], buf1: [2,3] — no overlap.
-        let iv0 = la.interval(buf0).unwrap();
-        let iv1 = la.interval(buf1).unwrap();
+        let iv0 = la
+            .interval(buf0)
+            .expect("buf0 registered in liveness analysis");
+        let iv1 = la
+            .interval(buf1)
+            .expect("buf1 registered in liveness analysis");
         assert!(!iv0.overlaps(iv1));
         assert!(la.interference_pairs().is_empty());
     }
@@ -376,7 +390,7 @@ mod tests {
     #[test]
     fn liveness_max_live_count() {
         let (g, _buf, _w, _r) = build_linear_graph();
-        let la = analyse(&g).unwrap();
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
         // Only one buffer, so max live = 1.
         assert_eq!(la.max_live_count(), 1);
     }
@@ -384,7 +398,7 @@ mod tests {
     #[test]
     fn liveness_max_live_bytes() {
         let (g, _buf, _w, _r) = build_linear_graph();
-        let la = analyse(&g).unwrap();
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
         // One internal buffer of 1024 bytes.
         assert_eq!(la.max_live_bytes(), 1024);
     }
@@ -399,8 +413,8 @@ mod tests {
         b.set_outputs(n0, [buf0]);
         b.set_outputs(n1, [buf1]);
         b.dep(n0, n1);
-        let g = b.build().unwrap();
-        let la = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
         let sorted = la.sorted_by_start();
         // buf0 defined at step 0, buf1 at step 1 → buf0 first.
         if sorted.len() == 2 {
@@ -411,8 +425,10 @@ mod tests {
     #[test]
     fn liveness_interval_length() {
         let (g, buf, _w, _r) = build_linear_graph();
-        let la = analyse(&g).unwrap();
-        let iv = la.interval(buf).unwrap();
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
+        let iv = la
+            .interval(buf)
+            .expect("buffer registered in liveness analysis");
         // writer at 0, reader at 1 → length = 1.
         assert_eq!(iv.length(), 1);
     }
@@ -426,8 +442,8 @@ mod tests {
             b.set_outputs(w, [dead]);
             w
         };
-        let g = b.build().unwrap();
-        let la = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
         let dead_list = la.dead_buffers();
         assert!(dead_list.contains(&dead));
     }
@@ -439,8 +455,8 @@ mod tests {
         b.alloc_buffer("b", 2);
         b.alloc_buffer("c", 4);
         b.add_barrier("n");
-        let g = b.build().unwrap();
-        let la = analyse(&g).unwrap();
+        let g = b.build().expect("test graph builds successfully");
+        let la = analyse(&g).expect("liveness analysis succeeds on valid graph");
         // 3 buffers registered.
         assert_eq!(la.all_intervals().count(), 3);
     }

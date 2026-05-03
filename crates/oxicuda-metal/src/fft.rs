@@ -117,12 +117,12 @@ pub enum MetalFftDirection {
 /// use oxicuda_metal::fft::{MetalFftDirection, MetalFftPlan};
 /// use num_complex::Complex;
 ///
-/// let plan = MetalFftPlan::new(1024, 1).unwrap();
+/// let plan = MetalFftPlan::new(1024, 1).expect("valid n and batch");
 /// let input: Vec<Complex<f32>> = (0..1024)
 ///     .map(|i| Complex::new(i as f32, 0.0))
 ///     .collect();
 /// let mut output = vec![Complex::new(0.0f32, 0.0); 1024];
-/// plan.execute(&input, &mut output, MetalFftDirection::Forward).unwrap();
+/// plan.execute(&input, &mut output, MetalFftDirection::Forward).expect("execute should succeed");
 /// ```
 pub struct MetalFftPlan {
     /// FFT size — always a power of 2.
@@ -644,7 +644,8 @@ mod tests {
     #[test]
     #[cfg(not(target_os = "macos"))]
     fn execute_wrong_input_length() {
-        let plan = MetalFftPlan::new(8, 1).unwrap();
+        let plan = MetalFftPlan::new(8, 1)
+            .expect("FFT plan creation should succeed for valid power-of-2 size");
         let input = vec![Complex::new(0.0f32, 0.0); 7]; // wrong: should be 8
         let mut output = vec![Complex::new(0.0f32, 0.0); 8];
         assert!(matches!(
@@ -656,7 +657,8 @@ mod tests {
     #[test]
     #[cfg(not(target_os = "macos"))]
     fn execute_wrong_output_length() {
-        let plan = MetalFftPlan::new(8, 1).unwrap();
+        let plan = MetalFftPlan::new(8, 1)
+            .expect("FFT plan creation should succeed for valid power-of-2 size");
         let input = vec![Complex::new(0.0f32, 0.0); 8];
         let mut output = vec![Complex::new(0.0f32, 0.0); 7]; // wrong: should be 8
         assert!(matches!(
@@ -775,7 +777,8 @@ mod tests {
     #[test]
     #[cfg(not(target_os = "macos"))]
     fn execute_unsupported_platform() {
-        let plan = MetalFftPlan::new(8, 1).unwrap();
+        let plan = MetalFftPlan::new(8, 1)
+            .expect("FFT plan creation should succeed for valid power-of-2 size");
         let input = vec![Complex::new(0.0f32, 0.0); 8];
         let mut output = vec![Complex::new(0.0f32, 0.0); 8];
         assert!(matches!(
