@@ -1,0 +1,28 @@
+[package]
+name         = "oxicuda-geometry3d"
+description  = "3D geometry, point-cloud, mesh, and Gaussian-splatting primitives for OxiCUDA: FPS/kNN/KD-tree, PointNet/PointNet++/DGCNN/Point-Transformer, sparse 3D conv, chamfer/EMD, ICP, 3D Gaussian splatting — pure Rust, zero CUDA SDK dependency."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+keywords   = ["gpu", "point-cloud", "geometry", "pointnet", "gaussian-splatting"]
+categories = ["science", "algorithms"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name    = "geom3d_ops"
+harness = false

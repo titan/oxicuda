@@ -8,7 +8,7 @@ license.workspace      = true
 repository.workspace   = true
 authors.workspace      = true
 readme                 = "README.md"
-keywords = ["gpu", "neural-architecture-search", "darts", "nas", "automl"]
+keywords = ["gpu", "architecture-search", "darts", "nas", "automl"]
 categories = ["science", "algorithms"]
 
 [package.metadata.docs.rs]
@@ -20,3 +20,10 @@ workspace = true
 
 [dependencies]
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name    = "nas_ops"
+harness = false

@@ -1,0 +1,23 @@
+[package]
+name = "oxicuda-meta"
+description = "Meta-learning algorithm primitives for OxiCUDA — MAML, FOMAML, ANIL, Reptile, ProtoNet, MatchingNet, RelationNet"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["gpu", "meta-learning", "few-shot", "maml", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "meta_ops"
+harness = false

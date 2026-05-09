@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-anomaly"
+description = "Anomaly detection primitives for OxiCUDA — DeepSVDD, AE/VAE reconstruction, LOF, COPOD, isolation scoring, statistical methods, ensemble"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "anomaly-detection", "outlier", "deep-learning", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "anomaly_ops"
+harness = false

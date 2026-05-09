@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-08
+
+### Added
+
+- `oxicuda-blas`: Tensor Core fast path for SYRK — triangle-masked GEMM kernel that eliminates redundant symmetric writes while hitting Tensor Core hardware units (`crates/oxicuda-blas/src/level3/syrk.rs`, `syr2k.rs`)
+- Vol.26 `oxicuda-adversarial` (Adversarial robustness: attack generation, adversarial training primitives)
+- Vol.27 `oxicuda-ssl` (Self-Supervised Learning: contrastive, masked-autoencoder, and distillation scaffolding)
+- Vol.28 `oxicuda-continual` (Continual Learning: PackNet architecture, task-incremental training, forgetting mitigation)
+- Vol.29 `oxicuda-multimodal` (Multimodal Learning: cross-modal fusion, shared-encoder scaffolding)
+- Vol.30 `oxicuda-geometry3d` (3-D Geometry: point-cloud ops, mesh primitives, spatial indexing)
+- Vol.31 `oxicuda-pinn` (Physics-Informed Neural Networks: PDE loss terms, residual sampling)
+- Vol.32 `oxicuda-ann` (Approximate Nearest Neighbour: flat / IVF / IVFPQ / HNSW / LSH / PQ / KNN-graph, Hamming / L2 / inner-product distances, SQ4/SQ8 quantizers, k-NN heap select)
+- Vol.33 `oxicuda-anomaly` (Anomaly Detection: Mahalanobis / COPOD density estimators, kNN score, LOF)
+- Vol.34 `oxicuda-causal` (Causal Inference: do-calculus primitives, causal graph scaffolding)
+- Vol.35 `oxicuda-meta` (Meta-Learning: MAML / Prototypical-Network scaffolding)
+- Vol.36 `oxicuda-moe` (Mixture-of-Experts: top-k routing, expert dispatch, load-balancing loss)
+- Vol.37 `oxicuda-nerf` (Neural Radiance Fields: ray-marching primitives, positional encoding, volume rendering)
+- Vol.38 `oxicuda-quantum` (Quantum-Classical Hybrid: qubit-state simulation primitives, variational circuit scaffolding)
+- Vol.39 `oxicuda-recsys` (Recommender Systems: collaborative filtering, embedding lookup, ranking loss)
+- Vol.40 `oxicuda-rlhf` (RLHF: reward-model scaffolding, PPO/DPO wrappers, KL-penalty helpers)
+- Vol.41 `oxicuda-tabular` (Tabular ML: feature encoding, gradient-boosted tree scaffolding, TabNet blocks)
+
 ## [0.1.5] - 2026-05-03
 
 ### Added

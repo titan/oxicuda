@@ -11,8 +11,6 @@ use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
 use crate::types::{FillMode, GpuFloat, MatrixDesc, MatrixDescMut, Transpose};
 
-use super::syrk_tc;
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -99,24 +97,23 @@ pub fn syr2k<T: GpuFloat>(
         return Ok(());
     }
 
-    // Check if Tensor Core path is applicable (SM >= 80, n >= 32).
-    // For SYR2K the TC path runs two triangle-masked GEMM passes:
-    //   Pass 1: C = alpha * op(A) * op(B)^T + beta * C  (triangle-masked)
-    //   Pass 2: C = alpha * op(B) * op(A)^T + 1.0 * C   (triangle-masked)
-    {
-        let sm = handle.sm_version();
-        if syrk_tc::is_tc_applicable(sm, n) && fill_mode != FillMode::Full {
-            let tile = syrk_tc::syrk_tc_tile_config(sm, n);
-            let config =
-                syrk_tc::SyrkTcConfig::new(tile.tile_m, tile.tile_n, tile.tile_k, sm, fill_mode);
-            // Generate the TC kernel PTX for both passes.
-            let _tc_kernel = syrk_tc::generate_syrk_tc_ptx(&config);
-            // TODO: Launch two TC kernel invocations (one per GEMM pass)
-            // when the launch infrastructure supports triangle-masked
-            // GEMM dispatch. Until then, fall through to the standard
-            // two-GEMM path below.
-        }
-    }
+    // Tensor Core fast path — not yet implemented for SYR2K.
+    //
+    // SYR2K requires two triangle-masked GEMM passes over *distinct* operands:
+    //   Pass 1: C = alpha * op(A) * op(B)^T + beta * C   (triangle-masked, fill_mode)
+    //   Pass 2: C = alpha * op(B) * op(A)^T + 1.0   * C  (triangle-masked, fill_mode)
+    //
+    // The existing `syrk_tc::generate_syrk_tc_ptx` kernel accepts a single
+    // data pointer `ptr_a` and computes `A * A^T` (both column loads use the
+    // same pointer).  Reusing it with B-as-A on the second pass would compute
+    // `A*A^T + B*B^T` instead of the correct `A*B^T + B*A^T`.
+    //
+    // To support a TC fast path here, a new `generate_syr2k_tc_ptx` function
+    // must be added to `syrk_tc.rs` that accepts two device pointers (`ptr_a`,
+    // `ptr_b`) and performs the cross-product column load in the epilogue.
+    // Until that kernel exists this falls through to the two-GEMM path below.
+    // fill_mode will be used once the TC kernel supports it.
+    let _ = fill_mode;
 
     // Fallback: SYR2K = alpha * A * B^T + alpha * B * A^T + beta * C
     // Decompose into two GEMM calls:

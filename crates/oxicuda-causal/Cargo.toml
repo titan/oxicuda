@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-causal"
+description = "Causal-inference primitives for OxiCUDA — NOTEARS, PC/GES, IPW, DML, DragonNet, causal forest, do-calculus, counterfactuals"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "causal-inference", "dag", "causal-discovery", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "causal_ops"
+harness = false

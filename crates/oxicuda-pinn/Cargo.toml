@@ -1,0 +1,28 @@
+[package]
+name         = "oxicuda-pinn"
+description  = "Physics-Informed Neural Networks for OxiCUDA: PINN losses, Neural ODEs/SDEs (adjoint method), Neural Operators (FNO/DeepONet/MWT/GNO), PDE templates, autodiff (dual numbers + tape), adaptive collocation sampling — pure Rust, zero CUDA SDK dependency."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+authors.workspace      = true
+keywords = ["gpu", "pinn", "neural-ode", "neural-operator", "scientific-ml"]
+categories = ["science", "algorithms"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name    = "pinn_ops"
+harness = false

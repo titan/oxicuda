@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-moe"
+description = "Mixture of Experts primitives for OxiCUDA — Switch Transformer, Top-K routing, Expert Choice, Soft MoE, load balancing"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "mixture-of-experts", "moe", "transformer", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "moe_ops"
+harness = false

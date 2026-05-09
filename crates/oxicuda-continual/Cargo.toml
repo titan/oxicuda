@@ -1,0 +1,28 @@
+[package]
+name = "oxicuda-continual"
+description = "Continual and lifelong learning primitives for OxiCUDA: EWC/SI/MAS regularization, PackNet/Piggyback/Progressive architectures, Experience Replay/GEM/A-GEM, DER++, forgetting metrics — pure Rust, zero CUDA SDK dependency."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords = ["gpu", "continual-learning", "lifelong", "ewc", "forgetting"]
+categories = ["science", "algorithms"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "continual_ops"
+harness = false

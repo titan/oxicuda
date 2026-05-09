@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-tabular"
+description = "Tabular deep learning primitives for OxiCUDA — TabNet, FT-Transformer, SAINT, NODE, sparsemax, quantile normalization"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "tabular", "tabnet", "deep-learning", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "tabular_ops"
+harness = false

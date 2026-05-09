@@ -1,0 +1,25 @@
+[package]
+name = "oxicuda-quantum"
+description = "Quantum simulation primitives for OxiCUDA — state-vector simulation, Pauli expectation values, VQE/QAOA, density matrices, Trotter-Suzuki, quantum kernels"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "quantum", "quantum-computing", "simulation", "pure-rust"]
+categories = ["science", "simulation"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+num-complex.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "quantum_ops"
+harness = false

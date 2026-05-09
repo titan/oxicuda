@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-ann"
+description = "Approximate Nearest Neighbor & vector-search primitives for OxiCUDA — HNSW, IVF, Product Quantization, IVFPQ, LSH, k-NN graph, top-K selection"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "ann", "nearest-neighbor", "hnsw", "pure-rust"]
+categories = ["algorithms", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "ann_ops"
+harness = false

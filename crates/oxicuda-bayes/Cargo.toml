@@ -8,7 +8,7 @@ license.workspace      = true
 repository.workspace   = true
 authors.workspace      = true
 readme                 = "README.md"
-keywords = ["gpu", "bayesian", "uncertainty", "variational-inference", "calibration"]
+keywords = ["gpu", "bayesian", "uncertainty", "variational", "calibration"]
 categories = ["science", "algorithms"]
 
 [package.metadata.docs.rs]
@@ -20,3 +20,10 @@ workspace = true
 
 [dependencies]
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name    = "bayes_ops"
+harness = false

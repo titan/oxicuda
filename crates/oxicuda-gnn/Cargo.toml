@@ -8,7 +8,7 @@ license.workspace      = true
 repository.workspace   = true
 authors.workspace      = true
 readme                 = "README.md"
-keywords = ["gpu", "graph-neural-network", "gnn", "gcn", "message-passing"]
+keywords = ["gpu", "graph-neural-net", "gnn", "gcn", "message-passing"]
 categories = ["science", "algorithms"]
 
 [package.metadata.docs.rs]

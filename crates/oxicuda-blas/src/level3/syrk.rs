@@ -7,6 +7,12 @@
 //! delegates to GEMM for the matrix product and applies the symmetry
 //! constraint during the output phase.
 
+use std::sync::Arc;
+
+use oxicuda_driver::Module;
+use oxicuda_launch::{Dim3, Kernel, LaunchParams};
+use oxicuda_ptx::ir::PtxType;
+
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
 use crate::types::{FillMode, GpuFloat, MatrixDesc, MatrixDescMut, Transpose};
@@ -69,7 +75,7 @@ pub fn syrk<T: GpuFloat>(
     let n = c.rows;
 
     // Determine the effective dimensions of A.
-    let (a_n, _a_k) = match trans {
+    let (a_n, a_k) = match trans {
         Transpose::NoTrans => (a.rows, a.cols),
         Transpose::Trans | Transpose::ConjTrans => (a.cols, a.rows),
     };
@@ -84,24 +90,65 @@ pub fn syrk<T: GpuFloat>(
         return Ok(()); // Nothing to do.
     }
 
-    // Check if Tensor Core path is applicable (SM >= 80, n >= 32).
-    // The TC path generates a triangle-masked GEMM kernel that writes
-    // only the requested triangle, saving half the memory bandwidth.
+    // Tensor Core fast path: triangle-masked GEMM kernel.
+    //
+    // Applicable when:
+    //   - SM >= 80 (Ampere+) and n >= 32
+    //   - fill_mode is Upper or Lower (not Full)
+    //   - The element type is f32 (the generated PTX uses f32 alpha/beta).
+    //
+    // NOTE: Kernel caching is not yet integrated — the module is compiled
+    // fresh on each call. A future enhancement would store compiled modules
+    // in an interior-mutable cache on `BlasHandle` (keyed by SyrkTcConfig).
     {
         let sm = handle.sm_version();
-        if syrk_tc::is_tc_applicable(sm, n) && fill_mode != FillMode::Full {
+        let tc_eligible = syrk_tc::is_tc_applicable(sm, n)
+            && fill_mode != FillMode::Full
+            && T::PTX_TYPE == PtxType::F32;
+
+        if tc_eligible {
             let tile = syrk_tc::syrk_tc_tile_config(sm, n);
             let config =
                 syrk_tc::SyrkTcConfig::new(tile.tile_m, tile.tile_n, tile.tile_k, sm, fill_mode);
-            // Generate the TC kernel PTX (validates config internally).
-            // If generation succeeds, the PTX and kernel name are available
-            // for launching via the handle's kernel cache. For now we store
-            // them for future launch integration and fall through to the
-            // GEMM fallback for actual execution.
-            let _tc_kernel = syrk_tc::generate_syrk_tc_ptx(&config);
-            // TODO: Launch the TC kernel when the launch infrastructure
-            // supports triangle-masked GEMM dispatch. Until then, fall
-            // through to the standard GEMM path below.
+
+            // PTX generation failed — fall through to GEMM fallback.
+            if let Ok((ptx, kernel_name)) = syrk_tc::generate_syrk_tc_ptx(&config) {
+                // Load the module (JIT-compiles PTX via the CUDA driver at
+                // runtime; returns CudaError::NotInitialized on macOS where
+                // no CUDA driver is present — falls through to GEMM below).
+                if let Ok(module) = Module::from_ptx(&ptx) {
+                    let module = Arc::new(module);
+                    let kernel =
+                        Kernel::from_module(Arc::clone(&module), &kernel_name).map_err(|e| {
+                            BlasError::LaunchFailed(format!("SYRK TC: kernel lookup failed: {e}"))
+                        })?;
+
+                    // Grid: one tile per output NxN tile (col-tiles x row-tiles).
+                    let grid_x = n.div_ceil(tile.tile_n);
+                    let grid_y = n.div_ceil(tile.tile_m);
+                    let threads_per_block = (tile.tile_m * tile.tile_n).min(256);
+
+                    let params = LaunchParams::new(
+                        Dim3::new(grid_x, grid_y, 1),
+                        Dim3::new(threads_per_block, 1, 1),
+                    );
+
+                    // Kernel args: ptr_a, ptr_c, alpha(f32), beta(f32),
+                    //              n, k, lda, ldc
+                    let alpha_f32 = f32::from_bits(alpha.to_bits_u64() as u32);
+                    let beta_f32 = f32::from_bits(beta.to_bits_u64() as u32);
+                    let args = (a.ptr, c.ptr, alpha_f32, beta_f32, n, a_k, a.ld, c.ld);
+
+                    kernel
+                        .launch(&params, handle.stream(), &args)
+                        .map_err(|e| {
+                            BlasError::LaunchFailed(format!("SYRK TC: launch failed: {e}"))
+                        })?;
+
+                    return Ok(());
+                }
+                // No CUDA driver available (e.g. macOS) — fall through to GEMM.
+            }
         }
     }
 

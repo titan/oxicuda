@@ -78,3 +78,6 @@ wheels/
 **/CLAUDE.md
 **/CLAUDE.local.md
 **/.hypothesis/
+**/.claude/
+
+target

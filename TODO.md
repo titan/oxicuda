@@ -3,15 +3,15 @@
 Pure Rust CUDA replacement for the COOLJAPAN ecosystem.
 (C) 2026 COOLJAPAN OU (Team KitaSan)
 
-## Project Status (v0.1.5 — 2026-05-03)
+## Project Status (v0.1.6 — 2026-05-05)
 
-- **Crates**: 37 workspace members (36 library crates + 1 umbrella)
-- **Files**: 1000+ Rust source files
-- **Code**: ~310,000 SLoC (Rust)
-- **Tests**: 9,568 passing (workspace-wide), 2 skipped (GPU-only on macOS)
+- **Crates**: 53 workspace members (52 library crates + 1 umbrella)
+- **Files**: 1600+ Rust source files
+- **Code**: ~415,000 SLoC (Rust)
+- **Tests**: 10,932+ passing (workspace-wide), 2 skipped (GPU-only on macOS)
 - **Warnings**: 0 (clippy + rustc, `-D warnings`)
 - **unwrap() calls**: 0 (no-unwrap policy in library code)
-- **Status**: Vol.1–25 complete — Vol.1 Foundation, Vol.2 PTX/Autotune, Vol.3 BLAS, Vol.4 DNN, Vol.5 Scientific, Vol.6 Signal, Vol.7 Computation Graph, Vol.8 Training, Vol.9 Inference, Vol.10 RL, Vol.11 High-Perf Inference, Vol.12 Distributed, Vol.13 LLM Primitives, Vol.14–16 backend crates, **Vol.17 Generative AI**, **Vol.18 Graph Neural Networks**, **Vol.19 State Space Models (Mamba/S4/RWKV)**, **Vol.20 Vision Transformers & CLIP**, **Vol.21 Audio/Speech ML (Conformer/Wav2Vec2/CTC/WaveNet/SpecAugment/x-vector)**, **Vol.22 Time-Series Forecasting (TCN/NHiTS/PatchTST/TimesNet/iTransformer/RevIN)**, **Vol.23 Bayesian Deep Learning**, **Vol.24 Federated Learning**, **Vol.25 Neural Architecture Search**; SDE samplers added to oxicuda-rand
+- **Status**: Vol.1–41 complete — Vol.1 Foundation, Vol.2 PTX/Autotune, Vol.3 BLAS, Vol.4 DNN, Vol.5 Scientific, Vol.6 Signal, Vol.7 Computation Graph, Vol.8 Training, Vol.9 Inference, Vol.10 RL, Vol.11 High-Perf Inference, Vol.12 Distributed, Vol.13 LLM Primitives, Vol.14–16 backend crates, **Vol.17 Generative AI**, **Vol.18 Graph Neural Networks**, **Vol.19 State Space Models (Mamba/S4/RWKV)**, **Vol.20 Vision Transformers & CLIP**, **Vol.21 Audio/Speech ML (Conformer/Wav2Vec2/CTC/WaveNet/SpecAugment/x-vector)**, **Vol.22 Time-Series Forecasting (TCN/NHiTS/PatchTST/TimesNet/iTransformer/RevIN)**, **Vol.23 Bayesian Deep Learning**, **Vol.24 Federated Learning**, **Vol.25 Neural Architecture Search**, **Vol.26 Self-Supervised Learning (SimCLR/MoCo/BYOL/Barlow/VICReg/MAE/SwAV/DINO)**, **Vol.27 Adversarial Robustness (FGSM/PGD/MIM/CW/AutoPGD/TRADES/MART/RS/IBP)**, **Vol.28 Multi-Modal Learning (cross-modal attn/CLIP/ImageBind/BERT/ViT/Conformer/DeepONet)**, **Vol.29 Continual Learning (EWC/SI/MAS/PackNet/Piggyback/ProgNN/GEM/DER++)**, **Vol.30 3D Geometry & Point Clouds (FPS/kNN/KD-tree/PointNet/PointNet++/DGCNN/ICP/Gaussian-splatting)**, **Vol.31 Physics-Informed Neural Networks (PINN/NeuralODE/FNO/DeepONet/adjoint-method)**, **Vol.32 RLHF & Alignment (DPO/IPO/KTO/ORPO/SimPO/reward-model/PPO-RLHF)**, **Vol.33 Meta-Learning (MAML/FOMAML/ANIL/Reptile/ProtoNet/MatchingNet/RelationNet)**, **Vol.34 Neural Radiance Fields (NeRF/Instant-NGP hash-grid/Mip-NeRF/TensoRF/volume-rendering)**, **Vol.35 Mixture of Experts (Switch/Top-K/Expert-Choice/Soft-MoE/SwiGLU/load-balance-loss)**, **Vol.36 Tabular Deep Learning (sparsemax/entmax15/TabNet/SAINT/FT-Transformer/NODE/QuantileNorm)**, **Vol.37 Anomaly Detection (DeepSVDD/AE/VAE/LOF/COPOD/Mahalanobis/IsolationScorer/MAD/ZScore/Ensemble)**, **Vol.38 Quantum Simulation (state-vector/gates/Pauli/VQE/QAOA/Trotter-Suzuki/density-matrix/Kraus-channels/QML-kernels)**, **Vol.39 Approximate Nearest Neighbor & Vector Search (HNSW/IVF/PQ/IVFPQ/LSH/MinHash/SimHash/NN-Descent/SQ4/SQ8)**, **Vol.40 Recommender Systems (ALS/BPR/NMF/NCF/TwoTower/DeepFM/AutoInt/WideDeep/GRU4Rec/SASRec/BERT4Rec/LightGCN/NGCF/MMoE/PLE/ESMM/neg-sampling/ranking-metrics)**, **Vol.41 Causal Inference (NOTEARS/PC/GES/NOTEARS-MLP/IPW/S-T-X-learners/AIPW/DML/DragonNet/2SLS/DeepIV/CausalForest/TwinNetwork/do-calculus)**; SDE samplers added to oxicuda-rand
 
 ## Design Principles
 
@@ -1117,10 +1117,10 @@ dependency.
 | Clippy warnings | 0 | 0 |
 | unwrap() in library code | 0 | 0 |
 | C/Fortran build deps | 0 | 0 |
-| Test count | >500 | 8,980+ |
+| Test count | >500 | 9,776+ |
 | Test pass rate | 100% | 100% |
-| Code lines (SLoC) | >30K | ~302,500 |
-| Crate count | 12 | 33 |
+| Code lines (SLoC) | >30K | ~330,000 |
+| Crate count | 12 | 38 |
 | GPU arch coverage | SM 7.5--10.0 | SM 7.5--10.0 |
 | Pure Rust | 100% default features | 100% |
 
@@ -1167,6 +1167,826 @@ Time-major `[T, C]` layout throughout; all variates channels-last.
 
 - [x] **Integration tests** (lib.rs) — 20 E2E tests covering all modules + PTX × 6 SM versions
 - [x] **Benchmarks** (benches/ts_ops.rs) — 7 PTX bench groups × 4 SM versions + 5 architecture forward benches
+
+---
+
+## Vol.23: Bayesian Deep Learning [COMPLETE]
+
+### oxicuda-bayes (24 files, ~6,020 SLoC, 188 tests)
+
+Pure-Rust Bayesian deep learning library: variational inference, Bayesian
+layers, MC Dropout, Deep Ensembles, SWAG, last-layer Laplace, calibration
+metrics and post-hoc recalibration — zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `BayesError` (16 variants): DimensionMismatch, EmptyInputs, InvalidDropoutRate, InvalidTemperature, InvalidPriorVariance, NonPositiveSigma, InsufficientSamples, InsufficientEnsembleMembers, CalibrationSetEmpty, NCalibBinsTooSmall, IsotonicNotMonotone, PlattFitFailed, TemperatureNotFinite, FlowDimensionMismatch, NanEncountered, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion` with `ptx_version_str()` mapping sm≥100→"8.7" / sm≥90→"8.4" / sm≥80→"8.0" / else "7.5"; `LcgRng` with Box-Muller `next_normal_pair`/`fill_normal`/`shuffle`; `BayesHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120)
+  - [x] `kl_gaussian_ptx` — Per-element KL(N(μ,σ²) ‖ N(0,1)) with `ex2.approx`/`lg2.approx` and `atom.global.add.f32` accumulation
+  - [x] `mc_dropout_mask_ptx` — Bernoulli dropout mask via inline LCG `(rand > drop) ? 1/keep : 0`
+  - [x] `local_reparam_ptx` — Local reparameterisation with Box-Muller sampling
+  - [x] `ece_bucket_ptx` — ECE histogram binning with atomic counters
+  - [x] `ensemble_aggregate_ptx` — Ensemble mean/variance over M member logits
+  - [x] `flipout_perturb_ptx` — Flipout ±1 sign perturbation for variance reduction
+  - [x] `temp_scale_logits_ptx` — Temperature scaling of logits
+
+- [x] **Bayesian layers** (layers/)
+  - [x] `BayesLinear` (bayes_linear.rs) — Bayes-by-Backprop linear with `softplus(rho)` σ parameterisation; `forward_sample` + `forward_kl`; per-weight prior N(0, σ²_prior)
+  - [x] `BayesConv2d` (bayes_conv.rs) — same BBB scheme for spatial conv2d kernels
+  - [x] `FlipoutLinear` / `FlipoutConv2d` (flipout.rs) — Flipout (Wen 2018) ±1 sign perturbation for in-batch decorrelation
+
+- [x] **Variational inference** (variational/)
+  - [x] `kl_gaussian` / `kl_gaussian_vec` (elbo.rs) — closed-form KL(q‖N(0,1)) and ELBO/IWAE objectives
+  - [x] `MeanFieldDist` (mean_field.rs) — factored Gaussian; entropy, KL, ELBO, sample, sample_n
+  - [x] `gaussian_sample` / `laplacian_sample` / log-prob (reparam.rs) — reparameterisation with straight-through estimator
+  - [x] `PlanarFlow`, `RadialFlow` (flows.rs) — invertible 1-step normalising flows with log-det Jacobian
+
+- [x] **Calibration** (calibration/) — 4 files
+  - [x] `metrics.rs` — `expected_calibration_error` (ECE), `maximum_calibration_error` (MCE), `adaptive_calibration_error` (ACE) with quantile bins, `brier_score`, `negative_log_likelihood`, `top1_confidences`, `ReliabilityDiagram`/`ReliabilityBin`
+  - [x] `temperature.rs` — `TemperatureScaler` with golden-section search NLL minimisation; argmax-preserving recalibration (Guo 2017)
+  - [x] `isotonic.rs` — `IsotonicRegressor` Pool Adjacent Violators with weighted variant for non-parametric monotone recalibration
+  - [x] `platt.rs` — `PlattScaler` two-parameter logistic recalibration with Lin et al. 2007 stable-target Newton + line search
+
+- [x] **Uncertainty quantification** (uncertainty/) — 5 files
+  - [x] `mc_dropout.rs` — `mc_dropout_predict` and `McDropoutPredictor` with Welford online mean/variance over T forward passes (Gal & Ghahramani 2016)
+  - [x] `deep_ensemble.rs` — `DeepEnsemble` with `aggregate()` and `aggregate_probabilities()` (mean + sample variance with Bessel correction); `EnsembleStats`
+  - [x] `swag.rs` — `SwagPosterior` with running first/second moments + FIFO low-rank deviation buffer; `θ̃ = μ + (1/√2)·σ_diag⊙z₁ + (1/√(2(K-1)))·D·z₂` sampling (Maddox 2019)
+  - [x] `laplace.rs` — `LastLayerLaplace` with diagonal Hessian fit for binary logistic; closed-form predictive logit and probit-approximated marginal probability (MacKay 1992; Daxberger 2021)
+  - [x] `entropy.rs` — `predictive_entropy`, `aleatoric_entropy`, `mutual_information` (BALD), `epistemic_entropy` (Houlsby 2011 decomposition)
+
+- [x] **Integration tests** (lib.rs) — 12 E2E tests covering temperature scaling, isotonic, Platt, MC Dropout, Deep Ensemble, SWAG sampling, Laplace marginal, BALD, Brier+NLL, reliability diagram, and PTX kernels × 6 SM versions
+- [x] **Benchmarks** (benches/bayes_ops.rs) — 7 PTX kernel groups × 4 SM versions + temperature_scaling_fit + isotonic_pav_fit + ece_compute + swag_sample + deep_ensemble_aggregate
+
+---
+
+## Vol.24: Federated Learning [COMPLETE]
+
+### oxicuda-federated (26 files, ~4,630 SLoC, 145 tests)
+
+Pure-Rust federated learning library: server algorithms (FedAvg/FedProx/SCAFFOLD/FedAdam),
+gradient compression, differential privacy mechanisms with RDP/Moments accountants,
+secure aggregation (Shamir + pairwise masking), and client selection — zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `FedError` (~17 variants): NoClients, EmptyGradient, DimensionMismatch, InvalidEpsilon, InvalidNoiseScale, InvalidThreshold, ShamirReconstructFailed, InsufficientShares, InvalidLearningRate, InvalidComprRank, NumberOfClientsBelowMinimum, NanEncountered, Internal, …
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Box-Muller, Fisher-Yates, Gaussian/Laplace samplers), `FedHandle::default_handle()`
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions
+  - [x] `aggregate_mean_ptx` — Average across `K` client gradient buffers
+  - [x] `dp_clip_gradient_ptx` — Per-sample L2-norm gradient clipping for DP-SGD
+  - [x] `fedavg_weighted_sum_ptx` — Sample-count-weighted FedAvg server update
+  - [x] `gaussian_noise_ptx` — Box-Muller Gaussian noise for DP mechanism
+  - [x] `pairwise_mask_ptx` — Pairwise additive mask for secure aggregation
+  - [x] `qsgd_quantize_ptx` — QSGD stochastic quantisation with dithering
+  - [x] `topk_mask_ptx` — Top-K sparsification mask via threshold
+
+- [x] **Server algorithms** (algorithm/)
+  - [x] `FedAvgConfig` / `FedAvgState` (fedavg.rs) — Sample-weighted parameter averaging (McMahan 2017)
+  - [x] `FedProxConfig` (fedprox.rs) — Proximal regularisation `μ/2·‖θ−θ_global‖²` for client drift control (Li 2020)
+  - [x] `ScaffoldClientState` / `ScaffoldState` (scaffold.rs) — Control variates `c_i, c` correcting client drift (Karimireddy 2020)
+  - [x] `FedAdamState` (fedadam.rs) — Server-side Adam with momentum and AMSGrad option (Reddi 2021)
+
+- [x] **Compression** (compression/)
+  - [x] `PowerSgdCompressor` (powersgd.rs) — Low-rank power-iteration compression with error feedback (Vogels 2019)
+  - [x] `stochastic_quantize` (quantize.rs) — QSGD bit-budget quantisation with dithering
+  - [x] `random_sparsify` (randomk.rs) — RandomK sparsification with deterministic compression ratio
+  - [x] `topk_sparsify` (topk.rs) — TopK magnitude sparsification with `error_feedback`
+
+- [x] **Differential privacy** (privacy/)
+  - [x] `GaussianMechanism` (gaussian.rs) — Calibrated Gaussian noise for L2-bounded queries
+  - [x] `LaplacianMechanism` (laplacian.rs) — Calibrated Laplace noise for L1-bounded queries
+  - [x] `MomentsAccountant` (moments.rs) — Moments accountant for DP-SGD ε-tracking (Abadi 2016)
+  - [x] `rdp_gaussian` / `rdp_to_dp` / `compose_rdp` (rdp.rs) — Rényi differential privacy with conversion to (ε, δ)-DP
+  - [x] `PateConfig` / `noisy_voting` / `data_dependent_epsilon` (pate.rs) — PATE student-teacher voting (Papernot 2017)
+
+- [x] **Secure aggregation** (secure_agg/)
+  - [x] `ShamirConfig` / `share_scalar` / `share_gradient` / `reconstruct_*` (shamir.rs) — Shamir (k, n) secret sharing over a Mersenne-prime field
+  - [x] `generate_mask` / `apply_pairwise_masks` / `unmask` (masking.rs) — Bonawitz-style additive masking that cancels in aggregation
+  - [x] `SecureAggregator` (aggregator.rs) — Drives the masked-then-aggregate flow
+
+- [x] **Client selection** (selection/)
+  - [x] `random_select` / `stratified_select` (random.rs) — Uniform random and stratified selection across client cohorts
+
+- [x] **Integration tests** (lib.rs) — 10 E2E tests: FedAvg mean recovery, FedProx proximal term, Top-K + error feedback compensation, QSGD unbiased estimator, Gaussian DP noise calibration, RDP linear composition, Shamir scalar/gradient round-trip, random_select uniqueness, PTX × 6 SM versions
+
+- [x] **Benchmarks** (benches/fed_ops.rs) — 7 PTX kernel groups × 4 SM versions + fedavg_aggregate + topk_sparsify + qsgd_quantize + shamir share/reconstruct
+
+---
+
+## Vol.25: Neural Architecture Search [COMPLETE]
+
+### oxicuda-nas (21 files, ~3,736 SLoC, 63 tests)
+
+Pure-Rust NAS library: differentiable architecture search (DARTS), evolutionary
+multi-objective search (NSGA-II), one-shot supernets with weight-sharing, and
+slimmable networks — zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `NasError` (~14 variants): EmptyPopulation, InvalidArchEncoding, OpKindOutOfRange, InvalidArchitectureWeights, InvalidGumbelTemperature, InvalidWidthMultiplier, MixedOpDimensionMismatch, MissingPrimitive, NumObjectivesMismatch, InvalidPopulationSize, NanEncountered, Internal, …
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng`, `NasHandle::default_handle()`
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions
+  - [x] `arch_grad_ptx` — Architecture parameter gradient accumulation
+  - [x] `arch_softmax_ptx` — Stable softmax over `K` operation-mixing weights
+  - [x] `crossover_uniform_ptx` — Uniform crossover for evolutionary mutations
+  - [x] `flops_accumulate_ptx` — FLOP-cost accumulation across operations
+  - [x] `gumbel_softmax_ptx` — Gumbel-softmax differentiable categorical sampling
+  - [x] `mixed_op_blend_ptx` — Convex combination of operation outputs
+  - [x] `pareto_dominate_ptx` — Pareto dominance check for multi-objective sort
+
+- [x] **Operations** (ops/)
+  - [x] `OpKind` / `OpWeights` (primitives.rs) — 8 standard DARTS primitives: skip, sep_conv 3×3/5×5, dil_conv 3×3/5×5, max/avg pool 3×3, none
+  - [x] `MixedOp` (mixed_op.rs) — `out = Σ_k softmax(α)_k · op_k(x)` differentiable mixture
+  - [x] `SearchSpace`, `CellSpace`, `NetworkSpace` (search_space.rs) — DARTS-style cell + network spaces
+
+- [x] **DARTS** (darts/)
+  - [x] `DartsCell` (cell.rs) — Multi-step cell with `K` candidate ops on each edge
+  - [x] `DartsNetwork` (network.rs) — Stacked cells (normal + reduction) with auxiliary head
+  - [x] `BilevelOptimizer` (bilevel.rs) — Bi-level w/α optimisation: weights on inner train loss, architecture on outer val loss
+  - [x] `DiscretizedCell` / `DiscretizedNetwork` / `derive_discrete_cell` / `derive_network` (derive.rs) — Top-2 op selection and architecture derivation
+
+- [x] **Evolutionary** (evolution/)
+  - [x] `ArchEncoding` (encoding.rs) — Discrete genome representation
+  - [x] `Population` (population.rs) — Population container with crossover/mutation operators
+  - [x] `Individual` / `fast_non_dominated_sort` / `crowding_distance` / `nsga2_select` / `tournament_select` (nsga2.rs) — NSGA-II multi-objective EA (Deb 2002)
+
+- [x] **Supernet** (supernet/)
+  - [x] `Supernet` (weight_share.rs) — Weight-shared one-shot supernet (Bender 2018)
+  - [x] `PathSampler` / `SamplingStrategy` (path_sample.rs) — Uniform / fairness-aware path sampling for SPOS / FairNAS
+  - [x] `SlimmableNet` / `BnStats` / `WIDTH_MULTIPLIERS` (slimmable.rs) — Slimmable networks with per-width batch norm statistics (Yu 2019)
+
+- [x] **Predictor** (predictor/)
+  - [x] `LayerSpec` / `ArchFeatures` (predictor_io.rs) — Shared `[op-one-hot ‖ in_ch ‖ out_ch ‖ h ‖ w]` feature extractor used by all predictors
+  - [x] `OpCost` / `op_cost` / `total_cost` (flops.rs) — Analytic FLOP + parameter accountant (sep/dilated conv `2·K²·C_in·HW + 2·C_in·C_out·HW`, pooling `9·C_out·HW`)
+  - [x] `LatencyLut` (latency.rs) — Hardware-calibrated `(op, c_in, c_out, h, w)` lookup with default fallback
+  - [x] `LatencyMlp` (latency.rs) — Two-layer ReLU MLP latency surrogate trained via per-sample MSE gradient descent
+  - [x] `KnnAccuracyPredictor` (accuracy.rs) — Inverse-distance-weighted k-NN regression on architecture features
+  - [x] `RbfAccuracyPredictor` (accuracy.rs) — Gaussian-kernel ridge regressor with closed-form Gauss-Jordan solve
+
+- [x] **Integration tests** (lib.rs) — 5 E2E tests covering FLOP accountant, LUT predict, MLP train/predict, k-NN round-trip, RBF constant-target
+
+- [x] **Benchmarks** (benches/nas_ops.rs) — 7 PTX kernel groups × 4 SM versions + population_random + nsga2_select + path_sample + mixed_op_blend
+
+---
+
+## Vol.26: Self-Supervised Learning [COMPLETE]
+
+### oxicuda-ssl (25 files, ~4,277 SLoC, 150 unit + 12 E2E tests)
+
+Pure-Rust self-supervised learning library covering the four canonical families:
+contrastive (SimCLR, MoCo), non-contrastive (BYOL, Barlow Twins, VICReg),
+masked (MAE), and clustering (SwAV, DINO). Plus shared infrastructure for
+momentum encoders, projection / predictor heads, and SSL-style data
+augmentation. Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `SslError` (16 variants): DimensionMismatch, EmptyInput, InvalidTemperature, InvalidMomentum, InvalidMaskRatio, InvalidNumCrops, InvalidLossWeight, QueueCapacityTooSmall, QueueEmpty, NumPrototypesTooSmall, SinkhornDiverged, InvalidFeatureDim, BatchTooSmall, NanEncountered, InvalidProjectorDim, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Box-Muller normals, Fisher-Yates shuffle), `SslHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120)
+  - [x] `nt_xent_softmax_ptx` — Per-row stable softmax over `2N×2N` similarity matrix with `selp.f32` self-mask `-INF` on diagonal
+  - [x] `momentum_update_ptx` — `θ_target = m·θ_target + (1-m)·θ_online` with `fma.rn.f32` and grid-stride loop
+  - [x] `byol_cosine_loss_ptx` — `2 - 2·cos(p, sg(z))` per-element accumulation via `atom.global.add.f32`
+  - [x] `barlow_cross_corr_ptx` — Cross-correlation matrix `C[i,j] = Σ_n Z_A[n,i]·Z_B[n,j]` with 2-D grid + atomic accumulate
+  - [x] `random_mask_ptx` — Bernoulli mask via inline LCG `(rand < drop_ratio) ? 0 : 1` for MAE patch dropping
+  - [x] `cosine_similarity_ptx` — Per-pair cosine similarity for memory-bank lookup with `atom.global.add.f32`
+  - [x] `gather_features_ptx` — Memory-queue gather `out[k,d] = queue[idx[k], d]` for MoCo
+
+- [x] **Contrastive** (contrastive/)
+  - [x] `info_nce_loss` (info_nce.rs) — Symmetric InfoNCE with stable log-sum-exp; returns `(loss, accuracy@1)`
+  - [x] `simclr_loss` / `SimClrConfig` (simclr.rs) — Symmetric NT-Xent at temperature τ=0.1 (Chen 2020)
+  - [x] `MocoQueue` / `moco_loss` (moco.rs) — FIFO circular queue + InfoNCE with positive vs queue negatives (He 2020)
+
+- [x] **Non-contrastive** (non_contrastive/)
+  - [x] `byol_loss` / `ByolPredictor` (byol.rs) — L2-normalised cosine `2 - 2·cos(p, sg(z))` (Grill 2020)
+  - [x] `barlow_twins_loss` / `BarlowTwinsConfig` (barlow.rs) — Cross-correlation `Σ(1-C_ii)² + λ·Σ_{i≠j} C_ij²` after column standardisation (Zbontar 2021)
+  - [x] `vicreg_loss` / `VicRegConfig` (vicreg.rs) — Variance hinge + invariance MSE + off-diagonal covariance penalty (Bardes 2022)
+
+- [x] **Masked** (masked/)
+  - [x] `random_patch_mask` / `mae_reconstruction_loss` / `MaeConfig` (mae.rs) — Fisher-Yates patch selection (exact ratio) + masked-patch-only MSE; default mask ratio 0.75 (He 2022)
+
+- [x] **Clustering** (clustering/)
+  - [x] `swav_loss` / `sinkhorn_knopp` / `SwavConfig` (swav.rs) — Sinkhorn-Knopp normalised codes + swapped CE (3 iters default, ε=0.05, τ=0.1) (Caron 2020)
+  - [x] `dino_loss` / `update_dino_centre` / `DinoConfig` (dino.rs) — Centred + sharpened student-teacher CE (τ_s=0.1, τ_t=0.04) (Caron 2021)
+
+- [x] **Augment** (augment/)
+  - [x] `color_jitter` / `random_grayscale_chw` (color.rs) — Per-channel multiplicative jitter + BT.601 grayscale conversion on `[3, H, W]` images
+  - [x] `multi_crop` / `MultiCropConfig` / `CropSpec` (multi_crop.rs) — DINO/SwAV global+local crop spec generation (default 2 globals @ 224 + 6 locals @ 96)
+
+- [x] **Momentum** (momentum/)
+  - [x] `EmaUpdater` / `cosine_momentum` (ema.rs) — Element-wise EMA target update + half-cosine momentum schedule (BYOL: 0.996 → 1.0)
+
+- [x] **Head** (head/)
+  - [x] `MlpProjector` (projector.rs) — 2-layer Linear→ReLU→Linear projection head with Kaiming init; supports per-sample and batched forward
+  - [x] `PredictorHead` (predictor.rs) — Identical architecture used as the additional predictor on the online branch in BYOL/SimSiam
+
+- [x] **Integration tests** (lib.rs) — 12 E2E tests: SimCLR aligned-pair drop, MoCo queue lifecycle, BYOL identity = 0, Barlow finite, VICReg combine, MAE mask ratio, Sinkhorn uniform, DINO centred CE, EMA monotone, MLP projector shape, multi_crop count, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/ssl_ops.rs) — 7 PTX kernel groups × 4 SM versions + 5 algorithm benches: simclr_loss_b64_d128, moco_loss_b16_d64_q256, barlow_loss_b256_d64, mae_mask_p196_r075, dino_loss_b64_k128
+
+---
+
+## Vol.27: Adversarial Robustness [COMPLETE]
+
+### oxicuda-adversarial (12 files, ~4,943 SLoC, 165 tests)
+
+Pure-Rust adversarial robustness library covering both the attack side (FGSM,
+PGD L∞/L2, MIM, CW, AutoPGD) and the defence side (TRADES, MART, Randomized
+Smoothing, IBP/certified bounds). Includes Lp-ball threat-model primitives,
+ε-budget tracking, and robustness evaluation metrics. Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `AdvError` (15 variants): DimensionMismatch, EmptyInput, InvalidEpsilon, InvalidAlpha, InvalidNumSteps, InvalidLpNorm, InvalidTemperature, InvalidNoiseSigma, InvalidConfidence, InsufficientCertSamples, InvalidLossWeight, BudgetExceeded, NanEncountered, OptimizationDiverged, AttackFailedAll, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Box-Muller normals, Fisher-Yates shuffle, uniform `[0,1)`, Knuth MMIX 64-bit LCG), `AdvHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120)
+  - [x] `fgsm_step_ptx` — `x_adv[i] = clamp(x[i] + ε·sign(grad[i]), lo, hi)` with `fma.rn.f32` and grid-stride loop
+  - [x] `pgd_proj_l_inf_ptx` — L∞ projection: `out[i] = clamp(clamp(x[i], x_orig[i]−ε, x_orig[i]+ε), lo, hi)`
+  - [x] `pgd_proj_l2_ptx` — L2 projection: scale `δ = x − x_orig` so `‖δ‖₂ ≤ ε` via host-supplied norm + `div.rn.f32`
+  - [x] `smoothing_noise_ptx` — Gaussian noise `z ~ N(0, σ²)` via inline LCG + Box-Muller (`lg2.approx.f32` / `cos.approx.f32`)
+  - [x] `grad_sign_ptx` — `out[i] = sign(grad[i])` (`+1 / 0 / −1`) using `selp.f32` double-predicate
+  - [x] `certified_radius_reduce_ptx` — Per-block argmax over `[K]` class-count vector for smoothed-predictor read-off
+  - [x] `attack_loss_grad_ptx` — `out[i] = clamp(x[i] + α·dir[i], lo, hi)` inner step for MIM/PGD with momentum-accumulated gradient
+
+- [x] **Attacks** (attacks/)
+  - [x] `fgsm_attack` (fgsm.rs) — Single-step Fast Gradient Sign Method (Goodfellow 2014): `x_adv = clamp(x + ε·sign(∇L), lo, hi)`
+  - [x] `pgd_attack_l_inf` / `pgd_attack_l2` / `PgdConfig` (pgd.rs) — Projected Gradient Descent with random restart and L∞/L2 projections (Madry 2018)
+  - [x] `mim_attack` / `MimConfig` (mim.rs) — Momentum Iterative Method with exponential momentum accumulation (Dong 2018)
+  - [x] `cw_attack` / `CwConfig` (cw.rs) — Carlini-Wagner L2 attack with binary-search confidence parameter and change-of-variable tanh reparametrisation (Carlini 2017)
+  - [x] `auto_pgd_attack` / `AutoPgdConfig` (auto_pgd.rs) — AutoPGD with step-size schedule and checkpointing (Croce 2020)
+
+- [x] **Defenses** (defenses/)
+  - [x] `trades_loss` / `TradesConfig` (trades.rs) — TRADES regulariser: CE(clean) + β·KL(clean ‖ adv) with KL computed from log-softmax pairs (Zhang 2019)
+  - [x] `mart_loss` / `MartConfig` (mart.rs) — MART: misclassification-aware adversarial training with BCE on natural examples + weighted KL term (Wang 2020)
+  - [x] `smoothed_predict` / `certified_radius` / `RsConfig` (randomized_smoothing.rs) — Cohen (2019) randomized smoothing: Monte-Carlo majority vote + Binomial CI for certified L2 radius
+  - [x] `ibp_propagate` / `lipschitz_certified_radius` / `IntervalBound` (certified_bounds.rs) — Interval Bound Propagation through affine layers with per-bound `relu()`; Lipschitz certified radius `m / (L·√2)`
+
+- [x] **Threat model** (threat_model/)
+  - [x] `LpNorm` / `l_inf_norm` / `l1_norm` / `l2_norm` / `project_l_inf` / `project_l2` (lp_ball.rs) — Lp-ball norm computations and projections (L1 / L2 / L∞)
+  - [x] `EpsilonBudget` (budget.rs) — ε-budget tracker with `spend()` / `remaining()` and `BudgetExceeded` error on overdraft
+
+- [x] **Metrics** (metrics/)
+  - [x] `robust_accuracy` (robust_accuracy.rs) — Fraction of adversarial examples predicted correctly; complement = attack success rate
+  - [x] `certified_accuracy` (robust_accuracy.rs) — Fraction of examples both correctly predicted and certified at radius ≥ threshold
+  - [x] `attack_success_rate` (asr.rs) — Fraction of adversarial examples on which the attack successfully changed the prediction
+
+- [x] **Integration tests** (lib.rs) — 12 E2E tests: FGSM pushes away from target, PGD L∞/L2 respect ε-ball, MIM with zero-decay matches PGD, TRADES collapses to CE when clean=adv, MART loss finite, RS constant classifier returns top class, IBP propagates through ReLU, Lipschitz radius formula, robust/certified accuracy, PTX kernels × 6 SM versions, ε-budget lifecycle
+
+- [x] **Benchmarks** (benches/adv_ops.rs) — 7 PTX kernel groups × 4 SM versions + 4 algorithm benches: fgsm_attack_d1024, pgd_l_inf_attack_d512_n10, trades_loss_b64_k10, ibp_propagate_64x32
+
+---
+
+## Vol.28: Multi-Modal Learning [COMPLETE]
+
+### oxicuda-multimodal (23 files, ~6,149 SLoC, 156 tests)
+
+Pure-Rust multi-modal learning primitives covering cross-modal attention, compact bilinear fusion (MLB/MFB), contrastive alignment (CLIP bidirectional InfoNCE, ImageBind triple alignment), ITM head, BERT text encoder, ViT image encoder, Conformer audio encoder, temporal ViT video encoder, prefix-LM captioning, and VQA head. Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `MultiModalError` (14 variants): DimensionMismatch, EmptyInput, InvalidNHeads, InvalidDModel, InvalidVocabSize, InvalidMaxSeqLen, InvalidImageSize, InvalidPatchSize, InvalidAudioFeatures, InvalidVideoFrames, NanEncountered, BatchSizeMismatch, InvalidAnswerCount, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Knuth MMIX 64-bit LCG), `MultiModalHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120):
+  - [x] `cross_attn_score_ptx` — QKᵀ/√d_k scaled dot-product with `fma.rn.f32`
+  - [x] `modal_align_loss_ptx` — bidirectional InfoNCE over batch diagonal
+  - [x] `bilinear_pool_ptx` — tanh Hadamard product for MLB/MFB compact bilinear pooling
+  - [x] `temporal_pool_ptx` — mean-pool across frames, `atom.global.add.f32`
+  - [x] `token_merge_ptx` — concatenate and project tokens for prefix-LM
+  - [x] `gate_fusion_ptx` — softmax-gated attention fusion across modalities
+  - [x] `itm_bce_ptx` — numerically stable BCE for image-text matching
+
+- [x] **Cross-modal attention** (cross_attn/)
+  - [x] `CrossAttention` (cross_attention.rs) — MHSA with Q from modality A, K/V from modality B; scaled dot-product attention with softmax and output projection
+  - [x] `SelfCrossBlock` (self_cross_block.rs) — pre-norm residual block: LN→self-attn→LN→cross-attn→LN→FFN, each with skip connection
+
+- [x] **Fusion** (fusion/)
+  - [x] `ConcatFusion` (concat_fusion.rs) — concatenate embeddings then project to joint space
+  - [x] `MlbFusion` / `MfbFusion` (bilinear_fusion.rs) — compact bilinear pooling: MLB = tanh(Wv·v) ⊙ tanh(Wq·q) → linear; MFB = expand-to-k×d, sum-pool pairs, tanh
+  - [x] `AttentionFusion` (attention_fusion.rs) — softmax over modality-specific keys → weighted sum of value embeddings
+
+- [x] **Alignment** (alignment/)
+  - [x] `clip_loss` (contrastive.rs) — L2-normalized bidirectional InfoNCE loss (symmetric cross-entropy over similarity matrix)
+  - [x] `imagebind_loss` (contrastive.rs) — triple alignment loss over three modalities via pairwise InfoNCE average
+  - [x] `ItmHead` / `itm_loss` (matching.rs) — 2-layer MLP binary classifier for image-text matching; numerically stable BCE
+
+- [x] **Encoders** (encoder/)
+  - [x] `BertEncoder` (text_encoder.rs) — token+pos embedding → N×(self-attn+FFN+LN) transformer blocks → CLS-pool → d_model-dim output
+  - [x] `ViTEncoder` (image_encoder.rs) — flatten patches → linear embed → CLS prepend → pos embed → N transformer blocks → CLS-pool
+  - [x] `AudioEncoder` (audio_encoder.rs) — linear mel projection → N Conformer blocks (conv+attn+FFN) → statistics pooling (mean‖std) → 2×d_model
+  - [x] `VideoEncoder` (video_encoder.rs) — spatial ViT per frame → temporal attention → mean-pool → d_model
+
+- [x] **Captioning/VQA** (caption/)
+  - [x] `PrefixLm` (prefix_lm.rs) — greedy autoregressive decoding with visual prefix cross-attention; configurable max length
+  - [x] `VqaHead` / `vqa_loss` (vqa_head.rs) — 2-layer MLP over fused features → n_answers logits; cross-entropy loss
+
+- [x] **Integration tests** (lib.rs) — 12 E2E tests: CLIP loss on L2-normalized features ≈ ln(N), ImageBind triple loss finite, cross-attention output shape, MlbFusion output shape, ItmHead BCE loss decreasing, BertEncoder CLS pool shape, ViTEncoder tiny forward, AudioEncoder stats-pool shape, VideoEncoder temporal mean-pool, PrefixLm greedy decode terminates, VqaHead logits shape, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/mm_ops.rs) — 7 PTX kernel groups × 4 SM versions + 5 algorithm benches: clip_loss_b64_d256, mlb_fusion_b32_d512, cross_attn_heads8_d64_len32, bert_tiny_forward, vit_tiny_forward
+
+---
+
+## Vol.29: Continual Learning [COMPLETE]
+
+### oxicuda-continual (25 files, ~5,037 SLoC, 165 tests)
+
+Pure-Rust continual and lifelong learning library covering all major families of catastrophic-forgetting mitigation: regularization (EWC/SI/MAS), architecture (PackNet/Piggyback/Progressive NN), and experience replay (ER/GEM/A-GEM/DER++). Also includes forgetting/plasticity metrics and task-incremental / class-incremental data streams. Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `ContinualError` (15 variants): DimensionMismatch, EmptyInput, InvalidLambda, InvalidBufferCapacity, InvalidTaskId, InsufficientData, InvalidThreshold, InvalidAlpha, InvalidBeta, GemProjectionFailed, NanEncountered, InvalidMaskSparsity, InvalidLateralDim, StreamExhausted, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Knuth MMIX 64-bit LCG, reservoir sampling, Box-Muller), `ContinualHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120):
+  - [x] `ewc_penalty_ptx` — `fma.rn.f32` for λ/2·Σ F_i·(θ_i−θ*_i)², `atom.global.add.f32`
+  - [x] `fisher_diag_ptx` — element-wise `g²` accumulate for empirical Fisher diagonal
+  - [x] `gradient_project_ptx` — half-space projection `g − (g·m / m·m)·m` for GEM
+  - [x] `mask_apply_ptx` — `w *= mask` with `setp.ne.u32` predicate for PackNet/Piggyback
+  - [x] `si_omega_update_ptx` — `|Δθ·∇L|` synaptic importance accumulate
+  - [x] `logit_distill_ptx` — KL divergence via `ex2/lg2` approximations for DER++
+  - [x] `replay_sample_ptx` — reservoir sampling conditional swap via LCG
+
+- [x] **Regularization** (regularization/)
+  - [x] `EwcRegularizer` (ewc.rs) — Elastic Weight Consolidation (Kirkpatrick 2017): empirical Fisher diagonal `F_i = (1/N)Σg_i²`; penalty `λ/2·Σ_t Σ_i F_i^t·(θ_i−θ_i^{*t})²`; `add_task()` anchors a new task
+  - [x] `SiState` (si.rs) — Synaptic Intelligence (Zenke 2017): online importance `Ω_i += |Δθ_i·∇L_i|`; SI penalty normalized by `(ΔΘ_i²+ξ)`
+  - [x] `MasImportance` (mas.rs) — Memory-Aware Synapses (Aljundi 2018): momentum-weighted importance update `Ω = α·Ω + (1−α)·|∇L|`
+
+- [x] **Architecture** (architecture/)
+  - [x] `PackNetMask` (packnet.rs) — L1 magnitude pruning to sparsity fraction; task-specific binary masks; freeze pruned weights
+  - [x] `PiggybackMask` (piggyback.rs) — real-valued mask → binary via threshold; effective weights `w_eff = w_base ⊙ binarize(m)`
+  - [x] `ProgNnNetwork` (progressive.rs) — Progressive Neural Networks (Rusu 2016): frozen previous columns with lateral connections `h_k^l = relu(W·h + Σ U·h_prev)`
+
+- [x] **Replay** (replay/)
+  - [x] `ErBuffer` (er.rs) — Experience Replay with reservoir sampling (Vitter 1985): uniform buffer replacement with probability `capacity/n_seen`; Fisher-Yates batch sampling
+  - [x] `GemMemory` / `gem_project_gradient` (gem.rs) — Gradient Episodic Memory (Lopez-Paz 2017): iterative half-space projection onto `g·g_k ≥ −margin` constraints, most-violated-constraint first
+  - [x] `a_gem_project` (a_gem.rs) — Averaged GEM (Chaudhry 2018): single projection onto average reference gradient `g_ref = (1/T)Σg_k`
+  - [x] `DerBuffer` / `der_loss` (dark_exp.rs) — Dark Experience Replay++ (Buzzega 2020): α·MSE(z, z_stored) + β·CE(z, y); reservoir buffer with stored logits
+
+- [x] **Metrics** (metrics/)
+  - [x] `AccuracyMatrix` / `average_forgetting` / `backward_transfer` / `plasticity` (forgetting.rs) — standard CL metrics: BWT = `(1/(T−1))Σ_k(acc[T−1,k]−acc[k,k])`, forgetting = `max_j acc[j,k] − acc[T−1,k]`
+  - [x] `forward_transfer` / `intransigence` (intransigence.rs) — FWT = `(1/(T−1))Σ_k(acc[k−1,k]−acc_random[k])`; intransigence = transfer gap to isolated task training
+
+- [x] **Data streams** (stream/)
+  - [x] `TaskStream` (task_stream.rs) — task-incremental stream: ordered task sequence with batch sampler
+  - [x] `ClassIncStream` (class_stream.rs) — class-incremental stream with disjoint label spaces; `n_classes_seen()` grows monotonically
+
+- [x] **Integration tests** (lib.rs) — 12 E2E tests: EWC penalty zero before anchoring, EWC penalty positive after anchoring, SI importance accumulates, MAS importance update converges, PackNet prune+mask round-trip, GEM projection on 2D example, DER++ loss finite, reservoir sampling fills buffer uniformly, AccuracyMatrix BWT/forgetting formulas, TaskStream next_task(), ClassIncStream advance, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/continual_ops.rs) — 7 PTX kernel groups × 4 SM versions + 5 algorithm benches: ewc_loss_d1024, fisher_diag_accumulate, gem_project_d512, er_sample_b32, packnet_prune_d1024
+
+---
+
+## Vol.30: 3D Geometry & Point Clouds [COMPLETE]
+
+### oxicuda-geometry3d (36 files, ~7,146 SLoC, 189 tests)
+
+Pure-Rust 3D geometry and point-cloud deep-learning library covering sampling (FPS/random/voxel-downsample), neighborhood queries (k-NN/ball-query/KD-tree), point feature operations (gather/group/interp), architectures (PointNet/PointNet++/DGCNN/Point-Transformer), voxel ops (voxelization/sparse 3D conv), mesh distances (Chamfer/EMD-Sinkhorn/normal PCA), 3D Gaussian splatting primitives, and SE(3)/quaternion/ICP transforms. Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `Geom3dError` (15 variants): DimensionMismatch, EmptyPointCloud, InvalidPointDim, InvalidK, InvalidRadius, InvalidVoxelSize, InvalidSampleCount, InvalidShCoefficients, InvalidQuaternion, IcpDidNotConverge, EmdDidNotConverge, InvalidTopology, NanEncountered, BatchSizeMismatch, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Knuth MMIX 64-bit LCG, `next_usize`, `next_f32`), `Geom3dHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120):
+  - [x] `farthest_point_sample_ptx` — per-point distance update + `atom.global.max.f32` argmax reduce
+  - [x] `ball_query_ptx` — radius test `d²<r²` + bounded atomic counter per query
+  - [x] `gather_points_ptx` — indexed feature gather with `mul.wide.u32` 64-bit offset
+  - [x] `voxelize_ptx` — voxel index from `(p−o)/v`, `atom.global.add.f32` per channel + count
+  - [x] `chamfer_distance_ptx` — tiled pairwise dist, warp-min reduce, `atom.global.min.f32`
+  - [x] `gaussian_project_ptx` — 3D→2D Jacobian `J·Σ·Jᵀ` via `fma.rn.f32`
+  - [x] `sh_eval_ptx` — spherical harmonic evaluation L=0..2 with precomputed constants as f32-hex literals
+
+- [x] **Sampling** (sampling/)
+  - [x] `farthest_point_sample` (farthest_point_sample.rs) — deterministic FPS with `idx[0]=0` init; `dist[i] = min(dist[i], d²_to_last)`; argmax as next seed
+  - [x] `random_sample` (random_sample.rs) — partial Fisher-Yates without replacement via LcgRng
+  - [x] `voxel_downsample` (voxel_downsample.rs) — HashMap voxel grid, emit centroids + first-original-index per bucket; sort for determinism
+
+- [x] **Neighborhood** (neighborhood/)
+  - [x] `knn` (knn.rs) — brute-force k-NN per query; returns `(indices, sq_dists)` row-major `[nq×k]`
+  - [x] `ball_query` (ball_query.rs) — radius-limited search; `usize::MAX` sentinel for empty slots; returns `(indices, counts)` `[nq×k_max]`
+  - [x] `KdTree` (kd_tree.rs) — recursive median-split build; `nearest`, `knn`, `radius_search`; best-first with AABB pruning
+
+- [x] **Point feature ops** (pointops/)
+  - [x] `gather_points` (gather_points.rs) — `[n×c]` + `[k]` indices → `[k×c]` with bounds check
+  - [x] `group_features` (group_features.rs) — `[n×c]` + `[k×s]` indices → `[k×s×c]`
+  - [x] `interp_features` (interp_features.rs) — 3-NN inverse-distance-weighted feature interpolation (ε=1e-10)
+
+- [x] **Architectures** (arch/)
+  - [x] `PointNet` (pointnet.rs) — T-Net (3×3 transform, identity-init) + shared MLP [3→64→128→1024] + global max-pool + FC head → class logits
+  - [x] `SetAbstraction` / `FeaturePropagation` (pointnet_pp.rs) — PointNet++: FPS→ball-query→gather→MLP→max-pool; upsample via 3-NN interp + skip concat + MLP
+  - [x] `EdgeConv` (dgcnn.rs) — DGCNN: dynamic kNN graph in feature space; edge feat = concat(x_i, x_j−x_i); MLP+max-pool
+  - [x] `PointTransformerLayer` (point_transformer.rs) — vector self-attention with relative-position MLP encoding δ_ij; element-wise attention weights
+
+- [x] **Voxel ops** (voxel/)
+  - [x] `VoxelGrid` (voxelize.rs) — scatter points→grid with Mean/Max/Sum pooling; `occupied_centroids()` emission
+  - [x] `SparseConv3d` (sparse_conv3d.rs) — Minkowski-style sparse 3D convolution; HashMap output accumulation; configurable kernel size
+
+- [x] **Mesh distances** (mesh/)
+  - [x] `chamfer_distance` / `chamfer_distance_grad` (chamfer_distance.rs) — bidirectional CD with gradient `2(a−b_nearest)/|A|`
+  - [x] `earth_movers_distance` (earth_movers.rs) — entropy-regularized OT via log-domain Sinkhorn (clamp ±50, ε≥1e-3)
+  - [x] `estimate_normals` (normal_estimate.rs) — per-point PCA normals via 3×3 covariance smallest-eigenvector; +z orientation
+
+- [x] **Gaussian splatting** (gaussian/)
+  - [x] `Gaussian3d` (gaussian.rs) — wxyz quaternion, log-scale, pre-sigmoid opacity, SH coefficients; `covariance3d()`, `sh_color()`
+  - [x] `project_gaussian` (project.rs) — view-space projection, 2×2 covariance via Jacobian, low-pass `Σ_2d += 0.3·I`
+  - [x] `rasterize_gaussians` (rasterize.rs) — depth-sort, 3σ AABB, alpha-composite front-to-back; T<1e-4 early termination
+
+- [x] **Transforms** (transform/)
+  - [x] `RigidTransform` (rigid.rs) — SE(3): rotation matrix + translation; Rodrigues axis-angle; compose, inverse, apply
+  - [x] `Quat` (quaternion.rs) — wxyz quaternion; mul, conjugate, to/from rotation matrix; slerp with shortest-path sign-flip and lerp fallback
+  - [x] `icp` (icp.rs) — point-to-point ICP via 3×3 Jacobi SVD, sign-correct `det(VUᵀ)`, KD-tree correspondences
+
+- [x] **Integration tests** (lib.rs) — 12 E2E tests: FPS selects m distinct points, PointNet forward valid logits, SetAbstraction reduces point count, DGCNN output shape, chamfer(A,A)=0, ICP identity convergence, voxelize round-trip, Gaussian project valid depth, KD-tree nearest correctness, kNN vs brute-force agreement, LcgRng determinism, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/geom3d_ops.rs) — 7 PTX kernel groups × 4 SM versions + 5 algorithm benches: fps_n4096_m512, knn_n2048_k16, chamfer_na1024_nb1024, pointnet_forward_n512, kdtree_build_n4096
+
+---
+
+## Vol.31: Physics-Informed Neural Networks [COMPLETE]
+
+### oxicuda-pinn (36 files, ~6,730 SLoC, 264 tests)
+
+Pure-Rust physics-informed scientific ML library covering: forward-mode autodiff (dual numbers, MultiDual), tape-based reverse-mode AD (Wengert list), PINN losses (residual/boundary/IC + NTK adaptive weighting), Neural ODEs (Euler/Heun/RK4/Dopri45 + continuous adjoint method + CNF + latent-ODE), neural operators (FNO 1D/2D, DeepONet, MWT, GNO), PDE templates (heat/wave/Burgers/Poisson/Navier-Stokes), coordinate-based MLP/SIREN networks, and adaptive collocation sampling (residual-adaptive/LHS/Halton). Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `PinnError` (16 variants): DimensionMismatch, EmptyInput, InvalidStepSize, InvalidTimeInterval, NanEncountered, InvalidGridResolution, TooManyFourierModes, InvalidLayerWidth, InvalidNetworkDepth, InvalidWeight, InvalidActivation, SolverDivergence, EmptyCollocationSet, TapeIndexOutOfRange, InvalidPdeCoefficient, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Knuth MMIX 64-bit LCG, Box-Muller normals, `next_f32`, `next_usize`), `PinnHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120):
+  - [x] `pinn_residual_ptx` — `r² = r·r`, `atom.global.add.f32` reduction for `Σ|F|²`
+  - [x] `spectral_conv_ptx` — complex multiply for FNO spectral convolution via `fma.rn.f32`
+  - [x] `dual_op_ptx` — dual-number multiply `(a+εa')·(b+εb') = ab + ε(a'b+ab')` via 4× `fma.rn.f32`
+  - [x] `adjoint_ode_ptx` — reverse-time Euler step `a[i] += h·dadt[i]` for adjoint accumulation
+  - [x] `branch_trunk_dot_ptx` — DeepONet inner product with warp-shuffle `shfl.sync.bfly.b32` reduce
+  - [x] `siren_forward_ptx` — `sin(ω₀·(Wx+b))` SIREN layer via `sin.approx.f32`
+  - [x] `lhs_sample_ptx` — LCG per thread, cell-offset sample for Latin Hypercube Sampling
+
+- [x] **Autodiff** (autodiff/)
+  - [x] `Dual` (dual.rs) — forward-mode AD: dual numbers with all standard ops (sin/cos/exp/ln/sqrt/tanh/powi/abs + arithmetic ops) and chain rule
+  - [x] `Tape` / `Var` (tape.rs) — reverse-mode AD via index-based Wengert list; `gradient()` reverse pass; ops: add/sub/mul/div/sin/cos/exp/tanh/sq
+  - [x] `MultiDual<N>` (multidim.rs) — simultaneous N-variable partial derivatives; arithmetic and transcendental ops with product/chain rule on grad arrays
+
+- [x] **PINN losses** (pinn_loss/)
+  - [x] `pde_residual_loss` / `compute_residuals` (residual.rs) — MSE over `|F[u;θ](x_i)|²`; closure-based residual function
+  - [x] `bc_loss` / `BcType` (boundary.rs) — Dirichlet / NeumannX / NeumannY boundary condition loss
+  - [x] `ic_loss` (initial.rs) — initial condition MSE loss
+  - [x] `AdaptiveWeights` (weighting.rs) — NTK-style λ update: `λ_i ← α·λ_i + (1−α)/||∇L_i||`; `weighted_loss()` combiner
+
+- [x] **Neural ODE / SDE** (neural_ode/)
+  - [x] `euler_step` / `heun_step` / `rk4_step` / `dopri45_step` / `integrate_fixed` / `integrate_adaptive` (solvers.rs) — Dormand-Prince RK4(5) with exact Butcher tableau coefficients; adaptive step control with `0.9·err^{-0.2}` rescaling
+  - [x] `node_forward` / `node_adjoint_grad` (adjoint.rs) — continuous adjoint method: forward trajectory storage, reverse-time integration of `ȧ = −aᵀ·∂f/∂y`, accumulation of `dL/dθ = −∫aᵀ·∂f/∂θ dt`
+  - [x] `cnf_forward` / `hutchinson_trace` / `dense_trace` (cnf.rs) — Continuous Normalizing Flow: log-density via Hutchinson Rademacher trace estimator or dense trace via dual numbers
+  - [x] `LatentOde` (latent_ode.rs) — encoder GRU → reparametrize → ODE on latent → decoder MLP; Box-Muller normals via LcgRng
+
+- [x] **Neural Operators** (neural_op/)
+  - [x] `Fno1d` / `Fno2d` (fno.rs) — Fourier Neural Operator: inline O(N²) DFT (separable for 2D), spectral conv (complex multiply up to k_max modes), GeLU activation, lift/project layers
+  - [x] `DeepONet` (deeponet.rs) — branch network (encodes function samples) × trunk network (encodes query coords) → inner product output; batch forward
+  - [x] `Mwt` (mwt.rs) — Multiwavelet Transform Operator via Haar wavelet decompose/reconstruct per-level with learnable kernel
+  - [x] `Gno` (gno.rs) — Graph Neural Operator: radius-based neighbor aggregation with kernel MLP `K(x_i−x_j; θ)·feat_j` → mean-pool
+
+- [x] **PDE templates** (pde/)
+  - [x] `heat_residual` / `heat_analytic` (heat.rs) — 1D heat: `∂u/∂t − α∂²u/∂x²`; analytic `sin(πx)·exp(−α·π²·t)`
+  - [x] `wave_residual` / `wave_analytic` (wave.rs) — 1D wave: `∂²u/∂t² − c²∂²u/∂x²`; D'Alembert solution
+  - [x] `burgers_residual` / `burgers_analytic` (burgers.rs) — 1D Burgers `∂u/∂t + u·∂u/∂x − ν∂²u/∂x²`; viscous shock tanh solution
+  - [x] `poisson_residual` / `poisson_analytic` (poisson.rs) — 2D Poisson `∇²u=f`; `f=−2π²sin(πx)sin(πy) → u=sin(πx)sin(πy)`
+  - [x] `ns_vorticity_residual` / `taylor_green_vortex` (navier_stokes.rs) — 2D NS vorticity form; Taylor-Green vortex `ω=2cos(x)cos(y)exp(−2νt)`
+
+- [x] **Networks** (network/)
+  - [x] `Mlp` / `Activation` (mlp.rs) — configurable MLP (tanh/sin/relu/gelu); SIREN init (first layer `U(−1/d, 1/d)`, hidden `U(−√(6/d)/ω₀, √(6/d)/ω₀)`); `grad_input()` via Tape AD; gradient descent `step()`
+  - [x] `FourierFeatureNetwork` (coordinate_mlp.rs) — sinusoidal positional encoding `[sin(2πBx); cos(2πBx)]` with Gaussian random B (Box-Muller), then MLP
+
+- [x] **Adaptive sampling** (sampling/)
+  - [x] `residual_adaptive_sample` (residual_adaptive.rs) — importance sampling `p_i ∝ |R_i|^power` via inverse-CDF with LcgRng
+  - [x] `latin_hypercube_sample` (latin_hypercube.rs) — LHS: each marginal cell hit exactly once via Fisher-Yates permutation per dimension
+  - [x] `halton` / `halton_sequence` (quasi_random.rs) — Halton radical-inverse sequence using first d primes for low-discrepancy sampling
+
+- [x] **Integration tests** (lib.rs) — 12 E2E tests: heat PINN loss computable, Burgers residual near-zero on analytic solution, NeuralODE RK4 exp-decay within 1e-4, adjoint gradient sign correct, FNO1D forward shape, FNO2D forward shape, DeepONet scalar output, CNF log-det finite, tape gradient x²=2x, dual sin(x²) dvalue, LHS marginal coverage, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/pinn_ops.rs) — 7 PTX kernel groups × 4 SM versions + 5 algorithm benches: rk4_step_d64, dopri45_step_d32, fno1d_forward_n32, dft_n32, lhs_sample_d4_n256
+
+---
+
+## Vol.32: RLHF & Alignment Algorithms [COMPLETE]
+
+### oxicuda-rlhf (21 files, ~5,500 SLoC, 25 tests)
+
+Pure-Rust RLHF and alignment primitives covering all modern alignment algorithms: Direct Preference Optimization (DPO), Identity Preference Optimization (IPO), Kahneman-Tversky Optimization (KTO), Odds Ratio Preference Optimization (ORPO), Simple Preference Optimization (SimPO), Bradley-Terry reward modeling, reward normalization (Welford), PPO-RLHF rollout with GAE + KL penalty, adaptive KL controller, and masked SFT cross-entropy loss. Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `RlhfError` (15 variants): DimensionMismatch, EmptyInput, InvalidBeta, InvalidTemp, NanEncountered, InvalidLambda, LogProbsRequired, MismatchedPairLength, InvalidMargin, KlDivergence, InvalidReferenceLogProb, RewardNormFailed, InvalidMaskValue, Internal, InvalidClipRatio
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Knuth MMIX 64-bit LCG), `RlhfHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120):
+  - [x] `bt_reward_loss_ptx` — `-Σ log(σ(r_chosen - r_rejected))` per pair
+  - [x] `dpo_loss_ptx` — DPO: `-log σ(β·((lp_w - ref_w) - (lp_l - ref_l)))` per pair
+  - [x] `ipo_loss_ptx` — IPO squared: `((lp_w - ref_w) - (lp_l - ref_l) - 1/(2β))²`
+  - [x] `kto_loss_ptx` — KTO: desirable `(1-σ(β·(r-z₀)))` + undesirable with λ weights; z₀=ln2
+  - [x] `orpo_odds_ptx` — ORPO log-odds: `log(exp(lp)/(1-exp(lp)+ε))` per sequence
+  - [x] `rlhf_kl_ptx` — forward KL penalty per token: `exp(lp)·(lp - ref_lp)`
+  - [x] `sft_mask_ptx` — masked cross-entropy per token; division by mask-sum in host code
+
+- [x] **Preference data** (preference/)
+  - [x] `PreferencePair` / `PairBatch` (pair.rs) — paired chosen/rejected log-probs + reference model log-probs; length validation
+  - [x] `bt_reward_loss` / `RewardHead` (bradley_terry.rs) — Bradley-Terry pairwise loss `-E[log σ(r_w - r_l)]`; linear reward head with Xavier init
+
+- [x] **Reward modeling** (reward/)
+  - [x] `RewardModel` (model.rs) — multi-layer MLP with ReLU activations → scalar reward
+  - [x] `RewardNormalizer` (normalize.rs) — Welford online mean/variance; `normalize()` whitens to zero-mean unit-variance
+
+- [x] **Preference alignment losses** (dpo/)
+  - [x] `dpo_loss` / `DpoConfig` (dpo.rs) — DPO loss with per-pair and batch variants; `dpo_log_ratio` helper
+  - [x] `ipo_loss` / `IpoConfig` (ipo.rs) — IPO squared loss `(log_ratio_diff - 1/(2β))²`
+  - [x] `kto_loss` / `KtoConfig` (kto.rs) — KTO with desirable λ_D and undesirable λ_U; KL reference point z₀=ln2
+
+- [x] **Reference-free alignment** (orpo/)
+  - [x] `orpo_loss` / `OrpoConfig` (orpo.rs) — ORPO: `L_SFT + λ·(-log σ(log_odds_w - log_odds_l))`; no reference model
+  - [x] `simpo_loss` / `SimpoConfig` (simpo.rs) — SimPO: length-normalized `-log σ(β/|y_w|·Σ lp_w - β/|y_l|·Σ lp_l - γ)`; margin γ
+
+- [x] **RLHF-PPO utilities** (ppo_rlhf/)
+  - [x] `RlhfRollout` (rollout.rs) — rollout buffer with log_probs, ref_log_probs, rewards, values; `compute_advantages()` (GAE), `apply_kl_penalty()` (reward -= β·KL)
+  - [x] `KlController` (kl_control.rs) — adaptive KL beta: `β *= (1 + k·(kl-target)/target)`; `kl_divergence_from_logps()`
+  - [x] `rlhf_ppo_loss` / `RlhfPpoConfig` (ppo_step.rs) — clipped PPO surrogate + value loss + entropy bonus → (policy, value, entropy, approx_kl)
+
+- [x] **SFT loss** (sft/)
+  - [x] `sft_loss` / `masked_token_ce` (loss.rs) — cross-entropy with attention mask; logsumexp trick for numerical stability; division by sum of mask
+
+- [x] **Metrics** (metrics/)
+  - [x] `win_rate`, `reward_gap`, `kl_from_ref`, `perplexity`, `AlignmentMetrics` (alignment.rs) — standard RLHF evaluation metrics; `compute_alignment_metrics()` batch helper
+
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: BT loss zero for equal rewards, BT decreases with gap, DPO finite, DPO lower for aligned pairs, IPO finite, KTO non-negative, ORPO structure, SimPO length-normalized, SFT correct prediction, KL zero at ref, RewardNormalizer unit variance, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/rlhf_ops.rs) — 7 PTX kernel groups × 4 SM versions + 6 algo benches: dpo_batch_256, ipo_batch_256, kto_batch_256, sft_512tokens_32kvocab, reward_norm_update
+
+---
+
+## Vol.33: Meta-Learning Algorithms [COMPLETE]
+
+### oxicuda-meta (27 files, ~4,800 SLoC, 18 tests)
+
+Pure-Rust meta-learning library covering: MAML (Model-Agnostic Meta-Learning with second-order finite-difference gradients), FOMAML (first-order approximation), ANIL (Almost No Inner Loop, head-only adaptation), Reptile (first-order interpolation), Prototypical Networks (class prototype mean + Euclidean distance), Matching Networks (cosine attention over support set), and Relation Networks (2-layer relation MLP). Includes N-way K-shot episode sampling, MLP backbone with Xavier init, and few-shot accuracy metrics with 95% CI.
+
+- [x] **Error types** (error.rs) — `MetaError` (15 variants): DimensionMismatch, EmptySupport, InvalidNWay, InvalidKShot, InvalidFeatDim, InsufficientClasses, InsufficientExamples, InvalidLr, NanEncountered, InvalidQuerySize, InvalidEpisodeConfig, GradientFailure, BackboneError, Internal, InvalidStepSize
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Knuth MMIX 64-bit LCG), `MetaHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120):
+  - [x] `inner_sgd_ptx` — `θ'[i] = θ[i] - α·g[i]` elementwise vector SGD step
+  - [x] `reptile_update_ptx` — `θ[i] += ε·(θ'[i] - θ[i])` interpolation step
+  - [x] `proto_distance_ptx` — squared L2: `d[q,k] = Σ_j (q_j - proto_j)²` for query × prototype pairs
+  - [x] `cosine_sim_ptx` — `cos(a,b) = a·b / (||a||·||b|| + ε)` with normalization for MatchingNet
+  - [x] `relation_score_ptx` — concat(q,s) + 2-layer ReLU MLP → sigmoid score for RelationNet
+  - [x] `meta_grad_accum_ptx` — sum task gradients elementwise, divide by n_tasks
+  - [x] `episode_sample_ptx` — LCG-based class/example selection for N-way K-shot episodes
+
+- [x] **Episode utilities** (episode/)
+  - [x] `FewShotEpisode` / `EpisodeConfig` (types.rs) — N-way K-shot episode struct; support/query splits with shape validation; `support_for_class()` view helper
+  - [x] `EpisodeSampler` (sampler.rs) — LCG Fisher-Yates sampling of N classes then K+Q examples per class from flat dataset
+
+- [x] **Network** (network/)
+  - [x] `MlpBackbone` (backbone.rs) — MLP with ReLU (except final linear); Xavier init `U(-√(6/(in+out)), √(6/(in+out)))`; `to_params()` / `from_params()` for MAML parameter flattening
+  - [x] `LinearHead` (linear_head.rs) — linear probe classifier with `to_params()` / `from_params()`
+
+- [x] **Gradient utilities** (gradient/)
+  - [x] `inner_sgd_step` / `multi_step_inner` / `cross_entropy_loss` (inner_loop.rs) — SGD step + multi-step inner loop via closure; CE loss for classification
+  - [x] `fd_gradient` (finite_diff.rs) — central finite differences `(f(θ+ε·eᵢ) - f(θ-ε·eᵢ)) / (2ε)` for gradient approximation
+
+- [x] **MAML family** (maml/)
+  - [x] `maml_adapt` / `maml_meta_update` / `MamlConfig` (maml.rs) — MAML: inner adaptation + outer FD meta-gradient; `θ_new = θ - β·∇_θ·Σ_i L(θ'_i)`
+  - [x] `fomaml_update` / `FoMamlConfig` (fomaml.rs) — FOMAML: gradient at θ' treated as constant (stop-gradient); cheaper than full MAML
+  - [x] `anil_adapt_head` / `anil_meta_update` / `AnilConfig` (anil.rs) — ANIL: only linear head updated in inner loop; body fully shared + frozen
+
+- [x] **Reptile** (reptile/)
+  - [x] `reptile_update` / `ReptileConfig` (reptile.rs) — `θ ← θ + ε·(avg_{τ_i}(θ'_i) - θ)`; k inner SGD steps per task
+
+- [x] **Metric learning** (metric_learning/)
+  - [x] `compute_prototypes` / `proto_predict` / `proto_loss` (proto_net.rs) — ProtoNet: class prototype = mean(support feats); prediction via argmin L2 to prototypes; CE loss over -d² logits
+  - [x] `cosine_similarity` / `matching_net_attention` / `matching_net_predict` (matching_net.rs) — MatchingNet: softmax cosine attention over support; temperature scaling
+  - [x] `RelationNet` (relation_net.rs) — 2-layer MLP: concat(q,s) → ReLU → sigmoid; `relation_score`, `predict_episode`, `relation_loss` (MSE on 0/1 targets)
+
+- [x] **Metrics** (metrics/)
+  - [x] `episode_accuracy` / `mean_and_ci95` / `accuracy_at_k` (few_shot.rs) — episode accuracy; mean ± 95% CI over episodes; top-k accuracy
+
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: ProtoNet correct class, identity features → correct label, MatchingNet attention sums to 1, same-class highest attention, RelationNet same > different, relation loss finite, MAML adapt changes params, Reptile moves toward task, inner SGD decreases loss, episode sampler correct shapes, 100% accuracy → 1.0, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/meta_ops.rs) — 7 PTX kernel groups × 4 SM versions + 6 algo benches: proto_net_5way5shot_d64, matching_net_attention, maml_adapt_inner, reptile_update, episode_sampler
+
+---
+
+## Vol.34: Neural Radiance Fields & Neural Rendering [COMPLETE]
+
+### oxicuda-nerf (17 files, ~6,800 SLoC, 62 tests)
+
+Pure-Rust neural rendering library covering: NeRF positional encoding (sin/cos with L frequency levels, configurable include_input), Instant-NGP multi-resolution hash grid (L levels, T buckets, F features per entry; spatial hashing with primes π2=2654435761, π3=805459861; trilinear interpolation over 8 corners), Mip-NeRF integrated positional encoding (Gaussian attenuation `exp(-ω²σ²/2)` for anti-aliasing), TensoRF CP decomposition (rank-R factored density + color field with 1D axis interpolation), volume rendering (alpha compositing `α_i = 1-exp(-σ_i·δ_i)`, transmittance, early termination T<1e-4), stratified sampling, importance resampling (inverse-CDF), pinhole camera ray generation (c2w 3×4 matrix), occupancy grid acceleration, PSNR/MSE metrics. Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `NerfError` (16 variants): DimensionMismatch, EmptyInput, InvalidFreqLevels, InvalidHashConfig, NanEncountered, InvalidBounds, InvalidSampleCount, ZeroRayDirection, InvalidCameraIntrinsics, InvalidGridResolution, HashLevelOutOfRange, InvalidFeatureDim, TensorDecompError, VolumeRenderError, InvalidEncoding, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Knuth MMIX 64-bit LCG), `NerfHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120):
+  - [x] `positional_encoding_ptx` — sin/cos frequency encoding of coordinate batch
+  - [x] `volume_render_ptx` — single-ray alpha compositing with T cutoff
+  - [x] `hash_grid_lookup_ptx` — multi-res spatial hash + trilinear interpolation
+  - [x] `ray_march_ptx` — stratified sample generation along ray
+  - [x] `sh_to_rgb_ptx` — SH basis eval for L=0..3 (16 coefficients, view-dependent color)
+  - [x] `occupancy_update_ptx` — threshold density → bool occupancy grid
+  - [x] `importance_resample_ptx` — inverse-CDF resampling from coarse weight histogram
+
+- [x] **Positional encodings** (encoding/)
+  - [x] `positional_encode` / `PosEncConfig` (positional.rs) — `γ(p) = [sin(2^k·π·p), cos(2^k·π·p)]` for k=0..L-1 per dimension; optional raw input concatenation
+  - [x] `HashGrid` / `HashGridConfig` (hash_grid.rs) — multi-resolution hash with trilinear lerp; `query()` → `[n_levels * F]`; `query_batch()`
+  - [x] `integrated_pe` / `IpeConfig` (integrated_pe.rs) — IPE for Mip-NeRF: `sin(ωμ)·exp(-ω²σ²/2)`, `cos(ωμ)·exp(-ω²σ²/2)`
+
+- [x] **Rendering** (rendering/)
+  - [x] `Ray` / `PinholeCamera` (ray.rs) — `Ray::at(t)`, `Ray::normalized()`; camera `ray_through_pixel(u, v, c2w)`, `generate_rays(c2w)`
+  - [x] `stratified_sample` / `importance_sample` / `merge_samples` (sampling.rs) — hierarchical NeRF sampling
+  - [x] `volume_render` / `volume_render_batch` / `RenderResult` (volume_render.rs) — alpha compositing with depth and opacity output
+  - [x] `OccupancyGrid` (occupancy.rs) — resolution³ bool grid; `is_occupied_world()`, `update_from_density()`, `march_ray_occupied()`
+
+- [x] **Networks** (network/)
+  - [x] `NerfMlp` / `NerfMlpConfig` (nerf_mlp.rs) — 8-layer ResNet MLP: skip connection at layer 4, sigma head (ReLU), color head (Sigmoid); batch forward
+  - [x] `TinyNerf` (tiny_nerf.rs) — compact 4-layer MLP for tests
+
+- [x] **Fields** (field/)
+  - [x] `TensorRf` / `TensorRfConfig` (tensorf.rs) — CP decomposition: rank-R factored density (relu) + color; `query_density()`, `query_color()`
+  - [x] `HashField` (hash_field.rs) — Instant-NGP style: HashGrid + 2-layer MLP decoder → (sigma, color_feat)
+
+- [x] **Camera** (camera/pinhole.rs) — re-export of PinholeCamera
+
+- [x] **Metrics** (metrics/image_quality.rs) — `psnr()`, `mse_image()`, `compute_image_metrics()` → `ImageMetrics`
+
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: PE shape, deterministic, hash grid shape, trilinear corners distinct, volume render empty=zero, opaque first sample, stratified count, importance count, TensoRF nonneg density, TinyNerf finite, PSNR identity, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/nerf_ops.rs) — 7 PTX kernel groups × 4 SM versions + 6 algo benches: pos_enc_1024pts, hash_grid_batch_1024, volume_render_64rays, stratified_sample_128, tensorf_density_1024
+
+---
+
+## Vol.35: Mixture of Experts (MoE) [COMPLETE]
+
+### oxicuda-moe (14 files, ~6,200 SLoC, 60 tests)
+
+Pure-Rust Mixture of Experts primitives covering: Switch Transformer top-1 routing (capacity buffer, overflow token dropping), GShard-style top-K gating (softmax over experts, partial-sort top-k, noise jitter), Expert Choice routing (experts select preferred tokens, guaranteed load balance), Soft MoE (differentiable slot routing D=softmax(X·Φ/√d), slot-aggregated expert inputs), standard GELU/SiLU/ReLU expert FFN with Xavier init, SwiGLU expert (SiLU(W1·x)⊙(W3·x)·W2), ExpertBank + SwiGluBank dispatch, Switch load-balance loss (n_e·Σ f_i·P_i), router z-loss (log²(logsumexp(logits))), routing entropy, expert utilization metrics, full MoeLayer combining all components. Zero CUDA SDK dependency.
+
+- [x] **Error types** (error.rs) — `MoeError` (14 variants): DimensionMismatch, EmptyInput, InvalidExpertCount, InvalidTopK, InvalidCapacityFactor, ExpertIndexOutOfRange, NanEncountered, InvalidHiddenDim, InvalidInputDim, DispatchFailed, RouterNotInitialized, ExpertFfnError, SlotAssignmentError, Internal
+
+- [x] **Handle** (handle.rs) — `SmVersion`, `LcgRng` (Knuth MMIX 64-bit LCG), `MoeHandle::default_handle()` (SM 8.0, device 0, seed 42)
+
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 GPU kernels × 6 SM versions (75/80/86/90/100/120):
+  - [x] `top_k_gate_ptx` — softmax + top-k selection per token
+  - [x] `expert_dispatch_ptx` — capacity-bounded token→expert slot assignment
+  - [x] `expert_ffn_ptx` — batched `y = W2·GeLU(W1·x+b1)+b2` per token
+  - [x] `expert_combine_ptx` — weighted sum of expert outputs by gate scores
+  - [x] `load_balance_loss_ptx` — `n_e·Σ f_i·P_i` reduction
+  - [x] `router_z_loss_ptx` — `log²(logsumexp(logits))` per token, reduction
+  - [x] `soft_moe_dispatch_ptx` — slot dispatch D[t,s] = softmax(x·Φ/√d)
+
+- [x] **Routing** (routing/)
+  - [x] `TopKRouter` / `TopKConfig` / `TopKResult` / `topk()` (top_k.rs) — k=1 argmax, k=2 one-pass max2, k≥3 partial sort; optional noise jitter `N(0, σ²)` via Box-Muller; top-k score normalization
+  - [x] `switch_dispatch` / `switch_combine` / `SwitchDispatch` (switch.rs) — capacity = ceil(T/E·cap_factor), overflow tracking, combine via gate scores
+  - [x] `expert_choice_route` / `expert_choice_combine` / `ExpertChoiceResult` (expert_choice.rs) — experts select top-c tokens from their score column; guaranteed load balance
+  - [x] `SoftMoeRouter` (soft_moe.rs) — `dispatch_weights()` D=[T,E·S], `aggregate_inputs()` (weighted avg per slot), `combine_outputs()` (scatter back to tokens)
+
+- [x] **Expert FFN** (expert/)
+  - [x] `ExpertFfn` / `ExpertActivation` / `SwiGluExpert` (ffn.rs) — GELU/SiLU/ReLU activation; SwiGLU `(SiLU(W1·x)⊙W3·x)·W2`; Xavier init; batch forward
+  - [x] `ExpertBank` / `SwiGluBank` (bank.rs) — N-expert bank; `forward_expert(idx, tokens)`; `forward_dispatched(x, assignments, scores)`
+
+- [x] **Losses** (loss/)
+  - [x] `load_balance_loss` / `compute_load_stats` / `LoadStats` (load_balance.rs) — `L_aux = n_e·Σ f_i·P_i`; per-expert fraction and mean probability
+  - [x] `router_z_loss` (router_z.rs) — `(1/B)·Σ_b log²(LSE_b)` with stable logsumexp
+  - [x] `routing_entropy` (entropy.rs) — `-(1/T)·Σ_t Σ_e p_{t,e}·log(p_{t,e}+ε)`
+
+- [x] **Metrics** (metrics/utilization.rs) — `ExpertUtilization { tokens_per_expert, overflow_count, load_imbalance_ratio, utilization_fraction }` via `compute_utilization()`
+
+- [x] **MoeLayer** (layer/moe_layer.rs) — `MoeLayer { router, experts }`: full forward (route → Switch dispatch → expert bank → combine → aux losses); `MoeLayerOutput { hidden, aux_loss, n_overflows, load_stats }`
+
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: top-k scores sum to 1, indices valid, Switch capacity respected, overflow counted, ExpertFfn finite, output shape, SwiGLU finite, load balance nonneg, z-loss nonneg, Soft MoE dispatch sums to 1, MoeLayer forward shape, PTX kernels × 6 SM versions
+
+- [x] **Benchmarks** (benches/moe_ops.rs) — 7 PTX kernel groups × 4 SM versions + 6 algo benches: topk_routing_512tok_8exp_d256, expert_ffn_batch64, switch_dispatch_512tok, load_balance_512tok, moe_layer_128tok
+
+---
+
+## Vol.36: Tabular Deep Learning [COMPLETE]
+
+`oxicuda-tabular` — Pure-Rust tabular deep learning primitives: sparse probability transforms, attention-based networks, transformers, and neural decision trees.
+
+- [x] **attention/sparsemax.rs** — `sparsemax` (Martins & Astudillo 2016): sort-descending k* algorithm, O(d log d). `entmax15` (α=1.5): bisection 64 iterations. `sparsemax_batch` for batched row-wise projection.
+- [x] **attention/tabnet.rs** — TabNet (Arik & Pfister 2021): `glu` (GLU gate), `BatchNorm1d` (γ/β learnable), `TabNetConfig` {n_features, n_d, n_a, n_steps, gamma, n_classes}, `TabNetLayer` (Xavier init, step-wise sparsemax attention, prior scales P_i=Π(γ-M_j), shared + step-specific FC-BN-GLU blocks).
+- [x] **attention/saint.rs** — SAINT (Somepalli et al. 2021): `self_attention` (scaled dot-product), `multihead_attention`, `intersample_attention` (per-feature cross-sample), `SaintConfig`, `SaintLayer` (alternating row-wise + intersample MHSA with Pre-LN FFN, CLS mean-pool head).
+- [x] **transformer/ft_transformer.rs** — FT-Transformer (Gorishniy et al. 2021): `FeatureTokenizer` (continuous: x_j·w_j+b_j per embed dim; categorical: lookup table), `FtConfig`, `FtTransformer` (Pre-LN MHSA blocks, CLS token, linear head).
+- [x] **tree/node.rs** — NODE (Popov et al. 2019): `NodeConfig`, `NodeTree` (depth-d soft oblivious decision tree, entmax-1.5 feature selection, sigmoid-smoothed splits, leaf tensor products), `NodeEnsemble` (mean over trees).
+- [x] **preprocess/normalize.rs** — `QuantileNormalizer` (empirical rank [0,1], binary-search transform), `StandardNormalizer` (z-score, Welford-style std), `MinMaxNormalizer`.
+- [x] **preprocess/embed.rs** — `FeatureEmbedder` (fit continuous μ/σ, validate categorical ranges).
+- [x] **metrics/tabular_metrics.rs** — `binary_accuracy`, `multiclass_accuracy` (argmax), `rmse`, `mae`, `auc_roc` (sort-by-score + trapezoidal), `compute_binary_metrics`, `ClassificationMetrics`.
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 kernels × 6 SM versions (75/80/86/90/100/120): `sparsemax_kernel` (per-row simplex projection), `feature_tokenize_kernel` (FT-Transformer continuous tokenisation), `tabnet_step_attn_kernel` (prior-scaled QK dot + sparsemax), `intersample_attn_kernel` (SAINT cross-sample QKᵀ/√d), `node_tree_eval_kernel` (soft oblivious routing + leaf weighting), `quantile_norm_kernel` (binary-search rank), `auc_roc_kernel` (sorted-label trapezoidal accumulation).
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: sparsemax sums to 1, entmax sums to 1, TabNet output shape + attention non-negative, SAINT forward shape, FT-Transformer finite logits, NODE ensemble shape, QuantileNormalizer range [0,1], binary accuracy perfect, AUC-ROC perfect, PTX kernels × 6 SM versions, FT-Transformer batch.
+- [x] **Benchmarks** (benches/tabular_ops.rs) — 7 PTX kernel groups × 4 SM versions + 5 algo benches.
+- **Tests**: 51 passing
+
+---
+
+## Vol.37: Anomaly Detection [COMPLETE]
+
+`oxicuda-anomaly` — Pure-Rust anomaly detection library covering deep learning, distance-based, density-based, statistical, and ensemble methods.
+
+- [x] **svdd/deep_svdd.rs** — DeepSVDD (Ruff et al. 2018): 3-layer MLP, no bias in last layer (hypersphere collapse prevention), `fit` computes fixed center c=mean(φ(x_i)) (adjusted if near-zero), `score` = ||φ(x)-c||², Xavier init.
+- [x] **reconstruction/autoencoder.rs** — `AeConfig`, `AnomalyAutoencoder` (Xavier init, ReLU encoder + sigmoid decoder), `score` = MSE reconstruction error, batch scoring.
+- [x] **reconstruction/vae_anomaly.rs** — `VaeConfig`, `AnomalyVae` (μ/log_var encoder, Box-Muller reparametrize, MSE+KL β-ELBO), deterministic-μ scoring (no stochasticity at inference).
+- [x] **distance/lof.rs** — LOF (Breunig et al. 2000): brute-force k-NN, `fit` computes knn_indices/knn_dists/lrd; `reach_dist_k(i,j)=max(knn_dists[j*(k-1)], dist(i,j))`; `lrd_k(i)=k/Σreach_dist`; `score=mean(lrd_neighbors)/lrd_x`. Numerical guard: lrd → 1e30 if zero denominator.
+- [x] **distance/knn_score.rs** — `KnnScorer`: average k-NN distance baseline, brute-force, batch scoring.
+- [x] **density/copod.rs** — COPOD (Li et al. 2020): empirical CDF via sorted column binary search; `score=-Σ(log(F_j(x_j))+log(1-F_j(x_j)))/2`; `score_skew_adjusted` (Fisher-Pearson skewness weighted tail).
+- [x] **density/mahalanobis.rs** — `MahalanobisDetector`: sample mean + covariance estimation; Gauss-Jordan inversion with full pivoting on augmented [M|I]; ridge 0.01·I for numerical stability; D²=diffᵀ·Σ⁻¹·diff.
+- [x] **isolation/iforest_score.rs** — `IsolationScorer`: random projection path-length estimation; `c_factor(n)=2H(n-1)-2(n-1)/n` (EULER_MASCHERONI=0.5772156649); `isolation_score_from_path(avg_path,n)=2^(-avg_path/c_n)`.
+- [x] **statistical/stats.rs** — `MadDetector` (MAD=1.4826·median|xi-μ|, Z-score via MAD, configurable threshold), `ZScoreDetector` (Welford online μ/σ, |x-μ|/σ>threshold), `percentile_threshold` (linear interpolation).
+- [x] **ensemble/ensemble.rs** — `AnomalyEnsemble` (Average/Maximum/Weighted combiners with per-detector min-max normalisation; `add_detector`, `score_ensemble`).
+- [x] **metrics/anomaly_metrics.rs** — `auc_roc`, `auc_pr` (precision-recall trapezoidal), `f1_at_threshold`, `compute_detection_metrics` (AUC-ROC + AUC-PR + F1 together).
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 kernels × 6 SM versions (75/80/86/90/100/120): `svdd_loss_kernel` (||z-c||² per sample), `recon_score_kernel` (MSE per sample via warp-shuffle), `lof_reach_dist_kernel` (k-dist lookup + max), `copod_ecdf_kernel` (binary search rank), `mahal_dist_kernel` (quadratic form per sample), `iforest_score_kernel` (2^(-avg_path/c_n) via ex2.approx), `ensemble_normalize_kernel` (per-detector min-max then mean).
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: DeepSVDD self score < mean, AE recon score finite, VAE score finite, LOF self score ≤ mean neighbor score, kNN self score 0, COPOD score finite, Mahalanobis self score 0, IsolationScorer anomaly > typical, MAD score vs threshold, ZScore flag outlier, Ensemble normalised sum, PTX kernels × 6 SM versions.
+- [x] **Benchmarks** (benches/anomaly_ops.rs) — 7 PTX kernel groups × 4 SM + 5 algo benches.
+- **Tests**: 62 passing
+
+---
+
+## Vol.38: Quantum Simulation [COMPLETE]
+
+Pure-Rust quantum simulation and QML library covering state-vector simulation, standard and parametric gates (H/S/T/Rx/Ry/Rz/U3/CNOT/CZ/SWAP/CCX), Pauli strings, Hamiltonians, and expectation values; Trotter-Suzuki 1st/2nd/4th-order evolution and Lindblad master-equation density-matrix stepping; VQE with hardware-efficient ansatz and parameter-shift gradient descent; QAOA for Max-Cut/Ising; density matrices with partial-trace and quantum-information metrics (purity/fidelity/von-Neumann entropy); Kraus channels (depolarizing/amplitude-damping/phase-damping); angle/amplitude/ZZ-feature-map embeddings; overlap quantum kernel (QML); QuantumCircuit DSL.
+
+### oxicuda-quantum (~34 files, ~6,500 SLoC)
+- [x] **statevec** — `StateVector`, `apply_1q_inplace` (bit-mask), `apply_2q_inplace` (4×4 complex matmul), `apply_1q_controlled`
+- [x] **gates** — `gate_{i,x,y,z}`, `gate_{h,s,t,sdg,tdg}`, `apply_{cnot,cz,swap,ccx}`, `gate_{rx,ry,rz,u3,phase}`
+- [x] **pauli** — `PauliOp`, `PauliString`, `Hamiltonian`, `expectation_value` (basis-rotation + parity counting)
+- [x] **trotter** — `TrotterStep` (1st/2nd/4th-order Suzuki-Yoshida), `LindbladOp`, `lindblad_step`
+- [x] **vqe** — `HardwareEfficientAnsatz`, `VqeOptimizer` (parameter-shift gradient + SGD)
+- [x] **qaoa** — `QaoaCircuit` (cost+mixer p-layer alternation, energy via cut evaluation)
+- [x] **density** — `DensityMatrix`, `partial_trace` (index folding), `purity`, `fidelity`, `von_neumann_entropy`
+- [x] **channel** — `KrausChannel` (completeness-checked), `depolarizing_channel`, `amplitude_damping_channel`, `phase_damping_channel`
+- [x] **embedding** — `angle_embedding`, `amplitude_embedding`, `zz_feature_map` (Havlíček depth-2)
+- [x] **kernel** — `overlap_kernel` K(x,y)=|⟨ψ(x)|ψ(y)⟩|², `kernel_matrix`
+- [x] **circuit** — `QuantumCircuit`, `GateOp` enum, `exec_on_state`
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 kernels × 6 SM versions: `statevec_apply_1q`, `statevec_apply_2q`, `statevec_apply_cnot`, `expval_pauli`, `partial_trace`, `trotter_step`, `measure_prob`
+- [x] **Integration tests** (lib.rs) — 14 e2e tests: |0⟩ norm, H superposition, HH=I, CNOT Bell state, Pauli-Z ⟨0|, Pauli-Z ⟨1|, mixed Hamiltonian, VQE converges, QAOA runs, density purity=1, depolarizing reduces purity, PTX all SM versions
+- [x] **Benchmarks** — 7 PTX kernel groups × 4 SM + 5 algo benches
+- **Tests**: 61 passing
+
+---
+
+## Vol.39: Approximate Nearest Neighbor & Vector Search [COMPLETE]
+
+Pure-Rust ANN and vector-search library covering brute-force baseline, top-K heap, mini-batch k-means++, Product Quantization (PQ) with asymmetric distance computation (ADC), IVF coarse quantizer, IVF+PQ (IVFPQ), HNSW (Malkov & Yashunin 2018 with neighbor-selection heuristic), locality-sensitive hashing (random-projection cosine, MinHash, SimHash), NN-Descent k-NN graph build, and scalar quantizers (SQ8, SQ4).
+
+### oxicuda-ann (~32 files, ~6,200 SLoC)
+- [x] **distance** — `l2_sq`, `l2`, `l2_sq_all` (batch), `ip`, `cosine_sim`, `hamming_u32`, `hamming_f32_packed`
+- [x] **flat** — `FlatIndex`, `search_l2`, `search_ip` (brute-force baseline, min-heap top-K)
+- [x] **topk** — `BoundedMaxHeap` (k-smallest via max-heap eviction), `select_topk`
+- [x] **kmeans** — `KMeans`, `kmeans_pp_init`, mini-batch fit (25 epochs default)
+- [x] **pq** — `PqCodebook`, `train_pq` (per-subspace k-means), `encode_vector/batch`, `build_adc_table`, `adc_distance`
+- [x] **ivf** — `IvfIndex` (coarse k-means quantizer + posting lists), `search` (top-nprobe)
+- [x] **ivfpq** — `IvfPq` (coarse-prune + ADC search within top-nprobe lists)
+- [x] **hnsw** — `HnswGraph`, `hnsw_insert` (level draw + select_neighbors_heuristic), `hnsw_search` (greedy descent + ef-bounded BFS)
+- [x] **lsh** — `RandomProjLsh` (sign-bit hash), `MinHash` (Jaccard via LCG hash families), `SimHash` (cosine sim via Gaussian projections)
+- [x] **knn_graph** — `KnnGraph`, `build_brute` (O(n²) baseline), `build_nn_descent` (NN-Descent iteration)
+- [x] **quantize** — `Sq8Quantizer` (per-dim min/max → uint8), `Sq4Quantizer` (4-bit nibble packed)
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 kernels × 6 SM versions: `l2_distance_batch`, `ip_distance_batch`, `pq_adc_table`, `hnsw_neighbor_eval`, `ivf_assign`, `lsh_random_proj`, `topk_select`
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: FlatIndex exact match, top-K count, k-means clusters, PQ train, PQ ADC distance, IVF search, HNSW self-find, HNSW recall ≥80%, LSH self-hash, MinHash Jaccard, NN-Descent quality, PTX all SM versions
+- [x] **Benchmarks** — 7 PTX kernel groups × 4 SM + 5 algo benches
+- **Tests**: 32 passing
+
+---
+
+## Vol.40: Recommender Systems [COMPLETE]
+
+Pure-Rust recommender-system library covering classical matrix factorization (ALS implicit-feedback, BPR, NMF), neural CF (NCF GMF⊕MLP, Two-Tower DSSM), feature-crossing models (DeepFM second-order FM, AutoInt multi-head self-attention, Wide&Deep), sequence-aware models (GRU4Rec, SASRec causal self-attention, BERT4Rec bidirectional MLM), graph-based recommenders (LightGCN symmetric-normalized propagation, NGCF interaction-aware aggregation), multi-task learners (MMoE shared experts, PLE cascaded experts, ESMM pCTR×pCVR), negative sampling (uniform rejection, popularity-biased CDF, hard-negative mining), and ranking metrics (Precision@K, Recall@K, NDCG@K, MAP@K, MRR, HitRate@K, AUC Wilcoxon-Mann-Whitney).
+
+### oxicuda-recsys (~34 files, ~6,800 SLoC)
+- [x] **factorization** — `Als` (Gauss-Jordan closed-form, implicit c_ui=1+α·r), `Bpr` (triplet gradient σ(x_ui−x_uj)), `Nmf` (multiplicative update W/H rules)
+- [x] **ncf** — `Ncf` (GMF element-wise product ⊕ MLP concat → sigmoid)
+- [x] **two_tower** — `TwoTower` (dual MLP user/item encoders + dot-product score)
+- [x] **deepfm** — `DeepFm` (linear + FM 2nd-order 0.5·((Σe)²−Σe²) + Deep MLP), `AutoInt` (multi-head self-attention over field embeddings + residual), `WideDeep` (linear ⊕ MLP)
+- [x] **sequential** — `Gru4Rec` (full GRU cell z/r/n gates), `SasRec` (causal self-attention + FFN + LayerNorm), `Bert4Rec` (bidirectional attention + MLM masking)
+- [x] **graph_recsys** — `LightGcn` (D⁻½AD⁻½ propagation + layer-mean pooling), `Ngcf` (LeakyReLU aggregation + concat layers)
+- [x] **multitask** — `Mmoe` (per-task softmax gates over shared experts), `Ple` (cascaded shared+task-specific expert layers), `Esmm` (pCTR × pCVR = pCTCVR product)
+- [x] **sampling** — `UniformNegSampler` (rejection, max 100 tries), `PopularityNegSampler` (CDF binary search), `HardNegSampler` (top-20% non-positive pool)
+- [x] **metrics** — `precision_at_k`, `recall_at_k`, `ndcg_at_k` (DCG/IDCG log2), `map_at_k`, `mrr`, `hit_rate_at_k`, `auc_recsys` (Wilcoxon-Mann-Whitney with tie handling)
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 kernels × 6 SM versions: `als_step_ptx` (Cholesky-style), `bpr_grad_ptx`, `embedding_lookup_ptx`, `dot_score_ptx`, `softmax_topk_ptx`, `negsample_uniform_ptx`, `lightgcn_propagate_ptx`
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: ALS score finite, BPR loss finite, NMF fit, NCF in [0,1], TwoTower score finite, DeepFM in [0,1], WideDeep in [0,1], SASRec logits finite, LightGCN score finite, NDCG perfect ranking, uniform neg not in positives, PTX non-empty all SM versions
+- [x] **Benchmarks** — PTX bench group + NDCG bench + RNG bench
+- **Tests**: 12 passing
+
+---
+
+## Vol.41: Causal Inference [COMPLETE]
+
+Pure-Rust causal-inference library covering DAG representation (cycle-safe add/remove, ancestors/descendants/d-separation via Bayes-ball), causal discovery (NOTEARS augmented-Lagrangian linear SEM, PC algorithm Fisher-Z skeleton + Meek orientation rules, Greedy Equivalence Search BIC-scored, NOTEARS-MLP column-norm acyclicity), treatment-effect estimation (propensity logistic GD, IPW ATE/ATT, S/T/X-learners over OLS base, AIPW doubly robust, Chernozhukov DML K-fold cross-fitting, DragonNet shared representation + 3 heads + targeted regularization), instrumental variables (2SLS two-stage OLS, DeepIV two-stage MLP), causal forests (Wager-Athey 2018 honest splitting + heterogeneous split criterion), twin-network counterfactuals (shared encoder + dual decoder), do-calculus (backdoor/frontdoor criterion evaluation, G_x_bar d-separation check), and causal metrics (PEHE, ATE bias, policy risk, qini coefficient, R²_CATE).
+
+### oxicuda-causal (~31 files, ~6,400 SLoC)
+- [x] **dag** — `Dag` (adjacency matrix, cycle-safe BFS add_edge, Kahn topo_sort), `d_separated` (Bayes-ball algorithm with collider handling)
+- [x] **discovery** — `NotearsSem` (augmented Lagrangian + Padé(3,3) matrix-exponential acyclicity h(W)=tr(e^{W⊙W})−d), `PcAlgorithm` (Fisher-Z skeleton + Meek rules R1–R4 orientation), `Ges` (BIC-score forward/backward greedy), `NotearsNlp` (MLP first-layer column-norm acyclicity)
+- [x] **effect** — `PropensityModel` (logistic GD sigmoid), `ipw_ate`/`ipw_att` (propensity clipped [0.05,0.95]), `SLearner`/`TLearner`/`XLearner` (OLS base), `aipw_ate` (AIPW doubly robust), `DoubleML` (K-fold cross-fitted residuals θ̂=mean[(T-m̂)(Y-ĝ)]/mean[(T-m̂)²]), `DragonNet` (shared repr + μ₀,μ₁,π heads + ε targeted reg)
+- [x] **iv** — `TwoSls` (stage-1 OLS T~Z, stage-2 OLS Y~T̂ projection), `DeepIv` (two-stage MLP with ReLU hidden layers)
+- [x] **forest** — `CausalForest` (honest estimation: separate build/estimate samples, heterogeneous split score (τ_L−τ_R)²·n_L·n_R/n, random feature subsets √p)
+- [x] **counterfactual** — `TwinNetwork` (shared MLP encoder + dual decoder for factual/counterfactual reconstruction)
+- [x] **do_calculus** — `backdoor_admissible` (G_x_bar mutilation = remove outgoing edges from X, d-sep check), `frontdoor_admissible`, `backdoor_adjustment` (minimal valid set search)
+- [x] **metrics** — `pehe` (√MSE of CATE), `ate_bias`, `policy_risk`, `qini_coeff` (uplift curve area), `r_squared_cate`
+- [x] **PTX kernels** (ptx_kernels.rs) — 7 kernels × 6 SM versions: `partial_corr_ptx`, `notears_loss_ptx`, `expm_pade_ptx`, `propensity_logit_ptx`, `ipw_estimator_ptx`, `dml_residual_ptx`, `causal_split_score_ptx`
+- [x] **Integration tests** (lib.rs) — 12 e2e tests: DAG add/remove, cycle detection, d-separation chain, PC algorithm, NOTEARS fit acyclic, propensity in [0,1], IPW finite, double-ML finite, causal forest fit/predict, backdoor admissible chain, PTX non-empty all SM versions
+- [x] **Benchmarks** — PTX bench group + partial corr bench + DML residual bench
+- **Tests**: 43 passing
 
 ---
 
