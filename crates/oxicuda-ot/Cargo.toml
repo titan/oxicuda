@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-ot"
+description = "Optimal Transport primitives for OxiCUDA — Sinkhorn (log-stabilized), Sinkhorn divergence, network simplex (exact OT), EMD, Wasserstein-1/2, Sliced/Max-Sliced, Gromov-Wasserstein, Fused-GW, Unbalanced OT, JKO scheme, Schrödinger Bridge, Wasserstein barycenters, multi-marginal, Wasserstein k-means, OT-based domain adaptation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "optimal-transport", "sinkhorn", "wasserstein", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "ot_ops"
+harness = false

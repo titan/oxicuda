@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-evol"
+description = "Evolutionary & Genetic Algorithms for OxiCUDA — CMA-ES, NSGA-II, NEAT, DE, PSO, ACO, multi-objective optimization, neuroevolution"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "evolutionary-algorithms", "cma-es", "nsga2", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "evol_ops"
+harness = false

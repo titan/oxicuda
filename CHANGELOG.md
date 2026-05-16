@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-16
+
+### Added
+
+- `oxicuda-blas`: SYR2K Tensor Core kernel with two-operand cross-product variant — efficient symmetric rank-2k update using Tensor Core hardware units with fused A×Bᵀ + B×Aᵀ accumulation (`crates/oxicuda-blas/src/level3/syr2k.rs`)
+- CUDA kernel enhancements across multiple subsystems (driver, memory, launch, blas, and backend layers)
+- MOS (Multi-Operation Scheduling) improvements for GPU task orchestration
+
 ## [0.1.6] - 2026-05-08
 
 ### Added

@@ -5,7 +5,7 @@
 [![CI](https://github.com/cool-japan/oxicuda/workflows/CI/badge.svg)](https://github.com/cool-japan/oxicuda/actions)
 [![License](https://img.shields.io/crates/l/oxicuda.svg)](LICENSE)
 
-**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~320K lines of safe Rust across 37 crates.**
+**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~479K lines of safe Rust across 73 crates.**
 
 OxiCUDA replaces the entire NVIDIA CUDA Toolkit software stack with type-safe,
 memory-safe Rust code. The only runtime dependency is the NVIDIA driver
@@ -267,9 +267,81 @@ fn main() -> Result<(), oxicuda::Error> {
 | `oxicuda-federated` | -- | FedAvg/FedProx/SCAFFOLD/FedAdam, DP, secure aggregation | 3,365 | 145 |
 | **Vol.25 -- Neural Architecture Search** | | | | |
 | `oxicuda-nas` | -- | DARTS, supernet, NSGA-II, hardware-aware FLOPs predictor | 2,864 | 63 |
+| **Vol.26 -- Self-Supervised Learning** | | | | |
+| `oxicuda-ssl` | -- | SimCLR/MoCo/BYOL/Barlow Twins/MAE/DINO | -- | -- |
+| **Vol.27 -- Adversarial Robustness** | | | | |
+| `oxicuda-adversarial` | -- | FGSM/PGD/CW/TRADES/MART | -- | -- |
+| **Vol.28 -- Multi-Modal Learning** | | | | |
+| `oxicuda-multimodal` | -- | Cross-modal attention, CLIP/ImageBind | -- | -- |
+| **Vol.29 -- Continual Learning** | | | | |
+| `oxicuda-continual` | -- | EWC/SI/PackNet/GEM/DER++ | -- | -- |
+| **Vol.30 -- 3D Geometry & Point Clouds** | | | | |
+| `oxicuda-geometry3d` | -- | FPS/kNN/PointNet/DGCNN/ICP | -- | -- |
+| **Vol.31 -- Physics-Informed Neural Networks** | | | | |
+| `oxicuda-pinn` | -- | PINN/NeuralODE/FNO/DeepONet | -- | -- |
+| **Vol.32 -- RLHF & Alignment** | | | | |
+| `oxicuda-rlhf` | -- | DPO/IPO/KTO/ORPO/PPO-RLHF/reward-model | -- | -- |
+| **Vol.33 -- Meta-Learning** | | | | |
+| `oxicuda-meta` | -- | MAML/FOMAML/ANIL/Reptile/ProtoNet | -- | -- |
+| **Vol.34 -- Neural Radiance Fields** | | | | |
+| `oxicuda-nerf` | -- | NeRF/Instant-NGP/Mip-NeRF/TensoRF | -- | -- |
+| **Vol.35 -- Mixture of Experts** | | | | |
+| `oxicuda-moe` | -- | Switch/Top-K/Expert-Choice/Soft-MoE | -- | -- |
+| **Vol.36 -- Tabular Deep Learning** | | | | |
+| `oxicuda-tabular` | -- | TabNet/SAINT/FT-Transformer/NODE | -- | -- |
+| **Vol.37 -- Anomaly Detection** | | | | |
+| `oxicuda-anomaly` | -- | DeepSVDD/LOF/COPOD/Mahalanobis/IsoForest | -- | -- |
+| **Vol.38 -- Quantum Simulation** | | | | |
+| `oxicuda-quantum` | -- | State-vector/VQE/QAOA/QML-kernels | -- | -- |
+| **Vol.39 -- Approximate Nearest Neighbor** | | | | |
+| `oxicuda-ann` | -- | HNSW/IVF/PQ/IVFPQ/LSH | -- | -- |
+| **Vol.40 -- Recommender Systems** | | | | |
+| `oxicuda-recsys` | -- | ALS/BPR/NCF/DeepFM/SASRec/LightGCN | -- | -- |
+| **Vol.41 -- Causal Inference** | | | | |
+| `oxicuda-causal` | -- | NOTEARS/IPW/S-T-X-learners/DML/CausalForest | -- | -- |
+| **Vol.42 -- Parameter-Efficient Fine-Tuning** | | | | |
+| `oxicuda-peft` | -- | LoRA/QLoRA/AdaLoRA/Prefix-Tuning | -- | -- |
+| **Vol.43 -- Knowledge Distillation** | | | | |
+| `oxicuda-distill` | -- | Hinton/FitNets/AT/CRD/DML/ZSKD | -- | -- |
+| **Vol.44 -- Optimal Transport** | | | | |
+| `oxicuda-ot` | -- | Sinkhorn/EMD/Gromov-Wasserstein/Wasserstein-kmeans | -- | -- |
+| **Vol.45 -- Spiking Neural Networks** | | | | |
+| `oxicuda-snn` | -- | LIF/IF/BPTT/STBP/SLAYER/STDP/ANN→SNN | -- | -- |
+| **Vol.46 -- Differential Privacy** | | | | |
+| `oxicuda-privacy` | -- | DP-FTRL/DP-Adam/RDP/zCDP/PRV/OUE/RAPPOR | -- | -- |
+| **Vol.47 -- Hyperdimensional Computing** | | | | |
+| `oxicuda-hdc` | -- | Binary/integer/complex HVs, AM/classifier | -- | -- |
+| **Vol.48 -- Evolutionary Algorithms** | | | | |
+| `oxicuda-evol` | -- | CMA-ES/NSGA-II/MOEA-D/NEAT/DE/PSO/ACO | -- | -- |
+| **Vol.49 -- Topological Data Analysis** | | | | |
+| `oxicuda-tda` | -- | Vietoris-Rips/persistent-homology/Mapper | -- | -- |
+| **Vol.50 -- Tensor Networks** | | | | |
+| `oxicuda-tn` | -- | MPS/MPO/DMRG/TEBD/PEPS/TT-cross/CP-ALS/einsum | -- | -- |
+| **Vol.51 -- Sequence Models** | | | | |
+| `oxicuda-seq` | -- | HMM/CRF/Kalman/EKF/Viterbi/Baum-Welch | -- | -- |
+| **Vol.52 -- Numerical PDE Solvers** | | | | |
+| `oxicuda-pde` | -- | FDM/FEM/spectral/multigrid/CG | -- | -- |
+| **Vol.53 -- Manifold Learning** | | | | |
+| `oxicuda-manifold` | -- | t-SNE/UMAP/LLE/Isomap/Diffusion-Maps/SMACOF | -- | -- |
+| **Vol.54 -- Statistical Inference** | | | | |
+| `oxicuda-stats` | -- | t-test/ANOVA/KS/bootstrap/regression/power | -- | -- |
+| **Vol.55 -- Streaming Sketches** | | | | |
+| `oxicuda-sketch` | -- | HyperLogLog/Count-Min/Bloom/t-Digest/MinHash | -- | -- |
+| **Vol.56 -- Survival Analysis** | | | | |
+| `oxicuda-survival` | -- | Kaplan-Meier/Cox-PH/AFT/Fine-Gray/Brier | -- | -- |
+| **Vol.57 -- Convex Optimization** | | | | |
+| `oxicuda-cvx` | -- | LP/QP/SOCP/SDP/ADMM/FISTA/proximal-gradient | -- | -- |
+| **Vol.58 -- Compressed Sensing** | | | | |
+| `oxicuda-cs` | -- | OMP/CoSaMP/IHT/AMP/K-SVD/LASSO/nuclear-norm | -- | -- |
+| **Vol.59 -- Graph Algorithms** | | | | |
+| `oxicuda-graphalg` | -- | BFS/DFS/Dijkstra/MST/flow/matching/SCC/TSP | -- | -- |
+| **Vol.60 -- Numerical Analysis** | | | | |
+| `oxicuda-numeric` | -- | Root-finding/quadrature/special-functions/ODE/interpolation | -- | -- |
+| **Vol.61 -- 2D Computational Geometry** | | | | |
+| `oxicuda-geom2d` | -- | Delaunay/Voronoi/convex-hull/sweep-line | -- | -- |
 | **Umbrella** | | | | |
 | `oxicuda` | -- | Umbrella re-export crate | 19,614 | 496 |
-| | | **Total** | **318,552** | **9,568** |
+| | | **Total** | **~479,242** | **13,542** |
 
 ## Feature Flags
 
@@ -360,27 +432,28 @@ cargo nextest run --all-features
 
 ## Roadmap
 
-**Released (v0.1.5) -- 2026-05-03**
-- Vol.1: Driver, Memory, Launch, Runtime -- foundation layer (4 crates, 23,025 SLoC)
-- Vol.2: PTX codegen DSL, autotuner engine (2 crates, 43,354 SLoC)
-- Vol.3: Full BLAS L1/L2/L3 with Tensor Core GEMM (21,845 SLoC)
-- Vol.4: Convolution, FlashAttention, MoE, normalization, pooling, quantization (34,711 SLoC)
-- Vol.5: FFT, sparse, solver, RNG (4 crates, 47,946 SLoC)
-- Vol.6: Signal processing -- audio/image DSP, DCT, DWT, IIR/FIR filters (6,061 SLoC)
-- Vol.7: Computation graph -- capture API, dep-sorted scheduling, parallel executor (4,802 SLoC)
-- Vol.8: GPU training -- AMP, optimizers, LR schedulers, checkpointing, quantization (2 crates, 10,247 SLoC)
-- Vol.9: Inference engine -- KV-cache, speculative decode, distributed infer, LM (3 crates, 11,929 SLoC)
-- Vol.10: Reinforcement learning -- replay buffers, policy dists, PPO/DQN/SAC/TD3 (4,522 SLoC)
-- Backends: Metal, Vulkan, WebGPU, ROCm, LevelZero (7 crates, 19,665 SLoC)
-- Vol.17: Generative AI -- diffusion schedulers, CFG, VAE, LoRA (5,765 SLoC)
-- Vol.18: Graph Neural Networks -- CSR/COO/Hetero graphs, GCN/GAT/GraphSAGE/GIN, pooling (6,406 SLoC)
-- Vol.19: State Space Models -- HiPPO-NPLR, S4D/S5, Mamba SSM, RWKV (7,255 SLoC)
-- Vol.20: Vision Transformers & CLIP -- ViT, patch embedding, dual-tower CLIP (7,230 SLoC)
-- Vol.21: Audio/Speech ML -- Conformer, Wav2Vec2, CTC/RNN-T, WaveNet, SpecAugment, x-vector (6,537 SLoC)
-- Vol.22: Time-Series Forecasting -- TCN, NHiTS, PatchTST, TimesNet, iTransformer, RevIN (4,939 SLoC)
-- Vol.23: Bayesian Deep Learning -- variational inference, MC Dropout, Deep Ensembles, SWAG, Laplace (2,334 SLoC)
-- Vol.24: Federated Learning -- FedAvg/FedProx/SCAFFOLD/FedAdam, DP, secure aggregation (3,365 SLoC)
-- Vol.25: Neural Architecture Search -- DARTS, supernet, NSGA-II, hardware-aware predictor (2,864 SLoC)
+**Released (v0.1.7) -- 2026-05-16** *(13,542 tests passing, 479K SLoC, 73 crates)*
+- Vol.1: Driver, Memory, Launch, Runtime -- foundation layer (4 crates)
+- Vol.2: PTX codegen DSL, autotuner engine (2 crates)
+- Vol.3: Full BLAS L1/L2/L3 with Tensor Core GEMM, SYR2K two-operand cross-product variant
+- Vol.4: Convolution, FlashAttention, MoE, normalization, pooling, quantization
+- Vol.5: FFT, sparse, solver, RNG (4 crates)
+- Vol.6: Signal processing -- audio/image DSP, DCT, DWT, IIR/FIR filters
+- Vol.7: Computation graph -- capture API, dep-sorted scheduling, parallel executor
+- Vol.8: GPU training -- AMP, optimizers, LR schedulers, checkpointing, quantization (2 crates)
+- Vol.9: Inference engine -- KV-cache, speculative decode, distributed infer, LM (3 crates)
+- Vol.10: Reinforcement learning -- replay buffers, policy dists, PPO/DQN/SAC/TD3
+- Backends: Metal, Vulkan, WebGPU, ROCm, LevelZero (7 crates)
+- Vol.17: Generative AI -- diffusion schedulers, CFG, VAE, LoRA
+- Vol.18: Graph Neural Networks -- GCN/GAT/GraphSAGE/GIN, pooling
+- Vol.19: State Space Models -- HiPPO-NPLR, S4D/S5, Mamba SSM, RWKV
+- Vol.20: Vision Transformers & CLIP -- ViT, patch embedding, dual-tower CLIP
+- Vol.21: Audio/Speech ML -- Conformer, Wav2Vec2, CTC/RNN-T, WaveNet, SpecAugment
+- Vol.22: Time-Series Forecasting -- TCN, NHiTS, PatchTST, TimesNet, iTransformer, RevIN
+- Vol.23: Bayesian Deep Learning -- variational inference, MC Dropout, Ensembles, Laplace
+- Vol.24: Federated Learning -- FedAvg/FedProx/SCAFFOLD/FedAdam, DP, secure aggregation
+- Vol.25: Neural Architecture Search -- DARTS, supernet, NSGA-II, hardware-aware predictor
+- Vol.26--61: SSL, Adversarial, Multimodal, Continual, 3D Geometry, PINN, RLHF, Meta-Learning, NeRF, MoE, Tabular, Anomaly, Quantum, ANN, RecSys, Causal, PEFT, Distillation, OT, SNN, DP, HDC, Evolutionary, TDA, Tensor Networks, Sequence Models, PDE, Manifold, Statistics, Sketches, Survival, CVX, Compressed Sensing, Graph Algorithms, Numerical Analysis, 2D Geometry
 
 **Next**
 - Published documentation on docs.rs

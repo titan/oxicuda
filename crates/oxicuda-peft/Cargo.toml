@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-peft"
+description = "Parameter-Efficient Fine-Tuning primitives for OxiCUDA — LoRA, QLoRA, AdaLoRA, DoRA, IA³, Prefix-Tuning, P-Tuning v2, Prompt-Tuning, Houlsby/Pfeiffer/Parallel adapters, BitFit, Diff-Pruning"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "peft", "lora", "fine-tuning", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "peft_ops"
+harness = false

@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-snn"
+description = "Spiking Neural Network primitives for OxiCUDA — LIF, IF, Izhikevich, AdEx, Poisson neurons; surrogate gradients (sigmoid/atan/triangle/super-spike/fast-sigmoid); BPTT/STBP/SLAYER training; STDP/R-STDP/triplet plasticity; ANN→SNN conversion; rate/TTFS/phase encodings; spiking layers and reservoirs; van Rossum/Victor-Purpura metrics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "spiking", "snn", "neuromorphic", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "snn_ops"
+harness = false

@@ -1,0 +1,22 @@
+[package]
+name = "oxicuda-survival"
+description = "OxiCUDA: Survival analysis & time-to-event modelling (KM, NA, Cox PH, AFT, Fine-Gray, RMST, C-index, Brier, DeepSurv)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "survival_ops"
+harness = false

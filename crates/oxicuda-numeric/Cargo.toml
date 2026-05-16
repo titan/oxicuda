@@ -1,0 +1,22 @@
+[package]
+name = "oxicuda-numeric"
+description = "OxiCUDA: Numerical analysis primitives (root finding, quadrature, ODEs, special functions, interpolation, polynomial roots, multi-D cubature)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "numeric_ops"
+harness = false

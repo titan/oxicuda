@@ -1,0 +1,22 @@
+[package]
+name = "oxicuda-geom2d"
+description = "OxiCUDA: 2D Computational Geometry (predicates, intersection, hull, triangulation, Voronoi, clipping, spatial indices)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "geom2d_ops"
+harness = false

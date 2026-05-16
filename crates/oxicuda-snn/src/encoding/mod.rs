@@ -1,0 +1,15 @@
+//! Spike-train encodings for analogue inputs.
+//!
+//! All encoders write a flat `(t_steps × n)` row-major buffer where row `t`
+//! holds the spikes emitted at time step `t`. This layout is consistent across
+//! [`rate`], [`temporal`], [`phase`], and [`poisson_input`] so callers can
+//! slice trains by row without re-arranging memory.
+
+/// Phase-coding via oscillatory reference signal.
+pub mod phase;
+/// Poisson rate-coded input wrapper.
+pub mod poisson_input;
+/// Bernoulli rate coding.
+pub mod rate;
+/// Time-To-First-Spike latency coding.
+pub mod temporal;

@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-tda"
+description = "Topological Data Analysis for OxiCUDA — persistent homology, Vietoris-Rips/Čech/alpha filtrations, barcode, persistence diagram, Mapper algorithm, witness complex, Betti numbers"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "topological-data-analysis", "persistent-homology", "tda", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "tda_ops"
+harness = false

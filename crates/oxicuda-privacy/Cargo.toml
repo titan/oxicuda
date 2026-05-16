@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-privacy"
+description = "Differential Privacy primitives for OxiCUDA — exponential/report-noisy-max/PTR mechanisms, SVT, f-DP/GDP/zCDP/PRV accounting, DP-FTRL/Adam optimizers, local DP (GRR/OUE/RAPPOR), smooth sensitivity, subsampling/shuffling amplification"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "differential-privacy", "privacy", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "privacy_ops"
+harness = false

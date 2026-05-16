@@ -1,0 +1,24 @@
+[package]
+name = "oxicuda-distill"
+description = "Knowledge-distillation primitives for OxiCUDA — Hinton KD, DIST, DKD, FitNets, AT, PKT, RKD, CRD, CC, DML, BYOT, EMA self-distill, BAN, TAS, progressive, DAFL, ZSK"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage = "https://github.com/cool-japan/oxicuda"
+repository.workspace = true
+keywords = ["gpu", "knowledge-distillation", "compression", "teacher-student", "pure-rust"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "distill_ops"
+harness = false

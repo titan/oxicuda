@@ -1,0 +1,22 @@
+[package]
+name = "oxicuda-cvx"
+description = "OxiCUDA: Convex Optimization (LP, QP, SOCP, SDP, ADMM, FISTA, prox operators, projections)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "cvx_ops"
+harness = false
