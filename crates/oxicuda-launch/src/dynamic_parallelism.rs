@@ -449,13 +449,16 @@ pub fn max_nesting_for_sm(sm: SmVersion) -> u32 {
 
 /// Generates PTX code for a device-side child kernel launch.
 ///
-/// Produces a `.func` that sets up the child kernel parameters,
-/// computes grid dimensions according to the [`GridSpec`], and calls
-/// `cudaLaunchDevice` (the device-side launch API exposed as a PTX
-/// system call).
+/// Produces a `.func` that computes the child grid dimensions according to
+/// the [`GridSpec`], obtains a parameter buffer from the CUDA device runtime
+/// via `cudaGetParameterBufferV2`, marshals the kernel arguments into that
+/// buffer, and enqueues the child grid with `cudaLaunchDeviceV2`. The real
+/// `cudaError_t` returned by `cudaLaunchDeviceV2` is propagated to the
+/// caller.
 ///
-/// The generated PTX uses the `cudaLaunchDeviceV2` pattern with
-/// parameter buffers allocated in local memory.
+/// The generated module declares `cudaGetParameterBufferV2` and
+/// `cudaLaunchDeviceV2` as `.extern .func` prototypes using the device
+/// runtime ABI, so it must be linked against `cudadevrt` at JIT/load time.
 ///
 /// # Arguments
 ///
@@ -500,6 +503,9 @@ pub fn generate_child_launch_ptx(
          .target {target}\n\
          .address_size 64\n\n"
     ));
+
+    // CUDA device runtime prototypes (linked against cudadevrt).
+    append_device_runtime_externs(&mut ptx);
 
     // Extern declaration for the child kernel
     ptx.push_str(&format!(
@@ -549,6 +555,9 @@ pub fn generate_child_launch_ptx(
     ptx.push_str("    .reg .u32 %block_x, %block_y, %block_z;\n");
     ptx.push_str("    .reg .u32 %shared_mem;\n");
     ptx.push_str("    .reg .u64 %stream;\n");
+    // Registers and address-taken symbol needed for the device-runtime calls.
+    ptx.push_str("    .reg .u64 %func_addr, %param_buf;\n");
+    ptx.push_str("    .reg .pred %p_buf_null;\n");
 
     // Additional registers for data-dependent grid
     if let GridSpec::DataDependent { .. } = &child.grid_dim {
@@ -619,27 +628,95 @@ pub fn generate_child_launch_ptx(
         smem = child.shared_mem_bytes,
     ));
 
-    // Device-side launch via cudaLaunchDeviceV2
-    // In real CUDA PTX, device-side launches use a special system call
-    // mechanism. We model this with the documented prototype pattern.
+    // Take the address of the child kernel entry. cudaGetParameterBufferV2
+    // and cudaLaunchDeviceV2 identify the kernel by its entry-point address.
     ptx.push_str(&format!(
-        "\n    // Launch child kernel: {child_name}\n\
-         // cudaLaunchDevice(\n\
-         //   &{child_name},\n\
-         //   param_buffer,\n\
-         //   dim3(grid_x, grid_y, grid_z),\n\
-         //   dim3(block_x, block_y, block_z),\n\
-         //   shared_mem, stream\n\
-         // )\n\
-         // Note: actual device-side launch uses cudaLaunchDeviceV2\n\
-         // which takes a pre-formatted parameter buffer.\n\
-         mov.s32 %retval, 0; // cudaSuccess\n",
+        "\n    // Resolve child kernel entry address\n\
+         mov.u64 %func_addr, {child_name};\n",
+        child_name = child.name,
+    ));
+
+    // Obtain a device-runtime parameter buffer sized for the child grid.
+    // cudaGetParameterBufferV2 reserves storage in the device launch pool;
+    // the kernel arguments are then written into the returned buffer.
+    ptx.push_str(
+        "\n    // Allocate parameter buffer via the CUDA device runtime\n\
+         // void *cudaGetParameterBufferV2(void *func,\n\
+         //                                dim3 gridDim, dim3 blockDim,\n\
+         //                                unsigned int sharedMem)\n\
+         {\n\
+         .param .b64 retval_pb;\n\
+         .param .b64 param0_pb;\n\
+         .param .align 4 .b8 param1_pb[12];\n\
+         .param .align 4 .b8 param2_pb[12];\n\
+         .param .b32 param3_pb;\n\
+         st.param.b64 [param0_pb], %func_addr;\n\
+         st.param.b32 [param1_pb+0], %grid_x;\n\
+         st.param.b32 [param1_pb+4], %grid_y;\n\
+         st.param.b32 [param1_pb+8], %grid_z;\n\
+         st.param.b32 [param2_pb+0], %block_x;\n\
+         st.param.b32 [param2_pb+4], %block_y;\n\
+         st.param.b32 [param2_pb+8], %block_z;\n\
+         st.param.b32 [param3_pb], %shared_mem;\n\
+         call.uni (retval_pb), cudaGetParameterBufferV2,\n\
+         \x20    (param0_pb, param1_pb, param2_pb, param3_pb);\n\
+         ld.param.b64 %param_buf, [retval_pb];\n\
+         }\n",
+    );
+
+    // A NULL parameter buffer means the device launch pool is exhausted;
+    // report cudaErrorLaunchPendingCountExceeded (== 209) to the caller.
+    ptx.push_str(
+        "\n    // Bail out if the device runtime could not provide a buffer\n\
+         setp.eq.u64 %p_buf_null, %param_buf, 0;\n\
+         @%p_buf_null mov.s32 %retval, 209;\n\
+         @%p_buf_null bra $L_launch_done;\n",
+    );
+
+    // Marshal the child kernel arguments into the parameter buffer.
+    // cudaGetParameterBufferV2 guarantees the buffer is aligned for the
+    // largest parameter; each argument is written at its natural offset.
+    // Loads and stores go through the type's bit-width form so the move is
+    // independent of the argument's value type.
+    ptx.push_str("\n    // Marshal child kernel arguments into the buffer\n");
+    let mut buf_offset: u32 = 0;
+    for (i, ptype) in child.param_types.iter().enumerate() {
+        let size = ptx_param_size_bytes(*ptype);
+        // Natural alignment: round the running offset up to the type size.
+        buf_offset = align_up(buf_offset, size);
+        let move_ty = ptx_param_move_type(*ptype);
+        let scratch = format!("%arg_scratch_{i}");
+        ptx.push_str(&format!(
+            "    .reg {move_ty} {scratch};\n\
+             ld.param{move_ty} {scratch}, [arg_{i}];\n\
+             st.global{move_ty} [%param_buf+{buf_offset}], {scratch};\n",
+        ));
+        buf_offset = buf_offset.saturating_add(size);
+    }
+
+    // Enqueue the child grid on the requested stream. cudaLaunchDeviceV2
+    // consumes the formatted parameter buffer produced above and returns a
+    // cudaError_t describing whether the grid was successfully enqueued.
+    ptx.push_str(&format!(
+        "\n    // Launch child kernel {child_name} via the CUDA device runtime\n\
+         // cudaError_t cudaLaunchDeviceV2(void *parameterBuffer,\n\
+         //                                cudaStream_t stream)\n\
+         {{\n\
+         .param .b32 retval_ld;\n\
+         .param .b64 param0_ld;\n\
+         .param .b64 param1_ld;\n\
+         st.param.b64 [param0_ld], %param_buf;\n\
+         st.param.b64 [param1_ld], %stream;\n\
+         call.uni (retval_ld), cudaLaunchDeviceV2, (param0_ld, param1_ld);\n\
+         ld.param.b32 %retval, [retval_ld];\n\
+         }}\n",
         child_name = child.name,
     ));
 
     // Store return value and close function
     ptx.push_str(
-        "\n    st.param.s32 [_retval], %retval;\n\
+        "\n$L_launch_done:\n\
+         \x20   st.param.s32 [_retval], %retval;\n\
          ret;\n\
          }\n",
     );
@@ -647,11 +724,85 @@ pub fn generate_child_launch_ptx(
     Ok(ptx)
 }
 
+/// Returns the byte size of a [`PtxType`] when laid out in a launch
+/// parameter buffer.
+///
+/// The CUDA device runtime parameter buffer stores each kernel argument at
+/// its natural size and alignment. This delegates to [`PtxType::size_bytes`]
+/// so it stays correct as new types are added to the IR.
+fn ptx_param_size_bytes(ty: PtxType) -> u32 {
+    // `size_bytes()` returns at most 16, well within `u32` range.
+    u32::try_from(ty.size_bytes()).unwrap_or(u32::MAX)
+}
+
+/// Returns the bit-width PTX type suffix (`.b8`/`.b16`/`.b32`/`.b64`/`.b128`)
+/// used for the `ld.param` / `st.global` pair that copies a kernel argument
+/// into the parameter buffer.
+///
+/// Arguments are moved through their bit-typed form so the copy matches the
+/// destination layout regardless of the register's value type (integer,
+/// float, packed or sub-word).
+fn ptx_param_move_type(ty: PtxType) -> &'static str {
+    match ptx_param_size_bytes(ty) {
+        0 | 1 => ".b8",
+        2 => ".b16",
+        3..=4 => ".b32",
+        5..=8 => ".b64",
+        _ => ".b128",
+    }
+}
+
+/// Rounds `value` up to the next multiple of `align`.
+///
+/// `align` is a power-of-two type size produced by [`ptx_param_size_bytes`];
+/// an `align` of zero or one leaves `value` unchanged.
+fn align_up(value: u32, align: u32) -> u32 {
+    if align <= 1 {
+        return value;
+    }
+    value.div_ceil(align).saturating_mul(align)
+}
+
+/// Emits the `.extern .func` prototypes for the CUDA device runtime
+/// (`cudadevrt`) entry points used by device-side kernel launches.
+///
+/// The generated module links against `cudadevrt` at JIT/load time. The
+/// prototypes use the device-runtime ABI exactly:
+///
+/// - `cudaGetParameterBufferV2` — reserves a parameter buffer; takes the
+///   kernel entry address, the grid and block `dim3` values (each a
+///   12-byte, 4-aligned aggregate) and the dynamic shared-memory size,
+///   and returns a `void*` buffer pointer.
+/// - `cudaLaunchDeviceV2` — enqueues the child grid; takes the formatted
+///   parameter buffer and a `cudaStream_t`, and returns a `cudaError_t`.
+fn append_device_runtime_externs(ptx: &mut String) {
+    ptx.push_str(
+        "// CUDA device runtime (cudadevrt) entry points — resolved at link time\n\
+         .extern .func (.param .b64 func_retval0) cudaGetParameterBufferV2\n\
+         (\n\
+         \x20   .param .b64 cudaGetParameterBufferV2_param_0,\n\
+         \x20   .param .align 4 .b8 cudaGetParameterBufferV2_param_1[12],\n\
+         \x20   .param .align 4 .b8 cudaGetParameterBufferV2_param_2[12],\n\
+         \x20   .param .b32 cudaGetParameterBufferV2_param_3\n\
+         )\n\
+         ;\n\
+         .extern .func (.param .b32 func_retval0) cudaLaunchDeviceV2\n\
+         (\n\
+         \x20   .param .b64 cudaLaunchDeviceV2_param_0,\n\
+         \x20   .param .b64 cudaLaunchDeviceV2_param_1\n\
+         )\n\
+         ;\n\n",
+    );
+}
+
 /// Generates PTX code for device-side synchronization.
 ///
-/// Produces a `.func` that calls `cudaDeviceSynchronize` from device code.
-/// This synchronizes all pending child kernel launches within the current
-/// thread's scope.
+/// Produces a `.func` that declares `cudaDeviceSynchronize` as an
+/// `.extern .func` prototype using the CUDA device runtime ABI and issues a
+/// `call.uni` to it. The real `cudaError_t` it returns is propagated to the
+/// caller. The call synchronizes all pending child kernel launches within
+/// the current thread's scope; the generated module must be linked against
+/// `cudadevrt` at JIT/load time.
 ///
 /// # Arguments
 ///
@@ -670,18 +821,24 @@ pub fn generate_device_sync_ptx(sm: SmVersion) -> Result<String, PtxGenError> {
          .target {target}\n\
          .address_size 64\n\
          \n\
-         // cudaDeviceSynchronize() from device code\n\
-         // Synchronizes all pending child kernel launches.\n\
+         // CUDA device runtime (cudadevrt) entry point — resolved at link time\n\
+         // cudaError_t cudaDeviceSynchronize(void)\n\
+         .extern .func (.param .b32 func_retval0) cudaDeviceSynchronize\n\
+         ;\n\
+         \n\
+         // cudaDeviceSynchronize() from device code.\n\
+         // Blocks the calling thread until every child grid it launched has\n\
+         // completed, then returns the device runtime cudaError_t status.\n\
          .func (.param .s32 _retval) __device_synchronize()\n\
          {{\n\
          .reg .s32 %retval;\n\
          \n\
-         // Device-side cudaDeviceSynchronize is a runtime call\n\
-         // that blocks until all child kernels complete.\n\
-         // In PTX, this maps to a system call:\n\
-         //   call.uni cudaDeviceSynchronize;\n\
-         // For code generation, we emit the call pattern.\n\
-         mov.s32 %retval, 0; // cudaSuccess (placeholder)\n\
+         // Invoke the device runtime synchronization entry point.\n\
+         {{\n\
+         .param .b32 retval_sync;\n\
+         call.uni (retval_sync), cudaDeviceSynchronize, ();\n\
+         ld.param.b32 %retval, [retval_sync];\n\
+         }}\n\
          \n\
          st.param.s32 [_retval], %retval;\n\
          ret;\n\
@@ -897,6 +1054,108 @@ mod tests {
     }
 
     #[test]
+    fn generate_child_launch_ptx_emits_device_runtime_externs() {
+        // The generated module must declare the cudadevrt entry points so it
+        // links against the CUDA device runtime at JIT/load time.
+        let child = ChildKernelSpec {
+            name: "child_dr".to_string(),
+            param_types: vec![PtxType::U64, PtxType::U32],
+            grid_dim: GridSpec::Fixed(Dim3::x(32)),
+            block_dim: Dim3::x(128),
+            shared_mem_bytes: 0,
+        };
+        let result = generate_child_launch_ptx("parent_dr", &child, SmVersion::Sm80);
+        assert!(result.is_ok());
+        if let Ok(ptx) = result {
+            // External prototypes with the device-runtime ABI.
+            assert!(
+                ptx.contains(".extern .func (.param .b64 func_retval0) cudaGetParameterBufferV2")
+            );
+            assert!(ptx.contains(".extern .func (.param .b32 func_retval0) cudaLaunchDeviceV2"));
+            // dim3 grid/block aggregates are 12-byte, 4-aligned params.
+            assert!(ptx.contains(".param .align 4 .b8 cudaGetParameterBufferV2_param_1[12]"));
+            assert!(ptx.contains(".param .align 4 .b8 cudaGetParameterBufferV2_param_2[12]"));
+            // Real call.uni invocations into the device runtime.
+            assert!(ptx.contains("call.uni (retval_pb), cudaGetParameterBufferV2"));
+            assert!(
+                ptx.contains("call.uni (retval_ld), cudaLaunchDeviceV2, (param0_ld, param1_ld);")
+            );
+        }
+    }
+
+    #[test]
+    fn generate_child_launch_ptx_sets_up_parameter_buffer() {
+        // The parameter buffer must be obtained, NULL-checked, and have the
+        // child arguments marshalled into it before the launch.
+        let child = ChildKernelSpec {
+            name: "child_buf".to_string(),
+            param_types: vec![PtxType::U64, PtxType::U64, PtxType::F32],
+            grid_dim: GridSpec::Fixed(Dim3::x(16)),
+            block_dim: Dim3::x(64),
+            shared_mem_bytes: 256,
+        };
+        let result = generate_child_launch_ptx("parent_buf", &child, SmVersion::Sm90);
+        assert!(result.is_ok());
+        if let Ok(ptx) = result {
+            // Parameter-buffer plumbing.
+            assert!(ptx.contains(".reg .u64 %func_addr, %param_buf;"));
+            assert!(ptx.contains("mov.u64 %func_addr, child_buf;"));
+            assert!(ptx.contains("ld.param.b64 %param_buf, [retval_pb];"));
+            // grid / block / smem are stored into the buffer-allocation params.
+            assert!(ptx.contains("st.param.b32 [param1_pb+0], %grid_x;"));
+            assert!(ptx.contains("st.param.b32 [param2_pb+8], %block_z;"));
+            assert!(ptx.contains("st.param.b32 [param3_pb], %shared_mem;"));
+            // NULL parameter buffer bails out with the pending-count error.
+            assert!(ptx.contains("setp.eq.u64 %p_buf_null, %param_buf, 0;"));
+            assert!(ptx.contains("@%p_buf_null mov.s32 %retval, 209;"));
+            // Arguments marshalled at natural offsets: u64,u64,f32 -> 0,8,16.
+            assert!(ptx.contains("st.global.b64 [%param_buf+0],"));
+            assert!(ptx.contains("st.global.b64 [%param_buf+8],"));
+            assert!(ptx.contains("st.global.b32 [%param_buf+16],"));
+            // The launch return code is captured into %retval.
+            assert!(ptx.contains("ld.param.b32 %retval, [retval_ld];"));
+        }
+    }
+
+    #[test]
+    fn generate_child_launch_ptx_no_stub_comments() {
+        // The stale placeholder comments must be gone once implemented.
+        let child = ChildKernelSpec {
+            name: "child_clean".to_string(),
+            param_types: vec![PtxType::U64],
+            grid_dim: GridSpec::Fixed(Dim3::x(8)),
+            block_dim: Dim3::x(32),
+            shared_mem_bytes: 0,
+        };
+        let result = generate_child_launch_ptx("parent_clean", &child, SmVersion::Sm80);
+        assert!(result.is_ok());
+        if let Ok(ptx) = result {
+            assert!(!ptx.contains("We model this with"));
+            assert!(!ptx.contains("actual device-side launch uses cudaLaunchDeviceV2"));
+            assert!(!ptx.contains("mov.s32 %retval, 0; // cudaSuccess"));
+        }
+    }
+
+    #[test]
+    fn generate_child_launch_ptx_aligns_mixed_arguments() {
+        // A u32 followed by a u64 must pad the u64 to an 8-byte offset.
+        let child = ChildKernelSpec {
+            name: "child_align".to_string(),
+            param_types: vec![PtxType::U32, PtxType::U64],
+            grid_dim: GridSpec::Fixed(Dim3::x(4)),
+            block_dim: Dim3::x(32),
+            shared_mem_bytes: 0,
+        };
+        let result = generate_child_launch_ptx("parent_align", &child, SmVersion::Sm80);
+        assert!(result.is_ok());
+        if let Ok(ptx) = result {
+            assert!(ptx.contains("st.global.b32 [%param_buf+0],"));
+            // u64 padded from offset 4 up to its natural 8-byte boundary.
+            assert!(ptx.contains("st.global.b64 [%param_buf+8],"));
+        }
+    }
+
+    #[test]
     fn generate_child_launch_ptx_data_dependent() {
         let child = ChildKernelSpec {
             name: "child_scale".to_string(),
@@ -977,6 +1236,53 @@ mod tests {
             assert!(ptx.contains(".version 8.0"));
             assert!(ptx.contains("sm_90"));
         }
+    }
+
+    #[test]
+    fn generate_device_sync_ptx_emits_real_extern_and_call() {
+        // The sync helper must declare the cudadevrt entry point and call it.
+        let result = generate_device_sync_ptx(SmVersion::Sm80);
+        assert!(result.is_ok());
+        if let Ok(ptx) = result {
+            assert!(ptx.contains(".extern .func (.param .b32 func_retval0) cudaDeviceSynchronize"));
+            assert!(ptx.contains("call.uni (retval_sync), cudaDeviceSynchronize, ();"));
+            // The real return code is stored into %retval.
+            assert!(ptx.contains("ld.param.b32 %retval, [retval_sync];"));
+        }
+    }
+
+    #[test]
+    fn generate_device_sync_ptx_no_stub_comments() {
+        // The stale placeholder comments must be gone once implemented.
+        let result = generate_device_sync_ptx(SmVersion::Sm80);
+        assert!(result.is_ok());
+        if let Ok(ptx) = result {
+            assert!(!ptx.contains("(placeholder)"));
+            assert!(!ptx.contains("For code generation, we emit the call pattern"));
+            assert!(!ptx.contains("mov.s32 %retval, 0;"));
+        }
+    }
+
+    #[test]
+    fn ptx_param_layout_helpers() {
+        // Buffer size matches PtxType::size_bytes for representative types.
+        assert_eq!(ptx_param_size_bytes(PtxType::U8), 1);
+        assert_eq!(ptx_param_size_bytes(PtxType::F16), 2);
+        assert_eq!(ptx_param_size_bytes(PtxType::U32), 4);
+        assert_eq!(ptx_param_size_bytes(PtxType::U64), 8);
+        assert_eq!(ptx_param_size_bytes(PtxType::B128), 16);
+        // Bit-width move type selection.
+        assert_eq!(ptx_param_move_type(PtxType::S8), ".b8");
+        assert_eq!(ptx_param_move_type(PtxType::BF16), ".b16");
+        assert_eq!(ptx_param_move_type(PtxType::F32), ".b32");
+        assert_eq!(ptx_param_move_type(PtxType::F64), ".b64");
+        assert_eq!(ptx_param_move_type(PtxType::B128), ".b128");
+        // align_up rounds to the next multiple, identity below 2.
+        assert_eq!(align_up(0, 8), 0);
+        assert_eq!(align_up(4, 8), 8);
+        assert_eq!(align_up(8, 8), 8);
+        assert_eq!(align_up(9, 4), 12);
+        assert_eq!(align_up(7, 1), 7);
     }
 
     // -- Display tests --

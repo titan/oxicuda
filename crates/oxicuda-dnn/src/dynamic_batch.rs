@@ -9,8 +9,11 @@
 //!   between prefill and decode phases.
 //! - **[`PagedKvManager`]** — block-level paged KV-cache allocator with
 //!   copy-on-write support for beam search and speculative decoding.
-//! - **[`SpeculativeDecoder`]** — draft-model speculative decoding with
-//!   rejection sampling verification.
+//! - **[`SpeculativeDecoder`]** — draft-model speculative decoding implementing
+//!   the speculative-sampling algorithm of Leviathan et al. (2023) and
+//!   Chen et al. (2023): drafted tokens are sampled from the draft model's
+//!   categorical distribution and verified against the target model with
+//!   modified rejection sampling.
 //! - **[`BatchMetrics`]** — running statistics for throughput, latency, and
 //!   utilization monitoring.
 //!
@@ -595,91 +598,433 @@ impl PagedKvManager {
 }
 
 // ---------------------------------------------------------------------------
+// LcgRng — workspace-convention pseudo-random number generator
+// ---------------------------------------------------------------------------
+
+/// Minimal full-period 64-bit LCG (Knuth MMIX constants).
+///
+/// Used for the categorical sampling and rejection-sampling steps of
+/// [`SpeculativeDecoder`].  The high bits of the state are used for output —
+/// the low bits of an MMIX LCG have short periods and must be discarded.
+#[derive(Debug, Clone)]
+pub struct LcgRng {
+    state: u64,
+}
+
+impl LcgRng {
+    /// LCG multiplier (Knuth MMIX).
+    const MUL: u64 = 6_364_136_223_846_793_005;
+    /// LCG increment (Knuth MMIX).
+    const ADD: u64 = 1_442_695_040_888_963_407;
+
+    /// Creates a new generator seeded with `seed`.
+    ///
+    /// The seed is run through a SplitMix64-style finalising multiply so that
+    /// nearby seeds produce well-separated streams.
+    #[must_use]
+    pub fn new(seed: u64) -> Self {
+        Self {
+            state: seed
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add(Self::ADD),
+        }
+    }
+
+    /// Advances the state and returns the next 64-bit value.
+    #[inline]
+    pub fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_mul(Self::MUL).wrapping_add(Self::ADD);
+        self.state
+    }
+
+    /// Returns a uniform `f64` in `[0, 1)`.
+    ///
+    /// The top 53 bits of the state are used so every representable
+    /// double-precision fraction in `[0, 1)` is reachable.
+    #[inline]
+    pub fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Samples a category index from a (not necessarily normalised) weight
+    /// vector via inverse-CDF sampling.
+    ///
+    /// `weights` must be non-negative and have a strictly positive sum;
+    /// `None` is returned when that precondition does not hold (empty slice,
+    /// all-zero weights, or a non-finite total).  The draw is performed
+    /// against the normalised cumulative distribution, so the result is a
+    /// genuine categorical sample from `weights / sum(weights)`.
+    pub fn sample_categorical(&mut self, weights: &[f64]) -> Option<usize> {
+        let total: f64 = weights.iter().sum();
+        if weights.is_empty() || !total.is_finite() || total <= 0.0 {
+            return None;
+        }
+        let threshold = self.next_f64() * total;
+        let mut acc = 0.0;
+        for (idx, &w) in weights.iter().enumerate() {
+            acc += w.max(0.0);
+            if threshold < acc {
+                return Some(idx);
+            }
+        }
+        // Floating-point round-off: fall back to the last positive-weight index.
+        weights.iter().rposition(|&w| w > 0.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SpeculativeDecoder
 // ---------------------------------------------------------------------------
+
+/// Outcome of one [`SpeculativeDecoder::verify_and_accept`] call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpeculativeResult {
+    /// Tokens emitted this round: the accepted prefix of drafted tokens
+    /// followed by exactly one extra token (a correction token on the first
+    /// rejection, or a bonus token when every drafted token was accepted).
+    pub tokens: Vec<u32>,
+    /// Number of drafted tokens that passed the rejection test.
+    pub accepted: usize,
+    /// Number of drafted tokens that were rejected (`0` or `1` per round —
+    /// at most one rejection can occur because verification stops there).
+    pub rejected: usize,
+}
 
 /// Speculative decoding support (draft + verify).
 ///
 /// A small "draft" model proposes several tokens ahead, and a larger "target"
-/// model verifies them in a single forward pass, accepting a prefix of the
-/// proposed tokens.  This amortises the cost of autoregressive generation.
+/// model verifies them, accepting a prefix of the proposed tokens.  This
+/// amortises the cost of autoregressive generation.
+///
+/// This is a faithful host-side implementation of the speculative-sampling
+/// algorithm of Leviathan et al., *"Fast Inference from Transformers via
+/// Speculative Decoding"* (2023), and Chen et al., *"Accelerating Large
+/// Language Model Decoding with Speculative Sampling"* (2023):
+///
+/// 1. [`Self::propose_tokens`] draws drafted tokens by **categorical sampling**
+///    from the draft model's per-position probability distributions.
+/// 2. [`Self::verify_and_accept`] performs **modified rejection sampling**:
+///    for the drafted token `t` at position `i`, a uniform `r ∈ [0, 1)` is
+///    drawn and the token is accepted iff `r < min(1, p_target(t) / p_draft(t))`.
+///    The longest passing prefix is kept; on the first rejection a correction
+///    token is sampled from the normalised residual
+///    `normalize(max(0, p_target − p_draft))`.  If every drafted token is
+///    accepted, one bonus token is sampled from `p_target`.
+///
+/// The decoder operates on the probability vectors supplied by the caller
+/// (which would come from running the draft and target model forward passes).
+/// The sampling and acceptance arithmetic is exact — no values are fabricated.
 #[derive(Debug)]
 pub struct SpeculativeDecoder {
     draft_length: usize,
+    rng: LcgRng,
     total_proposed: u64,
     total_accepted: u64,
+    rounds: u64,
 }
 
 impl SpeculativeDecoder {
-    /// Create a speculative decoder that proposes `draft_length` tokens at a
-    /// time.
+    /// Default RNG seed used by [`SpeculativeDecoder::new`].
+    const DEFAULT_SEED: u64 = 0x5350_4543; // "SPEC"
+
+    /// Creates a speculative decoder that proposes `draft_length` tokens at a
+    /// time, using the default RNG seed.
+    #[must_use]
     pub fn new(draft_length: usize) -> Self {
+        Self::with_seed(draft_length, Self::DEFAULT_SEED)
+    }
+
+    /// Creates a speculative decoder with an explicit RNG seed.
+    ///
+    /// A fixed seed makes the categorical sampling and rejection draws
+    /// reproducible, which is useful for tests and deterministic replay.
+    #[must_use]
+    pub fn with_seed(draft_length: usize, seed: u64) -> Self {
         Self {
             draft_length,
+            rng: LcgRng::new(seed),
             total_proposed: 0,
             total_accepted: 0,
+            rounds: 0,
         }
     }
 
-    /// Propose draft token sequences.
-    ///
-    /// Returns `num_candidates` candidate sequences, each of length
-    /// `draft_length`.  On macOS (no GPU) these are deterministic placeholder
-    /// token ids.
-    pub fn propose_tokens(&self, num_candidates: usize) -> Vec<Vec<u32>> {
-        // Simulated: produce deterministic sequences for testing / macOS.
-        (0..num_candidates)
-            .map(|c| {
-                (0..self.draft_length)
-                    .map(|t| ((c * self.draft_length + t) % 32000) as u32)
-                    .collect()
-            })
-            .collect()
+    /// Number of tokens proposed per speculation round (γ).
+    #[must_use]
+    pub fn draft_length(&self) -> usize {
+        self.draft_length
     }
 
-    /// Verify proposed sequences against target model probabilities.
+    /// Proposes a sequence of drafted tokens from the draft model.
     ///
-    /// Uses rejection sampling: accepts the longest prefix whose cumulative
-    /// acceptance probability exceeds the target threshold.
+    /// `draft_probs` holds one probability distribution per draft position:
+    /// `draft_probs[i]` is the draft model's categorical distribution over the
+    /// vocabulary for the `i`-th drafted token (its length is the vocabulary
+    /// size).  Each drafted token is obtained by **categorical sampling** from
+    /// the corresponding distribution — this is genuine sampling from the draft
+    /// model, not a deterministic placeholder.
     ///
-    /// Returns `(accepted_tokens, acceptance_count)`.
+    /// Returns one token id per position, paired with the probability the
+    /// draft model assigned to the sampled token (`p_draft(t_i)`).  That
+    /// probability is exactly what [`Self::verify_and_accept`] needs as the
+    /// denominator of the acceptance ratio.
+    ///
+    /// At most `draft_length` positions are consumed; supplying fewer
+    /// distributions simply produces a shorter draft.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DnnError::InvalidArgument`] if any consumed distribution is
+    /// empty, has non-finite or all-zero mass, so that no token can be drawn.
+    pub fn propose_tokens(&mut self, draft_probs: &[Vec<f64>]) -> DnnResult<Vec<DraftedToken>> {
+        let count = draft_probs.len().min(self.draft_length);
+        let mut drafted = Vec::with_capacity(count);
+        for (position, dist) in draft_probs.iter().take(count).enumerate() {
+            let token = self.rng.sample_categorical(dist).ok_or_else(|| {
+                DnnError::InvalidArgument(format!(
+                    "draft distribution at position {position} has no positive, finite mass"
+                ))
+            })?;
+            let total: f64 = dist.iter().map(|p| p.max(0.0)).sum();
+            // `total > 0` is guaranteed: sample_categorical returned `Some`.
+            let draft_prob = dist[token].max(0.0) / total;
+            drafted.push(DraftedToken {
+                token_id: token as u32,
+                draft_prob,
+            });
+        }
+        Ok(drafted)
+    }
+
+    /// Verifies drafted tokens against the target model with modified
+    /// rejection sampling, returning the tokens to emit this round.
+    ///
+    /// # Arguments
+    ///
+    /// * `drafted` — tokens proposed by [`Self::propose_tokens`], each carrying
+    ///   the draft probability `p_draft(t_i)`.
+    /// * `target_dists` — one target-model probability distribution per drafted
+    ///   position: `target_dists[i]` is the target model's categorical
+    ///   distribution over the vocabulary at position `i`.  It must be long
+    ///   enough to cover every drafted token.
+    ///
+    /// # Algorithm
+    ///
+    /// For each drafted token `t_i` in order, a uniform `r ∈ [0, 1)` is drawn
+    /// and `t_i` is accepted iff `r < min(1, p_target(t_i) / p_draft(t_i))`.
+    /// On the first rejection at position `i`, a correction token is sampled
+    /// from the normalised residual distribution
+    /// `normalize(max(0, p_target[i] − p_draft[i]))` and verification stops.
+    /// If every drafted token is accepted, one bonus token is sampled from the
+    /// extra target distribution at position `drafted.len()`
+    /// (`target_dists` must therefore contain `drafted.len() + 1` rows in that
+    /// case — see the error conditions).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DnnError::InvalidArgument`] if `target_dists` does not cover
+    /// every drafted position (plus one extra row for the all-accepted bonus
+    /// token), if a target distribution referenced by a drafted token is too
+    /// short to contain that token, or if a distribution required for sampling
+    /// has no positive, finite mass.
     pub fn verify_and_accept(
         &mut self,
-        proposed: &[Vec<u32>],
-        target_probs: &[f64],
-    ) -> (Vec<u32>, usize) {
-        if proposed.is_empty() {
-            return (Vec::new(), 0);
+        drafted: &[DraftedToken],
+        target_dists: &[Vec<f64>],
+    ) -> DnnResult<SpeculativeResult> {
+        let gamma = drafted.len();
+        // The all-accepted path needs one extra target distribution to draw
+        // the bonus token from, so `gamma + 1` rows are always required.
+        if target_dists.len() <= gamma {
+            return Err(DnnError::InvalidArgument(format!(
+                "target_dists must have at least {} rows (one per drafted token \
+                 plus a bonus row), got {}",
+                gamma + 1,
+                target_dists.len(),
+            )));
         }
 
-        // Simple rejection-sampling simulation:
-        // Accept tokens while target_prob >= threshold (0.5).
-        let best = proposed.first().cloned().unwrap_or_default();
-        let mut accepted = Vec::new();
-        let threshold = 0.5;
-
-        for (i, token) in best.iter().enumerate() {
-            let prob = target_probs.get(i).copied().unwrap_or(0.0);
-            if prob >= threshold {
-                accepted.push(*token);
+        let mut tokens = Vec::with_capacity(gamma + 1);
+        for (i, draft) in drafted.iter().enumerate() {
+            let token = draft.token_id as usize;
+            let target_dist = &target_dists[i];
+            let target_total: f64 = target_dist.iter().map(|p| p.max(0.0)).sum();
+            let p_target = target_dist
+                .get(token)
+                .copied()
+                .ok_or_else(|| {
+                    DnnError::InvalidArgument(format!(
+                        "target distribution at position {i} (len {}) does not \
+                         contain drafted token id {token}",
+                        target_dist.len(),
+                    ))
+                })?
+                .max(0.0);
+            // Normalise the target probability of the drafted token so the
+            // acceptance ratio is between two genuine probabilities.
+            let p_target = if target_total > 0.0 {
+                p_target / target_total
             } else {
-                break;
+                0.0
+            };
+
+            // Acceptance ratio  min(1, p_target / p_draft).
+            // A draft probability of zero means the draft model could never
+            // have produced this token — treat it as an unconditional reject.
+            let accept_ratio = if draft.draft_prob > 0.0 {
+                (p_target / draft.draft_prob).min(1.0)
+            } else {
+                0.0
+            };
+
+            let r = self.rng.next_f64();
+            if r < accept_ratio {
+                tokens.push(draft.token_id);
+                continue;
             }
+
+            // ---- First rejection: sample the correction token. ----------
+            let residual = Self::residual_distribution(target_dist, drafted, i);
+            let correction = self.rng.sample_categorical(&residual).ok_or_else(|| {
+                DnnError::InvalidArgument(format!(
+                    "residual distribution at position {i} has no positive mass"
+                ))
+            })?;
+            tokens.push(correction as u32);
+
+            let accepted = i;
+            self.record(gamma, accepted);
+            return Ok(SpeculativeResult {
+                tokens,
+                accepted,
+                rejected: 1,
+            });
         }
 
-        let count = accepted.len();
-        self.total_proposed += best.len() as u64;
-        self.total_accepted += count as u64;
-        (accepted, count)
+        // ---- Every drafted token accepted: sample one bonus token. ------
+        let bonus_dist = &target_dists[gamma];
+        let bonus = self.rng.sample_categorical(bonus_dist).ok_or_else(|| {
+            DnnError::InvalidArgument(
+                "bonus target distribution has no positive, finite mass".into(),
+            )
+        })?;
+        tokens.push(bonus as u32);
+
+        self.record(gamma, gamma);
+        Ok(SpeculativeResult {
+            tokens,
+            accepted: gamma,
+            rejected: 0,
+        })
     }
 
-    /// Running acceptance rate across all calls to `verify_and_accept`.
+    /// Builds the normalised residual distribution
+    /// `normalize(max(0, p_target − p_draft))` at the rejection position `i`.
+    ///
+    /// The draft model's distribution at position `i` is reconstructed as a
+    /// one-hot vector on the drafted token: the draft sampled exactly that
+    /// token, so all of the draft mass relevant to the residual sits there.
+    /// This matches the speculative-sampling residual `p(x) − q(x)` clamped to
+    /// non-negative values.  When the residual sums to zero (the target placed
+    /// no extra mass anywhere) the raw target distribution is returned so the
+    /// caller still draws a valid token from `p_target`.
+    fn residual_distribution(
+        target_dist: &[f64],
+        drafted: &[DraftedToken],
+        position: usize,
+    ) -> Vec<f64> {
+        let target_total: f64 = target_dist.iter().map(|p| p.max(0.0)).sum();
+        let drafted_token = drafted[position].token_id as usize;
+        let draft_prob = drafted[position].draft_prob;
+
+        let mut residual: Vec<f64> = Vec::with_capacity(target_dist.len());
+        for (idx, &t) in target_dist.iter().enumerate() {
+            let p_target = if target_total > 0.0 {
+                t.max(0.0) / target_total
+            } else {
+                0.0
+            };
+            // q(x): the draft distribution is one-hot on the drafted token.
+            let p_draft = if idx == drafted_token {
+                draft_prob.max(0.0)
+            } else {
+                0.0
+            };
+            residual.push((p_target - p_draft).max(0.0));
+        }
+
+        let residual_sum: f64 = residual.iter().sum();
+        if residual_sum <= 0.0 {
+            // Degenerate residual — draw the correction straight from p_target.
+            return target_dist.iter().map(|p| p.max(0.0)).collect();
+        }
+        residual
+    }
+
+    /// Updates the running accept/propose counters for one finished round.
+    fn record(&mut self, proposed: usize, accepted: usize) {
+        self.total_proposed += proposed as u64;
+        self.total_accepted += accepted as u64;
+        self.rounds += 1;
+    }
+
+    /// Running acceptance rate across all calls to [`Self::verify_and_accept`].
+    ///
+    /// This is `total accepted drafted tokens / total drafted tokens` and
+    /// reflects the real algorithm — it excludes correction and bonus tokens,
+    /// which are emitted regardless of acceptance.
+    #[must_use]
     pub fn acceptance_rate(&self) -> f64 {
         if self.total_proposed == 0 {
             return 0.0;
         }
         self.total_accepted as f64 / self.total_proposed as f64
     }
+
+    /// Total number of drafted tokens proposed across all rounds.
+    #[must_use]
+    pub fn total_proposed(&self) -> u64 {
+        self.total_proposed
+    }
+
+    /// Total number of drafted tokens accepted across all rounds.
+    #[must_use]
+    pub fn total_accepted(&self) -> u64 {
+        self.total_accepted
+    }
+
+    /// Number of completed speculation rounds.
+    #[must_use]
+    pub fn rounds(&self) -> u64 {
+        self.rounds
+    }
+
+    /// Average number of tokens emitted per round, including the correction or
+    /// bonus token.
+    ///
+    /// With a draft length of γ this lies in `[1, γ + 1]`: each round always
+    /// emits one correction-or-bonus token on top of the accepted prefix.
+    /// It is the practical speed-up factor of speculative decoding versus
+    /// plain autoregressive decoding (one target forward pass per round).
+    #[must_use]
+    pub fn mean_tokens_per_round(&self) -> f64 {
+        if self.rounds == 0 {
+            return 0.0;
+        }
+        // accepted drafted tokens + one emitted token (correction/bonus) per round.
+        (self.total_accepted + self.rounds) as f64 / self.rounds as f64
+    }
+}
+
+/// A token drafted by the draft model, with the probability the draft model
+/// assigned to it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DraftedToken {
+    /// Sampled vocabulary id.
+    pub token_id: u32,
+    /// Draft-model probability `p_draft(token_id)` of the sampled token,
+    /// normalised so it lies in `[0, 1]`.
+    pub draft_prob: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -1000,20 +1345,351 @@ mod tests {
         assert_eq!(d.prefill_requests, vec![2, 1, 3]);
     }
 
-    // 11. Speculative decoding acceptance
+    // 11. Speculative decoding — propose samples from the draft distribution.
     #[test]
-    fn test_speculative_decoding_acceptance() {
-        let mut spec = SpeculativeDecoder::new(4);
-        let proposed = spec.propose_tokens(2);
-        assert_eq!(proposed.len(), 2);
-        assert_eq!(proposed[0].len(), 4);
+    fn test_speculative_decoding_propose_samples_draft() {
+        let mut spec = SpeculativeDecoder::with_seed(3, 12345);
+        // Three positions, each a 4-token vocabulary. Position 0 always
+        // produces token 2 (the only one with mass); position 1 produces
+        // token 0; position 2 produces token 3.
+        let draft_probs = vec![
+            vec![0.0, 0.0, 1.0, 0.0],
+            vec![1.0, 0.0, 0.0, 0.0],
+            vec![0.0, 0.0, 0.0, 1.0],
+        ];
+        let drafted = spec.propose_tokens(&draft_probs).expect("propose");
+        assert_eq!(drafted.len(), 3);
+        assert_eq!(drafted[0].token_id, 2);
+        assert_eq!(drafted[1].token_id, 0);
+        assert_eq!(drafted[2].token_id, 3);
+        // The draft probability of a one-hot distribution is exactly 1.0.
+        for d in &drafted {
+            assert!((d.draft_prob - 1.0).abs() < 1e-12);
+        }
+    }
 
-        // Accept first 2, reject the rest.
-        let probs = vec![0.8, 0.6, 0.3, 0.1];
-        let (accepted, count) = spec.verify_and_accept(&proposed, &probs);
-        assert_eq!(count, 2);
-        assert_eq!(accepted.len(), 2);
-        assert!(spec.acceptance_rate() > 0.0);
+    // 11b. propose_tokens respects the draft_length cap and normalises probs.
+    #[test]
+    fn test_speculative_decoding_propose_caps_and_normalises() {
+        let mut spec = SpeculativeDecoder::with_seed(2, 99);
+        // Four positions supplied but draft_length == 2 → only 2 consumed.
+        // Un-normalised weights: token 1 has 3/4 of the mass.
+        let draft_probs = vec![
+            vec![1.0, 3.0],
+            vec![3.0, 1.0],
+            vec![1.0, 0.0],
+            vec![0.0, 1.0],
+        ];
+        let drafted = spec.propose_tokens(&draft_probs).expect("propose");
+        assert_eq!(drafted.len(), 2, "draft_length caps the count");
+        for d in &drafted {
+            // draft_prob must be a genuine probability in [0, 1].
+            assert!((0.0..=1.0).contains(&d.draft_prob));
+            // For these two-element weight vectors the sampled token's
+            // normalised probability is either 1/4 or 3/4.
+            let p = d.draft_prob;
+            assert!(
+                (p - 0.25).abs() < 1e-12 || (p - 0.75).abs() < 1e-12,
+                "unexpected normalised prob {p}"
+            );
+        }
+    }
+
+    // 11c. propose_tokens rejects a degenerate (all-zero) distribution.
+    #[test]
+    fn test_speculative_decoding_propose_rejects_zero_dist() {
+        let mut spec = SpeculativeDecoder::new(2);
+        let draft_probs = vec![vec![0.0, 0.0, 0.0]];
+        assert!(spec.propose_tokens(&draft_probs).is_err());
+    }
+
+    // 11d. Categorical sampling reproduces the target frequencies (statistical).
+    #[test]
+    fn test_categorical_sampling_matches_distribution() {
+        let mut rng = LcgRng::new(0x00C0_FFEE);
+        // Target distribution over 4 categories.
+        let weights = [0.1_f64, 0.2, 0.3, 0.4];
+        let trials = 200_000;
+        let mut counts = [0u64; 4];
+        for _ in 0..trials {
+            let idx = rng.sample_categorical(&weights).expect("sample");
+            counts[idx] += 1;
+        }
+        for (i, &w) in weights.iter().enumerate() {
+            let freq = counts[i] as f64 / trials as f64;
+            assert!(
+                (freq - w).abs() < 0.01,
+                "category {i}: freq {freq} vs expected {w}"
+            );
+        }
+    }
+
+    // 11e. Rejection sampling accepts with probability min(1, p_t / p_d).
+    #[test]
+    fn test_rejection_sampling_acceptance_probability() {
+        // Drafted token id 0 with draft prob 0.8. Target prob 0.4 → the
+        // acceptance ratio is 0.4 / 0.8 = 0.5: across many independent
+        // single-token rounds, ~half should be accepted.
+        let trials = 100_000;
+        let mut accepted_rounds = 0u64;
+        for seed in 0..trials {
+            let mut spec = SpeculativeDecoder::with_seed(1, seed);
+            let drafted = vec![DraftedToken {
+                token_id: 0,
+                draft_prob: 0.8,
+            }];
+            // Position 0 target dist: token 0 has prob 0.4, token 1 has 0.6.
+            // Bonus row (position 1) is required even on rejection paths.
+            let target = vec![vec![0.4, 0.6], vec![0.5, 0.5]];
+            let res = spec.verify_and_accept(&drafted, &target).expect("verify");
+            if res.accepted == 1 {
+                accepted_rounds += 1;
+            }
+        }
+        let rate = accepted_rounds as f64 / trials as f64;
+        assert!(
+            (rate - 0.5).abs() < 0.01,
+            "acceptance rate {rate} should be ~0.5"
+        );
+    }
+
+    // 11f. p_target >= p_draft → unconditional acceptance.
+    #[test]
+    fn test_rejection_sampling_always_accepts_when_target_ge_draft() {
+        for seed in 0..2000 {
+            let mut spec = SpeculativeDecoder::with_seed(1, seed);
+            let drafted = vec![DraftedToken {
+                token_id: 0,
+                draft_prob: 0.3,
+            }];
+            // Target prob of token 0 (normalised) is 0.6 >= 0.3 draft prob.
+            let target = vec![vec![0.6, 0.4], vec![0.5, 0.5]];
+            let res = spec.verify_and_accept(&drafted, &target).expect("verify");
+            assert_eq!(res.accepted, 1, "ratio >= 1 must always accept");
+            assert_eq!(res.rejected, 0);
+        }
+    }
+
+    // 11g. Zero draft probability → unconditional rejection.
+    #[test]
+    fn test_rejection_sampling_rejects_zero_draft_prob() {
+        let mut spec = SpeculativeDecoder::with_seed(1, 7);
+        let drafted = vec![DraftedToken {
+            token_id: 0,
+            draft_prob: 0.0,
+        }];
+        let target = vec![vec![0.9, 0.1], vec![0.5, 0.5]];
+        let res = spec.verify_and_accept(&drafted, &target).expect("verify");
+        assert_eq!(res.accepted, 0);
+        assert_eq!(res.rejected, 1);
+        // Exactly one correction token is emitted.
+        assert_eq!(res.tokens.len(), 1);
+    }
+
+    // 11h. Residual-distribution resampling is correct (statistical).
+    #[test]
+    fn test_residual_distribution_resampling() {
+        // Force a guaranteed rejection so the correction token is always
+        // drawn from the residual. Drafted token id 0 with draft prob 1.0 and
+        // target prob 0.0 for token 0 → acceptance ratio 0 → always reject.
+        //
+        // Target distribution: [0.0, 0.5, 0.5]. Draft is one-hot on token 0.
+        // Residual = max(0, p_target - p_draft):
+        //   token 0: max(0, 0.0 - 1.0) = 0.0
+        //   token 1: max(0, 0.5 - 0.0) = 0.5
+        //   token 2: max(0, 0.5 - 0.0) = 0.5
+        // Normalised residual = [0.0, 0.5, 0.5].
+        let trials = 100_000;
+        let mut counts = [0u64; 3];
+        for seed in 0..trials {
+            let mut spec = SpeculativeDecoder::with_seed(1, seed);
+            let drafted = vec![DraftedToken {
+                token_id: 0,
+                draft_prob: 1.0,
+            }];
+            let target = vec![vec![0.0, 0.5, 0.5], vec![1.0, 0.0, 0.0]];
+            let res = spec.verify_and_accept(&drafted, &target).expect("verify");
+            assert_eq!(res.accepted, 0, "must reject");
+            let corr = res.tokens[0] as usize;
+            counts[corr] += 1;
+        }
+        let total = trials as f64;
+        assert_eq!(counts[0], 0, "token 0 has zero residual mass");
+        assert!((counts[1] as f64 / total - 0.5).abs() < 0.01);
+        assert!((counts[2] as f64 / total - 0.5).abs() < 0.01);
+    }
+
+    // 11i. Rejection of a token the target does not place mass on draws the
+    //      correction from the residual concentrated elsewhere.
+    #[test]
+    fn test_residual_distribution_concentrated() {
+        // Drafted token id 1 with draft prob 1.0; target dist [1.0, 0.0].
+        // p_target(token 1) == 0 → acceptance ratio 0 → always reject.
+        // residual = max(0, p_target - p_draft) with draft one-hot on token 1:
+        //   token 0: max(0, 1.0 - 0.0) = 1.0
+        //   token 1: max(0, 0.0 - 1.0) = 0.0
+        // residual = [1.0, 0.0] (non-zero) → correction is always token 0.
+        for seed in 0..1000 {
+            let mut spec = SpeculativeDecoder::with_seed(1, seed);
+            let drafted = vec![DraftedToken {
+                token_id: 1,
+                draft_prob: 1.0,
+            }];
+            let target = vec![vec![1.0, 0.0], vec![0.5, 0.5]];
+            let res = spec.verify_and_accept(&drafted, &target).expect("verify");
+            assert_eq!(res.accepted, 0);
+            assert_eq!(res.tokens[0], 0, "residual concentrates on token 0");
+        }
+    }
+
+    // 11i-bis. A residual that sums to zero falls back to the target dist.
+    #[test]
+    fn test_residual_distribution_zero_fallback() {
+        // residual_distribution returns the raw target distribution when the
+        // clamped residual max(0, p_target - p_draft) sums to zero. This
+        // happens when the draft one-hot mass fully covers the target mass at
+        // the drafted token and the target has no mass anywhere else.
+        // Construct that case directly: target one-hot on the drafted token.
+        let drafted = [DraftedToken {
+            token_id: 0,
+            draft_prob: 1.0,
+        }];
+        let target_dist = [1.0_f64, 0.0, 0.0];
+        let residual = SpeculativeDecoder::residual_distribution(&target_dist, &drafted, 0);
+        // p_target = [1,0,0], p_draft one-hot on token 0 = [1,0,0]:
+        // residual = [0,0,0] → sum 0 → fallback returns the target dist.
+        assert_eq!(residual, vec![1.0, 0.0, 0.0]);
+    }
+
+    // 11j. Draft == target accepts every token (statistical).
+    #[test]
+    fn test_speculative_draft_equals_target_accepts_all() {
+        // When the draft and target distributions are identical, the
+        // acceptance ratio p_target / p_draft is exactly 1.0 for every
+        // drafted token, so all gamma tokens must always be accepted.
+        let gamma = 5;
+        for seed in 0..3000 {
+            let mut spec = SpeculativeDecoder::with_seed(gamma, seed);
+            // Identical draft/target distributions for every position.
+            let dist = vec![0.15, 0.25, 0.20, 0.40];
+            let draft_probs = vec![dist.clone(); gamma];
+            let drafted = spec.propose_tokens(&draft_probs).expect("propose");
+            assert_eq!(drafted.len(), gamma);
+
+            // Target: same distribution at every drafted position + bonus row.
+            let target_dists = vec![dist.clone(); gamma + 1];
+            let res = spec
+                .verify_and_accept(&drafted, &target_dists)
+                .expect("verify");
+            assert_eq!(res.accepted, gamma, "draft==target must accept all");
+            assert_eq!(res.rejected, 0);
+            // Accepted prefix + 1 bonus token.
+            assert_eq!(res.tokens.len(), gamma + 1);
+        }
+    }
+
+    // 11k. Accepted-length distribution is sane and accounting is correct.
+    #[test]
+    fn test_speculative_accepted_length_distribution() {
+        let gamma = 4usize;
+        let mut spec = SpeculativeDecoder::with_seed(gamma, 0xABCD);
+        let rounds = 5000u64;
+        let mut sum_accepted = 0u64;
+        for _ in 0..rounds {
+            // Draft distribution: token 0 always sampled (one-hot).
+            let draft_probs = vec![vec![1.0, 0.0]; gamma];
+            let drafted = spec.propose_tokens(&draft_probs).expect("propose");
+            // Target: token 0 (drafted) has acceptance ratio 0.7/1.0 = 0.7.
+            let target_dists = vec![vec![0.7, 0.3]; gamma + 1];
+            let res = spec
+                .verify_and_accept(&drafted, &target_dists)
+                .expect("verify");
+            assert!(res.accepted <= gamma, "accepted within [0, gamma]");
+            assert_eq!(res.rejected, usize::from(res.accepted < gamma));
+            // Emitted tokens = accepted prefix + exactly one extra token.
+            assert_eq!(res.tokens.len(), res.accepted + 1);
+            sum_accepted += res.accepted as u64;
+        }
+        // total_proposed = rounds * gamma; acceptance rate should track 0.7.
+        assert_eq!(spec.total_proposed(), rounds * gamma as u64);
+        assert_eq!(spec.total_accepted(), sum_accepted);
+        assert_eq!(spec.rounds(), rounds);
+        let rate = spec.acceptance_rate();
+        // Per-position acceptance is p = 0.7, but the first rejection truncates
+        // the round, so the realised rate is well below p. The expected number
+        // of accepted drafted tokens per gamma=4 round is
+        //   sum_{j=1}^{3} j*p^j*(1-p) + 4*p^4 = 1.7731,
+        // giving an expected rate of 1.7731 / 4 ≈ 0.4433.
+        assert!(
+            (rate - 0.4433).abs() < 0.02,
+            "acceptance rate {rate} should be ~0.4433"
+        );
+        // Mean tokens per round must lie in [1, gamma + 1].
+        let mtpr = spec.mean_tokens_per_round();
+        assert!(mtpr >= 1.0 && mtpr <= (gamma + 1) as f64, "mtpr {mtpr}");
+    }
+
+    // 11l. verify_and_accept errors when target_dists is too short.
+    #[test]
+    fn test_speculative_verify_rejects_short_target() {
+        let mut spec = SpeculativeDecoder::new(2);
+        let drafted = vec![
+            DraftedToken {
+                token_id: 0,
+                draft_prob: 0.5,
+            },
+            DraftedToken {
+                token_id: 1,
+                draft_prob: 0.5,
+            },
+        ];
+        // Only 2 rows supplied; need gamma + 1 == 3.
+        let target = vec![vec![0.5, 0.5], vec![0.5, 0.5]];
+        assert!(spec.verify_and_accept(&drafted, &target).is_err());
+    }
+
+    // 11m. verify_and_accept errors when a drafted token is out of vocab.
+    #[test]
+    fn test_speculative_verify_rejects_token_out_of_range() {
+        let mut spec = SpeculativeDecoder::new(1);
+        let drafted = vec![DraftedToken {
+            token_id: 9, // out of range for a 2-token target distribution
+            draft_prob: 0.5,
+        }];
+        let target = vec![vec![0.5, 0.5], vec![0.5, 0.5]];
+        assert!(spec.verify_and_accept(&drafted, &target).is_err());
+    }
+
+    // 11n. Empty draft → only a bonus token is emitted.
+    #[test]
+    fn test_speculative_empty_draft_emits_bonus() {
+        let mut spec = SpeculativeDecoder::with_seed(4, 55);
+        let drafted: Vec<DraftedToken> = Vec::new();
+        // gamma == 0, so a single bonus row is required.
+        let target = vec![vec![0.0, 1.0, 0.0]];
+        let res = spec.verify_and_accept(&drafted, &target).expect("verify");
+        assert_eq!(res.accepted, 0);
+        assert_eq!(res.rejected, 0);
+        assert_eq!(res.tokens, vec![1], "bonus drawn from one-hot target");
+    }
+
+    // 11o. LcgRng produces uniform f64 in [0, 1) and is deterministic.
+    #[test]
+    fn test_lcg_rng_uniform_and_deterministic() {
+        let mut a = LcgRng::new(2024);
+        let mut b = LcgRng::new(2024);
+        let mut sum = 0.0_f64;
+        let n = 100_000;
+        for _ in 0..n {
+            let va = a.next_f64();
+            let vb = b.next_f64();
+            assert_eq!(va, vb, "same seed must yield same stream");
+            assert!((0.0..1.0).contains(&va));
+            sum += va;
+        }
+        // Mean of a uniform [0,1) sample should be close to 0.5.
+        let mean = sum / n as f64;
+        assert!((mean - 0.5).abs() < 0.01, "uniform mean {mean}");
     }
 
     // 12. Batch metrics tracking

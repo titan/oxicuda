@@ -541,15 +541,16 @@ $SFT_LOOP:
     add.u64 %rd7, %rd1, %rd6;
     ld.global.u32 %r10, [%rd7];
 
-    // Store label-logit placeholder: logits[token * n_vocab + label]
-    // (simplified: store logits[0] of this token as a proxy; real impl uses n_vocab offset)
+    // Load the label-logit at the row-major offset logits[token * n_vocab + label].
     mul.lo.u32 %r11, %r8, %r1;
     add.u32 %r12, %r11, %r10;
     mul.wide.u32 %rd8, %r12, 4;
     add.u64 %rd9, %rd0, %rd8;
     ld.global.f32 %f0, [%rd9];
 
-    // Write CE contribution (negated label-logit; softmax normalization on host)
+    // Write the per-token CE contribution: the negated label-logit. The
+    // log-sum-exp softmax denominator over the vocab row is added by the host
+    // caller (see `sft::loss::masked_token_ce`), completing the device/host split.
     neg.f32 %f1, %f0;
     mul.wide.u32 %rd6, %r8, 4;
     add.u64 %rd4, %rd3, %rd6;

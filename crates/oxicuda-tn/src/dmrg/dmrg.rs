@@ -165,6 +165,26 @@ pub fn dmrg_two_site(
     })
 }
 
+/// Public-crate wrapper so that sibling modules (e.g. `two_site_excited`) can reuse this.
+pub(crate) fn build_left_env_pub(
+    prev: &[f64],
+    prev_shape: (usize, usize, usize),
+    mps_t: &MpsTensor,
+    mpo_t: &crate::mpo::mpo::MpoTensor,
+) -> TnResult<Vec<f64>> {
+    build_left_env(prev, prev_shape, mps_t, mpo_t)
+}
+
+/// Public-crate wrapper so that sibling modules (e.g. `two_site_excited`) can reuse this.
+pub(crate) fn build_right_env_pub(
+    next: &[f64],
+    next_shape: (usize, usize, usize),
+    mps_t: &MpsTensor,
+    mpo_t: &crate::mpo::mpo::MpoTensor,
+) -> TnResult<Vec<f64>> {
+    build_right_env(next, next_shape, mps_t, mpo_t)
+}
+
 /// Build the left environment at the new boundary using site `s`'s MPS and MPO tensor.
 fn build_left_env(
     prev: &[f64],

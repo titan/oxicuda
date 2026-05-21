@@ -1,13 +1,17 @@
 //! Iterative and direct linear solvers for sparse systems.
 
+pub mod bicgstab;
 pub mod cg;
+pub mod gmres;
 pub mod ilu0;
 pub mod jacobi;
 pub mod pcg;
 pub mod sparse;
 pub mod ssor;
 
+pub use bicgstab::{BicgstabConfig, BicgstabResult, bicgstab};
 pub use cg::cg_solve;
+pub use gmres::{GmresConfig, GmresResult, gmres};
 pub use ilu0::{ilu0_factor, ilu0_solve};
 pub use jacobi::jacobi_solve;
 pub use pcg::{pcg_ilu0, pcg_jacobi, pcg_ssor};

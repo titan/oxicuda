@@ -6,6 +6,9 @@
 //! quantile / standard / min-max normalisation, and evaluation metrics.
 
 pub mod attention;
+pub mod conformal;
+pub mod danet;
+pub mod deepgbm;
 pub mod error;
 pub mod handle;
 pub mod metrics;
@@ -19,6 +22,12 @@ pub mod prelude {
     pub use crate::attention::saint::{SaintConfig, SaintLayer};
     pub use crate::attention::sparsemax::{entmax15, sparsemax, sparsemax_batch};
     pub use crate::attention::tabnet::{BatchNorm1d, TabNetConfig, TabNetLayer, glu};
+    pub use crate::conformal::split_conformal::{
+        ClassifierScore, ConformalConfig, ConformalizedQuantileRegressor, SplitConformalClassifier,
+        SplitConformalRegressor, empirical_quantile,
+    };
+    pub use crate::danet::{AbstractLayer, Danet, DanetConfig};
+    pub use crate::deepgbm::{DeepGbm, DeepGbmConfig};
     pub use crate::error::{TabularError, TabularResult};
     pub use crate::handle::{LcgRng, SmVersion, TabularHandle};
     pub use crate::metrics::tabular_metrics::{

@@ -122,8 +122,15 @@ pub(crate) fn emit_radix8_butterfly_trivial(
     let y6 = complex_sub(b, precision, &v02_p, &v13_p);
     let y7 = complex_sub(b, precision, &v02_m, &v13_m_rot);
 
-    // Output in bit-reversed order: [y0, y4, y2, y6, y1, y5, y3, y7]
-    [y0, y4, y2, y6, y1, y5, y3, y7]
+    // Natural-order 8-point DFT outputs.  The radix-2 decimation-in-
+    // frequency split makes the even-index outputs the 4-point DFT of
+    // `u` (`DFT_4(u) = [y0,y1,y2,y3]`) and the odd-index outputs the
+    // 4-point DFT of `v_tw` (`DFT_4(v_tw) = [y4,y5,y6,y7]`), interleaved
+    // as `Y[2m] = U[m]`, `Y[2m+1] = V[m]`.  Both 4-point sub-DFTs above
+    // already emit their results in natural order, so the interleave is:
+    //   Y = [Y0,Y1,Y2,Y3,Y4,Y5,Y6,Y7]
+    //     = [y0,y4,y1,y5,y2,y6,y3,y7]
+    [y0, y4, y1, y5, y2, y6, y3, y7]
 }
 
 // ---------------------------------------------------------------------------

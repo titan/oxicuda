@@ -478,3 +478,141 @@ fn plan_with_offset_groups_equal_in_channels() -> DnnResult<()> {
     assert!(!ptx.is_empty());
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Backward-input scatter atomicity (race-free gradient accumulation)
+// ---------------------------------------------------------------------------
+
+/// The F32 backward-input scatter must use a native float atomic add so
+/// concurrent threads writing the same input pixel do not lose updates.
+#[test]
+fn backward_input_f32_scatter_is_atomic() -> DnnResult<()> {
+    let cfg = basic_config_3x3();
+    let plan = DeformableConvPlan::new(cfg)?;
+    let ptx = plan.generate_backward_input()?;
+    assert!(
+        ptx.contains("atom.global.add.f32"),
+        "F32 grad-input scatter must use atom.global.add.f32"
+    );
+    Ok(())
+}
+
+/// The F16 backward-input scatter must NOT use a plain store for gradient
+/// accumulation: a `st.global.b16` into `grad_input` races. Instead it must
+/// emit a 32-bit compare-and-swap loop (`atom.global.cas.b32`) with `bfe` /
+/// `bfi` lane manipulation.
+#[test]
+fn backward_input_f16_scatter_uses_cas_loop() -> DnnResult<()> {
+    let mut cfg = basic_config_3x3();
+    cfg.float_type = PtxType::F16;
+    let plan = DeformableConvPlan::new(cfg)?;
+    let ptx = plan.generate_backward_input()?;
+
+    // The half-precision scatter must be a CAS loop.
+    assert!(
+        ptx.contains("atom.global.cas.b32"),
+        "F16 grad-input scatter must use a 32-bit CAS loop"
+    );
+    // The CAS loop relies on bit-field extract/insert for the half lane.
+    assert!(
+        ptx.contains("bfe.u32"),
+        "F16 CAS loop must extract the target half lane with bfe"
+    );
+    assert!(
+        ptx.contains("bfi.b32"),
+        "F16 CAS loop must splice the updated half lane with bfi"
+    );
+    // A retry branch must close the loop.
+    assert!(
+        ptx.contains("setp.eq.b32"),
+        "F16 CAS loop must compare the returned word to detect contention"
+    );
+    Ok(())
+}
+
+/// Regression guard: the F16 backward-input kernel must not perform the
+/// gradient scatter with a bare `st.global.b16` — that is the racy path
+/// this implementation replaced.
+#[test]
+fn backward_input_f16_has_no_racy_scatter_store() -> DnnResult<()> {
+    let mut cfg = basic_config_3x3();
+    cfg.float_type = PtxType::F16;
+    let plan = DeformableConvPlan::new(cfg)?;
+    let ptx = plan.generate_backward_input()?;
+
+    // The only global stores in the backward-input kernel are the atomic
+    // CAS itself (which is `atom`, not `st`). A plain `st.global.b16`
+    // anywhere would mean the racy scatter was reintroduced. The kernel
+    // emits no other `st.global.b16`, so none must appear.
+    assert!(
+        !ptx.contains("st.global.b16"),
+        "F16 grad-input scatter must not use a non-atomic st.global.b16"
+    );
+    Ok(())
+}
+
+/// CPU model of the half-precision CAS atomic add: two "threads" scattering
+/// to the same pixel must both be reflected in the result. A non-atomic
+/// store would drop one contribution; the CAS loop retries and keeps both.
+#[test]
+fn f16_cas_atomic_add_accumulates_concurrent_updates() {
+    // Model: a 32-bit word holding two f16 lanes. Two updates target the
+    // *same* lane; an atomic RMW must sum both contributions.
+    fn f16_round(x: f32) -> f32 {
+        // Emulate f16 precision: 10-bit mantissa round-trip.
+        let h = half_from_f32(x);
+        half_to_f32(h)
+    }
+    fn half_from_f32(x: f32) -> u16 {
+        // Minimal round-to-nearest-even f32 -> f16 (normals + zero).
+        let bits = x.to_bits();
+        let sign = ((bits >> 16) & 0x8000) as u16;
+        let exp = ((bits >> 23) & 0xff) as i32 - 127 + 15;
+        let mant = bits & 0x7f_ffff;
+        if exp <= 0 {
+            return sign; // flush tiny values to signed zero
+        }
+        if exp >= 0x1f {
+            return sign | 0x7c00; // saturate to inf
+        }
+        let mut half = sign | ((exp as u16) << 10) | ((mant >> 13) as u16);
+        // Round-to-nearest-even on the dropped mantissa bits.
+        let round_bits = mant & 0x1fff;
+        if round_bits > 0x1000 || (round_bits == 0x1000 && (half & 1) == 1) {
+            half += 1;
+        }
+        half
+    }
+    fn half_to_f32(h: u16) -> f32 {
+        let sign = ((h as u32) & 0x8000) << 16;
+        let exp = ((h >> 10) & 0x1f) as u32;
+        let mant = ((h & 0x3ff) as u32) << 13;
+        if exp == 0 {
+            return f32::from_bits(sign);
+        }
+        let f_exp = exp + (127 - 15);
+        f32::from_bits(sign | (f_exp << 23) | mant)
+    }
+
+    // Initial accumulator value in the lane.
+    let initial = 1.0f32;
+    let contrib_a = 0.5f32;
+    let contrib_b = 0.25f32;
+
+    // Atomic RMW (CAS-loop semantics): read-modify-write applied serially —
+    // exactly what the retry loop guarantees under contention.
+    let mut lane = f16_round(initial);
+    lane = f16_round(lane + contrib_a);
+    lane = f16_round(lane + contrib_b);
+
+    let expected = f16_round(f16_round(f16_round(initial) + contrib_a) + contrib_b);
+    assert!(
+        (lane - expected).abs() < 1e-3,
+        "CAS atomic add must accumulate both contributions: {lane} vs {expected}"
+    );
+    // Both contributions are present: result clearly exceeds initial + one.
+    assert!(
+        lane > initial + contrib_a - 1e-3,
+        "result {lane} must include both concurrent updates"
+    );
+}

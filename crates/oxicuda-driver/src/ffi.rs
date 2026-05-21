@@ -1254,6 +1254,10 @@ pub use ffi_launch::*;
 mod ffi_descriptors;
 pub use ffi_descriptors::*;
 
+#[path = "ffi_graph.rs"]
+mod ffi_graph;
+pub use ffi_graph::*;
+
 // =========================================================================
 // Tests
 // =========================================================================

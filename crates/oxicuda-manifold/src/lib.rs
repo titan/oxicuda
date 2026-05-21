@@ -22,6 +22,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod autoencoder;
+pub mod clustering;
 pub mod diffusion;
 pub mod error;
 pub mod handle;
@@ -33,12 +35,59 @@ pub mod metrics;
 pub mod neighbor;
 pub mod optim;
 pub mod ptx_kernels;
+pub mod reduction;
 pub mod riemannian;
+pub mod topology;
 pub mod tsne;
 pub mod umap;
 
+pub use autoencoder::{
+    EmbeddingExport, ManifoldHook, PcaManifoldHook, TsneRegHook, manifold_encode_and_export,
+};
+pub use clustering::kohonen_som::{
+    KohonenSomConfig, KohonenSomResult, SomInit, kohonen_som_fit, som_grid_pos, som_predict,
+    som_weight_at,
+};
+pub use diffusion::phate::{PhateConfig, PhateResult, phate_fit};
 pub use error::{ManifoldError, ManifoldResult};
 pub use handle::{LcgRng, ManifoldHandle, SmVersion};
+pub use linear::cca_pls::{
+    CcaConfig, CcaFit, PlsConfig, PlsFit, PlsSvdFit, cca_fit, cca_transform, pls_fit, pls_predict,
+    pls_svd_fit, pls_transform,
+};
+pub use neighbor::hnsw::{
+    HnswConfig, HnswDistance, HnswIndex, HnswSearchResult, hnsw_add, hnsw_build, hnsw_search,
+};
+pub use reduction::pacmap::{PaCMapConfig, PaCMapInit, PaCMapResult, pacmap};
+pub use reduction::trimap::{TrimapConfig, TrimapInit, TrimapResult, trimap};
+pub use riemannian::so_n::{
+    so_2_rotation, so_n_check, so_n_distance, so_n_geodesic, so_n_identity, so_n_inner, so_n_log,
+    so_n_norm, so_n_project_tangent, so_n_random, so_n_retract_cayley, so_n_retract_expm,
+    so_n_retract_qr, so_n_riemannian_gradient,
+};
+pub use riemannian::spd_bures::{
+    bures_distance, bures_exp, bures_frechet_mean, bures_geodesic, bures_geometric_mean, bures_log,
+    spd_inv, spd_inv_sqrt, spd_sqrt,
+};
+pub use riemannian::spd_kmeans::{
+    FrechetMeanConfig, FrechetMeanResult, SpdKmeansConfig, SpdKmeansResult, spd_frechet_mean,
+    spd_kmeans,
+};
+pub use topology::persistent_homology::{
+    MapperConfig, MapperGraph, MapperNode, PersistenceDiagram, PersistencePair, VietorisRipsConfig,
+    bottleneck_distance, mapper, persistence_betti, vietoris_rips_persistence,
+};
+pub use tsne::heavy_tsne::{
+    AlphaTsneConfig, HeavyTsneConfig, HeavyTsneResult, SsneConfig, SsneResult, alpha_tsne_fit,
+    cauchy_tsne_fit, heavy_tsne_fit, ssne_fit,
+};
+pub use tsne::nerv_jse::{JseConfig, JseResult, NervConfig, NervResult, jse_fit, nerv_fit};
+pub use umap::multiscale::{
+    MultiScaleUmapConfig, MultiScaleUmapResult, combine_fuzzy_sets, multiscale_umap_fit,
+};
+pub use umap::supervised::{
+    SupervisedUmapConfig, SupervisedUmapResult, UNLABELED, supervised_umap,
+};
 
 #[cfg(test)]
 mod e2e_tests;

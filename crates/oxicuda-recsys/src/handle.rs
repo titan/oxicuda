@@ -72,6 +72,13 @@ impl LcgRng {
         (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
     }
 
+    /// Returns a random `usize` in `[0, n)`. Panics in debug if `n == 0` but is
+    /// only called from production code where `n > 0` has already been validated.
+    #[inline]
+    pub fn next_usize(&mut self, n: usize) -> usize {
+        (self.next_u32() as usize) % n
+    }
+
     pub fn fill_normal(&mut self, buf: &mut [f32]) {
         let mut i = 0;
         while i + 1 < buf.len() {

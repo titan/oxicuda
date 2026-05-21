@@ -36,8 +36,6 @@ pub struct InvertedBlockWeights {
     pub ff_w2: Vec<f32>,
     /// FFN second layer bias `[D]`.
     pub ff_b2: Vec<f32>,
-    /// Empty placeholder kept for structural symmetry.
-    pub ff_b_empty_placeholder: Vec<f32>,
 }
 
 impl InvertedBlockWeights {
@@ -66,7 +64,6 @@ impl InvertedBlockWeights {
             ff_b1: vec![0.0_f32; d_ff],
             ff_w2: init_mat(d, d_ff),
             ff_b2: vec![0.0_f32; d],
-            ff_b_empty_placeholder: Vec::new(),
         }
     }
 }
@@ -369,6 +366,27 @@ mod tests {
             InvertedBlock::new(65, 4, &mut rng).unwrap_err(),
             TsError::HeadDimMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn inverted_block_weights_field_sizes() {
+        let mut rng = make_rng();
+        let d = 16_usize;
+        let block = InvertedBlock::new(d, 4, &mut rng).expect("build");
+        let w = &block.weights;
+        let d_ff = d * 4;
+        assert_eq!(w.norm1_g.len(), d);
+        assert_eq!(w.norm1_b.len(), d);
+        assert_eq!(w.q_w.len(), d * d);
+        assert_eq!(w.k_w.len(), d * d);
+        assert_eq!(w.v_w.len(), d * d);
+        assert_eq!(w.out_w.len(), d * d);
+        assert_eq!(w.norm2_g.len(), d);
+        assert_eq!(w.norm2_b.len(), d);
+        assert_eq!(w.ff_w1.len(), d_ff * d);
+        assert_eq!(w.ff_b1.len(), d_ff);
+        assert_eq!(w.ff_w2.len(), d * d_ff);
+        assert_eq!(w.ff_b2.len(), d);
     }
 
     #[test]

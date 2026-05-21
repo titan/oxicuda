@@ -1,4 +1,4 @@
-use super::notears::gauss_jordan_inv;
+use super::notears::{expm_scaling_exponent, gauss_jordan_inv};
 use crate::error::{CausalError, CausalResult};
 use crate::handle::LcgRng;
 
@@ -22,8 +22,8 @@ fn mat_trace(a: &[f32], n: usize) -> f32 {
     (0..n).map(|i| a[i * n + i]).sum()
 }
 
-/// Padé(3,3) matrix exponential for acyclicity constraint.
-fn expm_pade(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
+/// Padé(1,1) rational approximant `(I + A/2 + A²/12)(I - A/2 + A²/12)^{-1}`.
+fn pade11(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
     let mut a2 = vec![0.0_f32; n * n];
     mat_mul_nn(a, a, &mut a2, n);
     let mut u = vec![0.0_f32; n * n];
@@ -38,6 +38,20 @@ fn expm_pade(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
     let v_inv = gauss_jordan_inv(&v, n, 0.0)?;
     let mut result = vec![0.0_f32; n * n];
     mat_mul_nn(&u, &v_inv, &mut result, n);
+    Ok(result)
+}
+
+/// Padé(1,1) matrix exponential with scaling-and-squaring for acyclicity.
+fn expm_pade(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
+    let s = expm_scaling_exponent(a, n);
+    let scale = 1.0_f32 / (1u64 << s) as f32;
+    let scaled: Vec<f32> = a.iter().map(|&v| v * scale).collect();
+    let mut result = pade11(&scaled, n)?;
+    for _ in 0..s {
+        let mut squared = vec![0.0_f32; n * n];
+        mat_mul_nn(&result, &result, &mut squared, n);
+        result = squared;
+    }
     Ok(result)
 }
 

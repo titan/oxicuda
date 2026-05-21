@@ -23,31 +23,50 @@
 //! └── ptx_kernels   — GPU PTX kernel strings
 //! ```
 
+pub mod crossformer;
 pub mod decomp;
+pub mod dlinear;
 pub mod error;
+pub mod fedformer;
 pub mod handle;
 pub mod head;
+pub mod informer;
 pub mod itransformer;
+pub mod nbeats;
 pub mod nhits;
 pub mod norm;
 pub mod patch;
 pub mod patchtst;
 pub mod ptx_kernels;
+pub mod pyraformer;
 pub mod tcn;
+pub mod timemixer;
 pub mod timesnet;
 
 /// Convenience re-exports for common time-series types.
 pub mod prelude {
+    pub use crate::crossformer::{Crossformer, CrossformerConfig};
     pub use crate::decomp::{DecompResult, MovingAvg, SeriesDecomp};
+    pub use crate::dlinear::{DLinear, DLinearConfig, NLinear, NLinearConfig};
     pub use crate::error::{TsError, TsResult};
+    pub use crate::fedformer::{Fedformer, FedformerConfig, FrequencyEnhancedBlock};
     pub use crate::handle::{LcgRng, SmVersion, TsHandle};
-    pub use crate::head::{LinearHead, MlpHead};
+    pub use crate::head::{
+        DeepArConfig, DeepArHead, GaussianPrediction, LinearHead, MlpHead, QuantileConfig,
+        QuantileHead, QuantilePrediction,
+    };
+    pub use crate::informer::{
+        InformerBlock, InformerEncoder, InformerEncoderConfig, InformerResult, ProbSparseConfig,
+    };
     pub use crate::itransformer::{ITransformer, ITransformerConfig, InvertedBlock};
+    pub use crate::nbeats::{NBeats, NBeatsBlock, NBeatsBlockType, NBeatsConfig};
     pub use crate::nhits::{MultiRateSampler, NHits, NHitsBlock, NHitsConfig};
     pub use crate::norm::{InstanceNorm1d, RevIn};
     pub use crate::patch::PatchEmbed1d;
     pub use crate::patchtst::{PatchTst, PatchTstConfig};
+    pub use crate::pyraformer::{Pyraformer, PyraformerConfig};
     pub use crate::tcn::{TcnBlock, TcnConfig, TcnEncoder};
+    pub use crate::timemixer::{TimeMixer, TimeMixerConfig};
     pub use crate::timesnet::{TimesBlock, TimesNet, TimesNetConfig};
 }
 

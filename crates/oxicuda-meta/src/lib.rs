@@ -41,12 +41,22 @@ pub mod prelude {
     pub use crate::maml::anil::{AnilConfig, anil_adapt_head, anil_meta_update};
     pub use crate::maml::fomaml::{FoMamlConfig, fomaml_update};
     pub use crate::maml::maml::{MamlConfig, maml_adapt, maml_meta_update};
+    pub use crate::metric_learning::can::{Can, CanAttentionOutput, CanConfig, CanWeights};
+    pub use crate::metric_learning::deepemd::{DeepEmd, DeepEmdConfig};
+    pub use crate::metric_learning::feat::{Feat, FeatConfig};
+    pub use crate::metric_learning::leo::{Leo, LeoConfig, LeoResult, LeoState, LeoWeights};
     pub use crate::metric_learning::matching_net::{matching_net_attention, matching_net_predict};
+    pub use crate::metric_learning::metaoptnet::{
+        MetaOptNet, MetaOptNetConfig, MetaOptNetResult, MetaOptNetSolver, MetaOptNetWeights,
+    };
     pub use crate::metric_learning::proto_net::{compute_prototypes, proto_loss, proto_predict};
+    pub use crate::metric_learning::r2d2::{R2D2, R2D2Config, R2D2Weights};
     pub use crate::metric_learning::relation_net::RelationNet;
     pub use crate::metrics::few_shot::{accuracy_at_k, episode_accuracy, mean_and_ci95};
     pub use crate::network::backbone::MlpBackbone;
+    pub use crate::network::conv4_backbone::{Conv4Backbone, Conv4Block, Conv4Config};
     pub use crate::network::linear_head::LinearHead;
+    pub use crate::network::tbn::{TbnConfig, TransductiveBn};
     pub use crate::ptx_kernels::{
         cosine_sim_ptx, episode_sample_ptx, f32_hex, inner_sgd_ptx, meta_grad_accum_ptx,
         proto_distance_ptx, relation_score_ptx, reptile_update_ptx,

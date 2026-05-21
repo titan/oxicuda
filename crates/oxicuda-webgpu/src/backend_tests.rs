@@ -636,6 +636,198 @@ fn gemm_alpha_beta() {
     b.free(c_h).expect("free");
 }
 
+// ── Transposed GEMM tests ─────────────────────────────────────────────
+//
+// These exercise the WGSL `trans_a` / `trans_b` uniform paths, which were
+// previously rejected with `BackendError::Unsupported`.
+
+/// Reference CPU GEMM: `C = alpha * op(A) * op(B) + beta * C`, row-major.
+///
+/// `op(A)` is the logical `m × k` operand; when `trans_a` is true the buffer
+/// `a` holds its transpose (`k × m`).  Likewise for `op(B)` / `b`.
+fn cpu_gemm(
+    trans_a: bool,
+    trans_b: bool,
+    m: usize,
+    n: usize,
+    k: usize,
+    alpha: f32,
+    a: &[f32],
+    b: &[f32],
+    beta: f32,
+    c: &[f32],
+) -> Vec<f32> {
+    let mut out = vec![0.0f32; m * n];
+    for row in 0..m {
+        for col in 0..n {
+            let mut acc = 0.0f32;
+            for i in 0..k {
+                let av = if trans_a {
+                    a[i * m + row]
+                } else {
+                    a[row * k + i]
+                };
+                let bv = if trans_b {
+                    b[col * k + i]
+                } else {
+                    b[i * n + col]
+                };
+                acc += av * bv;
+            }
+            let idx = row * n + col;
+            out[idx] = alpha * acc + beta * c[idx];
+        }
+    }
+    out
+}
+
+/// Drive `gemm` for one transpose combination and compare against `cpu_gemm`.
+fn run_gemm_transpose_case(
+    trans_a: BackendTranspose,
+    trans_b: BackendTranspose,
+    m: usize,
+    n: usize,
+    k: usize,
+) {
+    let Some(b) = try_init() else { return };
+
+    let ta = trans_a != BackendTranspose::NoTrans;
+    let tb = trans_b != BackendTranspose::NoTrans;
+
+    // `a` holds op(A) (m×k) or its transpose (k×m); same idea for `b`.
+    let a_data: Vec<f32> = (0..m * k).map(|x| (x as f32) * 0.5 - 1.0).collect();
+    let b_data: Vec<f32> = (0..k * n).map(|x| (x as f32) * 0.25 + 0.3).collect();
+    let c_init: Vec<f32> = (0..m * n).map(|x| (x as f32) * 0.1).collect();
+    let alpha = 2.0f32;
+    let beta = 3.0f32;
+
+    let expected = cpu_gemm(ta, tb, m, n, k, alpha, &a_data, &b_data, beta, &c_init);
+
+    let a_h = upload_f32(&b, &a_data);
+    let b_h = upload_f32(&b, &b_data);
+    let c_h = upload_f32(&b, &c_init);
+
+    b.gemm(
+        trans_a,
+        trans_b,
+        m,
+        n,
+        k,
+        alpha as f64,
+        a_h,
+        if ta { m } else { k },
+        b_h,
+        if tb { k } else { n },
+        beta as f64,
+        c_h,
+        n,
+    )
+    .expect("gemm transpose");
+
+    let result = download_f32(&b, c_h, m * n);
+    for (idx, (r, e)) in result.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (r - e).abs() < 1e-3 * (1.0 + e.abs()),
+            "trans_a={trans_a}, trans_b={trans_b}, slot={idx}: got {r}, expected {e}"
+        );
+    }
+
+    b.free(a_h).expect("free");
+    b.free(b_h).expect("free");
+    b.free(c_h).expect("free");
+}
+
+#[test]
+fn gemm_nn() {
+    run_gemm_transpose_case(
+        BackendTranspose::NoTrans,
+        BackendTranspose::NoTrans,
+        3,
+        4,
+        5,
+    );
+}
+
+#[test]
+fn gemm_nt() {
+    run_gemm_transpose_case(BackendTranspose::NoTrans, BackendTranspose::Trans, 3, 4, 5);
+}
+
+#[test]
+fn gemm_tn() {
+    run_gemm_transpose_case(BackendTranspose::Trans, BackendTranspose::NoTrans, 3, 4, 5);
+}
+
+#[test]
+fn gemm_tt() {
+    run_gemm_transpose_case(BackendTranspose::Trans, BackendTranspose::Trans, 3, 4, 5);
+}
+
+#[test]
+fn gemm_transpose_larger_than_tile() {
+    // Dimensions exceeding the 8×8 tile size exercise multi-tile k loops
+    // for every transpose combination.
+    for &ta in &[BackendTranspose::NoTrans, BackendTranspose::Trans] {
+        for &tb in &[BackendTranspose::NoTrans, BackendTranspose::Trans] {
+            run_gemm_transpose_case(ta, tb, 17, 13, 23);
+        }
+    }
+}
+
+#[test]
+fn gemm_conjtrans_treated_as_trans() {
+    // For real f32 buffers ConjTrans must behave exactly like Trans.
+    run_gemm_transpose_case(
+        BackendTranspose::ConjTrans,
+        BackendTranspose::ConjTrans,
+        4,
+        4,
+        4,
+    );
+}
+
+#[test]
+fn gemm_transpose_known_values() {
+    // A_logical = [[1,2,3],[4,5,6]] (2×3).  Stored transposed (3×2) for TN.
+    // B = [[1,0],[0,1],[1,1]] (3×2).  C = A_logical * B = [[4,5],[10,11]].
+    let Some(b) = try_init() else { return };
+
+    let a_transposed = [1.0f32, 4.0, 2.0, 5.0, 3.0, 6.0]; // column-major 3×2
+    let bm = [1.0f32, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let c_init = [0.0f32; 4];
+
+    let a_h = upload_f32(&b, &a_transposed);
+    let b_h = upload_f32(&b, &bm);
+    let c_h = upload_f32(&b, &c_init);
+
+    b.gemm(
+        BackendTranspose::Trans,
+        BackendTranspose::NoTrans,
+        2,
+        2,
+        3,
+        1.0,
+        a_h,
+        2,
+        b_h,
+        2,
+        0.0,
+        c_h,
+        2,
+    )
+    .expect("gemm TN");
+
+    let result = download_f32(&b, c_h, 4);
+    let expected = [4.0f32, 5.0, 10.0, 11.0];
+    for (r, e) in result.iter().zip(expected.iter()) {
+        assert!((r - e).abs() < 1e-4, "got {r}, expected {e}");
+    }
+
+    b.free(a_h).expect("free");
+    b.free(b_h).expect("free");
+    b.free(c_h).expect("free");
+}
+
 // ── Conv2D tests ──────────────────────────────────────────────────────
 
 #[test]
@@ -984,6 +1176,141 @@ fn batched_gemm_identity_2x2() {
     b.free(a_h).expect("free");
     b.free(b_h).expect("free");
     b.free(c_h).expect("free");
+}
+
+// ── Batched transposed GEMM tests ──────────────────────────────────
+//
+// Exercise the WGSL `trans_a` / `trans_b` uniforms in the batched kernel,
+// previously rejected with `BackendError::Unsupported`.
+
+/// Drive `batched_gemm` for one transpose combination and compare per batch
+/// against `cpu_gemm`.
+fn run_batched_gemm_transpose_case(
+    trans_a: BackendTranspose,
+    trans_b: BackendTranspose,
+    m: usize,
+    n: usize,
+    k: usize,
+    batch_count: usize,
+) {
+    let Some(b) = try_init() else { return };
+
+    let ta = trans_a != BackendTranspose::NoTrans;
+    let tb = trans_b != BackendTranspose::NoTrans;
+
+    let stride_a = m * k;
+    let stride_b = k * n;
+    let stride_c = m * n;
+
+    let a_data: Vec<f32> = (0..stride_a * batch_count)
+        .map(|x| (x as f32) * 0.3 - 0.7)
+        .collect();
+    let b_data: Vec<f32> = (0..stride_b * batch_count)
+        .map(|x| (x as f32) * 0.15 + 0.2)
+        .collect();
+    let c_init: Vec<f32> = (0..stride_c * batch_count)
+        .map(|x| (x as f32) * 0.05)
+        .collect();
+    let alpha = 1.5f32;
+    let beta = 0.5f32;
+
+    // Per-batch expected output via the CPU reference.
+    let mut expected = vec![0.0f32; stride_c * batch_count];
+    for batch in 0..batch_count {
+        let a_slice = &a_data[batch * stride_a..(batch + 1) * stride_a];
+        let b_slice = &b_data[batch * stride_b..(batch + 1) * stride_b];
+        let c_slice = &c_init[batch * stride_c..(batch + 1) * stride_c];
+        let out = cpu_gemm(ta, tb, m, n, k, alpha, a_slice, b_slice, beta, c_slice);
+        expected[batch * stride_c..(batch + 1) * stride_c].copy_from_slice(&out);
+    }
+
+    let a_h = upload_f32(&b, &a_data);
+    let b_h = upload_f32(&b, &b_data);
+    let c_h = upload_f32(&b, &c_init);
+
+    b.batched_gemm(
+        trans_a,
+        trans_b,
+        m,
+        n,
+        k,
+        alpha as f64,
+        a_h,
+        if ta { m } else { k },
+        stride_a,
+        b_h,
+        if tb { k } else { n },
+        stride_b,
+        beta as f64,
+        c_h,
+        n,
+        stride_c,
+        batch_count,
+    )
+    .expect("batched_gemm transpose");
+
+    let result = download_f32(&b, c_h, stride_c * batch_count);
+    for (idx, (r, e)) in result.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (r - e).abs() < 1e-3 * (1.0 + e.abs()),
+            "trans_a={trans_a}, trans_b={trans_b}, slot={idx}: got {r}, expected {e}"
+        );
+    }
+
+    b.free(a_h).expect("free");
+    b.free(b_h).expect("free");
+    b.free(c_h).expect("free");
+}
+
+#[test]
+fn batched_gemm_nn() {
+    run_batched_gemm_transpose_case(
+        BackendTranspose::NoTrans,
+        BackendTranspose::NoTrans,
+        3,
+        4,
+        5,
+        3,
+    );
+}
+
+#[test]
+fn batched_gemm_nt() {
+    run_batched_gemm_transpose_case(
+        BackendTranspose::NoTrans,
+        BackendTranspose::Trans,
+        3,
+        4,
+        5,
+        3,
+    );
+}
+
+#[test]
+fn batched_gemm_tn() {
+    run_batched_gemm_transpose_case(
+        BackendTranspose::Trans,
+        BackendTranspose::NoTrans,
+        3,
+        4,
+        5,
+        3,
+    );
+}
+
+#[test]
+fn batched_gemm_tt() {
+    run_batched_gemm_transpose_case(BackendTranspose::Trans, BackendTranspose::Trans, 3, 4, 5, 3);
+}
+
+#[test]
+fn batched_gemm_transpose_larger_than_tile() {
+    // Dimensions exceeding the 8×8 tile force multi-tile k loops per batch.
+    for &ta in &[BackendTranspose::NoTrans, BackendTranspose::Trans] {
+        for &tb in &[BackendTranspose::NoTrans, BackendTranspose::Trans] {
+            run_batched_gemm_transpose_case(ta, tb, 11, 19, 23, 2);
+        }
+    }
 }
 
 // ── FP16 GEMM tests ─────────────────────────────────────────────────

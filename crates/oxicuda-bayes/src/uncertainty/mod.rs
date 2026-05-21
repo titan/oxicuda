@@ -17,6 +17,9 @@
 
 pub mod deep_ensemble;
 pub mod entropy;
+pub mod functional_laplace;
 pub mod laplace;
 pub mod mc_dropout;
 pub mod swag;
+
+pub use functional_laplace::{FunctionalLaplace, FunctionalLaplaceConfig};

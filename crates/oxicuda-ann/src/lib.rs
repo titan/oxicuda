@@ -10,14 +10,17 @@
 //! ├── distance/    — L2, inner product distance metrics
 //! ├── flat/        — Brute-force flat index (exact search baseline)
 //! ├── hnsw/        — Hierarchical Navigable Small World graph (insert + search)
+//! ├── hnsw_pq      — Compressed HNSW with per-node PQ codes + ADC scoring
 //! ├── ivf/         — Inverted File Index (coarse quantizer + probing)
 //! ├── ivfpq/       — IVF with Product Quantization re-ranking
 //! ├── kmeans/      — k-Means clustering (used for IVF/PQ training)
 //! ├── knn_graph/   — Brute-force and NN-Descent k-NN graph construction
 //! ├── lsh/         — Random Projection LSH and MinHash
+//! ├── ngt/         — NGT/ANNG approximate neighborhood graph (incremental build + ε-greedy search)
 //! ├── pq/          — Product Quantization (train, encode, ADC)
 //! ├── quantize/    — Scalar quantization utilities
 //! ├── topk/        — Parallel top-K heap selection
+//! ├── vamana       — DiskANN in-memory Vamana graph (α-pruned RobustPrune + greedy search)
 //! ├── handle       — LcgRng (deterministic PRNG)
 //! ├── error        — AnnError / AnnResult
 //! └── ptx_kernels  — GPU PTX kernel strings (7 kernels × 6 SM versions)
@@ -28,15 +31,18 @@ pub mod error;
 pub mod flat;
 pub mod handle;
 pub mod hnsw;
+pub mod hnsw_pq;
 pub mod ivf;
 pub mod ivfpq;
 pub mod kmeans;
 pub mod knn_graph;
 pub mod lsh;
+pub mod ngt;
 pub mod pq;
 pub mod ptx_kernels;
 pub mod quantize;
 pub mod topk;
+pub mod vamana;
 
 #[cfg(test)]
 mod e2e_tests {

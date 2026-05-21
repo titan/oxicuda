@@ -112,7 +112,8 @@ pub mod prelude {
     pub use crate::aligned::{AlignedBuffer, Alignment, AlignmentInfo};
     pub use crate::buffer_view::{BufferView, BufferViewMut};
     pub use crate::copy::{
-        copy_dtod, copy_dtod_async, copy_dtoh, copy_dtoh_async_raw, copy_htod, copy_htod_async_raw,
+        copy_dtod, copy_dtod_async, copy_dtoh, copy_dtoh_async_raw, copy_dtoh_region_async,
+        copy_htod, copy_htod_async_raw, copy_htod_region_async,
     };
     pub use crate::copy_2d3d::{
         Memcpy2DParams, Memcpy3DParams, copy_2d_dtod, copy_2d_dtoh, copy_2d_htod, copy_3d_dtod,

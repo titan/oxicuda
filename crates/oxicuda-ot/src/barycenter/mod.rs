@@ -13,3 +13,9 @@
 pub mod fixed_support;
 /// Free-support Wasserstein barycenter via alternating Sinkhorn + support update.
 pub mod free_support;
+/// Improved free-support Wasserstein barycenter with adaptive support pruning.
+pub mod free_support_adaptive;
+
+pub use free_support_adaptive::{
+    FreeSupportBary, FreeSupportConfig, free_support_barycenter, free_support_cost,
+};

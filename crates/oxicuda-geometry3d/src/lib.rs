@@ -51,6 +51,7 @@ pub mod prelude {
     pub use crate::mesh::earth_movers::{SinkhornConfig, earth_movers_distance};
     pub use crate::mesh::normal_estimate::estimate_normals;
     pub use crate::neighborhood::ball_query::ball_query;
+    pub use crate::neighborhood::grid_knn::{GridKnnConfig, SpatialHashGrid};
     pub use crate::neighborhood::kd_tree::KdTree;
     pub use crate::neighborhood::knn::knn;
     pub use crate::pointops::gather_points::gather_points;
@@ -58,11 +59,14 @@ pub mod prelude {
     pub use crate::pointops::interp_features::interp_features;
     pub use crate::ptx_kernels::*;
     pub use crate::sampling::farthest_point_sample::farthest_point_sample;
+    pub use crate::sampling::pointnext_aug::{PointNextAug, PointNextAugConfig};
     pub use crate::sampling::random_sample::random_sample;
     pub use crate::sampling::voxel_downsample::voxel_downsample;
     pub use crate::transform::icp::{IcpConfig, IcpResult, icp};
     pub use crate::transform::quaternion::Quat;
+    pub use crate::transform::range_image::{RangeImage, RangeImageConfig, RangeImageProjector};
     pub use crate::transform::rigid::RigidTransform;
+    pub use crate::voxel::octree::{Octree, OctreeConfig, OctreeNode};
     pub use crate::voxel::sparse_conv3d::{SparseConv3d, SparseConv3dConfig, SparseTensor};
     pub use crate::voxel::voxelize::{VoxelGrid, VoxelPoolMode};
 }

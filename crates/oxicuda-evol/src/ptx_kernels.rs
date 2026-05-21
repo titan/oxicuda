@@ -171,11 +171,26 @@ $TS_DONE:\n\
 
 /// Per-gene Gaussian mutation with probability p_mut.
 ///
+/// Each surviving gene receives a true normal perturbation `delta = sigma * z`,
+/// where `z ~ N(0,1)` is produced by the **Box–Muller transform**
+/// `z = sqrt(-2·ln u1) · cos(2π·u2)` from two independent uniforms `u1, u2 ∈ [0,1)`.
+///
+/// PTX f64 has no `sin.approx`/`cos.approx`, so the transcendentals are evaluated
+/// in software:
+///   * `ln u1 = lg2.approx.f64(u1) · ln 2` (`u1` clamped to `2^-53` to avoid `ln(0)`),
+///   * `cos(a)` via Cody–Waite octant reduction `k = round(a·2/π)`,
+///     `x = a − k·(π/2) ∈ [-π/4, π/4]`, evaluating degree-10 cos / degree-11 sin
+///     Taylor series on the reduced argument and selecting the result from
+///     `{cos x, −sin x, −cos x, sin x}` by `k mod 4`. Octant reduction keeps the
+///     polynomial argument tiny, giving < 1.2e-10 absolute error over `[0,2π)` —
+///     far tighter than a naive `[-π,π]` series.
+///
 /// Signature: `gaussian_mutate_kernel(genome: *f64, n: u32, sigma: f64, p_mut: f64, seed: u64)`
 #[must_use]
 pub fn gaussian_mutate_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     let body = "// gaussian_mutate_kernel: add N(0,sigma) to each gene with prob p_mut\n\
+// delta = sigma * BoxMuller(u1,u2),  z = sqrt(-2 ln u1) * cos(2 pi u2)\n\
 .visible .entry gaussian_mutate_kernel(\n\
     .param .u64 p_genome,\n\
     .param .u32 p_n,\n\
@@ -184,10 +199,11 @@ pub fn gaussian_mutate_ptx(sm: u32) -> String {
     .param .u64 p_seed\n\
 )\n\
 {\n\
-    .reg .u64  %rd<12>;\n\
+    .reg .u64  %rd<16>;\n\
     .reg .u32  %r<8>;\n\
-    .reg .f64  %fd<8>;\n\
-    .reg .pred %p0, %p1;\n\
+    .reg .f64  %fd<48>;\n\
+    .reg .s64  %sd<4>;\n\
+    .reg .pred %p0, %p1, %p2, %p3;\n\
 \n\
     ld.param.u64  %rd0, [p_genome];\n\
     ld.param.u32  %r0,  [p_n];\n\
@@ -202,35 +218,114 @@ pub fn gaussian_mutate_ptx(sm: u32) -> String {
     setp.ge.u32   %p0, %r4, %r0;\n\
     @%p0 bra $GM_DONE;\n\
 \n\
-    // LCG: state = (seed XOR tid) * MUL + ADD\n\
+    // LCG: state = (seed XOR tid) * MUL + ADD; advance three times for\n\
+    // three independent uniforms: u_gate (mutation test), u1, u2 (Box-Muller).\n\
     cvt.u64.u32   %rd2, %r4;\n\
     xor.b64       %rd3, %rd1, %rd2;\n\
     mov.u64       %rd4, 6364136223846793005;\n\
+    mov.f64       %fd3, 0d3CA0000000000000;\n\
+    // draw 1: u_gate\n\
     mul.lo.u64    %rd5, %rd3, %rd4;\n\
     add.u64       %rd5, %rd5, 1442695040888963407;\n\
-    // uniform [0,1) from high 53 bits\n\
     shr.u64       %rd6, %rd5, 11;\n\
     cvt.rn.f64.u64 %fd2, %rd6;\n\
-    mov.f64       %fd3, 0d3CA0000000000000;\n\
     mul.rn.f64    %fd2, %fd2, %fd3;\n\
     setp.ge.f64   %p1, %fd2, %fd1;\n\
     @%p1 bra $GM_DONE;\n\
 \n\
-    // load gene, add sigma*normal_approx (use uniform as placeholder), store\n\
-    cvt.u64.u32   %rd7, %r4;\n\
-    shl.b64       %rd7, %rd7, 3;\n\
-    add.u64       %rd7, %rd0, %rd7;\n\
-    ld.global.f64 %fd4, [%rd7];\n\
-    // generate second uniform for Box-Muller\n\
-    mul.lo.u64    %rd8, %rd5, %rd4;\n\
-    add.u64       %rd8, %rd8, 1442695040888963407;\n\
-    shr.u64       %rd9, %rd8, 11;\n\
-    cvt.rn.f64.u64 %fd5, %rd9;\n\
+    // draw 2: u1 in [0,1)\n\
+    mul.lo.u64    %rd5, %rd5, %rd4;\n\
+    add.u64       %rd5, %rd5, 1442695040888963407;\n\
+    shr.u64       %rd7, %rd5, 11;\n\
+    cvt.rn.f64.u64 %fd4, %rd7;\n\
+    mul.rn.f64    %fd4, %fd4, %fd3;\n\
+    // draw 3: u2 in [0,1)\n\
+    mul.lo.u64    %rd5, %rd5, %rd4;\n\
+    add.u64       %rd5, %rd5, 1442695040888963407;\n\
+    shr.u64       %rd8, %rd5, 11;\n\
+    cvt.rn.f64.u64 %fd5, %rd8;\n\
     mul.rn.f64    %fd5, %fd5, %fd3;\n\
-    // delta = sigma * fd2 (approximation — full Box-Muller needs math.sin)\n\
-    mul.rn.f64    %fd6, %fd0, %fd2;\n\
-    add.rn.f64    %fd4, %fd4, %fd6;\n\
-    st.global.f64 [%rd7], %fd4;\n\
+\n\
+    // --- Box-Muller radius: r = sqrt(-2 * ln u1) ------------------------------\n\
+    // clamp u1 away from 0 so ln(u1) is finite (eps = 2^-53)\n\
+    max.f64       %fd6, %fd4, %fd3;\n\
+    // ln(u1) = lg2(u1) * ln(2)\n\
+    lg2.approx.f64 %fd7, %fd6;\n\
+    mov.f64       %fd8, 0d3FE62E42FEFA39EF;\n\
+    mul.rn.f64    %fd9, %fd7, %fd8;\n\
+    // -2 * ln(u1)\n\
+    mov.f64       %fd10, 0dC000000000000000;\n\
+    mul.rn.f64    %fd11, %fd10, %fd9;\n\
+    sqrt.rn.f64   %fd12, %fd11;\n\
+\n\
+    // --- angle a = 2*pi*u2 -----------------------------------------------------\n\
+    mov.f64       %fd13, 0d401921FB54442D18;\n\
+    mul.rn.f64    %fd14, %fd13, %fd5;\n\
+    // octant reduction: k = round(a * 2/pi); x = a - k*(pi/2), x in [-pi/4,pi/4]\n\
+    mov.f64       %fd15, 0d3FE45F306DC9C883;\n\
+    mul.rn.f64    %fd16, %fd14, %fd15;\n\
+    cvt.rni.s64.f64 %sd0, %fd16;\n\
+    cvt.rn.f64.s64 %fd17, %sd0;\n\
+    mov.f64       %fd18, 0d3FF921FB54442D18;\n\
+    mul.rn.f64    %fd19, %fd17, %fd18;\n\
+    sub.rn.f64    %fd20, %fd14, %fd19;\n\
+\n\
+    // u = x^2, x3 = x^3\n\
+    mul.rn.f64    %fd21, %fd20, %fd20;\n\
+    mul.rn.f64    %fd22, %fd21, %fd20;\n\
+\n\
+    // cos(x) on [-pi/4,pi/4]: Horner in u\n\
+    //   1 - u/2 + u^2/24 - u^3/720 + u^4/40320 - u^5/3628800\n\
+    mov.f64       %fd23, 0dBE927E4FB7789F5C;\n\
+    mov.f64       %fd24, 0d3EFA01A01A01A01A;\n\
+    fma.rn.f64    %fd25, %fd23, %fd21, %fd24;\n\
+    mov.f64       %fd26, 0dBF56C16C16C16C17;\n\
+    fma.rn.f64    %fd25, %fd25, %fd21, %fd26;\n\
+    mov.f64       %fd27, 0d3FA5555555555555;\n\
+    fma.rn.f64    %fd25, %fd25, %fd21, %fd27;\n\
+    mov.f64       %fd28, 0dBFE0000000000000;\n\
+    fma.rn.f64    %fd25, %fd25, %fd21, %fd28;\n\
+    mov.f64       %fd29, 0d3FF0000000000000;\n\
+    fma.rn.f64    %fd30, %fd25, %fd21, %fd29;\n\
+\n\
+    // sin(x) on [-pi/4,pi/4]: x + x^3 * P(u)\n\
+    //   P(u) = -1/6 + u/120 - u^2/5040 + u^3/362880 - u^4/39916800\n\
+    mov.f64       %fd31, 0dBE5AE64567F544E4;\n\
+    mov.f64       %fd32, 0d3EC71DE3A556C734;\n\
+    fma.rn.f64    %fd33, %fd31, %fd21, %fd32;\n\
+    mov.f64       %fd34, 0dBF2A01A01A01A01A;\n\
+    fma.rn.f64    %fd33, %fd33, %fd21, %fd34;\n\
+    mov.f64       %fd35, 0d3F81111111111111;\n\
+    fma.rn.f64    %fd33, %fd33, %fd21, %fd35;\n\
+    mov.f64       %fd36, 0dBFC5555555555555;\n\
+    fma.rn.f64    %fd33, %fd33, %fd21, %fd36;\n\
+    fma.rn.f64    %fd37, %fd33, %fd22, %fd20;\n\
+\n\
+    // quadrant select cos(a) from {cos x, -sin x, -cos x, sin x} by (k mod 4)\n\
+    and.b64       %sd1, %sd0, 3;\n\
+    // use_sin = (k & 1) == 1  -> pick sin x else cos x\n\
+    and.b64       %sd2, %sd0, 1;\n\
+    setp.eq.s64   %p2, %sd2, 1;\n\
+    selp.f64      %fd38, %fd37, %fd30, %p2;\n\
+    // negate = ((k mod 4) ^ ((k mod 4) >> 1)) & 1  -> true for q in {1,2}\n\
+    shr.s64       %sd3, %sd1, 1;\n\
+    xor.b64       %sd3, %sd3, %sd1;\n\
+    and.b64       %sd3, %sd3, 1;\n\
+    setp.eq.s64   %p3, %sd3, 1;\n\
+    neg.f64       %fd39, %fd38;\n\
+    selp.f64      %fd40, %fd39, %fd38, %p3;\n\
+\n\
+    // z0 = r * cos(a);  delta = sigma * z0\n\
+    mul.rn.f64    %fd41, %fd12, %fd40;\n\
+    mul.rn.f64    %fd42, %fd0, %fd41;\n\
+\n\
+    // load gene, add delta, store\n\
+    cvt.u64.u32   %rd9, %r4;\n\
+    shl.b64       %rd9, %rd9, 3;\n\
+    add.u64       %rd9, %rd0, %rd9;\n\
+    ld.global.f64 %fd2, [%rd9];\n\
+    add.rn.f64    %fd2, %fd2, %fd42;\n\
+    st.global.f64 [%rd9], %fd2;\n\
 $GM_DONE:\n\
     ret;\n\
 }\n";
@@ -596,4 +691,136 @@ $CS_DONE:\n\
     ret;\n\
 }\n";
     hdr + body
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SM versions spanning Turing through Blackwell.
+    const ALL_SM: &[u32] = &[75, 80, 86, 90, 100, 120];
+
+    /// Verify the header carries the expected target/address-size for `sm`.
+    fn check_header(ptx: &str, sm: u32) {
+        assert!(
+            ptx.contains(&format!(".target sm_{sm}")),
+            "missing .target sm_{sm}"
+        );
+        assert!(ptx.contains(".address_size 64"), "missing .address_size 64");
+    }
+
+    #[test]
+    fn fitness_eval_all_sm() {
+        for &sm in ALL_SM {
+            check_header(&fitness_eval_ptx(sm), sm);
+        }
+    }
+
+    #[test]
+    fn tournament_select_all_sm() {
+        for &sm in ALL_SM {
+            check_header(&tournament_select_ptx(sm), sm);
+        }
+    }
+
+    #[test]
+    fn gaussian_mutate_all_sm() {
+        for &sm in ALL_SM {
+            check_header(&gaussian_mutate_ptx(sm), sm);
+        }
+    }
+
+    #[test]
+    fn nsga_crowding_all_sm() {
+        for &sm in ALL_SM {
+            check_header(&nsga_crowding_ptx(sm), sm);
+        }
+    }
+
+    #[test]
+    fn pso_update_all_sm() {
+        for &sm in ALL_SM {
+            check_header(&pso_update_ptx(sm), sm);
+        }
+    }
+
+    #[test]
+    fn de_mutate_all_sm() {
+        for &sm in ALL_SM {
+            check_header(&de_mutate_ptx(sm), sm);
+        }
+    }
+
+    #[test]
+    fn cmaes_sample_all_sm() {
+        for &sm in ALL_SM {
+            check_header(&cmaes_sample_ptx(sm), sm);
+        }
+    }
+
+    #[test]
+    fn gaussian_mutate_emits_box_muller_sequence() {
+        // The mutation kernel must perform a real Box-Muller transform:
+        //   r = sqrt(-2 * ln u1),  z = r * cos(2 pi u2),  delta = sigma * z.
+        let ptx = gaussian_mutate_ptx(80);
+        // ln u1 via lg2.approx.f64 (PTX f64 has no native log).
+        assert!(
+            ptx.contains("lg2.approx.f64"),
+            "Box-Muller log step missing"
+        );
+        // radius via sqrt of -2 ln u1.
+        assert!(ptx.contains("sqrt.rn.f64"), "Box-Muller sqrt step missing");
+        // cosine of the reduced angle via octant reduction (cvt.rni + selp).
+        assert!(
+            ptx.contains("cvt.rni.s64.f64"),
+            "trig range-reduction missing"
+        );
+        assert!(ptx.contains("selp.f64"), "trig quadrant selection missing");
+        // The 2*pi angle constant must be present (0d401921FB54442D18).
+        assert!(
+            ptx.contains("0d401921FB54442D18"),
+            "2*pi angle constant missing"
+        );
+    }
+
+    #[test]
+    fn gaussian_mutate_no_longer_uses_uniform_proxy() {
+        // Regression: the old kernel approximated the normal noise with a bare
+        // uniform draw and admitted so in a comment. Neither the stale comment
+        // nor a single-uniform delta should remain.
+        let ptx = gaussian_mutate_ptx(80);
+        assert!(
+            !ptx.contains("approximation"),
+            "stale 'approximation' comment still present"
+        );
+        assert!(
+            !ptx.contains("placeholder"),
+            "stale 'placeholder' comment still present"
+        );
+        assert!(
+            ptx.contains("BoxMuller"),
+            "kernel should document the Box-Muller transform"
+        );
+    }
+
+    #[test]
+    fn gaussian_mutate_draws_three_independent_uniforms() {
+        // Three LCG advances: u_gate (mutation test), u1 and u2 (Box-Muller).
+        let ptx = gaussian_mutate_ptx(80);
+        let advances = ptx.matches("1442695040888963407").count();
+        assert!(
+            advances >= 3,
+            "expected >= 3 LCG advances for three uniforms, found {advances}"
+        );
+    }
+
+    #[test]
+    fn blackwell_uses_ptx_87() {
+        assert!(gaussian_mutate_ptx(120).contains(".version 8.7"));
+    }
+
+    #[test]
+    fn turing_uses_ptx_75() {
+        assert!(gaussian_mutate_ptx(75).contains(".version 7.5"));
+    }
 }

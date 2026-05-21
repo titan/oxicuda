@@ -99,8 +99,9 @@ pub use executor::{
 };
 pub use handle::InferHandle;
 pub use sampling::{
-    BeamHypothesis, BeamSearchConfig, BeamSearchState, Rng, greedy_sample, greedy_sample_batch,
-    speculative_verify, top_k_filter, top_k_sample, top_p_filter, top_p_sample,
+    BeamHypothesis, BeamSearchConfig, BeamSearchState, JsonConstraint, JsonToken, MedusaConfig,
+    MedusaDecoder, Rng, greedy_sample, greedy_sample_batch, speculative_verify, top_k_filter,
+    top_k_sample, top_p_filter, top_p_sample,
 };
 
 // ─── Integration tests ───────────────────────────────────────────────────────

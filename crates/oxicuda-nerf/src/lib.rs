@@ -39,6 +39,8 @@ pub mod prelude {
     pub use crate::encoding::positional::{PosEncConfig, positional_encode};
     pub use crate::error::{NerfError, NerfResult};
     pub use crate::field::hash_field::HashField;
+    pub use crate::field::kplanes::{KPlanes, KPlanesConfig};
+    pub use crate::field::plenoxel::{PlenoxelConfig, PlenoxelGrid};
     pub use crate::field::tensorf::{TensorRf, TensorRfConfig};
     pub use crate::handle::{LcgRng, NerfHandle, SmVersion};
     pub use crate::metrics::image_quality::{ImageMetrics, compute_image_metrics, psnr};

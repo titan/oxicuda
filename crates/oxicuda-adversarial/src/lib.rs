@@ -34,11 +34,19 @@ pub mod prelude {
     pub use crate::attacks::auto_pgd::{AutoPgdConfig, auto_pgd_attack};
     pub use crate::attacks::cw::{CwConfig, cw_attack};
     pub use crate::attacks::fgsm::fgsm_attack;
+    pub use crate::attacks::jsma::{Jsma, JsmaConfig};
     pub use crate::attacks::mim::{MimConfig, mim_attack};
+    pub use crate::attacks::patch::{PatchAttack, PatchConfig};
     pub use crate::attacks::pgd::{PgdConfig, pgd_attack_l_inf, pgd_attack_l2};
+    pub use crate::defenses::awp::{AwpConfig, AwpDefense, AwpWeightDelta};
     pub use crate::defenses::certified_bounds::{
         IntervalBound, ibp_propagate, lipschitz_certified_radius,
     };
+    pub use crate::defenses::crown::{
+        AlphaBound, CrownConfig, CrownVerifier, LinearLayer, NeuronBound,
+    };
+    pub use crate::defenses::laplace_smoothing::{LaplaceSmoothing, LaplaceSmoothingConfig};
+    pub use crate::defenses::macer::{MacerConfig, MacerLoss};
     pub use crate::defenses::mart::{MartConfig, mart_loss};
     pub use crate::defenses::randomized_smoothing::{RsConfig, certified_radius, smoothed_predict};
     pub use crate::defenses::trades::{TradesConfig, trades_loss};

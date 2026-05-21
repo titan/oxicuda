@@ -32,11 +32,16 @@ pub mod ptx_kernels;
 /// Convenience re-exports for common multi-modal types.
 pub mod prelude {
     pub use crate::alignment::contrastive::{clip_loss, imagebind_loss, l2_normalise};
+    pub use crate::alignment::llava_projector::{LlavaProjector, LlavaProjectorConfig};
     pub use crate::alignment::matching::{ItmHead, itm_loss};
+    pub use crate::alignment::whisper_log_mel::{WhisperLogMel, WhisperLogMelConfig};
     pub use crate::caption::prefix_lm::{PrefixLm, PrefixLmConfig, PrefixLmWeights};
     pub use crate::caption::vqa_head::{VqaHead, softmax, vqa_loss};
     pub use crate::cross_attn::cross_attention::{
         CrossAttention, CrossAttnConfig, CrossAttnWeights,
+    };
+    pub use crate::cross_attn::flamingo::{
+        FlamingoGatedConfig, FlamingoGatedLayer, FlamingoGatedWeights,
     };
     pub use crate::cross_attn::self_cross_block::{
         FeedForward, LayerNorm, SelfCrossBlock, SelfCrossBlockWeights,
@@ -44,7 +49,12 @@ pub mod prelude {
     pub use crate::encoder::audio_encoder::{
         AudioEncoder, AudioEncoderConfig, AudioEncoderWeights,
     };
+    pub use crate::encoder::coca::{CoCa, CoCaConfig, CoCaWeights};
     pub use crate::encoder::image_encoder::{ViTEncoder, ViTEncoderConfig, ViTEncoderWeights};
+    pub use crate::encoder::perceiver_io::{
+        PerceiverIo, PerceiverIoConfig, PerceiverIoWeights, PerceiverSelfLayer,
+    };
+    pub use crate::encoder::qformer::{QFormer, QFormerConfig, QFormerWeights};
     pub use crate::encoder::text_encoder::{BertConfig, BertEncoder, BertWeights};
     pub use crate::encoder::video_encoder::{
         VideoEncoder, VideoEncoderConfig, VideoEncoderWeights,

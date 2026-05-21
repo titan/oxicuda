@@ -303,9 +303,17 @@ $CS_DONE:
 pub fn relation_score_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     let zero = f32_hex(0.0_f32);
+    let one = f32_hex(1.0_f32);
+    let log2e = f32_hex(core::f32::consts::LOG2_E);
     format!(
         r#"{hdr}// relation_score_kernel: concat [query; support] -> ReLU(W1*x + b1) -> W2*h + b2 -> sigmoid
-// Each thread computes one (query, support) pair relation score
+// Each thread computes one (query, support) pair relation score.
+// Layout: p_query/p_support are [n_pairs * feat_dim] row-major; the network
+// input is the concatenation x = [query ; support] of length 2*feat_dim.
+// p_w1 is [hidden_dim * (2*feat_dim)] row-major: row j holds the weights of
+// hidden unit j, with columns 0..feat_dim multiplying the query slice and
+// columns feat_dim..2*feat_dim multiplying the support slice.
+// p_b1 is [hidden_dim], p_w2 is [hidden_dim], p_b2 is [1], p_out is [n_pairs].
 .visible .entry relation_score_kernel(
     .param .u64 p_query,
     .param .u64 p_support,
@@ -319,10 +327,10 @@ pub fn relation_score_ptx(sm: u32) -> String {
     .param .u32 n_pairs
 )
 {{
-    .reg .u64  %rd<14>;
-    .reg .u32  %r<10>;
-    .reg .f32  %f<8>;
-    .reg .pred %p0;
+    .reg .u64  %rd<24>;
+    .reg .u32  %r<20>;
+    .reg .f32  %f<16>;
+    .reg .pred %p0, %p1, %p2;
 
     ld.param.u64  %rd0,  [p_query];
     ld.param.u64  %rd1,  [p_support];
@@ -331,44 +339,119 @@ pub fn relation_score_ptx(sm: u32) -> String {
     ld.param.u64  %rd4,  [p_w2];
     ld.param.u64  %rd5,  [p_b2];
     ld.param.u64  %rd6,  [p_out];
+    ld.param.u32  %r1,   [feat_dim];
+    ld.param.u32  %r2,   [hidden_dim];
     ld.param.u32  %r0,   [n_pairs];
 
-    mov.u32       %r1, %ntid.x;
-    mov.u32       %r2, %ctaid.x;
-    mov.u32       %r3, %tid.x;
-    mad.lo.u32    %r4, %r1, %r2, %r3;
+    mov.u32       %r3, %ntid.x;
+    mov.u32       %r4, %ctaid.x;
+    mov.u32       %r5, %tid.x;
+    mad.lo.u32    %r6, %r3, %r4, %r5;
 
-    setp.ge.u32   %p0, %r4, %r0;
+    setp.ge.u32   %p0, %r6, %r0;
     @%p0 bra $RS_DONE;
 
-    // scalar sigmoid(0.0) = 0.5 as placeholder result
+    // Per-pair base element offsets into the query / support feature arrays.
+    mul.lo.u32    %r7, %r6, %r1;            // r7 = pair * feat_dim
+    mul.wide.u32  %rd7, %r7, 4;
+    add.u64       %rd8, %rd0, %rd7;         // rd8 = &p_query[pair*feat_dim]
+    add.u64       %rd9, %rd1, %rd7;         // rd9 = &p_support[pair*feat_dim]
+
+    // in_dim = 2 * feat_dim (concatenated feature length / W1 row stride).
+    shl.b32       %r8, %r1, 1;              // r8 = 2 * feat_dim
+
+    // pre_sig accumulator for the output layer: s = sum_j W2[j]*h_j + b2.
     mov.f32       %f0, {ZERO};
-    mul.wide.u32  %rd7, %r4, 4;
-    add.u64       %rd8, %rd6, %rd7;
-    st.global.f32 [%rd8], %f0;
+    // j = 0 : hidden-unit loop index.
+    mov.u32       %r9, 0;
+
+$RS_HIDDEN_LOOP:
+    setp.ge.u32   %p1, %r9, %r2;
+    @%p1 bra $RS_HIDDEN_DONE;
+
+    // Base element offset of W1 row j: j * in_dim.
+    mul.lo.u32    %r10, %r9, %r8;           // r10 = j * (2*feat_dim)
+    mul.wide.u32  %rd10, %r10, 4;
+    add.u64       %rd11, %rd2, %rd10;       // rd11 = &p_w1[j*in_dim] (query cols)
+    mul.wide.u32  %rd12, %r1, 4;
+    add.u64       %rd13, %rd11, %rd12;      // rd13 = &p_w1[j*in_dim + feat_dim]
+
+    // h_j pre-activation accumulator, seeded with b1[j].
+    mul.wide.u32  %rd14, %r9, 4;
+    add.u64       %rd15, %rd3, %rd14;
+    ld.global.f32 %f1, [%rd15];             // f1 = b1[j]
+
+    // i = 0 : feature loop index over the concatenated halves.
+    mov.u32       %r11, 0;
+
+$RS_FEAT_LOOP:
+    setp.ge.u32   %p2, %r11, %r1;
+    @%p2 bra $RS_FEAT_DONE;
+
+    mul.wide.u32  %rd16, %r11, 4;           // byte offset of feature i
+
+    // query contribution: W1[j, i] * query[i]
+    add.u64       %rd17, %rd11, %rd16;
+    ld.global.f32 %f2, [%rd17];             // f2 = W1[j, i]
+    add.u64       %rd18, %rd8, %rd16;
+    ld.global.f32 %f3, [%rd18];             // f3 = query[i]
+    fma.rn.f32    %f1, %f2, %f3, %f1;
+
+    // support contribution: W1[j, feat_dim + i] * support[i]
+    add.u64       %rd19, %rd13, %rd16;
+    ld.global.f32 %f4, [%rd19];             // f4 = W1[j, feat_dim+i]
+    add.u64       %rd20, %rd9, %rd16;
+    ld.global.f32 %f5, [%rd20];             // f5 = support[i]
+    fma.rn.f32    %f1, %f4, %f5, %f1;
+
+    add.u32       %r11, %r11, 1;
+    bra           $RS_FEAT_LOOP;
+
+$RS_FEAT_DONE:
+    // ReLU activation: h_j = max(pre_activation, 0).
+    max.f32       %f6, %f1, {ZERO};
+
+    // Output layer MAC: s += W2[j] * h_j.
+    add.u64       %rd21, %rd4, %rd14;
+    ld.global.f32 %f7, [%rd21];             // f7 = W2[j]
+    fma.rn.f32    %f0, %f7, %f6, %f0;
+
+    add.u32       %r9, %r9, 1;
+    bra           $RS_HIDDEN_LOOP;
+
+$RS_HIDDEN_DONE:
+    // s += b2[0]
+    ld.global.f32 %f8, [%rd5];
+    add.f32       %f0, %f0, %f8;
+
+    // sigmoid(s) = 1 / (1 + exp(-s)) = ex2(s*log2e) / (1 + ex2(s*log2e))
+    mul.f32       %f9, %f0, {LOG2E};
+    ex2.approx.f32 %f10, %f9;               // f10 = exp(s)
+    add.f32       %f11, %f10, {ONE};
+    div.rn.f32    %f12, %f10, %f11;         // f12 = sigmoid(s)
+
+    mul.wide.u32  %rd22, %r6, 4;
+    add.u64       %rd23, %rd6, %rd22;
+    st.global.f32 [%rd23], %f12;
 
 $RS_DONE:
-    mov.u32       %r5, 0;
-    mov.u32       %r6, 0;
-    mov.u32       %r7, 0;
-    mov.u32       %r8, 0;
-    mov.u32       %r9, 0;
-    mov.f32       %f1, {ZERO};
-    mov.f32       %f2, {ZERO};
-    mov.f32       %f3, {ZERO};
-    mov.f32       %f4, {ZERO};
-    mov.f32       %f5, {ZERO};
-    mov.f32       %f6, {ZERO};
-    mov.f32       %f7, {ZERO};
-    mov.u64       %rd9,  0;
-    mov.u64       %rd10, 0;
-    mov.u64       %rd11, 0;
-    mov.u64       %rd12, 0;
-    mov.u64       %rd13, 0;
+    mov.u32       %r12, 0;
+    mov.u32       %r13, 0;
+    mov.u32       %r14, 0;
+    mov.u32       %r15, 0;
+    mov.u32       %r16, 0;
+    mov.u32       %r17, 0;
+    mov.u32       %r18, 0;
+    mov.u32       %r19, 0;
+    mov.f32       %f13, {ZERO};
+    mov.f32       %f14, {ZERO};
+    mov.f32       %f15, {ZERO};
     ret;
 }}
 "#,
         ZERO = zero,
+        ONE = one,
+        LOG2E = log2e,
     )
 }
 
@@ -567,5 +650,125 @@ mod tests {
     fn f32_hex_known_values() {
         assert_eq!(f32_hex(0.0_f32), "0F00000000");
         assert_eq!(f32_hex(1.0_f32), "0F3F800000");
+    }
+
+    #[test]
+    fn relation_score_emits_mlp_body() {
+        // The real relation-network kernel must contain the hidden-unit loop,
+        // the inner feature MAC loop and the sigmoid output sequence — it must
+        // no longer be the placeholder that simply stores 0.0 to p_out.
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            let ptx = relation_score_ptx(sm);
+
+            // Hidden-layer loop and inner feature MAC loop are present.
+            assert!(
+                ptx.contains("$RS_HIDDEN_LOOP:"),
+                "sm={sm}: missing hidden-unit loop label"
+            );
+            assert!(
+                ptx.contains("$RS_FEAT_LOOP:"),
+                "sm={sm}: missing feature MAC loop label"
+            );
+            // Multiply-accumulate instructions for the two layers.
+            assert!(
+                ptx.contains("fma.rn.f32"),
+                "sm={sm}: missing fused multiply-add MAC instruction"
+            );
+            // ReLU activation on the hidden pre-activation.
+            assert!(
+                ptx.contains("max.f32"),
+                "sm={sm}: missing ReLU (max.f32) activation"
+            );
+            // Sigmoid output: ex2.approx + reciprocal division.
+            assert!(
+                ptx.contains("ex2.approx.f32"),
+                "sm={sm}: missing ex2.approx for sigmoid"
+            );
+            assert!(
+                ptx.contains("div.rn.f32"),
+                "sm={sm}: missing reciprocal division for sigmoid"
+            );
+
+            // The stale placeholder comment and its semantics must be gone.
+            assert!(
+                !ptx.contains("placeholder"),
+                "sm={sm}: stale placeholder comment still present"
+            );
+            assert!(
+                !ptx.contains("sigmoid(0.0)"),
+                "sm={sm}: stale sigmoid(0.0)=0.5 comment still present"
+            );
+        }
+    }
+
+    /// Bit-exact CPU mirror of the `relation_score_kernel` PTX body. Used to
+    /// document the GPU/CPU contract: row-major W1 indexing, ReLU on the
+    /// hidden layer, then a sigmoid output. The arithmetic order matches the
+    /// PTX (`fma` accumulation seeded with the bias, `max` for ReLU).
+    fn relation_score_cpu(
+        query: &[f32],
+        support: &[f32],
+        w1: &[f32],
+        b1: &[f32],
+        w2: &[f32],
+        b2: f32,
+        feat_dim: usize,
+        hidden_dim: usize,
+    ) -> f32 {
+        let in_dim = 2 * feat_dim;
+        let mut pre_sig = b2;
+        for j in 0..hidden_dim {
+            let row = &w1[j * in_dim..(j + 1) * in_dim];
+            let mut acc = b1[j];
+            for i in 0..feat_dim {
+                acc += row[i] * query[i];
+                acc += row[feat_dim + i] * support[i];
+            }
+            let h_j = acc.max(0.0_f32);
+            pre_sig += w2[j] * h_j;
+        }
+        1.0_f32 / (1.0_f32 + (-pre_sig).exp())
+    }
+
+    #[test]
+    fn relation_score_cpu_mirror_matches_reference() {
+        // Cross-check the documented kernel contract against a hand-rolled
+        // forward pass. Negative pre-activations exercise the ReLU clamp.
+        let feat_dim = 3_usize;
+        let hidden_dim = 4_usize;
+        let in_dim = 2 * feat_dim;
+        let query = [0.5_f32, -0.25, 1.0];
+        let support = [-0.5_f32, 0.75, 0.1];
+        let w1: Vec<f32> = (0..hidden_dim * in_dim)
+            .map(|k| (k as f32) * 0.1 - 0.3)
+            .collect();
+        let b1 = [-2.0_f32, 0.05, -0.1, 0.2];
+        let w2 = [0.4_f32, -0.3, 0.2, 0.6];
+        let b2 = 0.15_f32;
+
+        let kernel_like =
+            relation_score_cpu(&query, &support, &w1, &b1, &w2, b2, feat_dim, hidden_dim);
+
+        // Independent recompute with the same row-major indexing.
+        let mut expected = b2;
+        for j in 0..hidden_dim {
+            let mut acc = b1[j];
+            for i in 0..feat_dim {
+                acc += w1[j * in_dim + i] * query[i];
+                acc += w1[j * in_dim + feat_dim + i] * support[i];
+            }
+            expected += w2[j] * acc.max(0.0_f32);
+        }
+        let expected = 1.0_f32 / (1.0_f32 + (-expected).exp());
+
+        assert!(
+            (kernel_like - expected).abs() < 1e-6,
+            "relation-score mirror mismatch: {kernel_like} vs {expected}"
+        );
+        // Sigmoid output is always a valid probability.
+        assert!(
+            (0.0_f32..=1.0_f32).contains(&kernel_like),
+            "sigmoid output out of [0,1]: {kernel_like}"
+        );
     }
 }

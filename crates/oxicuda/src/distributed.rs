@@ -20,6 +20,8 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::collective::{Communicator, ReduceOp, RingAllReduce, TreeAllReduce};
+
 // ─── NodeId ─────────────────────────────────────────────────
 
 /// Unique identifier for a node in the distributed cluster.
@@ -503,6 +505,14 @@ pub struct Bucket {
     pub total_size: usize,
     /// Whether all gradients in this bucket have been computed.
     pub ready: bool,
+    /// Flattened gradient values held by this rank for every parameter in the
+    /// bucket, laid out in `param_ids` order.
+    ///
+    /// [`DistributedOptimizer::all_reduce_gradients`] reduces this buffer
+    /// across all participating ranks and writes the result back in place, so
+    /// after a successful all-reduce every bucket's `gradients` holds the
+    /// summed (or averaged) values across the process group.
+    pub gradients: Vec<f32>,
 }
 
 /// Gradient bucketing for distributed data parallel training.
@@ -531,8 +541,30 @@ impl GradientBucket {
     /// Add a gradient for parameter `param_id` with `grad_size` bytes.
     ///
     /// If the current bucket cannot fit the gradient a new bucket is
-    /// started.
+    /// started. The gradient buffer is reserved as zero-filled `f32` storage
+    /// (`grad_size / 4` elements); use [`add_gradient_data`](Self::add_gradient_data)
+    /// to supply concrete gradient values for an all-reduce.
     pub fn add_gradient(&mut self, param_id: usize, grad_size: usize) {
+        let elem_count = grad_size / std::mem::size_of::<f32>();
+        self.insert(param_id, grad_size, vec![0.0f32; elem_count]);
+    }
+
+    /// Add a gradient for parameter `param_id` with concrete `f32` values.
+    ///
+    /// The gradient occupies `grad.len() * 4` bytes for bucket-capacity
+    /// accounting. The values are stored so that
+    /// [`DistributedOptimizer::all_reduce_gradients`] can reduce them across
+    /// the process group.
+    ///
+    /// If the current bucket cannot fit the gradient a new bucket is started.
+    pub fn add_gradient_data(&mut self, param_id: usize, grad: &[f32]) {
+        let grad_size = std::mem::size_of_val(grad);
+        self.insert(param_id, grad_size, grad.to_vec());
+    }
+
+    /// Shared insertion logic: place a gradient (size + data) into the trailing
+    /// bucket, starting a new bucket when the capacity would be exceeded.
+    fn insert(&mut self, param_id: usize, grad_size: usize, data: Vec<f32>) {
         let needs_new = self.buckets.is_empty()
             || self
                 .buckets
@@ -544,10 +576,12 @@ impl GradientBucket {
                 param_ids: vec![param_id],
                 total_size: grad_size,
                 ready: false,
+                gradients: data,
             });
         } else if let Some(last) = self.buckets.last_mut() {
             last.param_ids.push(param_id);
             last.total_size += grad_size;
+            last.gradients.extend_from_slice(&data);
         }
     }
 
@@ -645,25 +679,100 @@ impl Default for ModelParallelConfig {
 
 /// Wraps gradient communication for distributed training.
 ///
-/// Provides simulated all-reduce over gradient buckets and ZeRO-style
-/// optimizer-state partitioning.
+/// Provides a real ring all-reduce over gradient buckets (built on the
+/// [`crate::collective`] primitives) and ZeRO-style optimizer-state
+/// partitioning.
 pub struct DistributedOptimizer;
 
 impl DistributedOptimizer {
-    /// Simulate an all-reduce across all buckets.
+    /// Performs an all-reduce of every bucket's gradients across the process
+    /// group described by `comm`.
     ///
-    /// In a real implementation this would use the collective ops over
-    /// device memory; here it validates bucket readiness.
-    pub fn all_reduce_gradients(buckets: &[Bucket]) -> CudaResult<()> {
-        for (i, bucket) in buckets.iter().enumerate() {
+    /// Each participating rank contributes its own copy of `bucket.gradients`;
+    /// the reduction combines them element-wise with `op` and writes the
+    /// converged result back into every bucket. After a successful call each
+    /// bucket's `gradients` therefore holds the summed gradient (or the
+    /// average, for [`ReduceOp::Avg`]) across all `comm.world_size()`
+    /// participants — the value an optimizer step should consume.
+    ///
+    /// The reduction runs through the collective primitives in
+    /// [`crate::collective`]: [`RingAllReduce`] — the bandwidth-optimal
+    /// algorithm — for buckets whose element count is at least the world
+    /// size, and the latency-optimal [`TreeAllReduce`] for smaller buckets
+    /// (the ring algorithm chunks the buffer per rank and is only well-defined
+    /// when each rank owns at least one element). This mirrors the
+    /// NCCL `ncclAllReduce` data path. On a single host the other ranks'
+    /// buffers are materialised from this rank's data, which is the standard
+    /// host-simulation contract used throughout the collective module.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaError::NotReady`] if any bucket has not been marked
+    /// ready, and [`CudaError::InvalidValue`] if the ring all-reduce rejects
+    /// the per-rank buffers (e.g. inconsistent lengths).
+    pub fn all_reduce_gradients(
+        buckets: &mut [Bucket],
+        comm: &Communicator,
+        op: ReduceOp,
+    ) -> CudaResult<()> {
+        // Every bucket must have all its gradients computed before it can be
+        // communicated — partial buckets would reduce stale data.
+        for bucket in buckets.iter() {
             if !bucket.ready {
                 return Err(CudaError::NotReady);
             }
-            // Simulate communication delay proportional to size
-            let _simulated_bytes = bucket.total_size;
-            let _bucket_id = i;
         }
+
+        let world_size = comm.world_size();
+        for bucket in buckets.iter_mut() {
+            if bucket.gradients.is_empty() {
+                // An empty gradient buffer has nothing to reduce.
+                continue;
+            }
+
+            if world_size < 2 {
+                // A single participant: the all-reduce is the identity.
+                // Averaging by a world size of 1 is also a no-op, so the
+                // bucket gradients are already the correct result.
+                continue;
+            }
+
+            // Materialise one buffer per rank. In this host simulation every
+            // rank starts from the same locally-computed gradients; a real
+            // multi-GPU run would pass each device's own buffer here.
+            let mut per_rank: Vec<Vec<f32>> =
+                (0..world_size).map(|_| bucket.gradients.clone()).collect();
+
+            // The ring algorithm partitions each buffer into one chunk per
+            // rank, so it requires at least `world_size` elements; fall back
+            // to the tree algorithm for shorter gradient buffers.
+            if bucket.gradients.len() >= world_size {
+                RingAllReduce::execute(&mut per_rank, op).map_err(|_| CudaError::InvalidValue)?;
+            } else {
+                TreeAllReduce::execute(&mut per_rank, op).map_err(|_| CudaError::InvalidValue)?;
+            }
+
+            // After a ring all-reduce every rank holds the identical result;
+            // adopt this rank's converged buffer as the bucket's gradients.
+            if let Some(reduced) = per_rank.into_iter().next() {
+                bucket.gradients = reduced;
+            }
+        }
+
         Ok(())
+    }
+
+    /// Convenience wrapper that all-reduces gradients with summation, the
+    /// default convention for data-parallel training.
+    ///
+    /// Equivalent to [`all_reduce_gradients`](Self::all_reduce_gradients) with
+    /// [`ReduceOp::Sum`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`all_reduce_gradients`](Self::all_reduce_gradients).
+    pub fn all_reduce_gradients_sum(buckets: &mut [Bucket], comm: &Communicator) -> CudaResult<()> {
+        Self::all_reduce_gradients(buckets, comm, ReduceOp::Sum)
     }
 
     /// Compute ZeRO-style parameter sharding ranges.
@@ -996,36 +1105,132 @@ mod tests {
 
     #[test]
     fn all_reduce_gradients_ready() {
-        let buckets = vec![
+        let mut buckets = vec![
             Bucket {
                 param_ids: vec![0, 1],
                 total_size: 1024,
                 ready: true,
+                gradients: vec![1.0, 2.0, 3.0, 4.0],
             },
             Bucket {
                 param_ids: vec![2],
                 total_size: 512,
                 ready: true,
+                gradients: vec![5.0, 6.0],
             },
         ];
-        assert!(DistributedOptimizer::all_reduce_gradients(&buckets).is_ok());
+        let comm = Communicator::new(&[0, 1, 2, 3]).expect("comm");
+        assert!(
+            DistributedOptimizer::all_reduce_gradients(&mut buckets, &comm, ReduceOp::Sum).is_ok()
+        );
     }
 
     #[test]
     fn all_reduce_gradients_not_ready() {
-        let buckets = vec![
+        let mut buckets = vec![
             Bucket {
                 param_ids: vec![0],
                 total_size: 1024,
                 ready: true,
+                gradients: vec![1.0; 4],
             },
             Bucket {
                 param_ids: vec![1],
                 total_size: 512,
                 ready: false,
+                gradients: vec![1.0; 2],
             },
         ];
-        assert!(DistributedOptimizer::all_reduce_gradients(&buckets).is_err());
+        let comm = Communicator::new(&[0, 1]).expect("comm");
+        assert!(
+            DistributedOptimizer::all_reduce_gradients(&mut buckets, &comm, ReduceOp::Sum).is_err()
+        );
+    }
+
+    #[test]
+    fn all_reduce_gradients_sums_across_ranks() {
+        // 4 ranks, each contributing the same [1, 2, 3, 4] => sum = [4, 8, 12, 16].
+        let mut buckets = vec![Bucket {
+            param_ids: vec![0],
+            total_size: 16,
+            ready: true,
+            gradients: vec![1.0, 2.0, 3.0, 4.0],
+        }];
+        let comm = Communicator::new(&[0, 1, 2, 3]).expect("comm");
+        DistributedOptimizer::all_reduce_gradients(&mut buckets, &comm, ReduceOp::Sum)
+            .expect("all-reduce should succeed");
+        let expected = [4.0f32, 8.0, 12.0, 16.0];
+        for (got, want) in buckets[0].gradients.iter().zip(&expected) {
+            assert!((got - want).abs() < 1e-5, "got {got}, want {want}");
+        }
+    }
+
+    #[test]
+    fn all_reduce_gradients_averages_across_ranks() {
+        // 4 ranks of identical data, Avg => the mean equals the original data.
+        let mut buckets = vec![Bucket {
+            param_ids: vec![0, 1],
+            total_size: 24,
+            ready: true,
+            gradients: vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+        }];
+        let comm = Communicator::new(&[0, 1, 2, 3]).expect("comm");
+        DistributedOptimizer::all_reduce_gradients(&mut buckets, &comm, ReduceOp::Avg)
+            .expect("all-reduce should succeed");
+        let expected = [2.0f32, 4.0, 6.0, 8.0, 10.0, 12.0];
+        for (got, want) in buckets[0].gradients.iter().zip(&expected) {
+            assert!((got - want).abs() < 1e-5, "got {got}, want {want}");
+        }
+    }
+
+    #[test]
+    fn all_reduce_gradients_single_rank_is_identity() {
+        // A world size of 1 leaves the gradients untouched.
+        let mut buckets = vec![Bucket {
+            param_ids: vec![0],
+            total_size: 12,
+            ready: true,
+            gradients: vec![7.0, 8.0, 9.0],
+        }];
+        let comm = Communicator::new(&[0]).expect("comm");
+        DistributedOptimizer::all_reduce_gradients(&mut buckets, &comm, ReduceOp::Sum)
+            .expect("all-reduce should succeed");
+        assert_eq!(buckets[0].gradients, vec![7.0, 8.0, 9.0]);
+    }
+
+    #[test]
+    fn all_reduce_gradients_sum_wrapper() {
+        let mut buckets = vec![Bucket {
+            param_ids: vec![0],
+            total_size: 8,
+            ready: true,
+            gradients: vec![1.0, 1.0],
+        }];
+        let comm = Communicator::new(&[0, 1]).expect("comm");
+        DistributedOptimizer::all_reduce_gradients_sum(&mut buckets, &comm)
+            .expect("sum all-reduce should succeed");
+        // 2 ranks summed => each element doubled.
+        assert_eq!(buckets[0].gradients, vec![2.0, 2.0]);
+    }
+
+    #[test]
+    fn gradient_bucket_carries_real_gradient_data() {
+        // add_gradient_data populates the bucket gradient buffer for all-reduce.
+        let mut gb = GradientBucket::new(1);
+        gb.add_gradient_data(0, &[1.0, 2.0]);
+        gb.add_gradient_data(1, &[3.0, 4.0, 5.0]);
+        assert_eq!(gb.num_buckets(), 1);
+        assert_eq!(gb.buckets()[0].gradients, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+
+        let mut buckets = gb.buckets().to_vec();
+        for b in &mut buckets {
+            b.ready = true;
+        }
+        let comm = Communicator::new(&[0, 1]).expect("comm");
+        DistributedOptimizer::all_reduce_gradients_sum(&mut buckets, &comm)
+            .expect("all-reduce should succeed");
+        // 2 ranks summed => every value doubled.
+        assert_eq!(buckets[0].gradients, vec![2.0, 4.0, 6.0, 8.0, 10.0]);
     }
 
     // ── NodeInfo ────────────────────────────────────────────

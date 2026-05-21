@@ -27,7 +27,9 @@ pub mod handle;
 pub mod ptx_kernels;
 
 pub mod deepfm;
+pub mod dlrm;
 pub mod factorization;
+pub mod fibinet;
 pub mod graph_recsys;
 pub mod metrics;
 pub mod multitask;
@@ -35,6 +37,11 @@ pub mod ncf;
 pub mod sampling;
 pub mod sequential;
 pub mod two_tower;
+
+pub use crate::dlrm::{Dlrm, DlrmConfig};
+pub use crate::factorization::fism::{Fism, FismConfig};
+pub use crate::factorization::ials::{Ials, IalsConfig};
+pub use crate::fibinet::{BilinearType, Fibinet, FibinetConfig};
 
 #[cfg(test)]
 mod e2e_tests {

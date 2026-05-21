@@ -9,5 +9,6 @@
 //! - [`rwkv_block`]    — Complete RWKV residual block combining both operations.
 
 pub mod channel_mixing;
+pub mod rwkv5;
 pub mod rwkv_block;
 pub mod time_mixing;

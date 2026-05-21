@@ -27,7 +27,9 @@ pub mod syr2k;
 pub mod syrk;
 pub mod syrk_tc;
 pub mod trmm;
+pub mod trmm_kernel;
 pub mod trsm;
+pub mod trsm_kernel;
 
 pub use batched_trsm::batched_trsm;
 pub use gemm::dispatch::{GemmCategory, GemmDispatcher, GemmProblem, TileConfig};

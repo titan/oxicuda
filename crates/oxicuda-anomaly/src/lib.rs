@@ -24,6 +24,7 @@ pub mod density;
 pub mod distance;
 pub mod ensemble;
 pub mod error;
+pub mod graph;
 pub mod handle;
 pub mod isolation;
 pub mod metrics;
@@ -31,16 +32,30 @@ pub mod ptx_kernels;
 pub mod reconstruction;
 pub mod statistical;
 pub mod svdd;
+pub mod time_series;
 
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 /// Convenience re-exports of the most-used anomaly detection types.
 pub mod prelude {
     pub use crate::density::copod::Copod;
+    pub use crate::density::gmm_detector::{
+        GmmConfig, GmmModel, gmm_fit, gmm_log_likelihood, gmm_predict, gmm_sample, gmm_score,
+    };
     pub use crate::density::mahalanobis::MahalanobisDetector;
     pub use crate::distance::knn_score::KnnAnomalyScorer;
     pub use crate::distance::lof::Lof;
+    pub use crate::distance::lof_kdtree::{
+        KdNode, KdTree, LofKdConfig, LofKdFit, kd_build, kd_knn, kd_knn_ex, lof_kd_fit,
+        lof_kd_predict, lof_kd_score,
+    };
     pub use crate::ensemble::ensemble::{AnomalyEnsemble, EnsembleMethod};
+    pub use crate::ensemble::ext_iforest::{
+        ExtIforestConfig, ExtIforestModel, ExtNode, ext_iforest_fit, ext_iforest_predict,
+        ext_iforest_score,
+    };
+    pub use crate::ensemble::loda::{Loda, LodaConfig};
+    pub use crate::ensemble::suod::{SuodConfig, SuodFit, suod_fit, suod_predict, suod_score};
     pub use crate::error::{AnomalyError, AnomalyResult};
     pub use crate::handle::{AnomalyHandle, LcgRng, SmVersion};
     pub use crate::isolation::iforest_score::{
@@ -55,9 +70,41 @@ pub mod prelude {
         mahal_dist_ptx, recon_score_ptx, svdd_loss_ptx,
     };
     pub use crate::reconstruction::autoencoder::{AeConfig, AutoencoderAnomaly};
+    pub use crate::reconstruction::dagmm::{
+        DagmmConfig, DagmmFit, dagmm_fit, dagmm_predict, dagmm_score,
+    };
+    pub use crate::reconstruction::diffusion_anomaly::{
+        DiffusionAnomalyConfig, DiffusionAnomalyFit, diffusion_anomaly_fit,
+        diffusion_anomaly_predict, diffusion_anomaly_score,
+    };
+    pub use crate::reconstruction::mem_ae::{
+        MemAeConfig, MemAeFit, mem_ae_attention, mem_ae_fit, mem_ae_predict, mem_ae_score,
+    };
+    pub use crate::reconstruction::pca_anomaly::{PcaAnomaly, PcaAnomalyConfig};
+    pub use crate::reconstruction::self_supervised::{
+        SelfSupervisedConfig, SelfSupervisedFit, self_supervised_confidence_gap,
+        self_supervised_fit, self_supervised_predict, self_supervised_score,
+    };
     pub use crate::reconstruction::vae_anomaly::VaeAnomaly;
+    pub use crate::statistical::concept_drift::{
+        AdwinDetector, CusumDetector, DdmDetector, DdmStatus, PageHinkleyDetector, adwin_add,
+        adwin_mean, adwin_new, adwin_window_size, cusum_add, cusum_new, cusum_reset, ddm_add,
+        ddm_new, ph_add, ph_detector_new, ph_reset,
+    };
+    pub use crate::statistical::conformal::{
+        ConformalConfig, ConformalDetector, ConformalResult, OnlineConformalDetector,
+        conformal_calibrate, conformal_p_value, conformal_predict, mondrian_conformal_predict,
+        online_conformal_detector_new, online_conformal_update,
+    };
+    pub use crate::statistical::ecod::Ecod;
+    pub use crate::statistical::hbos::{Hbos, HbosConfig};
+    pub use crate::statistical::rock_idec::{IdecConfig, IdecDetector, RockConfig, RockDetector};
     pub use crate::statistical::stats::{MadDetector, ZScoreDetector, percentile_threshold};
     pub use crate::svdd::deep_svdd::DeepSvdd;
+    pub use crate::svdd::trainable_svdd::{
+        TrainableSvddConfig, TrainableSvddFit, trainable_svdd_fit, trainable_svdd_loss_history,
+        trainable_svdd_predict, trainable_svdd_score,
+    };
 }
 
 // ─── End-to-end integration tests ────────────────────────────────────────────

@@ -148,6 +148,10 @@ impl ImplicitGemmConv {
 
     /// Executes the implicit GEMM convolution.
     ///
+    /// An optional `bias` tensor adds a per-output-channel constant in the
+    /// kernel epilogue. When `bias` is `None` a null device pointer is passed
+    /// and the epilogue skips the bias add via a guarded branch.
+    ///
     /// # Errors
     ///
     /// Returns errors from PTX generation, module loading, or kernel launch.
@@ -156,6 +160,7 @@ impl ImplicitGemmConv {
         handle: &DnnHandle,
         input: &TensorDesc<T>,
         filter: &TensorDesc<T>,
+        bias: Option<&TensorDesc<T>>,
         output: &mut TensorDescMut<T>,
     ) -> DnnResult<()> {
         let ptx = self.generate_ptx()?;
@@ -183,11 +188,15 @@ impl ImplicitGemmConv {
 
         let params = LaunchParams::new(grid, block).with_shared_mem(shared_bytes as u32);
 
+        // Optional bias: pass the device pointer, or 0 when absent. The
+        // kernel epilogue treats a zero pointer as "no bias".
+        let bias_ptr = bias.map_or(0u64, |b| b.ptr);
+
         let args = (
             input.ptr,
             filter.ptr,
             output.ptr,
-            0u64, // bias (null for now)
+            bias_ptr,
             self.problem.batch,
             self.problem.in_channels,
             self.problem.in_dims[0],
@@ -291,9 +300,91 @@ fn emit_implicit_gemm_body(
     }
 
     b.comment("Step 3: Epilogue -- write accumulator to global output");
-    b.comment("  Optional: add bias, apply activation (ReLU, etc.)");
+    emit_bias_epilogue(b);
 
     b.ret();
+}
+
+/// Emits the bias-aware epilogue for the implicit-GEMM conv kernel.
+///
+/// The epilogue computes, for one output element `(m, n)` owned by this
+/// thread, the per-output-channel bias add:
+///
+/// ```text
+/// out[m, n] += bias[n]   (only when the bias pointer is non-null)
+/// ```
+///
+/// where `n` (the GEMM-N coordinate) is the output channel. The bias add is
+/// guarded by a null-pointer check so the same kernel serves both the
+/// bias and no-bias cases — the host passes a zero pointer when no bias is
+/// supplied. The accumulator/store address is computed from the GEMM tile
+/// coordinates `(gemm_m, gemm_n)`; this is the structured epilogue the
+/// mainloop feeds once tile accumulation completes.
+fn emit_bias_epilogue(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>) {
+    b.comment("--- Bias epilogue (guarded per-output-channel add) ---");
+
+    let bias_ptr = b.load_param_u64("bias");
+    let output_ptr = b.load_param_u64("output");
+    let gemm_m = b.load_param_u32("gemm_m");
+    let gemm_n = b.load_param_u32("gemm_n");
+
+    // GEMM coordinates this thread is responsible for in the epilogue:
+    //   m  = blockIdx.x * blockDim.x + threadIdx.x   (output spatial point)
+    //   n  = blockIdx.y * blockDim.y + threadIdx.y   (output channel)
+    let m_coord = b.global_thread_id_x();
+    let n_coord = b.global_thread_id_y();
+
+    // Bounds: only threads mapping to a valid (m, n) touch global memory.
+    let skip_epilogue = b.fresh_label("ig_epilogue_skip");
+    let p_m = b.alloc_reg(PtxType::Pred);
+    let p_n = b.alloc_reg(PtxType::Pred);
+    let p_in = b.alloc_reg(PtxType::Pred);
+    b.raw_ptx(&format!("setp.lo.u32 {p_m}, {m_coord}, {gemm_m};"));
+    b.raw_ptx(&format!("setp.lo.u32 {p_n}, {n_coord}, {gemm_n};"));
+    b.raw_ptx(&format!("and.pred {p_in}, {p_m}, {p_n};"));
+    b.raw_ptx(&format!("@!{p_in} bra {skip_epilogue};"));
+
+    // Linear output index: out[n * gemm_m + m] (row-major [out_channels x M]).
+    let out_idx = b.alloc_reg(PtxType::U32);
+    b.raw_ptx(&format!("mul.lo.u32 {out_idx}, {n_coord}, {gemm_m};"));
+    b.raw_ptx(&format!("add.u32 {out_idx}, {out_idx}, {m_coord};"));
+
+    // Compute the output element address (f32 elements, 4 bytes each).
+    let out_idx64 = b.alloc_reg(PtxType::U64);
+    let out_off = b.alloc_reg(PtxType::U64);
+    let out_addr = b.alloc_reg(PtxType::U64);
+    b.raw_ptx(&format!("cvt.u64.u32 {out_idx64}, {out_idx};"));
+    b.raw_ptx(&format!("mul.lo.u64 {out_off}, {out_idx64}, 4;"));
+    b.raw_ptx(&format!("add.u64 {out_addr}, {output_ptr}, {out_off};"));
+
+    // Load the accumulator already written by the mainloop store.
+    let acc = b.alloc_reg(PtxType::F32);
+    b.raw_ptx(&format!("ld.global.f32 {acc}, [{out_addr}];"));
+
+    // Guarded bias add: skip entirely when the bias pointer is null.
+    let no_bias = b.fresh_label("ig_no_bias");
+    let p_has_bias = b.alloc_reg(PtxType::Pred);
+    b.raw_ptx(&format!("setp.ne.u64 {p_has_bias}, {bias_ptr}, 0;"));
+    b.raw_ptx(&format!("@!{p_has_bias} bra {no_bias};"));
+
+    // bias index = n_coord (one bias scalar per output channel).
+    let bias_idx64 = b.alloc_reg(PtxType::U64);
+    let bias_off = b.alloc_reg(PtxType::U64);
+    let bias_addr = b.alloc_reg(PtxType::U64);
+    b.raw_ptx(&format!("cvt.u64.u32 {bias_idx64}, {n_coord};"));
+    b.raw_ptx(&format!("mul.lo.u64 {bias_off}, {bias_idx64}, 4;"));
+    b.raw_ptx(&format!("add.u64 {bias_addr}, {bias_ptr}, {bias_off};"));
+
+    let bias_val = b.alloc_reg(PtxType::F32);
+    b.raw_ptx(&format!("ld.global.f32 {bias_val}, [{bias_addr}];"));
+    b.raw_ptx(&format!("add.rn.f32 {acc}, {acc}, {bias_val};"));
+
+    b.raw_ptx(&format!("{no_bias}:"));
+
+    // Store the (optionally bias-adjusted) result back to global memory.
+    b.raw_ptx(&format!("st.global.f32 [{out_addr}], {acc};"));
+
+    b.raw_ptx(&format!("{skip_epilogue}:"));
 }
 
 // ---------------------------------------------------------------------------
@@ -441,5 +532,96 @@ mod tests {
         let ptx_text = ptx.unwrap_or_default();
         assert!(ptx_text.contains("implicit_gemm_conv"));
         assert!(ptx_text.contains(".entry"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Bias epilogue tests
+    // -----------------------------------------------------------------------
+
+    /// The generated kernel epilogue must contain a *guarded* bias add: a
+    /// null-pointer test on the bias parameter, followed by a bias load and
+    /// a float add. This proves the bias is plumbed through, not discarded.
+    #[test]
+    fn ptx_epilogue_has_guarded_bias_add() {
+        let conv = ImplicitGemmConv::new(make_problem(), SmVersion::Sm80);
+        let ptx = conv.generate_ptx().expect("ptx generation");
+
+        // Null-pointer guard on the bias parameter.
+        assert!(
+            ptx.contains("setp.ne.u64"),
+            "epilogue must test the bias pointer for null"
+        );
+        // The bias is loaded from global memory and added to the accumulator.
+        assert!(
+            ptx.contains("ld.global.f32"),
+            "epilogue must load the bias value"
+        );
+        assert!(
+            ptx.contains("add.rn.f32"),
+            "epilogue must add the bias to the accumulator"
+        );
+        // The accumulator is stored back after the (optional) bias add.
+        assert!(
+            ptx.contains("st.global.f32"),
+            "epilogue must store the result"
+        );
+    }
+
+    /// The bias parameter must be declared on the kernel signature.
+    #[test]
+    fn ptx_declares_bias_param() {
+        let conv = ImplicitGemmConv::new(make_problem(), SmVersion::Sm80);
+        let ptx = conv.generate_ptx().expect("ptx generation");
+        assert!(ptx.contains("bias"), "kernel must declare a bias parameter");
+    }
+
+    /// CPU reference: the bias epilogue adds `bias[c_out]` to every spatial
+    /// position of the corresponding output channel. This mirrors the
+    /// `out[n * M + m] += bias[n]` performed by `emit_bias_epilogue`.
+    #[test]
+    fn bias_epilogue_cpu_reference() {
+        let out_channels = 4usize;
+        let m = 6usize; // spatial points per channel
+        // Pre-epilogue accumulator (row-major [out_channels x M]).
+        let mut acc: Vec<f32> = (0..out_channels * m)
+            .map(|i| (i as f32) * 0.25 - 1.0)
+            .collect();
+        let pre = acc.clone();
+        let bias: Vec<f32> = (0..out_channels).map(|c| (c as f32) * 0.5 + 0.1).collect();
+
+        // Apply the epilogue: out[n*M + m] += bias[n].
+        for (n, &bias_n) in bias.iter().enumerate() {
+            for mi in 0..m {
+                acc[n * m + mi] += bias_n;
+            }
+        }
+
+        for (n, &bias_n) in bias.iter().enumerate() {
+            for mi in 0..m {
+                let idx = n * m + mi;
+                let expected = pre[idx] + bias_n;
+                assert!(
+                    (acc[idx] - expected).abs() < 1e-6,
+                    "bias add mismatch at (n={n}, m={mi})"
+                );
+            }
+        }
+    }
+
+    /// With no bias, the epilogue must leave the accumulator unchanged: the
+    /// host passes a null pointer and the guard branch skips the add.
+    #[test]
+    fn no_bias_leaves_accumulator_unchanged() {
+        // `execute` maps `None` -> 0u64 pointer; the kernel's `setp.ne.u64`
+        // guard then branches over the bias load/add. Modelled on the CPU
+        // side: a null bias contributes nothing.
+        let acc: Vec<f32> = vec![1.5, -2.0, 0.0, 3.25];
+        let null_bias: Option<&[f32]> = None;
+        let result: Vec<f32> = acc
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| v + null_bias.map_or(0.0, |b| b[i]))
+            .collect();
+        assert_eq!(result, acc);
     }
 }

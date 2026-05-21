@@ -11,5 +11,11 @@
 //! For `k = 2` this reduces exactly to the standard log-domain Sinkhorn-Knopp
 //! algorithm.
 
+/// Multi-marginal OT with structured pairwise-separable cost.
+pub mod mmot_structured;
 /// Tensor-scaling multi-marginal OT in log-domain.
 pub mod multi_marginal;
+
+pub use mmot_structured::{
+    MmotBaryConfig, MmotStructuredConfig, MmotStructuredResult, mmot_barycenter, mmot_structured,
+};

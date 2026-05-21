@@ -38,11 +38,18 @@ pub mod prelude {
     pub use crate::graph::heterogeneous::HeteroGraph;
     pub use crate::graph::sampling::{NeighborhoodSampler, SampledGraph, biased_walk, random_walk};
     pub use crate::handle::{GnnHandle, LcgRng, SmVersion};
+    pub use crate::layers::appnp::{AppnpConfig, AppnpLayer};
     pub use crate::layers::gat::{GatConfig, GatLayer};
     pub use crate::layers::gat_v2::{GatV2Config, GatV2Layer};
     pub use crate::layers::gcn::{GcnConfig, GcnLayer};
     pub use crate::layers::gin::{GinConfig, GinLayer};
+    pub use crate::layers::graph_transformer::{
+        GraphTransformerConfig, GraphTransformerLayer, GraphTransformerWeights,
+    };
+    pub use crate::layers::jk_net::{JkMode, JkNet, JkNetConfig};
+    pub use crate::layers::rgcn::{RgcnConfig, RgcnLayer};
     pub use crate::layers::sage::{SageAggregator, SageConfig, SageLayer};
+    pub use crate::layers::sgc::{sgc_forward, sgc_linear, sgc_propagate};
     pub use crate::message_passing::aggregate::{
         AggregationType, aggregate, aggregate_degree_norm, aggregate_max, aggregate_mean,
         aggregate_softmax, aggregate_sum,
@@ -63,6 +70,7 @@ pub mod prelude {
         aggregate_mean_ptx, csr_spmv_ptx, f32_hex, gat_attention_ptx, gin_combine_ptx,
         scatter_add_ptx, softmax_edge_ptx, topk_score_ptx,
     };
+    pub use crate::readout::dgi::{Dgi, DgiConfig, DgiLoss, DgiWeights};
     pub use crate::readout::set2set::Set2Set;
 }
 

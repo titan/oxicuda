@@ -12,5 +12,9 @@
 //! (Courty et al., *Optimal Transport for Domain Adaptation*, IEEE TPAMI
 //! 2017). The mapping is differentiable and preserves cluster structure.
 
+/// OT-based feature flow for domain generalisation.
+pub mod feature_flow;
 /// Barycentric mapping for OT-based domain adaptation.
 pub mod mapping;
+
+pub use feature_flow::{FeatureFlowConfig, FeatureFlowResult, domain_discrepancy, ot_feature_flow};

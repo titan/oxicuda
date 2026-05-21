@@ -9,3 +9,9 @@
 /// JKO proximal step for Wasserstein gradient flows on the entropy and external
 /// potential energies.
 pub mod jko;
+/// JKO particle gradient flow via the Blob method (Carrillo et al. 2019).
+pub mod jko_step;
+
+pub use jko_step::{
+    JkoState, JkoStepConfig, jko_init, jko_run, jko_step, jko_wasserstein_distance,
+};

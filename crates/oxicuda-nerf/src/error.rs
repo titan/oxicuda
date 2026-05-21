@@ -45,6 +45,12 @@ pub enum NerfError {
     #[error("volume render failed: {msg}")]
     VolumeRenderError { msg: String },
 
+    #[error("invalid octree configuration: {msg}")]
+    InvalidOctreeConfig { msg: String },
+
+    #[error("invalid embedding configuration: {msg}")]
+    InvalidEmbeddingConfig { msg: String },
+
     #[error("internal error: {msg}")]
     Internal { msg: String },
 }

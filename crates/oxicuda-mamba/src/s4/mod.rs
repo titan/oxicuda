@@ -21,7 +21,11 @@
 //! - [`hippo`] — HiPPO-LegS A/B matrices and NPLR decomposition.
 //! - [`dplr`]  — Diagonal Plus Low Rank parameterization and SSM kernel.
 //! - [`s4_layer`] — Full S4 sequence layer (multi-channel, optional bidirectional).
+//! - [`s4_fft`] — FFT-based `O(L log L)` long convolution (radix-2 Cooley-Tukey).
 
 pub mod dplr;
 pub mod hippo;
+pub mod s4_fft;
 pub mod s4_layer;
+
+pub use s4_fft::{fft, fft_conv1d, s4_fft_conv};

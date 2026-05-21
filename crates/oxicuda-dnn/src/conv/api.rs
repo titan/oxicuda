@@ -87,7 +87,7 @@ pub fn conv_forward<T: GpuFloat>(
         }
         ConvAlgorithm::ImplicitGemm => {
             let engine = ImplicitGemmConv::new(problem, handle.sm_version());
-            engine.execute(handle, input, filter, output)
+            engine.execute(handle, input, filter, None, output)
         }
         ConvAlgorithm::Im2colGemm => {
             let ws = workspace.ok_or(DnnError::WorkspaceRequired(
@@ -119,7 +119,7 @@ pub fn conv_forward<T: GpuFloat>(
                 || problem.stride.len() != 2
             {
                 let engine = ImplicitGemmConv::new(problem, handle.sm_version());
-                return engine.execute(handle, input, filter, output);
+                return engine.execute(handle, input, filter, None, output);
             }
 
             let sm_num = sm_version_numeric(handle.sm_version());
@@ -140,7 +140,7 @@ pub fn conv_forward<T: GpuFloat>(
                 // Unsupported precision/layout for FFT plan: execute with
                 // implicit GEMM to keep functional behavior.
                 let engine = ImplicitGemmConv::new(problem, handle.sm_version());
-                return engine.execute(handle, input, filter, output);
+                return engine.execute(handle, input, filter, None, output);
             };
 
             let required_ws =

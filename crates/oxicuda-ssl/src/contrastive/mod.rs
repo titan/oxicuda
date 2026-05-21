@@ -7,4 +7,7 @@
 
 pub mod info_nce;
 pub mod moco;
+pub mod moco_v3;
 pub mod simclr;
+
+pub use moco_v3::{MocoV3Config, MocoV3State, moco_v3_loss, moco_v3_symmetric_loss};

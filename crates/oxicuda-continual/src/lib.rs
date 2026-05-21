@@ -43,27 +43,41 @@ pub mod prelude {
         EwcConfig, EwcRegularizer, FisherDiag, add_task as ewc_add_task, compute_fisher_empirical,
         ewc_loss,
     };
+    pub use crate::regularization::lwf::{
+        LwfConfig, lwf_combined_loss, lwf_distill_loss, lwf_distill_loss_batch,
+    };
     pub use crate::regularization::mas::{
         MasConfig, MasImportance, mas_importance_update, mas_penalty,
     };
     pub use crate::regularization::si::{SiConfig, SiState, si_importance_update, si_penalty};
 
     // Architecture
+    pub use crate::architecture::bic::{BicConfig, BicLayer, calibrate_bic};
     pub use crate::architecture::packnet::{
         PackNetMask, apply_mask, freeze_task_weights, prune_weights_l1,
     };
     pub use crate::architecture::piggyback::{
-        PiggybackConfig, PiggybackMask, binarize_mask, piggyback_forward,
+        PiggybackConfig, PiggybackMask, binarize_mask, piggyback_forward, sigmoid,
+        soft_binary_forward, stochastic_binary_forward,
     };
     pub use crate::architecture::progressive::{
         LateralConnection, ProgNnColumn, ProgNnNetwork, add_column, prog_forward,
+    };
+    pub use crate::architecture::sparse_mask_apply::{
+        SparseActiveMask, sparse_mask_apply, sparse_mask_backward, sparse_mask_compact,
+        sparse_mask_scatter,
+    };
+    pub use crate::architecture::stochastic_binary::{
+        StochasticBinaryConfig, StochasticBinaryState, stable_sigmoid,
     };
 
     // Replay
     pub use crate::replay::a_gem::{AGemConfig, a_gem_project, average_gradients};
     pub use crate::replay::dark_exp::{DerBuffer, DerConfig, der_add, der_loss};
+    pub use crate::replay::dark_exp_v2::{DerV2Buffer, DerV2Config};
     pub use crate::replay::er::{ErBuffer, er_add, er_buffer_new, er_sample_batch};
     pub use crate::replay::gem::{GemConfig, GemMemory, gem_project_gradient};
+    pub use crate::replay::vectorised_gem::{VectorisedGemConfig, vectorised_gem_project};
 
     // Metrics
     pub use crate::metrics::forgetting::{
@@ -71,6 +85,11 @@ pub mod prelude {
     };
     pub use crate::metrics::intransigence::{
         forward_transfer, intransigence, per_task_intransigence,
+    };
+
+    // Cross-task sampler
+    pub use crate::stream::cross_task_sampler::{
+        CrossTaskSampler, CrossTaskSamplerConfig, SamplingStrategy, TaskSample,
     };
 
     // Stream

@@ -29,6 +29,7 @@ pub mod frequency;
 pub mod handle;
 pub mod hash;
 pub mod lsh;
+pub mod matrix;
 pub mod membership;
 pub mod metrics;
 pub mod moment;

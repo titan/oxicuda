@@ -13,6 +13,8 @@
 //! ├── ops/            — Primitives (8 DARTS ops), MixedOp, SearchSpace
 //! ├── supernet/       — Weight-shared Supernet, PathSampler, SlimmableNet
 //! ├── predictor/      — FLOP/param accountant, latency LUT/MLP, k-NN/RBF accuracy
+//! ├── proxy/          — Zero-cost proxies (NASWOT, SNIP, GraSP, SynFlow)
+//! ├── controller/     — ENAS LSTM RL controller (REINFORCE + EMA baseline)
 //! ├── error           — NasError / NasResult
 //! ├── handle          — NasHandle (SmVersion + LcgRng)
 //! └── ptx_kernels     — GPU PTX kernel strings
@@ -20,12 +22,14 @@
 
 // ─── Module declarations ─────────────────────────────────────────────────────
 
+pub mod controller;
 pub mod darts;
 pub mod error;
 pub mod evolution;
 pub mod handle;
 pub mod ops;
 pub mod predictor;
+pub mod proxy;
 pub mod ptx_kernels;
 pub mod supernet;
 
@@ -33,18 +37,24 @@ pub mod supernet;
 
 /// Convenience re-exports for common neural architecture search types.
 pub mod prelude {
+    pub use crate::controller::enas::{EnasConfig, EnasController};
     pub use crate::darts::bilevel::{BilevelConfig, BilevelOptimizer};
     pub use crate::darts::cell::DartsCell;
+    pub use crate::darts::darts_plus::{DartsPlusConfig, DartsPlusState};
     pub use crate::darts::derive::{
         DiscretizedCell, DiscretizedNetwork, derive_discrete_cell, derive_network,
     };
     pub use crate::darts::network::DartsNetwork;
+    pub use crate::darts::pc_darts::{PcDarts, PcDartsConfig};
     pub use crate::error::{NasError, NasResult};
     pub use crate::evolution::encoding::ArchEncoding;
     pub use crate::evolution::nsga2::{
         Individual, crowding_distance, fast_non_dominated_sort, nsga2_select, tournament_select,
     };
     pub use crate::evolution::population::Population;
+    pub use crate::evolution::regularized_evolution::{
+        RegEvoConfig, RegEvoResult, RegularizedEvolution,
+    };
     pub use crate::handle::{LcgRng, NasHandle, SmVersion};
     pub use crate::ops::mixed_op::MixedOp;
     pub use crate::ops::primitives::{OpKind, OpWeights};
@@ -53,10 +63,15 @@ pub mod prelude {
     pub use crate::predictor::flops::{OpCost, op_cost, total_cost};
     pub use crate::predictor::latency::{LatencyLut, LatencyMlp};
     pub use crate::predictor::predictor_io::{ArchFeatures, LayerSpec};
+    pub use crate::proxy::zero_cost::{
+        NASWOT_RIDGE, ZeroCostProxy, grasp_score, naswot_score, rank_architectures, snip_score,
+        synflow_score,
+    };
     pub use crate::ptx_kernels::{
         arch_grad_ptx, arch_softmax_ptx, crossover_uniform_ptx, f32_hex, flops_accumulate_ptx,
         gumbel_softmax_ptx, mixed_op_blend_ptx, pareto_dominate_ptx,
     };
+    pub use crate::supernet::bignas::{BigNasConfig, BigNasSampler};
     pub use crate::supernet::path_sample::{PathSampler, SamplingStrategy};
     pub use crate::supernet::slimmable::{BnStats, SlimmableNet, WIDTH_MULTIPLIERS};
     pub use crate::supernet::weight_share::Supernet;

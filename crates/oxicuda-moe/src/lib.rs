@@ -32,6 +32,8 @@ pub mod prelude {
     pub use crate::routing::expert_choice::{
         ExpertChoiceConfig, ExpertChoiceResult, expert_choice_combine, expert_choice_route,
     };
+    pub use crate::routing::hash::{HashRouter, HashRoutingConfig};
+    pub use crate::routing::multi_gate::{MultiGateConfig, MultiGateRouter};
     pub use crate::routing::soft_moe::{SoftMoeConfig, SoftMoeRouter};
     pub use crate::routing::switch::{
         SwitchConfig, SwitchDispatch, switch_combine, switch_dispatch,

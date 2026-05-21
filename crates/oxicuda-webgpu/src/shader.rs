@@ -3,9 +3,25 @@
 //! Each function returns a complete, self-contained WGSL source string
 //! suitable for passing to `device.create_shader_module()`.
 
-/// Generate WGSL source for a tiled GEMM kernel: `C = alpha * A * B + beta * C`.
+/// Generate WGSL source for a tiled GEMM kernel: `C = alpha * op(A) * op(B) + beta * C`.
 ///
-/// Uses `tile_size × tile_size` workgroups.  Both A and B are stored row-major.
+/// Uses `tile_size × tile_size` workgroup tiles with shared-memory staging.
+///
+/// `op(A)` is the logical `m × k` left operand, `op(B)` the logical `k × n`
+/// right operand.  The physical layout of the stored buffers depends on the
+/// transpose flags carried in `GemmParams`:
+///
+/// * `trans_a == 0` — `a` is stored row-major as `m × k`; element `(r, i)` is
+///   at `a[r * k + i]`.
+/// * `trans_a != 0` — `a` is stored row-major as `k × m` (the transpose of the
+///   logical operand); element `(r, i)` of `op(A)` is at `a[i * m + r]`.
+/// * `trans_b == 0` — `b` is stored row-major as `k × n`; element `(i, c)` is
+///   at `b[i * n + c]`.
+/// * `trans_b != 0` — `b` is stored row-major as `n × k`; element `(i, c)` of
+///   `op(B)` is at `b[c * k + i]`.
+///
+/// The transpose flags are runtime uniforms, so a single shader module serves
+/// all four NN / NT / TN / TT combinations.
 ///
 /// # Arguments
 ///
@@ -14,11 +30,14 @@ pub fn gemm_wgsl(tile_size: u32) -> String {
     format!(
         r#"
 struct GemmParams {{
-    m:     u32,
-    n:     u32,
-    k:     u32,
-    alpha: f32,
-    beta:  f32,
+    m:       u32,
+    n:       u32,
+    k:       u32,
+    alpha:   f32,
+    beta:    f32,
+    trans_a: u32,
+    trans_b: u32,
+    _pad:    u32,
 }}
 
 @group(0) @binding(0) var<storage, read>       a:      array<f32>;
@@ -26,17 +45,53 @@ struct GemmParams {{
 @group(0) @binding(2) var<storage, read_write> c:      array<f32>;
 @group(0) @binding(3) var<uniform>             params: GemmParams;
 
+var<workgroup> tile_a: array<array<f32, {ts}>, {ts}>;
+var<workgroup> tile_b: array<array<f32, {ts}>, {ts}>;
+
+// op(A)[r, i] — logical m×k left operand.
+fn load_a(r: u32, i: u32) -> f32 {{
+    if (r >= params.m || i >= params.k) {{ return 0.0; }}
+    if (params.trans_a == 0u) {{
+        return a[r * params.k + i];
+    }}
+    return a[i * params.m + r];
+}}
+
+// op(B)[i, col] — logical k×n right operand.
+fn load_b(i: u32, col: u32) -> f32 {{
+    if (i >= params.k || col >= params.n) {{ return 0.0; }}
+    if (params.trans_b == 0u) {{
+        return b[i * params.n + col];
+    }}
+    return b[col * params.k + i];
+}}
+
 @compute @workgroup_size({ts}, {ts})
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_id)  lid: vec3<u32>,
+) {{
     let row = gid.y;
     let col = gid.x;
-    if (row >= params.m || col >= params.n) {{ return; }}
+    let lr  = lid.y;
+    let lc  = lid.x;
 
     var acc: f32 = 0.0;
-    for (var i: u32 = 0u; i < params.k; i = i + 1u) {{
-        acc += a[row * params.k + i] * b[i * params.n + col];
+    let num_tiles = (params.k + {ts}u - 1u) / {ts}u;
+    for (var t: u32 = 0u; t < num_tiles; t = t + 1u) {{
+        let a_col = t * {ts}u + lc;
+        let b_row = t * {ts}u + lr;
+        tile_a[lr][lc] = load_a(row, a_col);
+        tile_b[lr][lc] = load_b(b_row, col);
+        workgroupBarrier();
+
+        for (var e: u32 = 0u; e < {ts}u; e = e + 1u) {{
+            acc += tile_a[lr][e] * tile_b[e][lc];
+        }}
+        workgroupBarrier();
     }}
 
+    if (row >= params.m || col >= params.n) {{ return; }}
     let idx = row * params.n + col;
     c[idx] = params.alpha * acc + params.beta * c[idx];
 }}
@@ -48,10 +103,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 /// Generate WGSL source for a batched (strided) GEMM kernel.
 ///
 /// For each batch `b` in `0..batch_count`:
-///   `C_b = alpha * A_b * B_b + beta * C_b`
+///   `C_b = alpha * op(A_b) * op(B_b) + beta * C_b`
 /// where `A_b` starts at `a[b * stride_a]`, etc.
 ///
-/// Uses `tile_size × tile_size` workgroups with Z = batch_count.
+/// Uses `tile_size × tile_size` workgroup tiles with shared-memory staging and
+/// Z = batch_count.  Transpose handling matches [`gemm_wgsl`]: the `trans_a` /
+/// `trans_b` uniforms select a row-major (`m × k` / `k × n`) or column-major
+/// (`k × m` / `n × k`) physical layout for each per-batch operand.
 ///
 /// # Arguments
 ///
@@ -69,6 +127,8 @@ struct BatchedGemmParams {{
     stride_a: u32,
     stride_b: u32,
     stride_c: u32,
+    trans_a:  u32,
+    trans_b:  u32,
 }}
 
 @group(0) @binding(0) var<storage, read>       a:      array<f32>;
@@ -76,22 +136,59 @@ struct BatchedGemmParams {{
 @group(0) @binding(2) var<storage, read_write> c:      array<f32>;
 @group(0) @binding(3) var<uniform>             params: BatchedGemmParams;
 
+var<workgroup> tile_a: array<array<f32, {ts}>, {ts}>;
+var<workgroup> tile_b: array<array<f32, {ts}>, {ts}>;
+
+// op(A_b)[r, i] — logical m×k left operand for batch `a_offset`.
+fn load_a(a_offset: u32, r: u32, i: u32) -> f32 {{
+    if (r >= params.m || i >= params.k) {{ return 0.0; }}
+    if (params.trans_a == 0u) {{
+        return a[a_offset + r * params.k + i];
+    }}
+    return a[a_offset + i * params.m + r];
+}}
+
+// op(B_b)[i, col] — logical k×n right operand for batch `b_offset`.
+fn load_b(b_offset: u32, i: u32, col: u32) -> f32 {{
+    if (i >= params.k || col >= params.n) {{ return 0.0; }}
+    if (params.trans_b == 0u) {{
+        return b[b_offset + i * params.n + col];
+    }}
+    return b[b_offset + col * params.k + i];
+}}
+
 @compute @workgroup_size({ts}, {ts})
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_id)  lid: vec3<u32>,
+) {{
     let row = gid.y;
     let col = gid.x;
     let batch_index = gid.z;
-    if (batch_index >= params.batch_count || row >= params.m || col >= params.n) {{ return; }}
+    let lr  = lid.y;
+    let lc  = lid.x;
+    if (batch_index >= params.batch_count) {{ return; }}
 
     let a_offset = batch_index * params.stride_a;
     let b_offset = batch_index * params.stride_b;
     let c_offset = batch_index * params.stride_c;
 
     var acc: f32 = 0.0;
-    for (var i: u32 = 0u; i < params.k; i = i + 1u) {{
-        acc += a[a_offset + row * params.k + i] * b[b_offset + i * params.n + col];
+    let num_tiles = (params.k + {ts}u - 1u) / {ts}u;
+    for (var t: u32 = 0u; t < num_tiles; t = t + 1u) {{
+        let a_col = t * {ts}u + lc;
+        let b_row = t * {ts}u + lr;
+        tile_a[lr][lc] = load_a(a_offset, row, a_col);
+        tile_b[lr][lc] = load_b(b_offset, b_row, col);
+        workgroupBarrier();
+
+        for (var e: u32 = 0u; e < {ts}u; e = e + 1u) {{
+            acc += tile_a[lr][e] * tile_b[e][lc];
+        }}
+        workgroupBarrier();
     }}
 
+    if (row >= params.m || col >= params.n) {{ return; }}
     let idx = c_offset + row * params.n + col;
     c[idx] = params.alpha * acc + params.beta * c[idx];
 }}
@@ -698,6 +795,29 @@ mod tests {
     }
 
     #[test]
+    fn wgsl_gemm_has_transpose_flags() {
+        let src = gemm_wgsl(8);
+        // Transpose flags live in the uniform struct.
+        assert!(src.contains("trans_a: u32"));
+        assert!(src.contains("trans_b: u32"));
+        // Both row-major and column-major index forms must be present.
+        assert!(src.contains("a[r * params.k + i]"));
+        assert!(src.contains("a[i * params.m + r]"));
+        assert!(src.contains("b[i * params.n + col]"));
+        assert!(src.contains("b[col * params.k + i]"));
+    }
+
+    #[test]
+    fn wgsl_gemm_uses_shared_memory_tiling() {
+        let src = gemm_wgsl(16);
+        assert!(src.contains("var<workgroup> tile_a"));
+        assert!(src.contains("var<workgroup> tile_b"));
+        assert!(src.contains("workgroupBarrier"));
+        // Tile dimension is embedded in the workgroup-array declaration.
+        assert!(src.contains("array<array<f32, 16>, 16>"));
+    }
+
+    #[test]
     fn wgsl_elementwise_relu_contains_max() {
         let src = elementwise_wgsl("relu");
         assert!(src.contains("max(x, 0.0)"));
@@ -941,6 +1061,27 @@ mod tests {
         assert!(src8.contains("@workgroup_size(8, 8)"));
         let src32 = batched_gemm_wgsl(32);
         assert!(src32.contains("@workgroup_size(32, 32)"));
+    }
+
+    #[test]
+    fn wgsl_batched_gemm_has_transpose_flags() {
+        let src = batched_gemm_wgsl(8);
+        assert!(src.contains("trans_a:  u32"));
+        assert!(src.contains("trans_b:  u32"));
+        // Per-batch offset is applied to every index form.
+        assert!(src.contains("a[a_offset + r * params.k + i]"));
+        assert!(src.contains("a[a_offset + i * params.m + r]"));
+        assert!(src.contains("b[b_offset + i * params.n + col]"));
+        assert!(src.contains("b[b_offset + col * params.k + i]"));
+    }
+
+    #[test]
+    fn wgsl_batched_gemm_uses_shared_memory_tiling() {
+        let src = batched_gemm_wgsl(8);
+        assert!(src.contains("var<workgroup> tile_a"));
+        assert!(src.contains("var<workgroup> tile_b"));
+        assert!(src.contains("workgroupBarrier"));
+        assert!(src.contains("array<array<f32, 8>, 8>"));
     }
 
     // ── gemm_wgsl_f16 tests ─────────────────────────────────────────────

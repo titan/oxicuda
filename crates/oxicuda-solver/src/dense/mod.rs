@@ -33,7 +33,7 @@ pub use eig::{EigJob, syevd};
 pub use inverse::inverse;
 pub use ldlt::{LdltResult, ldlt, ldlt_solve};
 pub use lstsq::lstsq;
-pub use lu::{LuResult, lu_factorize, lu_solve};
+pub use lu::{LuResult, lu_factorize, lu_solve, lu_solve_transposed, lu_solve_with_transpose};
 pub use matrix_functions::{
     MatrixExpConfig, MatrixExpPlan, MatrixLogConfig, MatrixLogPlan, MatrixSqrtConfig,
     MatrixSqrtPlan,

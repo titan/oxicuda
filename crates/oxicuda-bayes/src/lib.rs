@@ -31,6 +31,13 @@ pub mod variational;
 
 /// Convenience re-exports for common Bayesian deep learning types.
 pub mod prelude {
+    pub use crate::calibration::beta::{BetaCalibConfig, BetaCalibrator};
+    pub use crate::calibration::conformal::{
+        ConformalClassifier, ConformalRegressor, RapsClassifier, conformal_quantile,
+    };
+    pub use crate::calibration::histogram::{
+        BinStrategy, HistogramBinCalibrator, HistogramBinConfig,
+    };
     pub use crate::calibration::isotonic::IsotonicRegressor;
     pub use crate::calibration::metrics::{
         ReliabilityBin, ReliabilityDiagram, adaptive_calibration_error, brier_score,
@@ -39,9 +46,11 @@ pub mod prelude {
     };
     pub use crate::calibration::platt::{PlattFitConfig, PlattScaler};
     pub use crate::calibration::temperature::{TemperatureFitConfig, TemperatureScaler};
+    pub use crate::calibration::vector_scaling::{ScalingMode, VectorScaler, VectorScalingConfig};
     pub use crate::error::{BayesError, BayesResult};
     pub use crate::handle::{BayesHandle, LcgRng, SmVersion};
     pub use crate::layers::bayes_conv::BayesConv2d;
+    pub use crate::layers::bayes_gru::{BayesGru, BayesGruConfig, BayesGruState, BayesGruWeights};
     pub use crate::layers::bayes_linear::{BayesLinear, softplus};
     pub use crate::layers::flipout::{FlipoutConv2d, FlipoutLinear};
     pub use crate::ptx_kernels::{
@@ -52,16 +61,19 @@ pub mod prelude {
     pub use crate::uncertainty::entropy::{
         aleatoric_entropy, epistemic_entropy, mutual_information, predictive_entropy,
     };
+    pub use crate::uncertainty::functional_laplace::{FunctionalLaplace, FunctionalLaplaceConfig};
     pub use crate::uncertainty::laplace::LastLayerLaplace;
     pub use crate::uncertainty::mc_dropout::{McDropoutPredictor, mc_dropout_predict};
     pub use crate::uncertainty::swag::SwagPosterior;
     pub use crate::variational::elbo::{ElboConfig, elbo, iwae, kl_gaussian, kl_gaussian_vec};
     pub use crate::variational::flows::{PlanarFlow, RadialFlow};
+    pub use crate::variational::hmc::{Hmc, HmcConfig, HmcResult, Nuts, NutsConfig, NutsResult};
     pub use crate::variational::mean_field::MeanFieldDist;
     pub use crate::variational::reparam::{
         gaussian_log_prob, gaussian_sample, laplacian_log_prob, laplacian_sample,
         log_prob_gaussian_vec, sample_gaussian_vec, straight_through,
     };
+    pub use crate::variational::vcl::{VclConfig, VclState};
 }
 
 // ─── End-to-end integration tests ────────────────────────────────────────────

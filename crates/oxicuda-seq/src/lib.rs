@@ -9,6 +9,7 @@
 //! ├── memm/         — Maximum-Entropy Markov Models
 //! ├── ssvm/         — Structured SVM (linear-chain) with cutting-plane optimisation
 //! ├── beam/         — Generic beam search with length normalisation and diversity penalty
+//! ├── decoders/     — Stochastic decoders: top-k, nucleus (top-p), typical sampling
 //! ├── alignment/    — Needleman-Wunsch, Smith-Waterman, Gotoh affine-gap, Hirschberg
 //! ├── grid_crf/     — Pairwise 2D CRF + mean-field inference
 //! ├── kalman/       — Linear/EKF Kalman filter, RTS smoother, EM parameter learning
@@ -27,6 +28,7 @@
 pub mod alignment;
 pub mod beam;
 pub mod crf;
+pub mod decoders;
 pub mod error;
 pub mod grid_crf;
 pub mod handle;

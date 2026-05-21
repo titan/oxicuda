@@ -180,12 +180,16 @@ impl KernelBuilder {
         }
         writeln!(ptx)?;
         writeln!(ptx, ")")?;
-        writeln!(ptx, "{{")?;
 
-        // .maxntid directive.
+        // `.maxntid` is a performance-tuning directive: per the PTX ISA it
+        // belongs in the kernel header, between the parameter list and the
+        // opening brace, and carries no trailing semicolon. Emitting it
+        // inside the body makes `ptxas` reject the module.
         if let Some(n) = self.max_threads {
-            writeln!(ptx, "    .maxntid {n}, 1, 1;")?;
+            writeln!(ptx, ".maxntid {n}, 1, 1")?;
         }
+
+        writeln!(ptx, "{{")?;
 
         // Register declarations.
         let reg_decls = regs.emit_declarations();
@@ -315,7 +319,16 @@ mod tests {
             .build()
             .expect("build should succeed");
 
-        assert!(ptx.contains(".maxntid 256, 1, 1;"));
+        // `.maxntid` is a header directive: it must appear before the
+        // opening brace and carry no trailing semicolon.
+        assert!(ptx.contains(".maxntid 256, 1, 1"));
+        assert!(!ptx.contains(".maxntid 256, 1, 1;"));
+        let directive_pos = ptx.find(".maxntid").expect("maxntid present");
+        let brace_pos = ptx.find('{').expect("opening brace present");
+        assert!(
+            directive_pos < brace_pos,
+            ".maxntid must precede the kernel body brace"
+        );
     }
 
     #[test]

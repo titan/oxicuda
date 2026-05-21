@@ -38,6 +38,7 @@ pub mod plasticity;
 pub mod ptx_kernels;
 pub mod reservoir;
 pub mod surrogate;
+pub mod synapse;
 pub mod training;
 
 #[cfg(test)]

@@ -30,25 +30,33 @@
 //! └── ptx_kernels — GPU PTX kernel strings for SSM operations
 //! ```
 
+pub mod bidirectional_ssm;
 pub mod error;
 pub mod handle;
+pub mod hyena;
 pub mod mamba;
 pub mod mamba2;
+pub mod mamba_moe;
 pub mod ptx_kernels;
 pub mod rwkv;
 pub mod s4;
+pub mod s5;
 pub mod ssm;
+pub mod xlstm;
 
 /// Convenience re-exports for common Mamba types.
 pub mod prelude {
+    pub use crate::bidirectional_ssm::{BiDirMode, BiDirSsm, BiDirSsmConfig};
     pub use crate::error::{MambaError, MambaResult};
     pub use crate::handle::{LcgRng, MambaHandle, SmVersion};
+    pub use crate::hyena::{HyenaConfig, HyenaOperator};
     pub use crate::mamba::mamba_block::{
         MambaBlock, MambaBlockConfig, MambaBlockWeights, causal_depthwise_conv1d, linear, rms_norm,
         silu,
     };
     pub use crate::mamba::mamba_model::{MambaConfig, MambaModel, MambaModelWeights};
     pub use crate::mamba::selective_scan::{SelectiveScanConfig, selective_scan, softplus};
+    pub use crate::mamba_moe::{MambaMoe, MambaMoeConfig};
     pub use crate::mamba2::chunk_scan::{ChunkConfig, chunk_scan, verify_chunk_equivalence};
     pub use crate::mamba2::mamba2_block::{Mamba2Block, Mamba2BlockConfig, Mamba2BlockWeights};
     pub use crate::mamba2::ssd::{ssd_naive, ssd_recurrent, verify_ssd_equivalence};
@@ -60,15 +68,23 @@ pub mod prelude {
         ChannelMixingConfig, ChannelMixingLayer, ChannelMixingWeights, square_relu,
     };
     pub use crate::rwkv::rwkv_block::{RwkvBlock, RwkvBlockConfig, RwkvBlockWeights};
+    pub use crate::rwkv::rwkv5::{Rwkv5TimeMixLayer, Rwkv5TimeMixWeights, Rwkv5WkvState};
     pub use crate::rwkv::time_mixing::{
         TimeMixingConfig, TimeMixingLayer, TimeMixingWeights, WkvState, layer_norm, sigmoid,
     };
     pub use crate::s4::dplr::Dplr;
     pub use crate::s4::hippo::{hippo_legs, hippo_legs_diag, hippo_nplr};
+    pub use crate::s4::s4_fft::{fft, fft_conv1d, s4_fft_conv};
     pub use crate::s4::s4_layer::{S4Config, S4Layer, S4Weights, naive_conv1d};
+    pub use crate::s5::{S5Config, S5Layer, S5Weights};
     pub use crate::ssm::discretize::{Discretization, discretize};
+    pub use crate::ssm::hippo_variants::{
+        HippoFou, HippoFouConfig, HippoLegT, HippoLegTConfig, HippoMatrix, compare_hippo_variants,
+        hippo_legs_matrix,
+    };
     pub use crate::ssm::parallel_scan::{ScanPair, exclusive_scan, inclusive_scan, ssm_state_scan};
     pub use crate::ssm::ssm_kernel::{SsmConfig, SsmKernel};
+    pub use crate::xlstm::{MLstm, MLstmConfig, MLstmState, SLstm, SLstmConfig, SLstmState};
 }
 
 // ─── Integration tests ────────────────────────────────────────────────────────

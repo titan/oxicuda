@@ -22,6 +22,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod circuits;
 pub mod contraction;
 pub mod cp;
 pub mod dmrg;
@@ -37,8 +38,32 @@ pub mod tebd;
 pub mod tt;
 pub mod tucker;
 
+pub use circuits::{Circuit, CircuitConfig, CircuitGate, compile_circuit_to_tebd_gates};
+pub use contraction::path_optimal::{
+    ContractionPathConfig, DpEntry, OptimalPath, TensorSpec, build_index_dims, compare_with_greedy,
+    contraction_flops, contraction_result_indices, greedy_flops, optimal_contraction_path,
+};
 pub use error::{TnError, TnResult};
 pub use handle::{LcgRng, SmVersion, TnHandle};
+pub use metrics::{
+    LoschmidtConfig, LoschmidtResult, ReturnProbResult, StructureFactorConfig,
+    StructureFactorResult, SzOperator, loschmidt_echo, mpo_expectation_value,
+    mps_inner_product as loschmidt_mps_inner_product, operator_matrix, return_probability,
+    static_structure_factor,
+};
+pub use mps::symmetric::{
+    Qn, QnBlock, SymMps, SymMpsConfig, SymMpsTensor, block_svd, sym_mps_left_canonicalize,
+    sym_mps_local_expectation, sym_mps_norm, sym_mps_random, sym_mps_to_dense,
+};
+pub use peps::ctmrg::{
+    CtmrgConfig, CtmrgEnv, CtmrgResult, ctmrg_expectation, ctmrg_init, ctmrg_norm_per_site,
+    ctmrg_run, ctmrg_step_down, ctmrg_step_right,
+};
+pub use peps::simple_update::PepsTensor as SuPepsTensor;
+pub use peps::simple_update::{
+    PepsLambdas, SimpleUpdateConfig, SimpleUpdateResult, simple_update_energy, simple_update_init,
+    simple_update_run, simple_update_step_h, simple_update_step_v,
+};
 
 #[cfg(test)]
 mod e2e_tests;

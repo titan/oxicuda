@@ -34,6 +34,8 @@ pub enum TnError {
     RankExceedsLimit { rank: usize, max: usize },
     #[error("invalid contraction path: {0}")]
     ContractionPathInvalid(String),
+    #[error("invalid parameter '{name}': {reason}")]
+    InvalidParameter { name: String, reason: String },
 }
 
 /// Result alias for tensor network operations.

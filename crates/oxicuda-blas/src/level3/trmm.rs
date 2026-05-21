@@ -4,16 +4,37 @@
 //! `B = alpha * B * op(A)` (side = Right), where A is triangular.
 //!
 //! Only the triangle indicated by `fill_mode` is read from A. Elements
-//! outside the triangle are treated as zero (or one on the diagonal if
+//! outside the triangle are treated as zero (or one on the diagonal when
 //! `diag == Unit`).
 //!
-//! The implementation uses GEMM with the triangular matrix treated as a
-//! dense matrix (future optimisation will use a dedicated TRMM kernel
-//! that skips zero elements).
+//! # Implementation
+//!
+//! A dedicated triangular-aware multiply kernel
+//! ([`trmm_kernel`](super::trmm_kernel)) computes one output element per
+//! thread, reading only the stored triangle of A. Because TRMM overwrites B,
+//! the kernel writes into a tightly-packed scratch buffer first — that keeps
+//! it race-free — and a strided copy kernel then writes the scratch back over
+//! B in place, honouring B's leading dimension.
+
+use std::sync::Arc;
+
+use oxicuda_driver::Module;
+use oxicuda_launch::{Dim3, Kernel, LaunchParams};
+use oxicuda_memory::DeviceBuffer;
+use oxicuda_ptx::ir::PtxType;
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
-use crate::types::{DiagType, FillMode, GpuFloat, MatrixDesc, MatrixDescMut, Transpose};
+use crate::types::{DiagType, FillMode, GpuFloat, Layout, MatrixDesc, MatrixDescMut, Transpose};
+
+use super::trmm_kernel::{TrmmKernelConfig, generate_trmm_copy_ptx, generate_trmm_mul_ptx};
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Threads per block for the multiply and copy kernel launches.
+const TRMM_THREADS: u32 = 256;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -42,7 +63,10 @@ use crate::types::{DiagType, FillMode, GpuFloat, MatrixDesc, MatrixDescMut, Tran
 ///
 /// Returns [`BlasError::InvalidDimension`] if A is not square or dimensions
 /// are zero. Returns [`BlasError::DimensionMismatch`] if sizes are
-/// incompatible.
+/// incompatible. Returns [`BlasError::UnsupportedOperation`] for element
+/// types other than `f32` / `f64`. Returns [`BlasError::PtxGeneration`] or
+/// [`BlasError::LaunchFailed`] on kernel build / launch failure, and
+/// [`BlasError::Cuda`] if the scratch allocation fails.
 #[allow(clippy::too_many_arguments)]
 pub fn trmm<T: GpuFloat>(
     handle: &BlasHandle,
@@ -92,39 +116,182 @@ pub fn trmm<T: GpuFloat>(
         }
     }
 
-    // Future: dedicated TRMM kernel that respects fill_mode and diag.
-    // Currently we delegate to GEMM, treating A as a full dense matrix.
-    // This is correct if the full matrix is materialised (or if the kernel
-    // is aware of the triangular structure — which the current naive GEMM
-    // is not). The dedicated kernel will be added in a follow-up.
-    let _ = (fill_mode, diag);
+    // The hand-written multiply kernel covers the real floating-point types.
+    if T::PTX_TYPE != PtxType::F32 && T::PTX_TYPE != PtxType::F64 {
+        return Err(BlasError::UnsupportedOperation(
+            "TRMM: only f32 and f64 element types are supported".into(),
+        ));
+    }
 
-    // TRMM is in-place on B, but GEMM writes C = alpha * A * B + beta * C.
-    // With beta = 0, C = alpha * A * B. We need C to alias B for in-place.
+    triangular_multiply(handle, side, fill_mode, trans_a, diag, alpha, a, b)
+}
+
+// ---------------------------------------------------------------------------
+// Implementation
+// ---------------------------------------------------------------------------
+
+/// Computes `B := alpha * op(A) * B` / `B := alpha * B * op(A)` via the
+/// dedicated triangular-multiply kernel plus a strided copy-back.
+#[allow(clippy::too_many_arguments)]
+fn triangular_multiply<T: GpuFloat>(
+    handle: &BlasHandle,
+    side: Side,
+    fill_mode: FillMode,
+    trans_a: Transpose,
+    diag: DiagType,
+    alpha: T,
+    a: &MatrixDesc<T>,
+    b: &mut MatrixDescMut<T>,
+) -> BlasResult<()> {
+    let m = b.rows;
+    let n = b.cols;
+
+    // --- Scratch buffer: tightly-packed, row-major (m x n) --------------
     //
-    // Because cuBLAS TRMM traditionally overwrites B, the caller must
-    // ensure that the MatrixDescMut's pointer is the same as the B input.
-    // The actual kernel will handle the in-place semantics; for now we
-    // store the parameters for the future kernel dispatch.
+    // The multiply kernel writes its result here so it never overwrites B
+    // while other threads are still reading B.
+    let scratch = DeviceBuffer::<T>::alloc((m as usize) * (n as usize))?;
+    let scratch_ptr = scratch.as_device_ptr();
+    // Packed row-major strides: element (r, c) lives at r * n + c.
+    let (scratch_row_stride, scratch_col_stride) = (n, 1u32);
 
-    let (trans_left, trans_right) = match side {
-        Side::Left => (trans_a, Transpose::NoTrans),
-        Side::Right => (Transpose::NoTrans, trans_a),
+    // --- Multiply kernel ------------------------------------------------
+    let mul_config = TrmmKernelConfig {
+        sm: handle.sm_version(),
+        elem: T::PTX_TYPE,
+        side,
+        fill_mode,
+        trans: trans_a,
+        diag,
     };
+    let (mul_ptx, mul_name) = generate_trmm_mul_ptx(&mul_config)?;
+    let mul_module = Arc::new(
+        Module::from_ptx(&mul_ptx)
+            .map_err(|e| BlasError::LaunchFailed(format!("TRMM: module load failed: {e}")))?,
+    );
+    let mul_kernel = Kernel::from_module(Arc::clone(&mul_module), &mul_name)
+        .map_err(|e| BlasError::LaunchFailed(format!("TRMM: kernel lookup failed: {e}")))?;
 
-    // We need a read-only view of A for the GEMM left operand.
-    // And we treat B as both input and output.
-    //
-    // NOTE: In a real implementation, we would either:
-    // 1. Use a temporary buffer for the result and copy back.
-    // 2. Use a dedicated in-place TRMM kernel.
-    //
-    // For the algorithmic skeleton, we express the GEMM structure.
-    let _ = (handle, a, b, alpha, trans_left, trans_right);
+    let (a_row_stride, a_col_stride) = elem_strides(a.layout, a.ld);
+    let (b_row_stride, b_col_stride) = elem_strides(b.layout, b.ld);
 
-    // Placeholder: the actual kernel dispatch will be connected when the
-    // in-place TRMM kernel or temporary-buffer strategy is implemented.
+    let total = m * n;
+    let grid_x = total.div_ceil(TRMM_THREADS);
+    let params = LaunchParams::new(Dim3::new(grid_x, 1, 1), Dim3::new(TRMM_THREADS, 1, 1));
+
+    launch_mul(
+        &mul_kernel,
+        handle,
+        &params,
+        a.ptr,
+        b.ptr,
+        scratch_ptr,
+        m,
+        n,
+        alpha,
+        [a_row_stride, a_col_stride],
+        [b_row_stride, b_col_stride],
+        [scratch_row_stride, scratch_col_stride],
+    )?;
+
+    // --- Copy the scratch result back over B in place ------------------
+    let (copy_ptx, copy_name) = generate_trmm_copy_ptx(handle.sm_version(), T::PTX_TYPE)?;
+    let copy_module = Arc::new(
+        Module::from_ptx(&copy_ptx)
+            .map_err(|e| BlasError::LaunchFailed(format!("TRMM copy: module load failed: {e}")))?,
+    );
+    let copy_kernel = Kernel::from_module(Arc::clone(&copy_module), &copy_name)
+        .map_err(|e| BlasError::LaunchFailed(format!("TRMM copy: kernel lookup failed: {e}")))?;
+
+    // dst = B (real strides), src = scratch (packed strides).
+    let copy_args = (
+        b.ptr,
+        scratch_ptr,
+        m,
+        n,
+        b_row_stride,
+        b_col_stride,
+        scratch_row_stride,
+        scratch_col_stride,
+    );
+    copy_kernel
+        .launch(&params, handle.stream(), &copy_args)
+        .map_err(|e| BlasError::LaunchFailed(format!("TRMM copy launch failed: {e}")))?;
+
+    // The scratch buffer must outlive both launches; the stream is
+    // synchronised before it is dropped so the copy has definitely read it.
+    handle.stream().synchronize().map_err(BlasError::Cuda)?;
+    drop(scratch);
     Ok(())
+}
+
+/// Launches the triangular-multiply kernel with the element-typed scalar
+/// passed in its native width.
+#[allow(clippy::too_many_arguments)]
+fn launch_mul<T: GpuFloat>(
+    kernel: &Kernel,
+    handle: &BlasHandle,
+    params: &LaunchParams,
+    a_ptr: u64,
+    b_ptr: u64,
+    out_ptr: u64,
+    m: u32,
+    n: u32,
+    alpha: T,
+    a_strides: [u32; 2],
+    b_strides: [u32; 2],
+    o_strides: [u32; 2],
+) -> BlasResult<()> {
+    match T::PTX_TYPE {
+        PtxType::F64 => {
+            let alpha_f64 = f64::from_bits(alpha.to_bits_u64());
+            let args = (
+                a_ptr,
+                b_ptr,
+                out_ptr,
+                m,
+                n,
+                alpha_f64,
+                a_strides[0],
+                a_strides[1],
+                b_strides[0],
+                b_strides[1],
+                o_strides[0],
+                o_strides[1],
+            );
+            kernel
+                .launch(params, handle.stream(), &args)
+                .map_err(|e| BlasError::LaunchFailed(format!("TRMM multiply launch failed: {e}")))
+        }
+        _ => {
+            let alpha_f32 = f32::from_bits(alpha.to_bits_u64() as u32);
+            let args = (
+                a_ptr,
+                b_ptr,
+                out_ptr,
+                m,
+                n,
+                alpha_f32,
+                a_strides[0],
+                a_strides[1],
+                b_strides[0],
+                b_strides[1],
+                o_strides[0],
+                o_strides[1],
+            );
+            kernel
+                .launch(params, handle.stream(), &args)
+                .map_err(|e| BlasError::LaunchFailed(format!("TRMM multiply launch failed: {e}")))
+        }
+    }
+}
+
+/// Returns the `(row_stride, col_stride)` element strides for a layout.
+fn elem_strides(layout: Layout, ld: u32) -> (u32, u32) {
+    match layout {
+        Layout::RowMajor => (ld, 1),
+        Layout::ColMajor => (1, ld),
+    }
 }
 
 // We need the Side type here.
@@ -164,5 +331,15 @@ mod tests {
         let tri_n: u32 = 128;
         let n: u32 = 128;
         assert_eq!(tri_n, n);
+    }
+
+    #[test]
+    fn elem_strides_row_major() {
+        assert_eq!(elem_strides(Layout::RowMajor, 10), (10, 1));
+    }
+
+    #[test]
+    fn elem_strides_col_major() {
+        assert_eq!(elem_strides(Layout::ColMajor, 10), (1, 10));
     }
 }

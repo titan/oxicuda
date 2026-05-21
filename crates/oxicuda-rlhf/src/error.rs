@@ -41,6 +41,9 @@ pub enum RlhfError {
     #[error("invalid mask value (must be 0 or 1)")]
     InvalidMaskValue,
 
+    #[error("no valid preference pair could be synthesized: {msg}")]
+    NoValidPair { msg: String },
+
     #[error("internal error: {msg}")]
     Internal { msg: String },
 }

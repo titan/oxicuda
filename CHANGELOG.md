@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-21
+
+### Changed
+
+- Maintenance release: numerical-stability refinements in HMC variational sampler, stream-ordered allocator tuning, and TriMap reduction polish (`crates/oxicuda-bayes/src/variational/hmc.rs`, `crates/oxicuda-driver/src/stream_ordered_alloc.rs`, `crates/oxicuda-manifold/src/reduction/trimap.rs`)
+
 ## [0.1.7] - 2026-05-16
 
 ### Added

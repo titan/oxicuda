@@ -21,7 +21,8 @@ pub mod prelude {
     };
     pub use crate::handle::{GenHandle, LcgRng, SmVersion};
     pub use crate::lora::{
-        LoraConfig, LoraLinear, LoraModel, merge_lora, unmerge_lora, verify_merge_roundtrip,
+        DoraAdapter, DoraConfig, LoraConfig, LoraLinear, LoraModel, merge_lora, unmerge_lora,
+        verify_merge_roundtrip,
     };
     pub use crate::ptx_kernels::{
         cfg_combine_ptx, ddpm_step_ptx, f32_hex, flow_velocity_ptx, lora_apply_ptx,
@@ -29,7 +30,8 @@ pub mod prelude {
     };
     pub use crate::scheduler::{
         BetaSchedule, BetaScheduleType, DdimScheduler, DdpmScheduler, DpmOrder, DpmSolverScheduler,
-        FlowMatchingPath, FlowMatchingScheduler,
+        FlowMatchingPath, FlowMatchingScheduler, InterpolantConfig, InterpolantKind, RectifiedFlow,
+        RectifiedFlowConfig, StochasticInterpolant, VPrediction, VPredictionConfig,
     };
     pub use crate::score::{
         CrossAttentionBlock, FourierEmbedding, SelfAttentionBlock, SinusoidalEmbedding,

@@ -7,7 +7,19 @@
 //! between intra-domain GW and an inter-domain Wasserstein term using a mixing
 //! parameter `α ∈ [0, 1]`.
 
+/// Batched entropic Gromov-Wasserstein for k-way hyperparameter sweeps and ensembling.
+pub mod batched_gw;
+/// Entropic GW with linear-memory column-sketching approximation (Peyré et al. 2016).
+pub mod entropic_gw_fast;
 /// Fused Gromov-Wasserstein combining intra-domain GW and inter-domain Wasserstein.
 pub mod fused;
 /// Entropic Gromov-Wasserstein for distributions on possibly different metric spaces.
 pub mod gromov_wasserstein;
+/// GW-Wasserstein hybrid for graph matching (Titouan et al. 2019).
+pub mod gw_graph_matching;
+
+pub use batched_gw::{BatchedGwConfig, BatchedGwResult, batched_gromov_wasserstein};
+pub use entropic_gw_fast::{
+    EntropicGwFastConfig, EntropicGwFastFit, entropic_gw_fast, gw_cost_matrix, gw_distance,
+};
+pub use gw_graph_matching::{GwGraphConfig, GwGraphResult, gw_frobenius_cost, gw_graph_matching};

@@ -9,8 +9,11 @@
 //! - **`features`**: Log-mel adapter, CMVN, delta/delta-delta.
 //! - **`handle`**: Session handle with SM version and LCG RNG.
 //! - **`ptx_kernels`**: 7 GPU PTX kernel string generators (SM 7.5–12.0).
+//! - **`rescoring`**: Shallow-fusion LM lattice / n-best rescoring (distinct from CTC beam search).
+//! - **`separation`**: Conv-TasNet time-domain source separation.
 //! - **`speaker`**: Speaker embedding (x-vector TDNN, stats pool, attentive pool).
-//! - **`vocoder`**: WaveNet dilated residual vocoder stack.
+//! - **`vad`**: Voice-activity detection (energy + spectral-flatness, onset/hangover hysteresis).
+//! - **`vocoder`**: WaveNet + HiFi-GAN neural vocoders.
 
 pub mod attention;
 pub mod augment;
@@ -20,7 +23,10 @@ pub mod error;
 pub mod features;
 pub mod handle;
 pub mod ptx_kernels;
+pub mod rescoring;
+pub mod separation;
 pub mod speaker;
+pub mod vad;
 pub mod vocoder;
 
 pub use error::{AudioError, AudioResult};
@@ -33,20 +39,26 @@ pub mod prelude {
     pub use crate::augment::{SpecAugOp, SpecAugPipeline, freq_mask, time_mask, time_warp};
     pub use crate::ctc::{BeamHypothesis, ctc_beam_search, ctc_forward_log};
     pub use crate::encoder::{
-        ConformerConfig, ConformerEncoder, Wav2VecCnnConfig, Wav2VecCnnEncoder,
+        ConformerConfig, ConformerEncoder, Wav2VecCnnConfig, Wav2VecCnnEncoder, WhisperEncoder,
+        WhisperEncoderConfig,
     };
     pub use crate::error::{AudioError, AudioResult};
     pub use crate::features::{
-        CmvnConfig, LogMelInput, apply_cmvn, compute_cmvn, compute_delta, compute_delta_delta,
-        stack_delta_features,
+        CmvnConfig, LogMelInput, MelFilterbank, MelFilterbankConfig, apply_cmvn, compute_cmvn,
+        compute_delta, compute_delta_delta, stack_delta_features,
     };
     pub use crate::handle::{AudioHandle, LcgRng, SmVersion};
     pub use crate::ptx_kernels::{
         ctc_alpha_ptx, depthwise_conv1d_ptx, dilated_conv1d_ptx, rel_pos_bias_ptx,
         spec_augment_mask_ptx, stats_pool_ptx, stride_conv1d_ptx,
     };
+    pub use crate::rescoring::{Hypothesis, LatticeRescorer, RescoreConfig, ScoredHypothesis};
+    pub use crate::separation::{ConvTasNet, ConvTasNetConfig, SeparationResult};
     pub use crate::speaker::{AttentivePool, XVectorConfig, XVectorTdnn, stats_pool};
-    pub use crate::vocoder::{WaveNetBlock, WaveNetConfig, WaveNetStack};
+    pub use crate::vad::{Vad, VadConfig, VadResult};
+    pub use crate::vocoder::{
+        HifiGanConfig, HifiGanGenerator, WaveNetBlock, WaveNetConfig, WaveNetStack,
+    };
 }
 
 // ─── End-to-end integration tests ────────────────────────────────────────────

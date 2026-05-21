@@ -9,6 +9,8 @@
 //! | [`top_p`]  | Nucleus sampling: smallest set with cumprob ≥ p |
 //! | [`beam_search`] | Maintain K parallel hypotheses with length normalisation |
 //! | [`speculative`] | Chen et al. 2023 speculative decoding with rejection sampling |
+//! | [`medusa`] | Cai et al. 2024 multi-head verified-tree speculative decoding |
+//! | [`json_constrained`] | Char-level pushdown JSON validator + logit masking |
 //!
 //! # Shared RNG
 //!
@@ -17,12 +19,16 @@
 
 pub mod beam_search;
 pub mod greedy;
+pub mod json_constrained;
+pub mod medusa;
 pub mod speculative;
 pub mod top_k;
 pub mod top_p;
 
 pub use beam_search::{BeamHypothesis, BeamSearchConfig, BeamSearchState};
 pub use greedy::{greedy_sample, greedy_sample_batch};
+pub use json_constrained::{JsonConstraint, JsonToken};
+pub use medusa::{MedusaConfig, MedusaDecoder};
 pub use speculative::speculative_verify;
 pub use top_k::{top_k_filter, top_k_sample};
 pub use top_p::{top_p_filter, top_p_sample};

@@ -50,6 +50,9 @@ pub enum SslError {
     #[error("invalid projector layer dim: in/hidden/out must be > 0")]
     InvalidProjectorDim,
 
+    #[error("invalid parameter `{name}`: {reason}")]
+    InvalidParameter { name: String, reason: String },
+
     #[error("internal error: {0}")]
     Internal(String),
 }

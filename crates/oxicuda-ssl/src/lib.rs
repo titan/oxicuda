@@ -12,6 +12,7 @@
 //! ├── masked/           — MAE (random patch mask + reconstruction MSE)
 //! ├── clustering/       — SwAV (Sinkhorn-Knopp), DINO (centred + sharpened CE)
 //! ├── augment/          — Color jitter, multi-crop helpers
+//! ├── metrics/          — Uniformity, alignment, effective rank, collapse score
 //! ├── momentum/         — EmaUpdater for momentum-encoder schemes
 //! ├── head/             — MlpProjector, PredictorHead
 //! ├── error             — SslError / SslResult
@@ -28,6 +29,7 @@ pub mod error;
 pub mod handle;
 pub mod head;
 pub mod masked;
+pub mod metrics;
 pub mod momentum;
 pub mod non_contrastive;
 pub mod ptx_kernels;
@@ -38,19 +40,69 @@ pub mod ptx_kernels;
 pub mod prelude {
     pub use crate::augment::color::{color_jitter, random_grayscale_chw};
     pub use crate::augment::multi_crop::{MultiCropConfig, multi_crop};
+    pub use crate::augment::rand_augment::{
+        AugOp, AutoAugPolicy, AutoAugmentConfig, RandAugmentConfig, SubPolicy, all_aug_ops,
+        apply_aug_op, auto_augment, rand_augment,
+    };
+    pub use crate::augment::solarize_blur::{
+        SimClrBlurSolarConfig, add_gaussian_noise, gaussian_blur_chw, random_gaussian_blur_chw,
+        random_solarize, simclr_blur_solar, solarize,
+    };
+    pub use crate::clustering::deep_cluster::{
+        DeepClusterConfig, DeepClusterResult, DeeperClusterConfig, DeeperClusterResult,
+        deep_cluster, deep_cluster_loss, deeper_cluster, pca_whiten,
+    };
     pub use crate::clustering::dino::{DinoConfig, dino_loss};
+    pub use crate::clustering::ibot::{
+        IBotCenters, IBotConfig, IBotResult, ibot_centers_init, ibot_cls_loss, ibot_loss,
+        ibot_mim_loss, ibot_random_patch_mask, ibot_update_centers,
+    };
     pub use crate::clustering::swav::{SwavConfig, sinkhorn_knopp, swav_loss};
     pub use crate::contrastive::info_nce::info_nce_loss;
     pub use crate::contrastive::moco::{MocoQueue, moco_loss};
+    pub use crate::contrastive::moco_v3::{
+        MocoV3Config, MocoV3State, moco_v3_loss, moco_v3_symmetric_loss,
+    };
     pub use crate::contrastive::simclr::{SimClrConfig, simclr_loss};
     pub use crate::error::{SslError, SslResult};
     pub use crate::handle::{LcgRng, SmVersion, SslHandle};
+    pub use crate::head::linear_probe::{
+        FittedLinearProbe, LinearProbeConfig, LinearProbeResult, linear_probe_eval,
+        linear_probe_fit, linear_probe_predict,
+    };
     pub use crate::head::predictor::PredictorHead;
     pub use crate::head::projector::MlpProjector;
+    pub use crate::masked::beit::{
+        BeitConfig, BeitResult, VqCodebook, beit_block_mask, beit_loss, vq_codebook_init,
+        vq_encode, vq_update_codebook,
+    };
+    pub use crate::masked::data2vec::{
+        Data2VecConfig, Data2VecResult, Data2VecState, data2vec_batch_loss, data2vec_loss,
+        data2vec_mask, huber_loss, normalize_teacher_targets,
+    };
     pub use crate::masked::mae::{MaeConfig, mae_reconstruction_loss, random_patch_mask};
+    pub use crate::masked::simmim::{
+        SimMimConfig, simmim_block_mask, simmim_l1_loss, simmim_l2_loss, simmim_random_mask,
+        simmim_reconstruction_loss,
+    };
+    pub use crate::metrics::feature_metrics::{
+        alignment_loss, collapse_score, effective_rank, pairwise_cosine_stats, uniformity_loss,
+    };
+    pub use crate::metrics::knn_eval::{KnnEvalConfig, KnnEvalResult, knn_eval};
     pub use crate::momentum::ema::{EmaUpdater, cosine_momentum};
     pub use crate::non_contrastive::barlow::{BarlowTwinsConfig, barlow_twins_loss};
     pub use crate::non_contrastive::byol::{ByolPredictor, byol_loss};
+    pub use crate::non_contrastive::dense_cl::{
+        DenseCLConfig, DenseCLResult, PixProConfig, dense_cl_loss, dense_correspondence,
+        dense_infonce, pixpro_loss,
+    };
+    pub use crate::non_contrastive::msn::{
+        MsnConfig, MsnPrototypes, MsnResult, msn_loss, msn_prototype_init, msn_random_mask,
+        msn_update_prototypes,
+    };
+    pub use crate::non_contrastive::simsiam::{
+        SimSiamConfig, SimSiamPredictor, is_collapsed, simsiam_loss, simsiam_loss_batch,
+    };
     pub use crate::non_contrastive::vicreg::{VicRegConfig, vicreg_loss};
     pub use crate::ptx_kernels::{
         barlow_cross_corr_ptx, byol_cosine_loss_ptx, cosine_similarity_ptx, f32_hex,

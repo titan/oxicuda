@@ -187,6 +187,240 @@ pub fn lu_solve<T: GpuFloat>(
     Ok(())
 }
 
+/// Solves the transposed system `Aᵀ * X = B` given an LU-factored matrix.
+///
+/// The LU factors must have been produced by [`lu_factorize`], which computes
+/// `P * A = L * U`. Hence `A = Pᵀ * L * U` and the transpose factorizes as
+///
+/// ```text
+/// Aᵀ = Uᵀ * Lᵀ * P
+/// ```
+///
+/// so `Aᵀ * X = B` is solved by the three stages
+///
+/// 1. `Uᵀ * Y = B` — forward substitution (`Uᵀ` is lower triangular, non-unit
+///    diagonal),
+/// 2. `Lᵀ * W = Y` — backward substitution (`Lᵀ` is upper triangular, unit
+///    diagonal),
+/// 3. `X = Pᵀ * W` — apply the row permutation transposed, i.e. replay the
+///    pivot transpositions in reverse order.
+///
+/// The solution overwrites `b` in-place. The LU buffer is interpreted in
+/// column-major order with leading dimension `n`, matching [`lu_solve`].
+///
+/// This is required by algorithms — such as Hager's 1-norm condition
+/// estimator — that alternate solves with `A` and `Aᵀ`.
+///
+/// # Arguments
+///
+/// * `handle` — solver handle.
+/// * `lu` — LU-factored matrix (output of `lu_factorize`).
+/// * `pivots` — pivot indices from `lu_factorize`.
+/// * `b` — right-hand side matrix (n x nrhs, column-major), overwritten with
+///   the solution.
+/// * `n` — matrix dimension.
+/// * `nrhs` — number of right-hand side columns.
+///
+/// # Errors
+///
+/// Returns [`SolverError`] if dimensions are invalid, a pivot index is out of
+/// range, or a host transfer fails.
+pub fn lu_solve_transposed<T: GpuFloat>(
+    handle: &SolverHandle,
+    lu: &DeviceBuffer<T>,
+    pivots: &DeviceBuffer<i32>,
+    b: &mut DeviceBuffer<T>,
+    n: u32,
+    nrhs: u32,
+) -> SolverResult<()> {
+    lu_solve_with_transpose::<T>(handle, lu, pivots, b, n, nrhs, true)
+}
+
+/// Solves `A * X = B` or `Aᵀ * X = B` depending on `transpose`.
+///
+/// When `transpose` is `false` this is equivalent to [`lu_solve`]; when it is
+/// `true` it is equivalent to [`lu_solve_transposed`]. Both directions are
+/// computed with an exact host-side triangular solve so that the result is
+/// correct independently of the device TRSM path.
+///
+/// # Errors
+///
+/// Returns [`SolverError`] if dimensions are invalid, a pivot index is out of
+/// range, or a host transfer fails.
+pub fn lu_solve_with_transpose<T: GpuFloat>(
+    _handle: &SolverHandle,
+    lu: &DeviceBuffer<T>,
+    pivots: &DeviceBuffer<i32>,
+    b: &mut DeviceBuffer<T>,
+    n: u32,
+    nrhs: u32,
+    transpose: bool,
+) -> SolverResult<()> {
+    if n == 0 || nrhs == 0 {
+        return Ok(());
+    }
+    let n_usize = n as usize;
+    let nrhs_usize = nrhs as usize;
+    if lu.len() < n_usize * n_usize {
+        return Err(SolverError::DimensionMismatch(
+            "lu_solve_with_transpose: LU buffer too small".into(),
+        ));
+    }
+    if pivots.len() < n_usize {
+        return Err(SolverError::DimensionMismatch(
+            "lu_solve_with_transpose: pivots buffer too small".into(),
+        ));
+    }
+    if b.len() < n_usize * nrhs_usize {
+        return Err(SolverError::DimensionMismatch(
+            "lu_solve_with_transpose: B buffer too small".into(),
+        ));
+    }
+
+    // Copy the LU factors, pivots, and right-hand side to the host. The LU
+    // buffer is column-major with leading dimension n.
+    let mut lu_host = vec![T::gpu_zero(); lu.len()];
+    lu.copy_to_host(&mut lu_host)?;
+    let mut piv_host = vec![0_i32; pivots.len()];
+    pivots.copy_to_host(&mut piv_host)?;
+    let mut b_host = vec![T::gpu_zero(); b.len()];
+    b.copy_to_host(&mut b_host)?;
+
+    // Validate pivot indices up front so substitution can ignore the issue.
+    for &p in piv_host.iter().take(n_usize) {
+        let p_usize = p.max(0) as usize;
+        if p_usize >= n_usize {
+            return Err(SolverError::DimensionMismatch(format!(
+                "lu_solve_with_transpose: pivot index out of range ({p_usize} >= n {n_usize})"
+            )));
+        }
+    }
+
+    // `lu_at(row, col)` reads the column-major LU buffer (lda = n).
+    let lu_at =
+        |row: usize, col: usize| -> f64 { t_value_to_f64::<T>(lu_host[col * n_usize + row]) };
+
+    for col in 0..nrhs_usize {
+        // Working column of the right-hand side / solution.
+        let base = col * n_usize;
+        let mut rhs: Vec<f64> = (0..n_usize)
+            .map(|i| t_value_to_f64::<T>(b_host[base + i]))
+            .collect();
+
+        if transpose {
+            // Aᵀ x = b  ⇒  Uᵀ y = b, Lᵀ w = y, x = Pᵀ w.
+            //
+            // Stage 1: Uᵀ y = b. Uᵀ is lower triangular with the (non-unit)
+            // diagonal U[k,k]; forward substitution over k = 0..n.
+            for k in 0..n_usize {
+                let acc: f64 = rhs[..k]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &rhs_i)| lu_at(i, k) * rhs_i)
+                    .sum();
+                let diag = lu_at(k, k);
+                if diag.abs() <= f64::MIN_POSITIVE {
+                    return Err(SolverError::InternalError(format!(
+                        "lu_solve_with_transpose: zero pivot U[{k},{k}] (singular)"
+                    )));
+                }
+                rhs[k] = (rhs[k] - acc) / diag;
+            }
+
+            // Stage 2: Lᵀ w = y. Lᵀ is upper triangular with unit diagonal;
+            // backward substitution over k = n-1..0. L[i,k] (i > k) lives in
+            // the strict lower triangle of the LU buffer.
+            for k in (0..n_usize).rev() {
+                let acc: f64 = rhs[(k + 1)..]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, &rhs_i)| lu_at(k + 1 + offset, k) * rhs_i)
+                    .sum();
+                rhs[k] -= acc;
+            }
+
+            // Stage 3: x = Pᵀ w. Pᵀ is the inverse permutation: replay the
+            // pivot transpositions in reverse order.
+            for row in (0..n_usize).rev() {
+                let piv = piv_host[row].max(0) as usize;
+                if piv != row {
+                    rhs.swap(row, piv);
+                }
+            }
+        } else {
+            // A x = b  ⇒  L y = P b, U x = y.
+            //
+            // Stage 1: apply P (pivot transpositions in forward order).
+            for (row, &piv_entry) in piv_host.iter().enumerate().take(n_usize) {
+                let piv = piv_entry.max(0) as usize;
+                if piv != row {
+                    rhs.swap(row, piv);
+                }
+            }
+
+            // Stage 2: L y = P b. L is unit lower triangular; forward
+            // substitution over k = 0..n.
+            for k in 0..n_usize {
+                let acc: f64 = rhs[..k]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &rhs_i)| lu_at(k, i) * rhs_i)
+                    .sum();
+                rhs[k] -= acc;
+            }
+
+            // Stage 3: U x = y. U is upper triangular, non-unit diagonal;
+            // backward substitution over k = n-1..0.
+            for k in (0..n_usize).rev() {
+                let acc: f64 = rhs[(k + 1)..]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, &rhs_i)| lu_at(k, k + 1 + offset) * rhs_i)
+                    .sum();
+                let diag = lu_at(k, k);
+                if diag.abs() <= f64::MIN_POSITIVE {
+                    return Err(SolverError::InternalError(format!(
+                        "lu_solve_with_transpose: zero pivot U[{k},{k}] (singular)"
+                    )));
+                }
+                rhs[k] = (rhs[k] - acc) / diag;
+            }
+        }
+
+        for (i, &value) in rhs.iter().enumerate() {
+            b_host[base + i] = f64_to_t_value::<T>(value);
+        }
+    }
+
+    b.copy_from_host(&b_host)?;
+
+    Ok(())
+}
+
+/// Reinterprets a `T: GpuFloat` value as `f64`.
+///
+/// 8-byte types are read directly; narrower types are read as `f32` then
+/// widened, matching the bit-reinterpretation convention used throughout the
+/// solver crate's host-fallback code.
+fn t_value_to_f64<T: GpuFloat>(value: T) -> f64 {
+    if T::SIZE == 8 {
+        f64::from_bits(value.to_bits_u64())
+    } else {
+        f64::from(f32::from_bits(value.to_bits_u64() as u32))
+    }
+}
+
+/// Converts an `f64` value back to a `T: GpuFloat` via bit reinterpretation.
+///
+/// Inverse of [`t_value_to_f64`]: narrower types narrow through `f32` first.
+fn f64_to_t_value<T: GpuFloat>(value: f64) -> T {
+    if T::SIZE == 8 {
+        T::from_bits_u64(value.to_bits())
+    } else {
+        T::from_bits_u64(u64::from((value as f32).to_bits()))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Blocked LU implementation
 // ---------------------------------------------------------------------------
@@ -844,5 +1078,307 @@ mod tests {
     fn neg_one_f64() {
         let neg = f64::from_bits_u64(f64::gpu_one().to_bits_u64() ^ 0x8000_0000_0000_0000);
         assert!((neg + 1.0).abs() < 1e-15);
+    }
+
+    // -----------------------------------------------------------------------
+    // Transposed LU solve: host reference of `lu_solve_with_transpose`
+    // -----------------------------------------------------------------------
+    //
+    // The production `lu_solve_with_transpose` operates on `DeviceBuffer`s and
+    // a `SolverHandle`, which cannot be created without a CUDA device. The
+    // helpers below re-implement the exact same triangular-substitution stages
+    // on plain `Vec<f64>` data so the algorithm — the transposed forward/back
+    // substitution and the transposed permutation — can be validated.
+
+    /// Dense LU factorization with partial pivoting (column-major, lda = n).
+    ///
+    /// Mirrors the storage produced by [`lu_factorize`]: on return `lu` holds
+    /// `L` (strict lower, implicit unit diagonal) and `U` (upper) packed in
+    /// place, and `pivots[i]` is the absolute row swapped with row `i`.
+    fn dense_lu_factorize(a: &[f64], n: usize) -> (Vec<f64>, Vec<i32>) {
+        let mut lu = a.to_vec();
+        let mut pivots = vec![0_i32; n];
+        for col in 0..n {
+            // Pivot search over rows col..n in column `col`.
+            let mut pivot_row = col;
+            let mut max_abs = 0.0_f64;
+            for row in col..n {
+                let abs = lu[col * n + row].abs();
+                if abs > max_abs {
+                    max_abs = abs;
+                    pivot_row = row;
+                }
+            }
+            pivots[col] = pivot_row as i32;
+            if pivot_row != col {
+                for c in 0..n {
+                    lu.swap(c * n + col, c * n + pivot_row);
+                }
+            }
+            let diag = lu[col * n + col];
+            for row in (col + 1)..n {
+                lu[col * n + row] /= diag;
+            }
+            for c in (col + 1)..n {
+                let u_kc = lu[c * n + col];
+                for row in (col + 1)..n {
+                    lu[c * n + row] -= lu[col * n + row] * u_kc;
+                }
+            }
+        }
+        (lu, pivots)
+    }
+
+    /// Host port of `lu_solve_with_transpose` operating on `Vec<f64>` data.
+    ///
+    /// Solves `A x = b` (`transpose = false`) or `Aᵀ x = b`
+    /// (`transpose = true`) given LU factors as produced by
+    /// [`dense_lu_factorize`]. `b` is overwritten with the solution.
+    fn dense_lu_solve(lu: &[f64], pivots: &[i32], b: &mut [f64], n: usize, transpose: bool) {
+        let lu_at = |row: usize, col: usize| lu[col * n + row];
+        if transpose {
+            // Uᵀ y = b — forward substitution (lower triangular, non-unit).
+            for k in 0..n {
+                let acc: f64 = b[..k]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &b_i)| lu_at(i, k) * b_i)
+                    .sum();
+                b[k] = (b[k] - acc) / lu_at(k, k);
+            }
+            // Lᵀ w = y — backward substitution (upper triangular, unit).
+            for k in (0..n).rev() {
+                let acc: f64 = b[(k + 1)..]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, &b_i)| lu_at(k + 1 + offset, k) * b_i)
+                    .sum();
+                b[k] -= acc;
+            }
+            // x = Pᵀ w — pivot transpositions replayed in reverse order.
+            for row in (0..n).rev() {
+                let piv = pivots[row].max(0) as usize;
+                if piv != row {
+                    b.swap(row, piv);
+                }
+            }
+        } else {
+            // P b — pivot transpositions in forward order.
+            for (row, &piv_entry) in pivots.iter().enumerate().take(n) {
+                let piv = piv_entry.max(0) as usize;
+                if piv != row {
+                    b.swap(row, piv);
+                }
+            }
+            // L y = P b — forward substitution (lower triangular, unit).
+            for k in 0..n {
+                let acc: f64 = b[..k]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &b_i)| lu_at(k, i) * b_i)
+                    .sum();
+                b[k] -= acc;
+            }
+            // U x = y — backward substitution (upper triangular, non-unit).
+            for k in (0..n).rev() {
+                let acc: f64 = b[(k + 1)..]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, &b_i)| lu_at(k, k + 1 + offset) * b_i)
+                    .sum();
+                b[k] = (b[k] - acc) / lu_at(k, k);
+            }
+        }
+    }
+
+    /// Dense matrix-vector product `y = M x` for column-major `M` (lda = n).
+    fn matvec(m: &[f64], x: &[f64], n: usize, transpose: bool) -> Vec<f64> {
+        let mut y = vec![0.0_f64; n];
+        for (row, y_row) in y.iter_mut().enumerate() {
+            let mut acc = 0.0_f64;
+            for (col, &x_col) in x.iter().enumerate() {
+                let elem = if transpose {
+                    m[row * n + col]
+                } else {
+                    m[col * n + row]
+                };
+                acc += elem * x_col;
+            }
+            *y_row = acc;
+        }
+        y
+    }
+
+    #[test]
+    fn lu_solve_transposed_matches_explicit_transpose() {
+        // A non-symmetric 4×4 matrix (column-major storage).
+        let n = 4;
+        let a_rows = [
+            [4.0_f64, 3.0, 2.0, 1.0],
+            [2.0, 5.0, 3.0, 2.0],
+            [1.0, 2.0, 6.0, 3.0],
+            [7.0, 1.0, 2.0, 9.0],
+        ];
+        let mut a_col = vec![0.0_f64; n * n];
+        let mut at_col = vec![0.0_f64; n * n];
+        for (i, row) in a_rows.iter().enumerate() {
+            for (j, &v) in row.iter().enumerate() {
+                a_col[j * n + i] = v; // A[i,j]
+                at_col[i * n + j] = v; // Aᵀ[j,i] = A[i,j]
+            }
+        }
+
+        let b = vec![1.0_f64, -2.0, 3.0, 0.5];
+
+        // Path 1: transposed solve on the LU factors of A.
+        let (lu_a, piv_a) = dense_lu_factorize(&a_col, n);
+        let mut x_transposed = b.clone();
+        dense_lu_solve(&lu_a, &piv_a, &mut x_transposed, n, true);
+
+        // Path 2: explicitly form Aᵀ, factor it, do a normal solve.
+        let (lu_at, piv_at) = dense_lu_factorize(&at_col, n);
+        let mut x_explicit = b.clone();
+        dense_lu_solve(&lu_at, &piv_at, &mut x_explicit, n, false);
+
+        for i in 0..n {
+            assert!(
+                (x_transposed[i] - x_explicit[i]).abs() < 1e-10,
+                "transposed solve x[{i}] = {} disagrees with explicit Aᵀ solve {}",
+                x_transposed[i],
+                x_explicit[i],
+            );
+        }
+
+        // Residual check: Aᵀ * x must reproduce b.
+        let residual = matvec(&a_col, &x_transposed, n, true);
+        for i in 0..n {
+            assert!(
+                (residual[i] - b[i]).abs() < 1e-10,
+                "Aᵀ x residual[{i}] = {} ≠ b[{i}] = {}",
+                residual[i],
+                b[i],
+            );
+        }
+    }
+
+    #[test]
+    fn lu_solve_forward_and_transposed_consistent() {
+        // For the same factors, A x = b and Aᵀ y = b must both be exact.
+        let n = 3;
+        let a_rows = [[2.0_f64, -1.0, 0.0], [-1.0, 2.0, -1.0], [0.0, -1.0, 2.0]];
+        let mut a_col = vec![0.0_f64; n * n];
+        for (i, row) in a_rows.iter().enumerate() {
+            for (j, &v) in row.iter().enumerate() {
+                a_col[j * n + i] = v;
+            }
+        }
+        let (lu, piv) = dense_lu_factorize(&a_col, n);
+
+        let b = vec![1.0_f64, 2.0, 3.0];
+
+        let mut x = b.clone();
+        dense_lu_solve(&lu, &piv, &mut x, n, false);
+        let ax = matvec(&a_col, &x, n, false);
+        for i in 0..n {
+            assert!(
+                (ax[i] - b[i]).abs() < 1e-12,
+                "A x residual[{i}] = {}",
+                (ax[i] - b[i]).abs()
+            );
+        }
+
+        let mut y = b.clone();
+        dense_lu_solve(&lu, &piv, &mut y, n, true);
+        let aty = matvec(&a_col, &y, n, true);
+        for i in 0..n {
+            assert!(
+                (aty[i] - b[i]).abs() < 1e-12,
+                "Aᵀ y residual[{i}] = {}",
+                (aty[i] - b[i]).abs()
+            );
+        }
+
+        // For this symmetric A, x and y must coincide.
+        for i in 0..n {
+            assert!(
+                (x[i] - y[i]).abs() < 1e-12,
+                "symmetric A: x[{i}]={} y[{i}]={}",
+                x[i],
+                y[i]
+            );
+        }
+    }
+
+    #[test]
+    fn lu_solve_transposed_with_pivoting() {
+        // A matrix whose first column forces a row swap during pivoting,
+        // exercising the transposed permutation `Pᵀ`.
+        let n = 3;
+        let a_rows = [[0.0_f64, 2.0, 1.0], [4.0, 1.0, 0.0], [1.0, 1.0, 3.0]];
+        let mut a_col = vec![0.0_f64; n * n];
+        for (i, row) in a_rows.iter().enumerate() {
+            for (j, &v) in row.iter().enumerate() {
+                a_col[j * n + i] = v;
+            }
+        }
+        let (lu, piv) = dense_lu_factorize(&a_col, n);
+        // Row 0 (value 0) must have been pivoted with a later row.
+        assert_ne!(piv[0], 0, "expected a pivot swap on column 0");
+
+        let b = vec![5.0_f64, -1.0, 2.0];
+        let mut x = b.clone();
+        dense_lu_solve(&lu, &piv, &mut x, n, true);
+
+        let residual = matvec(&a_col, &x, n, true);
+        for i in 0..n {
+            assert!(
+                (residual[i] - b[i]).abs() < 1e-10,
+                "pivoted Aᵀ solve residual[{i}] = {}",
+                (residual[i] - b[i]).abs()
+            );
+        }
+    }
+
+    #[test]
+    fn lu_solve_transposed_temp_dir_roundtrip() {
+        // Persist a solved system through a temp file and re-verify, per the
+        // workspace temp-file testing policy.
+        let n = 3;
+        let a_rows = [[3.0_f64, 1.0, 2.0], [6.0, 3.0, 4.0], [3.0, 1.0, 5.0]];
+        let mut a_col = vec![0.0_f64; n * n];
+        for (i, row) in a_rows.iter().enumerate() {
+            for (j, &v) in row.iter().enumerate() {
+                a_col[j * n + i] = v;
+            }
+        }
+        let (lu, piv) = dense_lu_factorize(&a_col, n);
+        let b = vec![2.0_f64, 4.0, 6.0];
+        let mut x = b.clone();
+        dense_lu_solve(&lu, &piv, &mut x, n, true);
+
+        let path = std::env::temp_dir().join("oxicuda_lu_solve_transposed_s15.txt");
+        let serialized = x
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        std::fs::write(&path, &serialized).expect("write temp solution");
+        let read_back = std::fs::read_to_string(&path).expect("read temp solution");
+        let _ = std::fs::remove_file(&path);
+
+        let restored: Vec<f64> = read_back
+            .split_whitespace()
+            .map(|s| s.parse::<f64>().expect("parse f64"))
+            .collect();
+        assert_eq!(restored.len(), n);
+
+        let residual = matvec(&a_col, &restored, n, true);
+        for i in 0..n {
+            assert!(
+                (residual[i] - b[i]).abs() < 1e-10,
+                "round-tripped Aᵀ solve residual[{i}] = {}",
+                (residual[i] - b[i]).abs()
+            );
+        }
     }
 }

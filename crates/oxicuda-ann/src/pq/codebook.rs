@@ -1,4 +1,5 @@
 /// Product Quantization codebook: `m` subspaces, `ksub` codewords each of size `dsub`.
+#[derive(Debug)]
 pub struct PqCodebook {
     /// Flat storage `[m, ksub, dsub]`.
     centroids: Vec<f32>,

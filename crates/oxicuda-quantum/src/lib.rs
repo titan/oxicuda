@@ -12,14 +12,22 @@ pub mod error;
 pub mod gates;
 pub mod handle;
 pub mod kernel;
+pub mod midcircuit;
+pub mod mps;
 pub mod pauli;
 pub mod ptx_kernels;
 pub mod qaoa;
+pub mod stabilizer;
 pub mod statevec;
 pub mod trotter;
 pub mod vqe;
 
 pub use error::{QuantumError, QuantumResult};
+pub use midcircuit::{
+    ClassicalRegister, MidCircuitOp, apply_if, measure_and_collapse, measure_deterministic,
+    run as run_midcircuit,
+};
+pub use mps::{MatrixProductState, MpsConfig};
 
 #[cfg(test)]
 mod e2e_tests {

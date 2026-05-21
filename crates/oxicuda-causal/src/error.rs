@@ -14,6 +14,8 @@ pub enum CausalError {
     NotADag,
     #[error("incompatible data shapes")]
     IncompatibleData,
+    #[error("invalid parameter: {reason}")]
+    InvalidParameter { reason: String },
     #[error("propensity score out of bounds: {value}")]
     PropensityOutOfBounds { value: f32 },
     #[error("invalid number of folds: {k}")]

@@ -86,6 +86,20 @@ impl LcgRng {
         (self.next_u32() as usize) % n
     }
 
+    /// Return two independent `N(0, 1)` samples via the Box-Muller transform.
+    ///
+    /// Both returned values are standard-normal distributed and mutually
+    /// independent.  The first uniform draw is clamped away from `0` so the
+    /// logarithm stays finite.
+    #[inline]
+    pub fn next_normal_pair(&mut self) -> (f32, f32) {
+        let u1 = (self.next_f32() + 1e-10).min(1.0 - 1e-10);
+        let u2 = self.next_f32();
+        let r = (-2.0_f32 * u1.ln()).sqrt();
+        let theta = 2.0 * std::f32::consts::PI * u2;
+        (r * theta.cos(), r * theta.sin())
+    }
+
     /// Shuffle a slice in-place using Fisher-Yates.
     pub fn shuffle<T>(&mut self, slice: &mut [T]) {
         let n = slice.len();
@@ -237,6 +251,45 @@ mod tests {
         let mut sorted = v.clone();
         sorted.sort_unstable();
         assert_eq!(sorted, original);
+    }
+
+    #[test]
+    fn lcg_rng_normal_pair_finite() {
+        let mut rng = LcgRng::new(13);
+        for _ in 0..1000 {
+            let (a, b) = rng.next_normal_pair();
+            assert!(a.is_finite());
+            assert!(b.is_finite());
+        }
+    }
+
+    #[test]
+    fn lcg_rng_normal_pair_spans_both_signs() {
+        // Box-Muller output should produce both positive and negative samples
+        // and stay within a sane magnitude window.
+        let mut rng = LcgRng::new(2024);
+        let mut saw_positive = false;
+        let mut saw_negative = false;
+        for _ in 0..5000 {
+            let (a, _) = rng.next_normal_pair();
+            if a > 0.0 {
+                saw_positive = true;
+            }
+            if a < 0.0 {
+                saw_negative = true;
+            }
+            assert!(a.abs() < 12.0, "unreasonable magnitude: {a}");
+        }
+        assert!(saw_positive && saw_negative);
+    }
+
+    #[test]
+    fn lcg_rng_normal_pair_deterministic() {
+        let mut r1 = LcgRng::new(321);
+        let mut r2 = LcgRng::new(321);
+        for _ in 0..50 {
+            assert_eq!(r1.next_normal_pair(), r2.next_normal_pair());
+        }
     }
 
     #[test]

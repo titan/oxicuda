@@ -284,6 +284,120 @@ pub fn copy_dtoh_async<T: Copy>(
 }
 
 // ---------------------------------------------------------------------------
+// Asynchronous sub-region copies (pinned buffer staging)
+// ---------------------------------------------------------------------------
+
+/// Asynchronously copies a contiguous sub-region of a device buffer into a
+/// pinned host buffer.
+///
+/// Exactly `count` elements starting at element index `src_offset` within
+/// `src` are copied into `dst[0..count]`.  The pinned buffer must be large
+/// enough to receive `count` elements.
+///
+/// This is the device→host leg of a host-staged inter-device transfer: the
+/// caller stages a slab slice into pinned memory here, then pushes it onto a
+/// different device with [`copy_htod_region_async`].
+///
+/// The copy is enqueued on `stream`; the caller must synchronise the stream
+/// before reading `dst`.
+///
+/// # Errors
+///
+/// * [`CudaError::InvalidValue`] if `src_offset + count` exceeds `src.len()`,
+///   if `count` exceeds `dst.len()`, or on offset overflow.
+/// * Other driver errors from `cuMemcpyDtoHAsync_v2`.
+pub fn copy_dtoh_region_async<T: Copy>(
+    dst: &mut PinnedBuffer<T>,
+    src: &DeviceBuffer<T>,
+    src_offset: usize,
+    count: usize,
+    stream: &Stream,
+) -> CudaResult<()> {
+    let elem_size = std::mem::size_of::<T>();
+    let src_end = src_offset
+        .checked_add(count)
+        .ok_or(CudaError::InvalidValue)?;
+    if src_end > src.len() || count > dst.len() {
+        return Err(CudaError::InvalidValue);
+    }
+    if count == 0 {
+        return Ok(());
+    }
+    let byte_count = count
+        .checked_mul(elem_size)
+        .ok_or(CudaError::InvalidValue)?;
+    let src_byte_offset = src_offset
+        .checked_mul(elem_size)
+        .ok_or(CudaError::InvalidValue)? as u64;
+    let api = try_driver()?;
+    // SAFETY: `dst` is pinned host memory with room for `count` elements,
+    // the source sub-range lies within `src`, and byte counts match.
+    let rc = unsafe {
+        (api.cu_memcpy_dtoh_async_v2)(
+            dst.as_mut_ptr().cast::<c_void>(),
+            src.as_device_ptr() + src_byte_offset,
+            byte_count,
+            stream.raw(),
+        )
+    };
+    oxicuda_driver::check(rc)
+}
+
+/// Asynchronously copies from a pinned host buffer into a contiguous
+/// sub-region of a device buffer.
+///
+/// The first `count` elements of `src` are written into `dst` starting at
+/// element index `dst_offset`.
+///
+/// This is the host→device leg of a host-staged inter-device transfer; see
+/// [`copy_dtoh_region_async`] for the device→host leg.
+///
+/// The copy is enqueued on `stream`; the caller must synchronise the stream
+/// before reusing `src`.
+///
+/// # Errors
+///
+/// * [`CudaError::InvalidValue`] if `dst_offset + count` exceeds `dst.len()`,
+///   if `count` exceeds `src.len()`, or on offset overflow.
+/// * Other driver errors from `cuMemcpyHtoDAsync_v2`.
+pub fn copy_htod_region_async<T: Copy>(
+    dst: &mut DeviceBuffer<T>,
+    dst_offset: usize,
+    src: &PinnedBuffer<T>,
+    count: usize,
+    stream: &Stream,
+) -> CudaResult<()> {
+    let elem_size = std::mem::size_of::<T>();
+    let dst_end = dst_offset
+        .checked_add(count)
+        .ok_or(CudaError::InvalidValue)?;
+    if dst_end > dst.len() || count > src.len() {
+        return Err(CudaError::InvalidValue);
+    }
+    if count == 0 {
+        return Ok(());
+    }
+    let byte_count = count
+        .checked_mul(elem_size)
+        .ok_or(CudaError::InvalidValue)?;
+    let dst_byte_offset = dst_offset
+        .checked_mul(elem_size)
+        .ok_or(CudaError::InvalidValue)? as u64;
+    let api = try_driver()?;
+    // SAFETY: `src` is pinned host memory holding at least `count` elements,
+    // the destination sub-range lies within `dst`, and byte counts match.
+    let rc = unsafe {
+        (api.cu_memcpy_htod_async_v2)(
+            dst.as_device_ptr() + dst_byte_offset,
+            src.as_ptr().cast::<c_void>(),
+            byte_count,
+            stream.raw(),
+        )
+    };
+    oxicuda_driver::check(rc)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -339,5 +453,29 @@ mod tests {
             &super::PinnedBuffer<f32>,
             &oxicuda_driver::stream::Stream,
         ) -> super::CudaResult<()> = super::copy_htod_async;
+    }
+
+    #[test]
+    fn region_dtoh_signature_compiles() {
+        type RegionDtohFn = fn(
+            &mut super::PinnedBuffer<f32>,
+            &super::DeviceBuffer<f32>,
+            usize,
+            usize,
+            &oxicuda_driver::stream::Stream,
+        ) -> super::CudaResult<()>;
+        let _f: RegionDtohFn = super::copy_dtoh_region_async;
+    }
+
+    #[test]
+    fn region_htod_signature_compiles() {
+        type RegionHtodFn = fn(
+            &mut super::DeviceBuffer<f32>,
+            usize,
+            &super::PinnedBuffer<f32>,
+            usize,
+            &oxicuda_driver::stream::Stream,
+        ) -> super::CudaResult<()>;
+        let _f: RegionHtodFn = super::copy_htod_region_async;
     }
 }

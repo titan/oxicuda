@@ -12,9 +12,36 @@ fn mat_trace(a: &[f32], n: usize) -> f32 {
     (0..n).map(|i| a[i * n + i]).sum()
 }
 
-/// Padé(3,3) approximation of matrix exponential for small matrices.
-/// expm(A) ≈ (I + A/2 + A²/12)(I - A/2 + A²/12)^{-1}
-fn expm_pade(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
+/// Padé(1,1) scaling threshold: `‖A/2^s‖∞` is reduced below this before the
+/// rational approximation is formed, keeping the truncation error small.
+pub(crate) const EXPM_PADE_THETA: f32 = 0.5;
+
+/// Infinity norm (maximum absolute row sum) of an `n × n` row-major matrix.
+pub(crate) fn mat_inf_norm(a: &[f32], n: usize) -> f32 {
+    let mut norm = 0.0_f32;
+    for i in 0..n {
+        let row_sum: f32 = (0..n).map(|j| a[i * n + j].abs()).sum();
+        if row_sum > norm {
+            norm = row_sum;
+        }
+    }
+    norm
+}
+
+/// Number of halvings `s` so that `‖A/2^s‖∞ <= EXPM_PADE_THETA`.
+pub(crate) fn expm_scaling_exponent(a: &[f32], n: usize) -> u32 {
+    let norm = mat_inf_norm(a, n);
+    if norm <= EXPM_PADE_THETA || !norm.is_finite() {
+        return 0;
+    }
+    // s = ceil(log2(norm / theta)).
+    let ratio = norm / EXPM_PADE_THETA;
+    ratio.log2().ceil().max(0.0) as u32
+}
+
+/// Padé(1,1) rational approximation `(I + A/2 + A²/12)(I - A/2 + A²/12)^{-1}`.
+/// Assumes `A` is already small in norm; callers scale beforehand.
+fn pade11(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
     let mut a2 = vec![0.0_f32; n * n];
     mat_mul(a, a, &mut a2, n);
 
@@ -27,10 +54,28 @@ fn expm_pade(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
             v[i * n + j] = identity - a[i * n + j] * 0.5 + a2[i * n + j] / 12.0;
         }
     }
-    // expm ≈ U * V^{-1}: solve V * result = U via Gauss-Jordan
+    // expm ≈ U * V^{-1}: invert V via Gauss-Jordan (partial pivoting) then GEMM.
     let v_inv = gauss_jordan_inv(&v, n, 0.0)?;
     let mut result = vec![0.0_f32; n * n];
     mat_mul(&u, &v_inv, &mut result, n);
+    Ok(result)
+}
+
+/// Padé(1,1) matrix exponential with scaling-and-squaring.
+///
+/// `expm(A) = (expm(A / 2^s))^(2^s)` where `s` is chosen so `‖A/2^s‖∞` is
+/// small enough for the bare Padé(1,1) approximant to be accurate. The scaled
+/// exponential is then squared `s` times to recover `expm(A)`.
+fn expm_pade(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
+    let s = expm_scaling_exponent(a, n);
+    let scale = 1.0_f32 / (1u64 << s) as f32;
+    let scaled: Vec<f32> = a.iter().map(|&v| v * scale).collect();
+    let mut result = pade11(&scaled, n)?;
+    for _ in 0..s {
+        let mut squared = vec![0.0_f32; n * n];
+        mat_mul(&result, &result, &mut squared, n);
+        result = squared;
+    }
     Ok(result)
 }
 
@@ -247,5 +292,82 @@ mod tests {
         let inv = gauss_jordan_inv(&id, 2, 0.0).unwrap();
         assert!((inv[0] - 1.0).abs() < 1e-5);
         assert!((inv[3] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn expm_pade_zero_is_identity() {
+        // expm(0) = I.
+        let a = vec![0.0_f32; 9];
+        let e = expm_pade(&a, 3).unwrap();
+        for i in 0..3 {
+            for j in 0..3 {
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!((e[i * 3 + j] - want).abs() < 1e-5, "expm(0) wrong");
+            }
+        }
+    }
+
+    #[test]
+    fn expm_pade_diagonal_matches_scalar_exp() {
+        // expm(diag(x)) = diag(exp(x)); covers the scaling-and-squaring path.
+        let xs = [0.3_f32, -0.7, 1.6];
+        let mut a = vec![0.0_f32; 9];
+        for (i, &x) in xs.iter().enumerate() {
+            a[i * 3 + i] = x;
+        }
+        let e = expm_pade(&a, 3).unwrap();
+        for (i, &x) in xs.iter().enumerate() {
+            assert!(
+                (e[i * 3 + i] - x.exp()).abs() < 2e-3,
+                "diag exp mismatch at {i}: got {}, want {}",
+                e[i * 3 + i],
+                x.exp()
+            );
+        }
+        // off-diagonal must stay zero
+        assert!((e[1]).abs() < 1e-4 && (e[3]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn expm_pade_nilpotent_is_exact_series() {
+        // Strictly-upper nilpotent N (N^2 = 0): expm(N) = I + N exactly.
+        let n = vec![0.0_f32, 0.4, 0.0, 0.0];
+        let e = expm_pade(&n, 2).unwrap();
+        assert!((e[0] - 1.0).abs() < 1e-4);
+        assert!((e[1] - 0.4).abs() < 1e-3);
+        assert!((e[2]).abs() < 1e-4);
+        assert!((e[3] - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn expm_scaling_exponent_grows_with_norm() {
+        // Small norm needs no scaling; large norm needs s >= 1.
+        let small = vec![0.1_f32, 0.0, 0.0, 0.1];
+        assert_eq!(expm_scaling_exponent(&small, 2), 0);
+        let large = vec![4.0_f32, 0.0, 0.0, 4.0];
+        let s = expm_scaling_exponent(&large, 2);
+        assert!(s >= 3, "norm 4 should scale down by >= 2^3, got s={s}");
+        // After scaling, the scaled norm must fall at/below the threshold.
+        let scale = 1.0_f32 / (1u64 << s) as f32;
+        let scaled: Vec<f32> = large.iter().map(|&v| v * scale).collect();
+        assert!(mat_inf_norm(&scaled, 2) <= EXPM_PADE_THETA + 1e-6);
+    }
+
+    #[test]
+    fn expm_pade_large_norm_accurate() {
+        // Without scaling-and-squaring the bare Padé(1,1) is badly wrong here;
+        // the scaled path must still recover diag(exp(x)) accurately.
+        let a = vec![3.0_f32, 0.0, 0.0, -2.5];
+        let e = expm_pade(&a, 2).unwrap();
+        assert!(
+            (e[0] - 3.0_f32.exp()).abs() / 3.0_f32.exp() < 5e-3,
+            "exp(3) mismatch: got {}",
+            e[0]
+        );
+        assert!(
+            (e[3] - (-2.5_f32).exp()).abs() < 5e-3,
+            "exp(-2.5) mismatch: got {}",
+            e[3]
+        );
     }
 }

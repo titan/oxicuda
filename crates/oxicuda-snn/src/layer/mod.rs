@@ -9,9 +9,13 @@
 
 /// Recurrent spiking layer with self-connections.
 pub mod recurrent;
+/// Spikformer spike-driven self-attention layer.
+pub mod spiking_attention;
 /// Spiking 2D convolution layer.
 pub mod spiking_conv;
 /// Spiking fully-connected layer (Linear + LIF).
 pub mod spiking_linear;
 /// Spiking max/avg pooling layer.
 pub mod spiking_pool;
+/// Threshold-dependent batch normalisation (tdBN).
+pub mod td_bn;

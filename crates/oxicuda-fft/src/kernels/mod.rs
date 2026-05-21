@@ -6,6 +6,7 @@
 
 pub mod bank_conflict_free;
 pub mod batch_fft;
+pub mod butterfly;
 pub mod fused_batch;
 pub mod large_fft;
 pub mod stockham;

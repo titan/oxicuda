@@ -14,3 +14,10 @@
 
 /// Iterative-Proportional-Fitting Schrödinger Bridge in log-domain.
 pub mod schrodinger;
+
+/// Time-Dependent Schrödinger Bridge via log-domain IPF over space-time path.
+pub mod tdsb;
+
+// ─── Re-exports ───────────────────────────────────────────────────────────────
+
+pub use tdsb::{TdsbConfig, TdsbResult, tdsb, tdsb_interpolate, tdsb_transition_plan};

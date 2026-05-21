@@ -3,11 +3,17 @@
 pub mod friedman;
 pub mod kruskal_wallis;
 pub mod mann_whitney;
+pub mod outlier;
+pub mod permanova;
 pub mod wilcoxon;
 
 pub use friedman::{FriedmanResult, friedman};
 pub use kruskal_wallis::{KruskalWallisResult, kruskal_wallis};
 pub use mann_whitney::{MannWhitneyResult, mann_whitney_u};
+pub use permanova::{
+    DistMetric, PermanovaConfig, PermanovaResult, distance_matrix_from_data, permanova,
+    permanova_f_statistic,
+};
 pub use wilcoxon::{WilcoxonResult, wilcoxon_signed_rank};
 
 /// Internal helper: compute mid-ranks (average rank for ties) given a slice of values.

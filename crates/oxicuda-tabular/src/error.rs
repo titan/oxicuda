@@ -42,6 +42,9 @@ pub enum TabularError {
     #[error("insufficient samples: need {need}, got {got}")]
     InsufficientSamples { need: usize, got: usize },
 
+    #[error("invalid parameter {name}: {msg}")]
+    InvalidParameter { name: String, msg: String },
+
     #[error("internal error: {msg}")]
     Internal { msg: String },
 }

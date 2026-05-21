@@ -4,6 +4,7 @@ description = "Optimal Transport primitives for OxiCUDA — Sinkhorn (log-stabil
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+readme = "README.md"
 license.workspace = true
 homepage = "https://github.com/cool-japan/oxicuda"
 repository.workspace = true

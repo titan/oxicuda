@@ -33,9 +33,21 @@ pub mod reward;
 pub mod sft;
 
 pub mod prelude {
+    pub use crate::dpo::cringe::{CringeBatch, CringeConfig, CringeLoss, CringeSample};
     pub use crate::dpo::dpo::{DpoConfig, dpo_log_ratio, dpo_loss, dpo_loss_per_pair};
     pub use crate::dpo::ipo::{IpoConfig, ipo_loss};
     pub use crate::dpo::kto::{KtoConfig, kto_loss};
+    pub use crate::dpo::length_dpo::{LengthDpo, LengthDpoBatch, LengthDpoConfig, LengthPair};
+    pub use crate::dpo::online_dpo::{
+        OnlineDpoConfig, PairingMode, build_preference_pair, online_dpo_pairs, online_dpo_step,
+    };
+    pub use crate::dpo::sdpo::{
+        SdpoConfig, StagedDpo, sdpo_stage_loss, sdpo_stage_margin, sdpo_total_loss,
+        sdpo_update_reference,
+    };
+    pub use crate::dpo::step_dpo::{
+        StepDpoConfig, StepDpoOutput, StepPair, step_dpo_loss, step_dpo_loss_batch,
+    };
     pub use crate::error::{RlhfError, RlhfResult};
     pub use crate::handle::{LcgRng, RlhfHandle, SmVersion};
     pub use crate::metrics::alignment::{
@@ -52,8 +64,13 @@ pub mod prelude {
         bt_reward_loss_ptx, dpo_loss_ptx, f32_hex, ipo_loss_ptx, kto_loss_ptx, orpo_odds_ptx,
         rlhf_kl_ptx, sft_mask_ptx,
     };
+    pub use crate::reward::best_of_n::{BestOfN, BestOfNConfig, ScoreAggregation};
+    pub use crate::reward::ensemble::{EnsembleAgg, RewardEnsemble, RewardEnsembleConfig};
     pub use crate::reward::model::RewardModel;
     pub use crate::reward::normalize::RewardNormalizer;
+    pub use crate::reward::process_reward::{
+        PrmConfig, PrmLabel, PrmOutput, prm_aggregate_score, prm_loss, prm_rank_solutions,
+    };
     pub use crate::sft::loss::{masked_token_ce, sft_loss};
 }
 

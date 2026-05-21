@@ -13,8 +13,9 @@ use oxicuda_ptx::builder::KernelBuilder;
 use oxicuda_ptx::ir::PtxType;
 
 use crate::error::{FftError, FftResult};
+use crate::kernels::butterfly::{StageShape as ButterflyStageShape, emit_stockham_pass_global};
 use crate::ptx_helpers::ptx_type_suffix;
-use crate::types::FftPrecision;
+use crate::types::{FftDirection, FftPrecision};
 
 // ---------------------------------------------------------------------------
 // Large FFT pass kernel generation
@@ -22,12 +23,23 @@ use crate::types::FftPrecision;
 
 /// Generates a PTX kernel for one pass of a large multi-pass FFT.
 ///
-/// Each pass applies a single radix butterfly stage, reading from
-/// `input_ptr` and writing to `output_ptr` (which may be a temporary
-/// buffer or the final output).
+/// Each pass applies a single Stockham radix butterfly stage, reading
+/// from `input_ptr` and writing to `output_ptr` (which may be a
+/// temporary buffer or the final output).  The full radix butterfly —
+/// global loads, runtime twiddle multiply and `r`-point DFT, global
+/// stores — is emitted by the shared
+/// [`butterfly`](crate::kernels::butterfly) module so every kernel
+/// generator shares one numerically-correct implementation.
 ///
 /// The kernel is launched with enough threads to cover all butterfly
 /// operations: `grid = ceil(N / (radix * block_size)), block = block_size`.
+///
+/// For a uniform-radix decomposition the Stockham sub-transform length
+/// `L` at stage `s` equals `radix^s`; that is what this pass uses.
+///
+/// The `direction` kernel parameter is retained in the PTX signature for
+/// ABI stability — the transform direction is baked into the twiddle
+/// evaluation at code-generation time.
 ///
 /// # Errors
 ///
@@ -37,16 +49,20 @@ pub fn generate_large_fft_pass(
     radix: u32,
     stage: u32,
     precision: FftPrecision,
+    direction: FftDirection,
     sm: SmVersion,
 ) -> FftResult<String> {
     let suffix = ptx_type_suffix(precision);
-    let kernel_name = format!("fft_large_pass_{suffix}_n{n}_r{radix}_s{stage}");
+    let dir_tag = match direction {
+        FftDirection::Forward => "fwd",
+        FftDirection::Inverse => "inv",
+    };
+    let kernel_name = format!("fft_large_pass_{suffix}_n{n}_r{radix}_s{stage}_{dir_tag}");
     let block_size = 256u32;
-    let elem_bytes = precision.element_bytes();
 
-    // Stride at this stage = product of radices from previous stages
-    // For Stockham, stride doubles each stage: stride = radix^stage
-    let stride: u64 = (radix as u64).pow(stage);
+    // Stockham sub-transform length L = product of previous radices.
+    // For a uniform-radix decomposition that is radix^stage.
+    let l: usize = (radix as usize).pow(stage);
 
     let ptx = KernelBuilder::new(&kernel_name)
         .target(sm)
@@ -57,112 +73,43 @@ pub fn generate_large_fft_pass(
         .param("direction", PtxType::U32)
         .max_threads_per_block(block_size)
         .body(move |b| {
+            let fft_direction = direction;
             b.comment(&format!(
-                "Large FFT pass: N={n}, radix={radix}, stage={stage}, stride={stride}"
+                "Large FFT pass: N={n}, radix={radix}, stage={stage}, L={l}, \
+                 direction={fft_direction:?}"
             ));
 
             let gid = b.global_thread_id_x();
-            let _input_ptr = b.load_param_u64("input_ptr");
-            let _output_ptr = b.load_param_u64("output_ptr");
-            let n_total = b.load_param_u32("n_total");
+            let input_ptr = b.load_param_u64("input_ptr");
+            let output_ptr = b.load_param_u64("output_ptr");
+            let _n_total = b.load_param_u32("n_total");
             let _batch_count = b.load_param_u32("batch_count");
             let _direction = b.load_param_u32("direction");
 
-            // Number of butterflies in this stage
+            // Each thread handles one radix butterfly.
             let butterflies = n / (radix as usize);
             let max_idx = b.alloc_reg(PtxType::U32);
             b.raw_ptx(&format!("mov.u32 {max_idx}, {butterflies};"));
 
-            let gid_copy = gid.clone();
+            let gid_for_body = gid.clone();
             b.if_lt_u32(gid, max_idx, |b| {
-                b.comment("decompose thread index into group and position");
-
-                // group = gid / stride
-                // pos   = gid % stride
-                let stride_reg = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("mov.u32 {stride_reg}, {};", stride as u32));
-
-                let group = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("div.u32 {group}, {gid_copy}, {stride_reg};"));
-
-                let pos = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("rem.u32 {pos}, {gid_copy}, {stride_reg};"));
-
-                // Compute input indices for each radix leg
-                // For radix-R: index[k] = group * R * stride + k * stride + pos
-                b.comment("compute addresses for radix butterfly");
-
-                let radix_times_stride = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!(
-                    "mul.lo.u32 {radix_times_stride}, {}, {stride_reg};",
-                    radix
-                ));
-
-                let base_idx = b.mul_lo_u32(group, radix_times_stride);
-                let base_with_pos = b.add_u32(base_idx, pos);
-
-                // Each element is a complex number (2 floats)
-                let complex_byte_size = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("mov.u32 {complex_byte_size}, {};", elem_bytes * 2));
-
-                // Load radix elements from global memory
-                for k in 0..radix {
-                    let elem_idx = if k == 0 {
-                        base_with_pos.clone()
-                    } else {
-                        let offset = b.alloc_reg(PtxType::U32);
-                        b.raw_ptx(&format!(
-                            "mad.lo.u32 {offset}, {k}, {stride_reg}, {base_with_pos};"
-                        ));
-                        offset
-                    };
-
-                    let byte_off = b.mul_wide_u32_to_u64(elem_idx, complex_byte_size.clone());
-                    let addr = b.add_u64(_input_ptr.clone(), byte_off);
-
-                    b.comment(&format!("  load element {k} of radix-{radix}"));
-                    match precision {
-                        FftPrecision::Single => {
-                            let _re = b.load_global_f32(addr.clone());
-                            let im_off = b.alloc_reg(PtxType::U64);
-                            b.raw_ptx(&format!("add.u64 {im_off}, {addr}, {elem_bytes};"));
-                            let _im = b.load_global_f32(im_off);
-                        }
-                        FftPrecision::Double => {
-                            let _re = b.load_global_f64(addr.clone());
-                            let im_off = b.alloc_reg(PtxType::U64);
-                            b.raw_ptx(&format!("add.u64 {im_off}, {addr}, {elem_bytes};"));
-                            let _im = b.load_global_f64(im_off);
-                        }
-                    }
-                }
-
-                // Butterfly computation
-                b.comment("butterfly computation (twiddle + DFT)");
-                // The actual butterfly would use the radix modules here
-
-                // Store results
-                b.comment("store butterfly results");
-                for k in 0..radix {
-                    let elem_idx = if k == 0 {
-                        base_with_pos.clone()
-                    } else {
-                        let offset = b.alloc_reg(PtxType::U32);
-                        b.raw_ptx(&format!(
-                            "mad.lo.u32 {offset}, {k}, {stride_reg}, {base_with_pos};"
-                        ));
-                        offset
-                    };
-
-                    let byte_off = b.mul_wide_u32_to_u64(elem_idx, complex_byte_size.clone());
-                    let addr = b.add_u64(_output_ptr.clone(), byte_off);
-
-                    b.comment(&format!("  store element {k} of radix-{radix}"));
-                    // Actual store would go here
-                    let _ = addr;
-                }
-
-                let _ = n_total;
+                // The shared emitter computes the Stockham index mapping,
+                // loads the radix-r legs, applies the runtime twiddle and
+                // the radix-r DFT, and emits the real `st.global` stores.
+                let shape = ButterflyStageShape {
+                    n,
+                    radix: radix as usize,
+                    l,
+                    direction: fft_direction,
+                };
+                emit_stockham_pass_global(
+                    b,
+                    precision,
+                    shape,
+                    &gid_for_body,
+                    &input_ptr,
+                    &output_ptr,
+                );
             });
 
             b.ret();
@@ -198,7 +145,14 @@ mod tests {
 
     #[test]
     fn large_fft_pass_smoke() {
-        let result = generate_large_fft_pass(8192, 8, 0, FftPrecision::Single, SmVersion::Sm80);
+        let result = generate_large_fft_pass(
+            8192,
+            8,
+            0,
+            FftPrecision::Single,
+            FftDirection::Forward,
+            SmVersion::Sm80,
+        );
         assert!(result.is_ok());
         if let Ok(ptx) = result {
             assert!(ptx.contains("fft_large_pass_f32_n8192"));
@@ -210,5 +164,56 @@ mod tests {
         let bytes = temp_buffer_bytes(8192, 1, FftPrecision::Single);
         // 8192 * 1 * 8 (complex f32) = 65536
         assert_eq!(bytes, 65536);
+    }
+
+    /// The large-FFT pass must emit real butterfly arithmetic and — most
+    /// importantly — real `st.global` stores (the stale code discarded
+    /// the loaded values into `_` registers and never stored anything).
+    #[test]
+    fn large_fft_pass_emits_real_global_stores() {
+        let ptx = generate_large_fft_pass(
+            8192,
+            8,
+            1,
+            FftPrecision::Single,
+            FftDirection::Forward,
+            SmVersion::Sm80,
+        )
+        .expect("large pass generation must succeed");
+        assert!(ptx.contains("ld.global.f32"), "expected global loads");
+        assert!(
+            ptx.contains("st.global.f32"),
+            "expected real global stores (results must be written back)"
+        );
+        assert!(ptx.contains("add.f32") && ptx.contains("sub.f32"));
+        assert!(
+            ptx.contains("mul.rn.f32") || ptx.contains("fma.rn.f32"),
+            "expected real butterfly multiplies"
+        );
+        assert!(
+            ptx.contains("cos.approx.f32") && ptx.contains("sin.approx.f32"),
+            "expected runtime twiddle evaluation"
+        );
+        // Stale placeholders must be gone.
+        assert!(!ptx.contains("Actual store would go here"));
+        assert!(!ptx.contains("actual butterfly would use the radix modules"));
+    }
+
+    /// f64 large-FFT pass: the twiddle must use the range-reduced
+    /// polynomial, never the (non-existent) `sin.approx.f64`.
+    #[test]
+    fn large_fft_pass_f64_polynomial_twiddle() {
+        let ptx = generate_large_fft_pass(
+            8192,
+            8,
+            2,
+            FftPrecision::Double,
+            FftDirection::Inverse,
+            SmVersion::Sm80,
+        )
+        .expect("f64 large pass");
+        assert!(ptx.contains("st.global.f64"), "expected f64 global stores");
+        assert!(!ptx.contains("sin.approx.f64"));
+        assert!(ptx.contains("fma.rn.f64"));
     }
 }

@@ -76,9 +76,11 @@ impl FftHandle {
         let ptx_cache = PtxCache::new()
             .map_err(|e| FftError::InternalError(format!("PTX cache init failed: {e}")))?;
 
-        // Default to Ampere (sm_80) when we cannot query the device.
-        // In a full implementation, this would query the device attribute.
-        let sm_version = SmVersion::Sm80;
+        // Detect the GPU architecture from the context's device by querying
+        // its CUDA compute capability (`COMPUTE_CAPABILITY_MAJOR`/`MINOR`).
+        // Falls back to Ampere (sm_80) only if the query genuinely fails or
+        // reports a capability this build does not recognise.
+        let sm_version = detect_sm_version(ctx);
 
         Ok(Self {
             context: Arc::clone(ctx),
@@ -241,5 +243,155 @@ impl std::fmt::Debug for FftHandle {
         f.debug_struct("FftHandle")
             .field("sm_version", &self.sm_version)
             .finish_non_exhaustive()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SM version detection
+// ---------------------------------------------------------------------------
+
+/// Detects the target [`SmVersion`] for the device backing `ctx`.
+///
+/// This queries the CUDA compute capability of the context's device via
+/// `cuDeviceGetAttribute` (the `COMPUTE_CAPABILITY_MAJOR` / `MINOR`
+/// attributes, wrapped by [`oxicuda_driver::device::Device::compute_capability`])
+/// and maps the resulting `(major, minor)` pair to an `SmVersion`:
+///
+/// | Compute capability | `SmVersion`        |
+/// |--------------------|--------------------|
+/// | 7.5                | [`SmVersion::Sm75`] |
+/// | 8.0                | [`SmVersion::Sm80`] |
+/// | 8.6                | [`SmVersion::Sm86`] |
+/// | 8.9                | [`SmVersion::Sm89`] |
+/// | 9.0                | [`SmVersion::Sm90`] |
+/// | 10.0               | [`SmVersion::Sm100`] |
+/// | 12.0               | [`SmVersion::Sm120`] |
+///
+/// The `9.0a` accelerated profile ([`SmVersion::Sm90a`]) is not a distinct
+/// hardware capability — the driver reports plain `9.0` for Hopper parts — so
+/// it is never produced by automatic detection; callers that need the `a`
+/// profile select it explicitly via [`FftHandle::with_sm_version`].
+///
+/// Falls back to [`SmVersion::Sm80`] (Ampere) only when the attribute query
+/// genuinely fails or reports a capability this build does not recognise.
+fn detect_sm_version(ctx: &Arc<Context>) -> SmVersion {
+    match ctx.device().compute_capability() {
+        Ok((major, minor)) => {
+            SmVersion::from_compute_capability(major, minor).unwrap_or(SmVersion::Sm80)
+        }
+        Err(_) => SmVersion::Sm80,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Attempts to build a CUDA context on device 0.
+    ///
+    /// Returns `None` so the caller skips the test when no CUDA device is
+    /// available, following the crate's device-test skip convention.
+    fn gpu_context() -> Option<Arc<Context>> {
+        if oxicuda_driver::init().is_err() {
+            return None;
+        }
+        let device = oxicuda_driver::device::Device::get(0).ok()?;
+        let context = Context::new(&device).ok()?;
+        Some(Arc::new(context))
+    }
+
+    /// The compute-capability mapping must cover every recognised pair.
+    #[test]
+    fn from_compute_capability_covers_known_arches() {
+        assert_eq!(
+            SmVersion::from_compute_capability(7, 5),
+            Some(SmVersion::Sm75)
+        );
+        assert_eq!(
+            SmVersion::from_compute_capability(8, 0),
+            Some(SmVersion::Sm80)
+        );
+        assert_eq!(
+            SmVersion::from_compute_capability(8, 6),
+            Some(SmVersion::Sm86)
+        );
+        assert_eq!(
+            SmVersion::from_compute_capability(8, 9),
+            Some(SmVersion::Sm89)
+        );
+        assert_eq!(
+            SmVersion::from_compute_capability(9, 0),
+            Some(SmVersion::Sm90)
+        );
+        assert_eq!(
+            SmVersion::from_compute_capability(10, 0),
+            Some(SmVersion::Sm100)
+        );
+        assert_eq!(
+            SmVersion::from_compute_capability(12, 0),
+            Some(SmVersion::Sm120)
+        );
+        // Unknown capabilities have no mapping (detection falls back).
+        assert_eq!(SmVersion::from_compute_capability(6, 1), None);
+    }
+
+    /// `with_sm_version` must honour the explicitly-requested architecture.
+    #[test]
+    fn with_sm_version_round_trips() {
+        let Some(ctx) = gpu_context() else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+        let handle = FftHandle::with_sm_version(&ctx, SmVersion::Sm75)
+            .expect("handle creation must succeed");
+        assert_eq!(handle.sm_version(), SmVersion::Sm75);
+    }
+
+    /// `FftHandle::new` must detect the *real* compute capability of the
+    /// installed GPU instead of hardcoding `Sm80`.
+    ///
+    /// On this box (an NVIDIA RTX A4000) the device reports compute
+    /// capability 8.6, so detection must yield [`SmVersion::Sm86`].
+    #[test]
+    fn new_detects_real_sm_version() {
+        let Some(ctx) = gpu_context() else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+
+        // Cross-check against a direct compute-capability query.
+        let expected = match ctx.device().compute_capability() {
+            Ok((major, minor)) => {
+                SmVersion::from_compute_capability(major, minor).unwrap_or(SmVersion::Sm80)
+            }
+            Err(_) => {
+                eprintln!("skipping: compute capability query failed");
+                return;
+            }
+        };
+
+        let handle = FftHandle::new(&ctx).expect("handle creation must succeed");
+        assert_eq!(
+            handle.sm_version(),
+            expected,
+            "FftHandle::new must detect the device's real SM version"
+        );
+
+        // The RTX A4000 is an Ampere GA10x part (sm_86).  When this test runs
+        // on that hardware, confirm detection did not silently fall back to
+        // the hardcoded Sm80 default.
+        if let Ok(name) = ctx.device().name() {
+            if name.contains("A4000") {
+                assert_eq!(
+                    handle.sm_version(),
+                    SmVersion::Sm86,
+                    "RTX A4000 must be detected as sm_86, not the Sm80 fallback"
+                );
+            }
+        }
     }
 }

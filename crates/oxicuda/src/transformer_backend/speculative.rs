@@ -220,7 +220,18 @@ impl SpeculativeDecoder {
 
     /// Build a speculation tree from draft model outputs.
     ///
-    /// Returns the tree structure for tree verification.
+    /// Constructs the full `width`-ary token tree of the requested depth and
+    /// returns every root-to-leaf path. A tree of depth `D` and branching
+    /// factor `W` has `W^(D-1)` leaves, so this returns that many paths, each
+    /// of length `D` (one token per tree level). Tree verification then checks
+    /// all paths in a single batched target-model forward pass and keeps the
+    /// longest accepted prefix.
+    ///
+    /// Each tree level draws its candidate tokens from the top-`W` indices of
+    /// the root distribution; deeper levels rotate the candidate set so that
+    /// sibling sub-trees explore distinct continuations. When a real draft
+    /// model is wired in, `extend_path` is the single
+    /// place that would consult it for per-node candidates.
     pub fn build_tree(&self, root_probs: &[f64], depth: usize) -> TransformerResult<Vec<Vec<u32>>> {
         if root_probs.is_empty() {
             return Err(TransformerError::SpeculativeError(
@@ -228,17 +239,30 @@ impl SpeculativeDecoder {
             ));
         }
 
-        let effective_depth = depth.min(self.config.max_tree_depth);
-        let effective_width = self.config.max_tree_width;
+        let effective_depth = depth.min(self.config.max_tree_depth).max(1);
+        let effective_width = self.config.max_tree_width.max(1);
+
+        // Candidate token pool: the top-`width` tokens of the root distribution.
+        let candidates = self.top_k_indices(root_probs, effective_width);
+        if candidates.is_empty() {
+            return Err(TransformerError::SpeculativeError(
+                "no candidate tokens in root distribution".to_string(),
+            ));
+        }
 
         let mut paths = Vec::new();
-        let top_k = self.top_k_indices(root_probs, effective_width);
-
-        // Generate tree paths (DFS)
-        for &token_id in &top_k {
-            let mut path = vec![token_id];
-            self.extend_path(&mut path, effective_depth - 1, effective_width);
-            paths.push(path);
+        // The tree root branches into one sub-tree per top-`width` token.
+        for (branch, &token_id) in candidates.iter().enumerate() {
+            let mut path = Vec::with_capacity(effective_depth);
+            path.push(token_id);
+            self.extend_path(
+                &mut path,
+                &mut paths,
+                effective_depth - 1,
+                effective_width,
+                &candidates,
+                branch,
+            );
         }
 
         Ok(paths)
@@ -407,10 +431,50 @@ impl SpeculativeDecoder {
         indexed.iter().take(k).map(|(i, _)| *i as u32).collect()
     }
 
-    fn extend_path(&self, _path: &mut [u32], _remaining_depth: usize, _width: usize) {
-        // In a real system, this would query the draft model.
-        // For the infrastructure, we provide the tree structure.
-        // Actual extension happens when draft model outputs are available.
+    /// Recursively extends `path` into the full `width`-ary sub-tree, pushing
+    /// every completed root-to-leaf path into `paths`.
+    ///
+    /// `remaining_depth` is the number of tree levels still to add below the
+    /// current node. When it reaches zero the current `path` is a finished
+    /// leaf and is recorded. Otherwise the node branches into `width`
+    /// children: child `c` is assigned a candidate token chosen from
+    /// `candidates` with a per-level rotation so that distinct sub-trees
+    /// explore distinct continuations rather than collapsing onto one path.
+    fn extend_path(
+        &self,
+        path: &mut Vec<u32>,
+        paths: &mut Vec<Vec<u32>>,
+        remaining_depth: usize,
+        width: usize,
+        candidates: &[u32],
+        rotation: usize,
+    ) {
+        if remaining_depth == 0 {
+            // Leaf reached: this path is a complete speculative candidate.
+            paths.push(path.clone());
+            return;
+        }
+
+        // The current depth index (0 == root) drives the candidate rotation,
+        // ensuring sibling sub-trees diverge on their continuation tokens.
+        let depth_index = path.len();
+        for child in 0..width {
+            // Select a distinct candidate token for this child. The rotation
+            // mixes the depth, the branch taken higher up, and the child
+            // index so the W-ary tree expands into W^remaining_depth leaves
+            // with reproducible, non-degenerate token sequences.
+            let idx = (child + depth_index + rotation) % candidates.len();
+            path.push(candidates[idx]);
+            self.extend_path(
+                path,
+                paths,
+                remaining_depth - 1,
+                width,
+                candidates,
+                rotation.wrapping_add(child).wrapping_add(1),
+            );
+            path.pop();
+        }
     }
 }
 
@@ -587,7 +651,68 @@ mod tests {
             .build_tree(&probs, 3)
             .expect("build_tree with valid probs should succeed");
         assert!(!paths.is_empty());
-        assert!(paths.len() <= 3); // max_tree_width
+        // depth=3, width=3 => 3 root branches each expanding a 3-ary sub-tree
+        // of remaining depth 2 => 3 * 3^2 = 27 root-to-leaf paths.
+        assert_eq!(paths.len(), 27);
+        // Every path spans the full requested depth.
+        for path in &paths {
+            assert_eq!(path.len(), 3, "each path must span the full tree depth");
+        }
+    }
+
+    #[test]
+    fn test_build_tree_depth_one() {
+        // Depth 1 collapses to one token per branch: the seed tokens only.
+        let decoder = SpeculativeDecoder::new(default_config())
+            .expect("SpeculativeDecoder creation with valid config should succeed");
+        let probs = vec![0.1, 0.4, 0.3, 0.2];
+        let paths = decoder
+            .build_tree(&probs, 1)
+            .expect("build_tree with depth 1 should succeed");
+        // width=3 root branches, each a length-1 leaf.
+        assert_eq!(paths.len(), 3);
+        for path in &paths {
+            assert_eq!(path.len(), 1);
+        }
+        // Root tokens are the top-3 of [0.1, 0.4, 0.3, 0.2] => indices 1, 2, 3.
+        let roots: Vec<u32> = paths.iter().map(|p| p[0]).collect();
+        assert!(roots.contains(&1) && roots.contains(&2) && roots.contains(&3));
+    }
+
+    #[test]
+    fn test_build_tree_respects_max_depth() {
+        // Requesting a depth above max_tree_depth clamps to the configured max.
+        let mut cfg = default_config();
+        cfg.max_tree_depth = 2;
+        cfg.max_tree_width = 2;
+        let decoder = SpeculativeDecoder::new(cfg)
+            .expect("SpeculativeDecoder creation with valid config should succeed");
+        let probs = vec![0.25, 0.25, 0.25, 0.25];
+        let paths = decoder
+            .build_tree(&probs, 10)
+            .expect("build_tree should clamp depth");
+        // Clamped depth=2, width=2 => 2 root branches * 2^1 = 4 paths of length 2.
+        assert_eq!(paths.len(), 4);
+        for path in &paths {
+            assert_eq!(path.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_build_tree_width_one_is_linear() {
+        // Width 1 yields a single linear chain per root token.
+        let mut cfg = default_config();
+        cfg.max_tree_width = 1;
+        cfg.max_tree_depth = 5;
+        let decoder = SpeculativeDecoder::new(cfg)
+            .expect("SpeculativeDecoder creation with valid config should succeed");
+        let probs = vec![0.5, 0.3, 0.2];
+        let paths = decoder
+            .build_tree(&probs, 4)
+            .expect("build_tree with width 1 should succeed");
+        // width=1 => exactly one path, of the full depth.
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].len(), 4);
     }
 
     #[test]

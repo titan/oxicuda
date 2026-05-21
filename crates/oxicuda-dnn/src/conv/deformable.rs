@@ -589,6 +589,109 @@ fn ptx_load_type(float_type: PtxType) -> &'static str {
     }
 }
 
+/// Emits a half-precision (`f16`) atomic add via a 32-bit compare-and-swap
+/// loop.
+///
+/// CUDA exposes a native `atom.global.add.f16` only on a subset of the
+/// architectures DCNv2 targets, so the deformable backward-input scatter
+/// cannot rely on it. A plain `st.global` would lose updates whenever two
+/// threads scatter to the same input pixel — a common case, since the
+/// bilinear taps of neighbouring kernel positions overlap.
+///
+/// This routine performs the read-modify-write atomically:
+///
+/// 1. Mask the byte address down to the enclosing aligned 32-bit word and
+///    derive the lane bit-offset (`addr & 2` → `{0, 16}`): the target
+///    `f16` occupies either bits `0..16` (low) or `16..32` (high).
+/// 2. Loop: load the current 32-bit word, extract the target lane with
+///    `bfe.u32`, reinterpret it as `f16`, promote to `f32`, add the
+///    contribution, demote back to `f16`, splice the new lane into the word
+///    with `bfi.b32`, and `atom.global.cas.b32`. Retry while the CAS
+///    observes a word other than the one we read.
+///
+/// The 16-bit reinterpretation between an `f16` value and the 32-bit lane
+/// register goes through a `.b16` (untyped 16-bit) register: `cvt.u16.u32`
+/// truncates the extracted field into it, `mov.b16` bit-copies it to/from
+/// the `.f16` register, and `cvt.u32.u16` zero-extends it back. No numeric
+/// float conversion happens during the bit shuffling.
+///
+/// `addr` is the byte address of the target `f16` (a `u64` register name);
+/// `value` is the `f16` register name holding the increment.
+fn emit_f16_atomic_add(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, addr: &str, value: &str) {
+    b.comment("--- f16 atomic add (32-bit CAS loop) ---");
+
+    // Aligned 32-bit word address = addr & ~0x3.
+    let word_addr = b.alloc_reg(PtxType::U64);
+    b.raw_ptx(&format!("and.b64 {word_addr}, {addr}, -4;"));
+
+    // Byte offset of the half within the word: addr & 0x2 -> {0, 2}.
+    let byte_off = b.alloc_reg(PtxType::U64);
+    b.raw_ptx(&format!("and.b64 {byte_off}, {addr}, 2;"));
+
+    // Bit shift for the target lane: 0 for the low half, 16 for the high
+    // half. shift = (byte_off as u32) << 3  (0 -> 0, 2 -> 16).
+    let shift = b.alloc_reg(PtxType::U32);
+    let byte_off_u32 = b.alloc_reg(PtxType::U32);
+    b.raw_ptx(&format!("cvt.u32.u64 {byte_off_u32}, {byte_off};"));
+    b.raw_ptx(&format!("shl.b32 {shift}, {byte_off_u32}, 3;"));
+
+    // Promote the increment to f32 once, outside the retry loop.
+    let value_f32 = b.alloc_reg(PtxType::F32);
+    b.raw_ptx(&format!("cvt.f32.f16 {value_f32}, {value};"));
+
+    // Registers reused across loop iterations.
+    let old_word = b.alloc_reg(PtxType::B32);
+    let lane_bits = b.alloc_reg(PtxType::U32);
+    let lane_b16 = b.alloc_reg(PtxType::B16);
+    let lane_f16 = b.alloc_reg(PtxType::F16);
+    let lane_f32 = b.alloc_reg(PtxType::F32);
+    let sum_f32 = b.alloc_reg(PtxType::F32);
+    let sum_f16 = b.alloc_reg(PtxType::F16);
+    let sum_b16 = b.alloc_reg(PtxType::B16);
+    let sum_bits = b.alloc_reg(PtxType::U32);
+    let new_word = b.alloc_reg(PtxType::B32);
+    let cas_ret = b.alloc_reg(PtxType::B32);
+    let len16 = b.alloc_reg(PtxType::U32);
+    let pred_done = b.alloc_reg(PtxType::Pred);
+
+    // Field length for bfe/bfi is a constant 16 bits.
+    b.raw_ptx(&format!("mov.u32 {len16}, 16;"));
+
+    let cas_loop = b.fresh_label("f16_cas_loop");
+    b.raw_ptx(&format!("{cas_loop}:"));
+
+    // Load the current 32-bit word.
+    b.raw_ptx(&format!("ld.global.b32 {old_word}, [{word_addr}];"));
+
+    // Extract the 16-bit lane into the low bits of a u32 register, then
+    // narrow it into a b16 register and reinterpret those bits as f16.
+    b.raw_ptx(&format!(
+        "bfe.u32 {lane_bits}, {old_word}, {shift}, {len16};"
+    ));
+    b.raw_ptx(&format!("cvt.u16.u32 {lane_b16}, {lane_bits};"));
+    b.raw_ptx(&format!("mov.b16 {lane_f16}, {lane_b16};"));
+
+    // Promote the lane to f32, add the contribution, demote back to f16.
+    b.raw_ptx(&format!("cvt.f32.f16 {lane_f32}, {lane_f16};"));
+    b.raw_ptx(&format!("add.rn.f32 {sum_f32}, {lane_f32}, {value_f32};"));
+    b.raw_ptx(&format!("cvt.rn.f16.f32 {sum_f16}, {sum_f32};"));
+
+    // Reinterpret the new f16 as 16 raw bits, widen to u32, splice it into
+    // the target lane of the word with bfi.
+    b.raw_ptx(&format!("mov.b16 {sum_b16}, {sum_f16};"));
+    b.raw_ptx(&format!("cvt.u32.u16 {sum_bits}, {sum_b16};"));
+    b.raw_ptx(&format!(
+        "bfi.b32 {new_word}, {sum_bits}, {old_word}, {shift}, {len16};"
+    ));
+
+    // Atomic compare-and-swap; retry if another thread changed the word.
+    b.raw_ptx(&format!(
+        "atom.global.cas.b32 {cas_ret}, [{word_addr}], {old_word}, {new_word};"
+    ));
+    b.raw_ptx(&format!("setp.eq.b32 {pred_done}, {cas_ret}, {old_word};"));
+    b.raw_ptx(&format!("@!{pred_done} bra {cas_loop};"));
+}
+
 // ---------------------------------------------------------------------------
 // Forward body emitter
 // ---------------------------------------------------------------------------
@@ -1474,9 +1577,12 @@ fn emit_backward_input_body(
                         "atom.global.add.f32 {tmp_f}, [{addr64}], {scatter_val};"
                     ));
                 } else {
-                    // F16 atomicAdd not available on all archs; use CAS loop in production.
-                    // For now, emit a non-atomic store (GPU-test gated anyway).
-                    b.raw_ptx(&format!("st.global.{lt} [{addr64}], {scatter_val};"));
+                    // F16 has no native global atomic add on Turing/Ampere, so
+                    // a concurrent `st.global` would race: two threads
+                    // scattering to the same input pixel would lose updates.
+                    // Emit a 32-bit CAS loop that atomically reads-modifies-
+                    // writes the aligned word containing the target half lane.
+                    emit_f16_atomic_add(b, &addr64.to_string(), &scatter_val.to_string());
                 }
 
                 b.raw_ptx(&format!("{corner_skip}:"));

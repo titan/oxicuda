@@ -3,7 +3,10 @@
 //! Pure-Rust CPU reference implementation providing:
 //! - **`patch_embed`**: strided Conv2D patch embedder, sinusoidal & learnable
 //!   positional encodings.
-//! - **`vit`**: ViT block (pre-norm MHSA + MLP), encoder stack, full ViT model.
+//! - **`vit`**: ViT block (pre-norm MHSA + MLP), encoder stack, full ViT model,
+//!   and the Swin Transformer windowed / shifted-window block.
+//! - **`convnext`**: ConvNeXt modern-CNN block (depthwise conv + channel
+//!   LayerNorm + inverted-bottleneck + layer scale).
 //! - **`clip`**: CLIP vision encoder, projection head, InfoNCE contrastive loss.
 //! - **`augment`**: geometric, photometric, and normalisation image augmentations.
 //! - **`fpn`**: Feature Pyramid Network (lateral 1×1 convolutions + top-down pathway).
@@ -15,6 +18,7 @@
 
 pub mod augment;
 pub mod clip;
+pub mod convnext;
 pub mod detection;
 pub mod error;
 pub mod fpn;
@@ -33,7 +37,11 @@ pub mod prelude {
     pub use crate::clip::{
         ClipVisionConfig, ClipVisionEncoder, ProjectionHead, contrastive::info_nce_loss,
     };
-    pub use crate::detection::{DetrConfig, DetrDecoder, bipartite_match, roi_align};
+    pub use crate::convnext::block::{ConvNextBlock, ConvNextConfig};
+    pub use crate::detection::{
+        AnchorConfig, AnchorGenerator, DetrConfig, DetrDecoder, MaskHead, MaskHeadConfig,
+        bipartite_match, iou, nms, roi_align, soft_nms,
+    };
     pub use crate::error::{VisionError, VisionResult};
     pub use crate::fpn::{FeatureMap, Fpn, FpnConfig};
     pub use crate::handle::{LcgRng, SmVersion, VisionHandle};
@@ -44,6 +52,7 @@ pub mod prelude {
         adaptive_avg_pool_ptx, bilinear_interp_ptx, contrastive_loss_ptx, focal_loss_ptx,
         image_normalize_ptx, patch_embed_ptx, roi_align_ptx,
     };
+    pub use crate::vit::swin::{SwinBlock, SwinConfig, SwinWeights};
     pub use crate::vit::{ViTConfig, ViTEncoder, ViTModel};
 }
 

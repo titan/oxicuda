@@ -15,7 +15,16 @@
 //! All routines run on CPU; complementary PTX kernels in [`crate::ptx_kernels`] cover
 //! the per-element steps (`temp_scale_logits_ptx`, `ece_bucket_ptx`).
 
+pub mod beta;
+pub mod conformal;
+pub mod histogram;
 pub mod isotonic;
 pub mod metrics;
 pub mod platt;
 pub mod temperature;
+pub mod vector_scaling;
+
+pub use beta::{BetaCalibConfig, BetaCalibrator};
+pub use conformal::{ConformalClassifier, ConformalRegressor, RapsClassifier, conformal_quantile};
+pub use histogram::{BinStrategy, HistogramBinCalibrator, HistogramBinConfig};
+pub use vector_scaling::{ScalingMode, VectorScaler, VectorScalingConfig};

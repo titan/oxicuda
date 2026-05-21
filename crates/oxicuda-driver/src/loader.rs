@@ -1133,6 +1133,179 @@ pub struct DriverApi {
     /// stream-ordered memory API is not supported.
     pub cu_mem_free_async:
         Option<unsafe extern "C" fn(dptr: CUdeviceptr, hstream: CUstream) -> CUresult>,
+
+    /// `cuMemAllocAsync(dptr*, bytesize, hStream) -> CUresult`
+    ///
+    /// Asynchronously allocates memory from the current context's default
+    /// pool on a stream.  When `None`, the stream-ordered memory API is not
+    /// supported.
+    pub cu_mem_alloc_async: Option<
+        unsafe extern "C" fn(
+            dptr: *mut CUdeviceptr,
+            bytesize: usize,
+            hstream: CUstream,
+        ) -> CUresult,
+    >,
+
+    /// `cuMemPoolTrimTo(pool, minBytesToKeep) -> CUresult`
+    ///
+    /// Releases freed memory back to the OS, keeping at least
+    /// `minBytesToKeep` bytes reserved.  When `None`, the memory pool API
+    /// is not supported.
+    pub cu_mem_pool_trim_to:
+        Option<unsafe extern "C" fn(pool: CUmemoryPool, min_bytes_to_keep: usize) -> CUresult>,
+
+    /// `cuMemPoolSetAttribute(pool, attr, value*) -> CUresult`
+    ///
+    /// Sets a writable attribute on a memory pool.  When `None`, the memory
+    /// pool API is not supported.
+    pub cu_mem_pool_set_attribute: Option<
+        unsafe extern "C" fn(
+            pool: CUmemoryPool,
+            attr: CUmemPoolAttribute,
+            value: *mut c_void,
+        ) -> CUresult,
+    >,
+
+    /// `cuMemPoolGetAttribute(pool, attr, value*) -> CUresult`
+    ///
+    /// Reads an attribute from a memory pool.  When `None`, the memory pool
+    /// API is not supported.
+    pub cu_mem_pool_get_attribute: Option<
+        unsafe extern "C" fn(
+            pool: CUmemoryPool,
+            attr: CUmemPoolAttribute,
+            value: *mut c_void,
+        ) -> CUresult,
+    >,
+
+    /// `cuMemPoolSetAccess(pool, map*, count) -> CUresult`
+    ///
+    /// Controls the per-device visibility of allocations from a memory pool.
+    /// When `None`, the memory pool API is not supported.
+    pub cu_mem_pool_set_access: Option<
+        unsafe extern "C" fn(
+            pool: CUmemoryPool,
+            map: *const CUmemAccessDesc,
+            count: usize,
+        ) -> CUresult,
+    >,
+
+    /// `cuDeviceGetDefaultMemPool(pool*, dev) -> CUresult`
+    ///
+    /// Returns the default stream-ordered memory pool of a device.  When
+    /// `None`, the memory pool API is not supported.
+    pub cu_device_get_default_mem_pool:
+        Option<unsafe extern "C" fn(pool: *mut CUmemoryPool, dev: CUdevice) -> CUresult>,
+
+    // -- CUDA Graph API (optional, CUDA 10.0+) ------------------------------
+    /// `cuGraphCreate(phGraph*, flags) -> CUresult`
+    ///
+    /// Creates an empty CUDA graph.  When `None`, the graph API is not
+    /// supported by the loaded driver.
+    pub cu_graph_create:
+        Option<unsafe extern "C" fn(ph_graph: *mut CUgraph, flags: u32) -> CUresult>,
+
+    /// `cuGraphDestroy(hGraph) -> CUresult`
+    ///
+    /// Destroys a CUDA graph.  When `None`, the graph API is not supported.
+    pub cu_graph_destroy: Option<unsafe extern "C" fn(h_graph: CUgraph) -> CUresult>,
+
+    /// `cuGraphAddKernelNode(phGraphNode*, hGraph, dependencies*, numDependencies, nodeParams*) -> CUresult`
+    ///
+    /// Adds a kernel-launch node to a graph.  When `None`, the graph API is
+    /// not supported.
+    pub cu_graph_add_kernel_node: Option<
+        unsafe extern "C" fn(
+            ph_graph_node: *mut CUgraphNode,
+            h_graph: CUgraph,
+            dependencies: *const CUgraphNode,
+            num_dependencies: usize,
+            node_params: *const CUDA_KERNEL_NODE_PARAMS,
+        ) -> CUresult,
+    >,
+
+    /// `cuGraphAddMemcpyNode(phGraphNode*, hGraph, dependencies*, numDependencies, copyParams*, ctx) -> CUresult`
+    ///
+    /// Adds a memory-copy node to a graph.  When `None`, the graph API is
+    /// not supported.
+    pub cu_graph_add_memcpy_node: Option<
+        unsafe extern "C" fn(
+            ph_graph_node: *mut CUgraphNode,
+            h_graph: CUgraph,
+            dependencies: *const CUgraphNode,
+            num_dependencies: usize,
+            copy_params: *const CUDA_MEMCPY3D,
+            ctx: CUcontext,
+        ) -> CUresult,
+    >,
+
+    /// `cuGraphAddMemsetNode(phGraphNode*, hGraph, dependencies*, numDependencies, memsetParams*, ctx) -> CUresult`
+    ///
+    /// Adds a memset node to a graph.  When `None`, the graph API is not
+    /// supported.
+    pub cu_graph_add_memset_node: Option<
+        unsafe extern "C" fn(
+            ph_graph_node: *mut CUgraphNode,
+            h_graph: CUgraph,
+            dependencies: *const CUgraphNode,
+            num_dependencies: usize,
+            memset_params: *const CUDA_MEMSET_NODE_PARAMS,
+            ctx: CUcontext,
+        ) -> CUresult,
+    >,
+
+    /// `cuGraphAddEmptyNode(phGraphNode*, hGraph, dependencies*, numDependencies) -> CUresult`
+    ///
+    /// Adds an empty (no-op) node to a graph.  When `None`, the graph API
+    /// is not supported.
+    pub cu_graph_add_empty_node: Option<
+        unsafe extern "C" fn(
+            ph_graph_node: *mut CUgraphNode,
+            h_graph: CUgraph,
+            dependencies: *const CUgraphNode,
+            num_dependencies: usize,
+        ) -> CUresult,
+    >,
+
+    /// `cuGraphInstantiateWithFlags(phGraphExec*, hGraph, flags) -> CUresult`
+    ///
+    /// Instantiates a graph into an executable form (CUDA 11.4+).  When
+    /// `None`, fall back to [`cu_graph_instantiate`](Self::cu_graph_instantiate).
+    pub cu_graph_instantiate_with_flags: Option<
+        unsafe extern "C" fn(
+            ph_graph_exec: *mut CUgraphExec,
+            h_graph: CUgraph,
+            flags: u64,
+        ) -> CUresult,
+    >,
+
+    /// `cuGraphInstantiate_v2(phGraphExec*, hGraph, phErrorNode*, logBuffer*, bufferSize) -> CUresult`
+    ///
+    /// Instantiates a graph into an executable form (legacy signature).
+    /// When `None`, the graph API is not supported.
+    pub cu_graph_instantiate: Option<
+        unsafe extern "C" fn(
+            ph_graph_exec: *mut CUgraphExec,
+            h_graph: CUgraph,
+            ph_error_node: *mut CUgraphNode,
+            log_buffer: *mut c_char,
+            buffer_size: usize,
+        ) -> CUresult,
+    >,
+
+    /// `cuGraphExecDestroy(hGraphExec) -> CUresult`
+    ///
+    /// Destroys an executable graph.  When `None`, the graph API is not
+    /// supported.
+    pub cu_graph_exec_destroy: Option<unsafe extern "C" fn(h_graph_exec: CUgraphExec) -> CUresult>,
+
+    /// `cuGraphLaunch(hGraphExec, hStream) -> CUresult`
+    ///
+    /// Submits an executable graph to a stream.  When `None`, the graph API
+    /// is not supported.
+    pub cu_graph_launch:
+        Option<unsafe extern "C" fn(h_graph_exec: CUgraphExec, h_stream: CUstream) -> CUresult>,
 }
 
 // SAFETY: All fields are plain function pointers (which are Send + Sync) and
@@ -1420,6 +1593,24 @@ impl DriverApi {
             cu_mem_pool_destroy: load_sym_optional!(lib, "cuMemPoolDestroy"),
             cu_mem_alloc_from_pool_async: load_sym_optional!(lib, "cuMemAllocFromPoolAsync"),
             cu_mem_free_async: load_sym_optional!(lib, "cuMemFreeAsync"),
+            cu_mem_alloc_async: load_sym_optional!(lib, "cuMemAllocAsync"),
+            cu_mem_pool_trim_to: load_sym_optional!(lib, "cuMemPoolTrimTo"),
+            cu_mem_pool_set_attribute: load_sym_optional!(lib, "cuMemPoolSetAttribute"),
+            cu_mem_pool_get_attribute: load_sym_optional!(lib, "cuMemPoolGetAttribute"),
+            cu_mem_pool_set_access: load_sym_optional!(lib, "cuMemPoolSetAccess"),
+            cu_device_get_default_mem_pool: load_sym_optional!(lib, "cuDeviceGetDefaultMemPool"),
+
+            // -- CUDA Graph API (optional, CUDA 10.0+) ------------------------
+            cu_graph_create: load_sym_optional!(lib, "cuGraphCreate"),
+            cu_graph_destroy: load_sym_optional!(lib, "cuGraphDestroy"),
+            cu_graph_add_kernel_node: load_sym_optional!(lib, "cuGraphAddKernelNode"),
+            cu_graph_add_memcpy_node: load_sym_optional!(lib, "cuGraphAddMemcpyNode"),
+            cu_graph_add_memset_node: load_sym_optional!(lib, "cuGraphAddMemsetNode"),
+            cu_graph_add_empty_node: load_sym_optional!(lib, "cuGraphAddEmptyNode"),
+            cu_graph_instantiate_with_flags: load_sym_optional!(lib, "cuGraphInstantiateWithFlags"),
+            cu_graph_instantiate: load_sym_optional!(lib, "cuGraphInstantiate_v2"),
+            cu_graph_exec_destroy: load_sym_optional!(lib, "cuGraphExecDestroy"),
+            cu_graph_launch: load_sym_optional!(lib, "cuGraphLaunch"),
 
             // Keep the library handle alive.
             _lib: lib,
@@ -1621,5 +1812,51 @@ mod tests {
         let _probe_alloc = |api: &DriverApi| api.cu_mem_alloc_from_pool_async.is_none();
         let _probe_free = |api: &DriverApi| api.cu_mem_free_async.is_none();
         let _ = (_probe_create, _probe_destroy, _probe_alloc, _probe_free);
+    }
+
+    /// The extended stream-ordered memory-pool fields are present and `Option`.
+    #[test]
+    fn driver_stream_ordered_pool_extended_fields_present() {
+        let _probe_alloc_async = |api: &DriverApi| api.cu_mem_alloc_async.is_none();
+        let _probe_trim = |api: &DriverApi| api.cu_mem_pool_trim_to.is_none();
+        let _probe_set_attr = |api: &DriverApi| api.cu_mem_pool_set_attribute.is_none();
+        let _probe_get_attr = |api: &DriverApi| api.cu_mem_pool_get_attribute.is_none();
+        let _probe_set_access = |api: &DriverApi| api.cu_mem_pool_set_access.is_none();
+        let _probe_default = |api: &DriverApi| api.cu_device_get_default_mem_pool.is_none();
+        let _ = (
+            _probe_alloc_async,
+            _probe_trim,
+            _probe_set_attr,
+            _probe_get_attr,
+            _probe_set_access,
+            _probe_default,
+        );
+    }
+
+    /// All CUDA Graph API fields are present and `Option`.
+    #[test]
+    fn driver_graph_api_fields_present() {
+        let _probe_create = |api: &DriverApi| api.cu_graph_create.is_none();
+        let _probe_destroy = |api: &DriverApi| api.cu_graph_destroy.is_none();
+        let _probe_kernel = |api: &DriverApi| api.cu_graph_add_kernel_node.is_none();
+        let _probe_memcpy = |api: &DriverApi| api.cu_graph_add_memcpy_node.is_none();
+        let _probe_memset = |api: &DriverApi| api.cu_graph_add_memset_node.is_none();
+        let _probe_empty = |api: &DriverApi| api.cu_graph_add_empty_node.is_none();
+        let _probe_inst_flags = |api: &DriverApi| api.cu_graph_instantiate_with_flags.is_none();
+        let _probe_inst = |api: &DriverApi| api.cu_graph_instantiate.is_none();
+        let _probe_exec_destroy = |api: &DriverApi| api.cu_graph_exec_destroy.is_none();
+        let _probe_launch = |api: &DriverApi| api.cu_graph_launch.is_none();
+        let _ = (
+            _probe_create,
+            _probe_destroy,
+            _probe_kernel,
+            _probe_memcpy,
+            _probe_memset,
+            _probe_empty,
+            _probe_inst_flags,
+            _probe_inst,
+            _probe_exec_destroy,
+            _probe_launch,
+        );
     }
 }

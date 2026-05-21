@@ -455,12 +455,11 @@ impl ComputeBackend for WebGpuBackend {
             return Ok(());
         }
 
-        // Transpose not yet supported in the WGSL shader.
-        if trans_a != BackendTranspose::NoTrans || trans_b != BackendTranspose::NoTrans {
-            return Err(BackendError::Unsupported(
-                "WebGPU GEMM does not yet support transposed inputs".into(),
-            ));
-        }
+        // The WGSL tiled GEMM kernel handles every NN / NT / TN / TT
+        // combination at runtime via the `trans_a` / `trans_b` uniforms.
+        // `ConjTrans` collapses to `Trans` because the f32 buffers are real.
+        let trans_a_flag: u32 = u32::from(trans_a != BackendTranspose::NoTrans);
+        let trans_b_flag: u32 = u32::from(trans_b != BackendTranspose::NoTrans);
 
         let dev = self.device()?;
         let mem = self.memory()?;
@@ -488,17 +487,21 @@ impl ComputeBackend for WebGpuBackend {
 
         let bgl = pipeline.get_bind_group_layout(0);
 
-        // Build uniform buffer for GemmParams { m, n, k, alpha, beta }.
-        let mut params_bytes = [0u8; 20];
+        // Build uniform buffer for GemmParams { m, n, k, alpha, beta,
+        // trans_a, trans_b, _pad } — 8 × 4 = 32 bytes (16-byte aligned).
+        let mut params_bytes = [0u8; 32];
         params_bytes[0..4].copy_from_slice(&(m as u32).to_le_bytes());
         params_bytes[4..8].copy_from_slice(&(n as u32).to_le_bytes());
         params_bytes[8..12].copy_from_slice(&(k as u32).to_le_bytes());
         params_bytes[12..16].copy_from_slice(&(alpha as f32).to_le_bytes());
         params_bytes[16..20].copy_from_slice(&(beta as f32).to_le_bytes());
+        params_bytes[20..24].copy_from_slice(&trans_a_flag.to_le_bytes());
+        params_bytes[24..28].copy_from_slice(&trans_b_flag.to_le_bytes());
+        // bytes 28..32 are zero padding.
 
         let uniform_buf = dev.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("oxicuda-gemm-params"),
-            size: 20,
+            size: 32,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -594,11 +597,11 @@ impl ComputeBackend for WebGpuBackend {
             return Ok(());
         }
 
-        if trans_a != BackendTranspose::NoTrans || trans_b != BackendTranspose::NoTrans {
-            return Err(BackendError::Unsupported(
-                "WebGPU batched GEMM does not yet support transposed inputs".into(),
-            ));
-        }
+        // The WGSL batched tiled GEMM kernel handles every NN / NT / TN / TT
+        // combination at runtime via the `trans_a` / `trans_b` uniforms.
+        // `ConjTrans` collapses to `Trans` because the f32 buffers are real.
+        let trans_a_flag: u32 = u32::from(trans_a != BackendTranspose::NoTrans);
+        let trans_b_flag: u32 = u32::from(trans_b != BackendTranspose::NoTrans);
 
         let dev = self.device()?;
         let mem = self.memory()?;
@@ -626,11 +629,9 @@ impl ComputeBackend for WebGpuBackend {
 
         let bgl = pipeline.get_bind_group_layout(0);
 
-        // BatchedGemmParams: m, n, k, alpha, beta, batch_count, stride_a, stride_b, stride_c
-        // 9 fields: 5 x u32/f32 + 4 x u32 = 36 bytes total
-        // But we need 16-byte alignment for uniform buffers. 36 rounds up to 48.
-        // Actually: 3 u32 + 2 f32 + 1 u32 + 3 u32 = 9 x 4 = 36 bytes.
-        // Pad to 48 for safety (16-byte aligned).
+        // BatchedGemmParams: m, n, k, alpha, beta, batch_count, stride_a,
+        // stride_b, stride_c, trans_a, trans_b — 11 × 4 = 44 bytes.
+        // Uniform buffers need 16-byte alignment, so 44 rounds up to 48.
         let mut params_bytes = [0u8; 48];
         params_bytes[0..4].copy_from_slice(&(m as u32).to_le_bytes());
         params_bytes[4..8].copy_from_slice(&(n as u32).to_le_bytes());
@@ -641,7 +642,9 @@ impl ComputeBackend for WebGpuBackend {
         params_bytes[24..28].copy_from_slice(&(stride_a as u32).to_le_bytes());
         params_bytes[28..32].copy_from_slice(&(stride_b as u32).to_le_bytes());
         params_bytes[32..36].copy_from_slice(&(stride_c as u32).to_le_bytes());
-        // bytes 36..48 are padding zeros
+        params_bytes[36..40].copy_from_slice(&trans_a_flag.to_le_bytes());
+        params_bytes[40..44].copy_from_slice(&trans_b_flag.to_le_bytes());
+        // bytes 44..48 are padding zeros
 
         let uniform_buf = dev.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("oxicuda-batched-gemm-params"),

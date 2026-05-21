@@ -5,5 +5,11 @@
 //! to Wasserstein space: distances are computed with `wasserstein::w2`, and
 //! centroids are recomputed by `barycenter::free_support_barycenter`.
 
+/// Sinkhorn k-means: entropic Wasserstein k-means with free-support barycenter centroids.
+pub mod sinkhorn_kmeans;
 /// Wasserstein k-means clustering using OT-barycenter centroids.
 pub mod wasserstein_kmeans;
+
+pub use sinkhorn_kmeans::{
+    SinkhornKmeansConfig, SinkhornKmeansResult, sinkhorn_kmeans, sinkhorn_w2_distance,
+};

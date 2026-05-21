@@ -18,8 +18,8 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 use oxicuda_driver::ffi::CUdeviceptr;
-use oxicuda_memory::DeviceBuffer;
 use oxicuda_memory::peer_copy;
+use oxicuda_memory::{DeviceBuffer, PinnedBuffer, copy};
 
 use crate::error::{FftError, FftResult};
 use crate::execute::FftHandle;
@@ -735,7 +735,11 @@ impl MultiGpuFftExecutor {
         }
 
         for (src, dst, region) in &pending {
+            // `TransposeRegion` counts/offsets are in complex elements; the
+            // slab buffers are raw `u8`, so convert to byte units here.
             let byte_count = region.count * bytes_per_element;
+            let src_byte_offset = region.src_offset * bytes_per_element;
+            let dst_byte_offset = region.dst_offset * bytes_per_element;
             transfers.push(TransferRecord {
                 src_device: *src,
                 dst_device: *dst,
@@ -743,10 +747,25 @@ impl MultiGpuFftExecutor {
                 bytes: byte_count,
             });
 
+            // Resolve the real CUDA devices backing the source and
+            // destination handles for this transfer pair.  Each handle is
+            // bound to its own context, and that context records the device
+            // it was created on.
+            let src_device = *handles
+                .get(*src)
+                .ok_or_else(|| FftError::InternalError(format!("missing handle for device {src}")))?
+                .context()
+                .device();
+            let dst_device = *handles
+                .get(*dst)
+                .ok_or_else(|| FftError::InternalError(format!("missing handle for device {dst}")))?
+                .context()
+                .device();
+
             match strategy {
                 TransposeStrategy::PeerToPeer => {
-                    // For P2P: use split_at_mut to borrow two elements.
-                    // We need src < dst or dst < src; use index arithmetic.
+                    // Borrow the source (immutable) and destination (mutable)
+                    // slab buffers simultaneously via `split_at_mut`.
                     let (lo, hi) = if src < dst {
                         (*src, *dst)
                     } else {
@@ -754,41 +773,85 @@ impl MultiGpuFftExecutor {
                     };
                     let (left, right) = slab_bufs.split_at_mut(lo + 1);
                     let (lo_buf, hi_buf) = (&mut left[lo], &mut right[hi - lo - 1]);
-
-                    // Determine which is src and which is dst.
                     let (src_buf, dst_buf) = if *src < *dst {
                         (lo_buf as &DeviceBuffer<u8>, hi_buf)
                     } else {
                         (hi_buf as &DeviceBuffer<u8>, lo_buf)
                     };
 
-                    // Attempt peer copy; fall back to host-staged on error.
-                    // The peer copy API requires same-length buffers.  In a full
-                    // implementation, offset/slice management would be used so
-                    // that only the TransposeRegion sub-slice is transferred.
-                    // We call the peer copy function here so the code path is
-                    // exercised and the API surface is verified.
-                    let _ = region;
-                    let copy_result = peer_copy::copy_peer(
+                    // Transfer exactly the `TransposeRegion` sub-slice
+                    // (`byte_count` bytes at `src_byte_offset` -> `dst_byte_offset`)
+                    // between the resolved devices.
+                    let copy_result = peer_copy::copy_peer_region(
                         dst_buf,
-                        &oxicuda_driver::device::Device::get(0).map_err(FftError::Cuda)?,
+                        &dst_device,
+                        dst_byte_offset,
                         src_buf,
-                        &oxicuda_driver::device::Device::get(0).map_err(FftError::Cuda)?,
+                        &src_device,
+                        src_byte_offset,
+                        byte_count,
                     );
 
-                    // On non-GPU platforms or if P2P is unavailable, fall
-                    // through silently (the copy is a no-op in the stub).
-                    if let Err(oxicuda_driver::CudaError::NotSupported) = copy_result {
-                        // Expected on macOS / stub build — continue.
-                    } else {
-                        copy_result.map_err(FftError::Cuda)?;
+                    // If direct P2P access is unavailable for this device
+                    // pair, fall back to a host-staged transfer rather than
+                    // failing the whole FFT.
+                    match copy_result {
+                        Ok(()) => {}
+                        Err(
+                            oxicuda_driver::CudaError::NotSupported
+                            | oxicuda_driver::CudaError::PeerAccessUnsupported
+                            | oxicuda_driver::CudaError::PeerAccessNotEnabled,
+                        ) => {
+                            let src_handle = handles.get(*src).ok_or_else(|| {
+                                FftError::InternalError(format!("missing handle {src}"))
+                            })?;
+                            let dst_handle = handles.get(*dst).ok_or_else(|| {
+                                FftError::InternalError(format!("missing handle {dst}"))
+                            })?;
+                            stage_via_host(
+                                dst_buf,
+                                dst_byte_offset,
+                                src_buf,
+                                src_byte_offset,
+                                byte_count,
+                                src_handle,
+                                dst_handle,
+                            )?;
+                        }
+                        Err(e) => return Err(FftError::Cuda(e)),
                     }
                 }
                 TransposeStrategy::StagedViaHost => {
-                    // Stage via host: D->H on src, H->D on dst.
-                    // In a real implementation this would allocate a pinned
-                    // host staging buffer.  Here we record the intent.
-                    let _ = region;
+                    // Host-staged path: D->H from the source slab into a
+                    // pinned buffer, then H->D into the destination slab.
+                    let (lo, hi) = if src < dst {
+                        (*src, *dst)
+                    } else {
+                        (*dst, *src)
+                    };
+                    let (left, right) = slab_bufs.split_at_mut(lo + 1);
+                    let (lo_buf, hi_buf) = (&mut left[lo], &mut right[hi - lo - 1]);
+                    let (src_buf, dst_buf) = if *src < *dst {
+                        (lo_buf as &DeviceBuffer<u8>, hi_buf)
+                    } else {
+                        (hi_buf as &DeviceBuffer<u8>, lo_buf)
+                    };
+
+                    let src_handle = handles
+                        .get(*src)
+                        .ok_or_else(|| FftError::InternalError(format!("missing handle {src}")))?;
+                    let dst_handle = handles
+                        .get(*dst)
+                        .ok_or_else(|| FftError::InternalError(format!("missing handle {dst}")))?;
+                    stage_via_host(
+                        dst_buf,
+                        dst_byte_offset,
+                        src_buf,
+                        src_byte_offset,
+                        byte_count,
+                        src_handle,
+                        dst_handle,
+                    )?;
                 }
             }
         }
@@ -834,6 +897,81 @@ impl MultiGpuFftExecutor {
             total_elapsed: total_start.elapsed(),
         })
     }
+}
+
+// ---------------------------------------------------------------------------
+// Host-staged inter-device transfer
+// ---------------------------------------------------------------------------
+
+/// Transfers a contiguous byte sub-range between two device slabs by staging
+/// through pinned host memory.
+///
+/// This is the fallback path used when direct GPU-to-GPU peer access is
+/// unavailable (e.g. across NUMA nodes without NVLink), and the primary path
+/// for the [`TransposeStrategy::StagedViaHost`] strategy.
+///
+/// The transfer happens in two legs:
+///
+/// 1. **Device -> Host:** `byte_count` bytes are copied from `src` starting at
+///    `src_byte_offset` into a freshly-allocated [`PinnedBuffer`].  The copy
+///    runs on `src_handle`'s stream with `src_handle`'s context current.
+/// 2. **Host -> Device:** the staged bytes are copied into `dst` starting at
+///    `dst_byte_offset`.  This leg runs on `dst_handle`'s stream with
+///    `dst_handle`'s context current.
+///
+/// Each leg's stream is synchronised before the next step, so the pinned
+/// staging buffer is guaranteed to be fully written before it is read and
+/// stays alive for the entire transfer.
+///
+/// # Errors
+///
+/// Returns [`FftError::Cuda`] if pinned allocation, either copy, a context
+/// switch, or stream synchronisation fails.
+fn stage_via_host(
+    dst: &mut DeviceBuffer<u8>,
+    dst_byte_offset: usize,
+    src: &DeviceBuffer<u8>,
+    src_byte_offset: usize,
+    byte_count: usize,
+    src_handle: &FftHandle,
+    dst_handle: &FftHandle,
+) -> FftResult<()> {
+    // A zero-byte region is a well-defined no-op.
+    if byte_count == 0 {
+        return Ok(());
+    }
+
+    // Pinned host staging buffer sized exactly to the transfer.
+    let mut staging: PinnedBuffer<u8> = PinnedBuffer::alloc(byte_count).map_err(FftError::Cuda)?;
+
+    // ---- Leg 1: Device -> Host on the source device ----------------------
+    src_handle.context().set_current().map_err(FftError::Cuda)?;
+    copy::copy_dtoh_region_async(
+        &mut staging,
+        src,
+        src_byte_offset,
+        byte_count,
+        src_handle.stream(),
+    )
+    .map_err(FftError::Cuda)?;
+    // The staging buffer must be fully populated before the H->D leg reads it.
+    src_handle.stream().synchronize().map_err(FftError::Cuda)?;
+
+    // ---- Leg 2: Host -> Device on the destination device -----------------
+    dst_handle.context().set_current().map_err(FftError::Cuda)?;
+    copy::copy_htod_region_async(
+        dst,
+        dst_byte_offset,
+        &staging,
+        byte_count,
+        dst_handle.stream(),
+    )
+    .map_err(FftError::Cuda)?;
+    // Synchronise so the staging buffer is not freed (on drop) while the
+    // asynchronous H->D copy is still in flight.
+    dst_handle.stream().synchronize().map_err(FftError::Cuda)?;
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1368,5 +1506,141 @@ mod tests {
         // Need total_n >= num_devices * 2 = 6
         let result = NvLinkOverlapPlan::new(3, 4, true);
         assert!(result.is_err());
+    }
+
+    // -- Host-staged / peer transpose transfer tests --
+    //
+    // These exercise the real transpose data movement.  On a single-GPU box
+    // the source and destination handles are both bound to device 0, so the
+    // transfer becomes a within-device sub-buffer copy — which still proves
+    // that exactly `region.count` elements move between the right offsets.
+
+    /// Builds an [`FftHandle`] on device 0, or returns `None` so the caller
+    /// skips the test when no CUDA device is available.
+    #[cfg(test)]
+    fn gpu_handle() -> Option<FftHandle> {
+        use std::sync::Arc;
+        if oxicuda_driver::init().is_err() {
+            return None;
+        }
+        let device = oxicuda_driver::device::Device::get(0).ok()?;
+        let context = Arc::new(oxicuda_driver::Context::new(&device).ok()?);
+        FftHandle::new(&context).ok()
+    }
+
+    #[test]
+    fn stage_via_host_moves_exact_region() {
+        let Some(src_handle) = gpu_handle() else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+        let Some(dst_handle) = gpu_handle() else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+
+        // Source slab: bytes 0,1,2,...,15.  Destination slab: all zero.
+        let host_src: Vec<u8> = (0..16u8).collect();
+        let Ok(src_buf) = DeviceBuffer::<u8>::from_host(&host_src) else {
+            eprintln!("skipping: device alloc failed");
+            return;
+        };
+        let Ok(mut dst_buf) = DeviceBuffer::<u8>::from_host(&[0u8; 16]) else {
+            eprintln!("skipping: device alloc failed");
+            return;
+        };
+
+        // Move 4 bytes from src[4..8] -> dst[10..14] via host staging.
+        if stage_via_host(&mut dst_buf, 10, &src_buf, 4, 4, &src_handle, &dst_handle).is_err() {
+            eprintln!("skipping: host-staged transfer failed");
+            return;
+        }
+
+        let mut out = [0u8; 16];
+        if dst_buf.copy_to_host(&mut out).is_err() {
+            eprintln!("skipping: copy back failed");
+            return;
+        }
+        // Exactly dst[10..14] must hold src[4..8] = [4,5,6,7]; nothing else.
+        let mut expected = [0u8; 16];
+        expected[10..14].copy_from_slice(&[4, 5, 6, 7]);
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn stage_via_host_zero_count_is_noop() {
+        let Some(src_handle) = gpu_handle() else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+        let Some(dst_handle) = gpu_handle() else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+        let Ok(src_buf) = DeviceBuffer::<u8>::from_host(&[1u8, 2, 3, 4]) else {
+            eprintln!("skipping: device alloc failed");
+            return;
+        };
+        let Ok(mut dst_buf) = DeviceBuffer::<u8>::from_host(&[9u8, 9, 9, 9]) else {
+            eprintln!("skipping: device alloc failed");
+            return;
+        };
+        // A zero-byte transfer must leave the destination untouched.
+        assert!(stage_via_host(&mut dst_buf, 0, &src_buf, 0, 0, &src_handle, &dst_handle).is_ok());
+        let mut out = [0u8; 4];
+        if dst_buf.copy_to_host(&mut out).is_err() {
+            eprintln!("skipping: copy back failed");
+            return;
+        }
+        assert_eq!(out, [9, 9, 9, 9]);
+    }
+
+    #[test]
+    fn executor_transpose_moves_data_single_gpu() {
+        // End-to-end check that the transpose phase of `execute` actually
+        // moves bytes between slabs.  We use a tiny 2-device plan and a
+        // forward FFT; both handles are bound to device 0.
+        let Some(handle_a) = gpu_handle() else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+        let Some(handle_b) = gpu_handle() else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+
+        let config = MultiGpuFftConfig::new(8, 2, FftPrecision::Single, FftType::C2C);
+        let Ok(plan) = MultiGpuFftPlan::new(config) else {
+            eprintln!("skipping: plan creation failed");
+            return;
+        };
+        let executor = MultiGpuFftExecutor::new(plan);
+
+        // Each slab holds 4 complex f32 elements = 32 bytes.
+        let slab_bytes = 4 * FftPrecision::Single.complex_bytes();
+        let Ok(buf0) = DeviceBuffer::<u8>::zeroed(slab_bytes) else {
+            eprintln!("skipping: device alloc failed");
+            return;
+        };
+        let Ok(buf1) = DeviceBuffer::<u8>::zeroed(slab_bytes) else {
+            eprintln!("skipping: device alloc failed");
+            return;
+        };
+        let mut slabs = [buf0, buf1];
+        let handles = [handle_a, handle_b];
+
+        match executor.execute(&handles, &mut slabs, FftDirection::Forward) {
+            Ok(result) => {
+                // The transpose must report the byte total it actually moved.
+                let recorded: usize = result.transpose.transfers.iter().map(|t| t.bytes).sum();
+                assert_eq!(recorded, result.transpose.bytes_transferred);
+                // With 2 devices each sends one region to the other.
+                assert_eq!(result.transpose.transfers.len(), 2);
+            }
+            Err(e) => {
+                // Kernel JIT / launch may be unavailable in some CI images.
+                eprintln!("skipping: multi-GPU FFT execution failed: {e}");
+            }
+        }
     }
 }

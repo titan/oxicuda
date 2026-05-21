@@ -37,9 +37,9 @@ pub(crate) mod tensor_util;
 // ---------------------------------------------------------------------------
 
 pub use dynamic_batch::{
-    BatchConfig, BatchDecision, BatchMetrics, BatchSlot, ContinuousBatcher, InferenceRequest,
-    PagedKvManager, PreemptionPolicy, Priority, RequestId, SchedulingPolicy, SpeculativeDecoder,
-    TokenBudgetAllocator,
+    BatchConfig, BatchDecision, BatchMetrics, BatchSlot, ContinuousBatcher, DraftedToken,
+    InferenceRequest, LcgRng, PagedKvManager, PreemptionPolicy, Priority, RequestId,
+    SchedulingPolicy, SpeculativeDecoder, SpeculativeResult, TokenBudgetAllocator,
 };
 pub use error::{DnnError, DnnResult};
 pub use handle::DnnHandle;

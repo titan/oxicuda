@@ -14,7 +14,14 @@
 
 /// Backprop-through-time for SNN with surrogate gradients.
 pub mod bptt;
+/// e-prop online learning rule (Bellec 2020) and DECOLLE variant (Kaiser 2020).
+pub mod eprop;
 /// SLAYER spike layer error reassignment.
 pub mod slayer;
 /// Spatio-temporal backprop with explicit reset gradient (Wu et al. 2018).
 pub mod stbp;
+
+pub use eprop::{
+    EligibilityTraces, EpropConfig, LearningSignal, apply_weight_update, compute_weight_update,
+    decolle_learning_signals, eprop_step, update_eligibility_traces, update_running_rates,
+};

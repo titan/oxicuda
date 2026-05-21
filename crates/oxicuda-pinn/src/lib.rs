@@ -53,14 +53,24 @@ pub mod prelude {
 
     // PINN losses
     pub use crate::pinn_loss::boundary::{BcType, bc_loss};
+    pub use crate::pinn_loss::causal::{CausalPinnConfig, CausalPinnLoss};
+    pub use crate::pinn_loss::conservative::{ConservativeConfig, ConservativeLoss, SubdomainBox};
+    pub use crate::pinn_loss::deep_ritz::{DeepRitz, DeepRitzConfig, DeepRitzEnergy, DeepRitzNet};
     pub use crate::pinn_loss::initial::ic_loss;
     pub use crate::pinn_loss::residual::{compute_residuals, pde_residual_loss};
+    pub use crate::pinn_loss::sa_pinn::{SaPinn, SaPinnConfig};
     pub use crate::pinn_loss::weighting::AdaptiveWeights;
 
     // Neural ODE
     pub use crate::neural_ode::adjoint::{node_adjoint_grad, node_forward};
     pub use crate::neural_ode::cnf::{cnf_forward, dense_trace, hutchinson_trace};
+    pub use crate::neural_ode::hamiltonian::{
+        HamiltonianNn, HnnConfig, HnnTrajectory, HnnWeights, LagrangianNn, LnnConfig, LnnTrajectory,
+    };
     pub use crate::neural_ode::latent_ode::{LatentOde, LatentOdeConfig};
+    pub use crate::neural_ode::neural_sde::{
+        NeuralSde, NeuralSdeConfig, NeuralSdeWeights, NoiseType, SdeMethod, SdePath,
+    };
     pub use crate::neural_ode::solvers::{
         OdeRhsFn, dopri45_step, euler_step, heun_step, integrate_adaptive, integrate_fixed,
         rk4_step,
@@ -69,8 +79,10 @@ pub mod prelude {
     // Neural operators
     pub use crate::neural_op::deeponet::{DeepONet, DeepONetConfig};
     pub use crate::neural_op::fno::{Fno1d, Fno1dConfig, Fno2d, Fno2dConfig, dft_1d, idft_1d};
+    pub use crate::neural_op::fno_3d::{Fno3d, Fno3dConfig};
     pub use crate::neural_op::gno::{Gno, GnoConfig};
     pub use crate::neural_op::mwt::{Mwt, MwtConfig};
+    pub use crate::neural_op::wno::{Wno, WnoConfig};
 
     // PDE templates
     pub use crate::pde::burgers::{burgers_analytic, burgers_residual};
@@ -81,6 +93,8 @@ pub mod prelude {
 
     // Networks
     pub use crate::network::coordinate_mlp::{FourierFeatureConfig, FourierFeatureNetwork};
+    pub use crate::network::fbpinn::{Fbpinn, FbpinnConfig, Subdomain};
+    pub use crate::network::hard_bc::{BoundaryDomain, HardBc, HardBcConfig};
     pub use crate::network::mlp::{Activation, Mlp, MlpConfig};
 
     // Sampling

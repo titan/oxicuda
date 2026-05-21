@@ -30,6 +30,14 @@ pub enum RecsysError {
     NotFitted,
     #[error("internal error: {msg}")]
     Internal { msg: String },
+    #[error("matrix is not positive definite")]
+    NotPositiveDefinite,
+    #[error("invalid lambda regularization: {val}")]
+    InvalidLambda { val: f32 },
+    #[error("item index {idx} out of bounds (n_items={n})")]
+    ItemOutOfBounds { idx: usize, n: usize },
+    #[error("invalid config: {msg}")]
+    InvalidConfig { msg: String },
 }
 
 pub type RecsysResult<T> = std::result::Result<T, RecsysError>;

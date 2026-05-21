@@ -5,5 +5,13 @@
 
 pub mod a_gem;
 pub mod dark_exp;
+pub mod dark_exp_v2;
 pub mod er;
 pub mod gem;
+pub mod vectorised_gem;
+
+// ─── Vectorised GEM re-exports ────────────────────────────────────────────────
+pub use vectorised_gem::{VectorisedGemConfig, vectorised_gem_project};
+
+// ─── DER V2 re-exports ────────────────────────────────────────────────────────
+pub use dark_exp_v2::{DerV2Buffer, DerV2Config};
