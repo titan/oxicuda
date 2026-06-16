@@ -46,6 +46,7 @@ pub mod dense;
 pub mod error;
 pub mod handle;
 pub mod helpers;
+pub mod iterative;
 pub mod sparse;
 
 #[allow(dead_code)]
@@ -57,10 +58,11 @@ pub use dense::{
     Grid1D, Grid2D, HeatEquation1D, ImplicitEulerSolver, LdltResult, LuResult, Matrix, OdeConfig,
     OdeMethod, OdeSolution, OdeSystem, PdeConfig, Poisson1D, RandomizedSvdConfig,
     RandomizedSvdResult, Rk4Solver, Rk45Solver, StepResult, SvdJob, SvdResult, Tensor, TtConfig,
-    TtDecomposition, TuckerConfig, TuckerDecomposition, WaveEquation1D,
+    TtDecomposition, TuckerConfig, TuckerDecomposition, WaveEquation1D, block_tridiagonal_solve,
 };
 pub use error::{SolverError, SolverResult};
 pub use handle::SolverHandle;
+pub use helpers::{IterRefineConfig, iterative_refinement};
 pub use sparse::{
     AdjacencyGraph, EliminationTree, FgmresConfig, MultifrontalLUSolver, NestedDissectionOrdering,
     OrderingQuality, Permutation, SupernodalCholeskySolver, SupernodalStructure,

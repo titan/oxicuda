@@ -21,7 +21,7 @@ use crate::error::TrainResult;
 /// ```rust,no_run
 /// use oxicuda_train::handle::TrainHandle;
 ///
-/// let handle = TrainHandle::new().unwrap();
+/// let handle = TrainHandle::new().expect("new should succeed");
 /// println!("SM version: {}", handle.sm_version());
 /// ```
 #[derive(Clone)]

@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn cc_loss_identical_is_zero() {
         let feats: Vec<Vec<f32>> = (0..4).map(|i| vec![i as f32, (i + 1) as f32]).collect();
-        let loss = cc_loss(&feats, &feats).unwrap();
+        let loss = cc_loss(&feats, &feats).expect("cc_loss should succeed");
         assert!(loss < 1e-5);
     }
 }

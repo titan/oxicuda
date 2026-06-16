@@ -73,19 +73,20 @@ mod tests {
 
     #[test]
     fn depolarizing_zero_p_is_identity() {
-        let ch = depolarizing_channel(0.0, 2).unwrap();
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let ch = depolarizing_channel(0.0, 2).expect("valid depolarizing channel with p=0");
+        let sv = StateVector::new_zero_state(1).expect("valid 1-qubit zero state");
         let dm = DensityMatrix::from_pure_state(&sv);
-        let out = ch.apply(&dm).unwrap();
+        let out = ch.apply(&dm).expect("channel application must succeed");
         assert!((out.rho[0].re - 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn amplitude_damping_gamma_zero_is_identity() {
-        let ch = amplitude_damping_channel(0.0).unwrap();
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let ch =
+            amplitude_damping_channel(0.0).expect("valid amplitude damping channel with gamma=0");
+        let sv = StateVector::new_zero_state(1).expect("valid 1-qubit zero state");
         let dm = DensityMatrix::from_pure_state(&sv);
-        let out = ch.apply(&dm).unwrap();
+        let out = ch.apply(&dm).expect("channel application must succeed");
         assert!((out.rho[0].re - 1.0).abs() < 1e-5);
     }
 }

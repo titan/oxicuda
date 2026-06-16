@@ -28,9 +28,11 @@ pub mod error;
 pub mod feature;
 pub mod handle;
 pub mod logit;
+pub mod losses;
 pub mod metrics;
 pub mod online;
 pub mod ptx_kernels;
+pub mod regularization;
 pub mod relation;
 
 #[cfg(test)]
@@ -49,7 +51,7 @@ mod e2e_tests {
         let s = vec![1.0_f32, 2.0, 3.0, 0.5];
         let t = vec![2.0_f32, 1.0, 3.0, 0.5];
         let label = 2_usize;
-        let kd = kd_loss(&s, &t, label, &cfg).unwrap();
+        let kd = kd_loss(&s, &t, label, &cfg).expect("kd_loss should succeed");
         let ce = cross_entropy(&s, label);
         assert!(
             (kd - ce).abs() < 1e-4,
@@ -118,7 +120,7 @@ mod e2e_tests {
         let t: Vec<Vec<f32>> = (0..5)
             .map(|i| vec![i as f32 * 0.9, (i + 1) as f32 * 1.1, (i + 2) as f32])
             .collect();
-        let loss = distance_loss(&s, &t).unwrap();
+        let loss = distance_loss(&s, &t).expect("distance_loss should succeed");
         assert!(loss >= 0.0 && loss.is_finite(), "loss={loss}");
     }
 
@@ -133,7 +135,7 @@ mod e2e_tests {
         let mut bank = CrdMemoryBank::new(10, 8, 0.9, &mut rng);
         let original = bank.feats[0].clone();
         let new_feat: Vec<f32> = (0..8).map(|i| i as f32).collect();
-        bank.update(0, &new_feat).unwrap();
+        bank.update(0, &new_feat).expect("update should succeed");
         assert_ne!(bank.feats[0], original, "bank must change after EMA update");
     }
 
@@ -167,7 +169,7 @@ mod e2e_tests {
             .map(|i| vec![i as f32, 2.0, (4 - i) as f32])
             .collect();
         let labels: Vec<usize> = (0..n_peers).map(|i| i % 3).collect();
-        let losses = dml_all_losses(&logits, &labels).unwrap();
+        let losses = dml_all_losses(&logits, &labels).expect("dml_all_losses should succeed");
         assert_eq!(losses.len(), n_peers);
         for l in &losses {
             assert!(l.is_finite(), "loss not finite: {l}");
@@ -199,7 +201,7 @@ mod e2e_tests {
             vec![1.0_f32, 3.0, 2.0],
             vec![2.0_f32, 1.0, 3.0],
         ];
-        let agree = top_k_agreement(&logits, &logits, 1).unwrap();
+        let agree = top_k_agreement(&logits, &logits, 1).expect("top_k_agreement should succeed");
         assert!(
             (agree - 1.0).abs() < 1e-5,
             "perfect agreement must be 1.0, got {agree}"

@@ -259,7 +259,7 @@ mod tests {
     const TINY: f32 = 1e-6;
 
     fn make_flow(dim: usize, n_steps: usize, heun: bool) -> RectifiedFlow {
-        RectifiedFlow::new(RectifiedFlowConfig { dim, n_steps, heun }).unwrap()
+        RectifiedFlow::new(RectifiedFlowConfig { dim, n_steps, heun }).expect("new should succeed")
     }
 
     #[test]
@@ -267,7 +267,9 @@ mod tests {
         let rf = make_flow(3, 10, false);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 5.0, 6.0];
-        let out = rf.interpolate(&x0, &x1, 0.0).unwrap();
+        let out = rf
+            .interpolate(&x0, &x1, 0.0)
+            .expect("interpolate should succeed");
         for (&o, &a) in out.iter().zip(&x0) {
             assert!((o - a).abs() < EPS, "t=0: {o} != {a}");
         }
@@ -278,7 +280,9 @@ mod tests {
         let rf = make_flow(3, 10, false);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 5.0, 6.0];
-        let out = rf.interpolate(&x0, &x1, 1.0).unwrap();
+        let out = rf
+            .interpolate(&x0, &x1, 1.0)
+            .expect("interpolate should succeed");
         for (&o, &b) in out.iter().zip(&x1) {
             assert!((o - b).abs() < EPS, "t=1: {o} != {b}");
         }
@@ -289,7 +293,9 @@ mod tests {
         let rf = make_flow(4, 10, false);
         let x0 = vec![0.0_f32, 2.0, -4.0, 10.0];
         let x1 = vec![2.0_f32, 4.0, 0.0, 0.0];
-        let out = rf.interpolate(&x0, &x1, 0.5).unwrap();
+        let out = rf
+            .interpolate(&x0, &x1, 0.5)
+            .expect("interpolate should succeed");
         let expected = [1.0_f32, 3.0, -2.0, 5.0];
         for (&o, &e) in out.iter().zip(&expected) {
             assert!((o - e).abs() < EPS, "midpoint: {o} != {e}");
@@ -301,7 +307,9 @@ mod tests {
         let rf = make_flow(3, 10, false);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 6.0, 0.0];
-        let v = rf.target_velocity(&x0, &x1).unwrap();
+        let v = rf
+            .target_velocity(&x0, &x1)
+            .expect("target_velocity should succeed");
         let expected = [3.0_f32, 4.0, -3.0];
         for (&vi, &e) in v.iter().zip(&expected) {
             assert!((vi - e).abs() < EPS, "target_velocity: {vi} != {e}");
@@ -313,8 +321,12 @@ mod tests {
         let rf = make_flow(3, 10, false);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 6.0, 0.0];
-        let v_pred = rf.target_velocity(&x0, &x1).unwrap();
-        let loss = rf.flow_loss(&v_pred, &x0, &x1).unwrap();
+        let v_pred = rf
+            .target_velocity(&x0, &x1)
+            .expect("target_velocity should succeed");
+        let loss = rf
+            .flow_loss(&v_pred, &x0, &x1)
+            .expect("flow_loss should succeed");
         assert!(loss.abs() < TINY, "loss should be 0, got {loss}");
     }
 
@@ -325,7 +337,9 @@ mod tests {
         let x0 = vec![0.0_f32, 0.0];
         let x1 = vec![1.0_f32, 1.0];
         let v_pred = vec![2.0_f32, 3.0];
-        let loss = rf.flow_loss(&v_pred, &x0, &x1).unwrap();
+        let loss = rf
+            .flow_loss(&v_pred, &x0, &x1)
+            .expect("flow_loss should succeed");
         assert!((loss - 2.5).abs() < EPS, "loss should be 2.5, got {loss}");
     }
 
@@ -334,8 +348,12 @@ mod tests {
         let rf = make_flow(3, 1, false);
         let x0 = vec![0.0_f32, -1.0, 2.0];
         let x1 = vec![3.0_f32, 5.0, -2.0];
-        let target = rf.target_velocity(&x0, &x1).unwrap();
-        let out = rf.sample(&x0, |_, _| target.clone()).unwrap();
+        let target = rf
+            .target_velocity(&x0, &x1)
+            .expect("target_velocity should succeed");
+        let out = rf
+            .sample(&x0, |_, _| target.clone())
+            .expect("value should be present");
         for (&o, &b) in out.iter().zip(&x1) {
             assert!((o - b).abs() < EPS, "1-step Euler const field: {o} != {b}");
         }
@@ -346,8 +364,12 @@ mod tests {
         let rf = make_flow(3, 10, false);
         let x0 = vec![0.0_f32, -1.0, 2.0];
         let x1 = vec![3.0_f32, 5.0, -2.0];
-        let target = rf.target_velocity(&x0, &x1).unwrap();
-        let out = rf.sample(&x0, |_, _| target.clone()).unwrap();
+        let target = rf
+            .target_velocity(&x0, &x1)
+            .expect("target_velocity should succeed");
+        let out = rf
+            .sample(&x0, |_, _| target.clone())
+            .expect("value should be present");
         for (&o, &b) in out.iter().zip(&x1) {
             assert!((o - b).abs() < EPS, "10-step Euler const field: {o} != {b}");
         }
@@ -358,8 +380,12 @@ mod tests {
         let rf = make_flow(3, 5, true);
         let x0 = vec![1.0_f32, 1.0, 1.0];
         let x1 = vec![4.0_f32, -2.0, 0.0];
-        let target = rf.target_velocity(&x0, &x1).unwrap();
-        let out = rf.sample(&x0, |_, _| target.clone()).unwrap();
+        let target = rf
+            .target_velocity(&x0, &x1)
+            .expect("target_velocity should succeed");
+        let out = rf
+            .sample(&x0, |_, _| target.clone())
+            .expect("value should be present");
         for (&o, &b) in out.iter().zip(&x1) {
             assert!((o - b).abs() < EPS, "Heun const field: {o} != {b}");
         }
@@ -370,8 +396,12 @@ mod tests {
         let rf = make_flow(3, 20, false);
         let x0 = vec![0.0_f32, 1.0, -1.0];
         let x1 = vec![2.0_f32, -3.0, 4.0];
-        let target = rf.target_velocity(&x0, &x1).unwrap();
-        let s = rf.straightness(&x0, &x1, |_, _| target.clone()).unwrap();
+        let target = rf
+            .target_velocity(&x0, &x1)
+            .expect("target_velocity should succeed");
+        let s = rf
+            .straightness(&x0, &x1, |_, _| target.clone())
+            .expect("value should be present");
         assert!(s.abs() < TINY, "straightness should be 0, got {s}");
     }
 
@@ -390,7 +420,7 @@ mod tests {
                 let c = (2.0 * std::f32::consts::PI * t).cos();
                 target.iter().map(|&d| c * d).collect()
             })
-            .unwrap();
+            .expect("value should be present");
         assert!(
             s > 1e-3,
             "curved field should have positive straightness: {s}"
@@ -402,8 +432,10 @@ mod tests {
         let rf = make_flow(3, 7, false);
         let x0 = vec![0.5_f32, -0.5, 1.5];
         let velocity = |x: &[f32], _t: f32| x.iter().map(|&xi| 0.3 * xi + 0.1).collect();
-        let via_sample = rf.sample(&x0, velocity).unwrap();
-        let via_reflow = rf.reflow_pair(&x0, velocity).unwrap();
+        let via_sample = rf.sample(&x0, velocity).expect("sample should succeed");
+        let via_reflow = rf
+            .reflow_pair(&x0, velocity)
+            .expect("reflow_pair should succeed");
         for (&a, &b) in via_sample.iter().zip(&via_reflow) {
             assert!((a - b).abs() < TINY, "reflow != sample: {a} vs {b}");
         }
@@ -414,8 +446,12 @@ mod tests {
         let rf = make_flow(1, 4, false);
         let x0 = vec![2.0_f32];
         let x1 = vec![5.0_f32];
-        let target = rf.target_velocity(&x0, &x1).unwrap();
-        let out = rf.sample(&x0, |_, _| target.clone()).unwrap();
+        let target = rf
+            .target_velocity(&x0, &x1)
+            .expect("target_velocity should succeed");
+        let out = rf
+            .sample(&x0, |_, _| target.clone())
+            .expect("value should be present");
         assert_eq!(out.len(), 1);
         assert!((out[0] - 5.0).abs() < EPS, "dim=1 recover x1: {}", out[0]);
     }
@@ -424,7 +460,9 @@ mod tests {
     fn sample_output_len_equals_dim() {
         let rf = make_flow(5, 3, true);
         let x0 = vec![1.0_f32; 5];
-        let out = rf.sample(&x0, |x, _| x.to_vec()).unwrap();
+        let out = rf
+            .sample(&x0, |x, _| x.to_vec())
+            .expect("value should be present");
         assert_eq!(out.len(), 5, "output length should equal dim");
     }
 
@@ -502,8 +540,8 @@ mod tests {
         let rf = make_flow(4, 6, true);
         let x0 = vec![0.1_f32, 0.2, 0.3, 0.4];
         let velocity = |x: &[f32], t: f32| x.iter().map(|&xi| xi * 0.5 + t).collect();
-        let a = rf.sample(&x0, velocity).unwrap();
-        let b = rf.sample(&x0, velocity).unwrap();
+        let a = rf.sample(&x0, velocity).expect("sample should succeed");
+        let b = rf.sample(&x0, velocity).expect("sample should succeed");
         for (&ai, &bi) in a.iter().zip(&b) {
             assert!((ai - bi).abs() < TINY, "non-deterministic: {ai} vs {bi}");
         }
@@ -515,7 +553,7 @@ mod tests {
         let rf = make_flow(3, 1, false);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let velocity = |x: &[f32], _t: f32| x.iter().map(|&xi| xi * 2.0).collect::<Vec<_>>();
-        let out = rf.sample(&x0, velocity).unwrap();
+        let out = rf.sample(&x0, velocity).expect("sample should succeed");
         // dt = 1, v = [2,4,6] => x = [1+2, 2+4, 3+6] = [3, 6, 9]
         let expected = [3.0_f32, 6.0, 9.0];
         for (&o, &e) in out.iter().zip(&expected) {
@@ -544,7 +582,7 @@ mod tests {
         let x1 = vec![1.0_f32, 1.0]; // target = [1, 1]
         let s = rf
             .straightness(&x0, &x1, |_, _| vec![2.0_f32, 1.0])
-            .unwrap();
+            .expect("value should be present");
         // deviation = [2-1, 1-1] = [1, 0] => ‖.‖² = 1 each step => average 1
         assert!((s - 1.0).abs() < EPS, "straightness average: {s}");
     }

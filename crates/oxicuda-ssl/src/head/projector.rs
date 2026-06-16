@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn projector_construction_correct_shapes() {
         let mut rng = LcgRng::new(0);
-        let p = MlpProjector::new(8, 16, 4, &mut rng).unwrap();
+        let p = MlpProjector::new(8, 16, 4, &mut rng).expect("new should succeed");
         assert_eq!(p.in_dim, 8);
         assert_eq!(p.hidden_dim, 16);
         assert_eq!(p.out_dim, 4);
@@ -148,17 +148,17 @@ mod tests {
     #[test]
     fn projector_forward_correct_shape() {
         let mut rng = LcgRng::new(0);
-        let p = MlpProjector::new(8, 16, 4, &mut rng).unwrap();
+        let p = MlpProjector::new(8, 16, 4, &mut rng).expect("new should succeed");
         let x = vec![0.0_f32; 8];
-        let y = p.forward(&x).unwrap();
+        let y = p.forward(&x).expect("forward should succeed");
         assert_eq!(y.len(), 4);
     }
 
     #[test]
     fn projector_zero_input_returns_zero_when_no_bias() {
         let mut rng = LcgRng::new(0);
-        let p = MlpProjector::new(8, 16, 4, &mut rng).unwrap();
-        let y = p.forward(&[0.0_f32; 8]).unwrap();
+        let p = MlpProjector::new(8, 16, 4, &mut rng).expect("new should succeed");
+        let y = p.forward(&[0.0_f32; 8]).expect("forward should succeed");
         for &v in &y {
             assert!(v.abs() < 1e-6);
         }
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn projector_forward_rejects_dim_mismatch() {
         let mut rng = LcgRng::new(0);
-        let p = MlpProjector::new(8, 16, 4, &mut rng).unwrap();
+        let p = MlpProjector::new(8, 16, 4, &mut rng).expect("new should succeed");
         let r = p.forward(&[0.0_f32; 4]);
         assert!(r.is_err());
     }
@@ -175,16 +175,18 @@ mod tests {
     #[test]
     fn projector_forward_batch_correct_shape() {
         let mut rng = LcgRng::new(0);
-        let p = MlpProjector::new(8, 16, 4, &mut rng).unwrap();
+        let p = MlpProjector::new(8, 16, 4, &mut rng).expect("new should succeed");
         let x = vec![0.1_f32; 4 * 8];
-        let y = p.forward_batch(&x, 4).unwrap();
+        let y = p
+            .forward_batch(&x, 4)
+            .expect("forward_batch should succeed");
         assert_eq!(y.len(), 4 * 4);
     }
 
     #[test]
     fn projector_forward_batch_rejects_dim_mismatch() {
         let mut rng = LcgRng::new(0);
-        let p = MlpProjector::new(8, 16, 4, &mut rng).unwrap();
+        let p = MlpProjector::new(8, 16, 4, &mut rng).expect("new should succeed");
         let r = p.forward_batch(&[0.0_f32; 16], 4);
         assert!(r.is_err());
     }

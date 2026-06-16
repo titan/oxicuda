@@ -31,6 +31,7 @@ pub mod ops;
 pub mod predictor;
 pub mod proxy;
 pub mod ptx_kernels;
+pub mod search;
 pub mod supernet;
 
 // ─── Prelude ─────────────────────────────────────────────────────────────────
@@ -63,6 +64,9 @@ pub mod prelude {
     pub use crate::predictor::flops::{OpCost, op_cost, total_cost};
     pub use crate::predictor::latency::{LatencyLut, LatencyMlp};
     pub use crate::predictor::predictor_io::{ArchFeatures, LayerSpec};
+    pub use crate::proxy::jacobian_covariance::{
+        JACOV_EPSILON, jacobian_covariance_score, pearson_correlation_matrix, symmetric_eigenvalues,
+    };
     pub use crate::proxy::zero_cost::{
         NASWOT_RIDGE, ZeroCostProxy, grasp_score, naswot_score, rank_architectures, snip_score,
         synflow_score,
@@ -70,6 +74,17 @@ pub mod prelude {
     pub use crate::ptx_kernels::{
         arch_grad_ptx, arch_softmax_ptx, crossover_uniform_ptx, f32_hex, flops_accumulate_ptx,
         gumbel_softmax_ptx, mixed_op_blend_ptx, pareto_dominate_ptx,
+    };
+    pub use crate::search::darts_ops::{DartsConfig, DartsMixedOp};
+    pub use crate::search::latency_predictor::{
+        LatencyPredictor, latency_features, train_latency_predictor,
+    };
+    pub use crate::search::local_search::{
+        ArchSpace, LocalSearchConfig, LocalSearchNas, SearchResult, single_op_neighbors,
+    };
+    pub use crate::search::successive_halving::{
+        BracketResult, Hyperband, HyperbandConfig, HyperbandResult, RoundInfo, ShaConfig,
+        ShaResult, SuccessiveHalving,
     };
     pub use crate::supernet::bignas::{BigNasConfig, BigNasSampler};
     pub use crate::supernet::path_sample::{PathSampler, SamplingStrategy};
@@ -95,7 +110,7 @@ mod e2e_tests {
     #[test]
     fn e2e_flop_accountant_produces_finite_cost() {
         let arch = sample_arch();
-        let cost = total_cost(&arch).unwrap();
+        let cost = total_cost(&arch).expect("total_cost should succeed");
         assert!(cost.flops > 0);
         assert!(cost.params > 0);
     }
@@ -108,7 +123,7 @@ mod e2e_tests {
         for (idx, layer) in arch.iter().enumerate() {
             lut.insert(layer, 1e-4 * (idx + 1) as f32);
         }
-        let total = lut.predict(&arch).unwrap();
+        let total = lut.predict(&arch).expect("predict should succeed");
         let expected = (1.0_f32 + 2.0 + 3.0 + 4.0) * 1e-4;
         assert!((total - expected).abs() < 1e-6);
     }
@@ -117,36 +132,37 @@ mod e2e_tests {
     fn e2e_latency_mlp_train_and_predict() {
         let mut handle = NasHandle::default_handle();
         let arch = sample_arch();
-        let f = ArchFeatures::from_layers(&arch).unwrap();
+        let f = ArchFeatures::from_layers(&arch).expect("from_layers should succeed");
         let in_dim = f.dim();
         let mut mlp = LatencyMlp::new(in_dim, 16, handle.rng_mut());
         // Synthetic single-target dataset.
         let samples: Vec<(Vec<f32>, f32)> = (0..32).map(|_| (f.data.clone(), 0.001_f32)).collect();
-        let loss = mlp.fit(&samples, 200, 1e-5).unwrap();
+        let loss = mlp.fit(&samples, 200, 1e-5).expect("fit should succeed");
         assert!(loss.is_finite());
-        let pred = mlp.predict(&arch).unwrap();
+        let pred = mlp.predict(&arch).expect("predict should succeed");
         assert!(pred.is_finite());
     }
 
     #[test]
     fn e2e_knn_accuracy_predictor_round_trip() {
         let arch = sample_arch();
-        let mut p = KnnAccuracyPredictor::new(3).unwrap();
-        let f = ArchFeatures::from_layers(&arch).unwrap();
+        let mut p = KnnAccuracyPredictor::new(3).expect("new should succeed");
+        let f = ArchFeatures::from_layers(&arch).expect("from_layers should succeed");
         for _ in 0..6 {
-            p.add(f.data.clone(), 0.85).unwrap();
+            p.add(f.data.clone(), 0.85)
+                .expect("value should be present");
         }
-        let q = p.predict(&arch).unwrap();
+        let q = p.predict(&arch).expect("predict should succeed");
         assert!((q - 0.85).abs() < 1e-3);
     }
 
     #[test]
     fn e2e_rbf_accuracy_predictor_constant_target() {
         let arch = sample_arch();
-        let f = ArchFeatures::from_layers(&arch).unwrap();
+        let f = ArchFeatures::from_layers(&arch).expect("from_layers should succeed");
         let samples = vec![(f.data, 0.7_f32); 4];
-        let p = RbfAccuracyPredictor::fit(&samples, 1.0, 1e-3).unwrap();
-        let q = p.predict(&arch).unwrap();
+        let p = RbfAccuracyPredictor::fit(&samples, 1.0, 1e-3).expect("fit should succeed");
+        let q = p.predict(&arch).expect("predict should succeed");
         assert!((q - 0.7).abs() < 1e-2, "q = {q}");
     }
 }

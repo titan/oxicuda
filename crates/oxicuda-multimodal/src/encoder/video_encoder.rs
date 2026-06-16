@@ -294,7 +294,8 @@ mod tests {
         let frame_size = 3 * 32 * 32;
         let n_frames = 4;
         let frames = vec![0.1_f32; n_frames * frame_size];
-        let out = VideoEncoder::forward(&frames, n_frames, &cfg, &weights).unwrap();
+        let out = VideoEncoder::forward(&frames, n_frames, &cfg, &weights)
+            .expect("forward should succeed");
         assert_eq!(out.len(), cfg.d_model());
     }
 
@@ -307,7 +308,8 @@ mod tests {
         let frames: Vec<f32> = (0..n_frames * frame_size)
             .map(|i| (i as f32 * 0.001).sin())
             .collect();
-        let out = VideoEncoder::forward(&frames, n_frames, &cfg, &weights).unwrap();
+        let out = VideoEncoder::forward(&frames, n_frames, &cfg, &weights)
+            .expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -335,7 +337,8 @@ mod tests {
         let weights = VideoEncoderWeights::zeros(&cfg, 8);
         let frame_size = 3 * 32 * 32;
         let frames = vec![0.5_f32; frame_size];
-        let out = VideoEncoder::forward(&frames, 1, &cfg, &weights).unwrap();
+        let out =
+            VideoEncoder::forward(&frames, 1, &cfg, &weights).expect("forward should succeed");
         assert_eq!(out.len(), cfg.d_model());
     }
 }

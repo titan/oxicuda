@@ -378,13 +378,13 @@ mod tests {
     use super::*;
 
     fn make_config() -> EncoderConfig {
-        EncoderConfig::new(4, 8, vec![1, 2], 1, 16).unwrap()
+        EncoderConfig::new(4, 8, vec![1, 2], 1, 16).expect("new should succeed")
     }
 
     #[test]
     fn encoder_new_valid() {
         let config = make_config();
-        let enc = Encoder::new(config).unwrap();
+        let enc = Encoder::new(config).expect("new should succeed");
         assert!(!enc.blocks.is_empty());
     }
 
@@ -392,10 +392,10 @@ mod tests {
     fn encoder_forward_output_shape() {
         let config = make_config();
         let weights = EncoderWeights::zeros(&config);
-        let enc = Encoder::new(config.clone()).unwrap();
+        let enc = Encoder::new(config.clone()).expect("value should be present");
         let batch = 2;
         let x = vec![0.5_f32; batch * config.in_channels];
-        let latent = enc.encode(&x, &weights).unwrap();
+        let latent = enc.encode(&x, &weights).expect("encode should succeed");
         assert_eq!(latent.mu.len(), batch * config.latent_dim);
         assert_eq!(latent.logvar.len(), batch * config.latent_dim);
     }
@@ -405,9 +405,9 @@ mod tests {
         // With zero weights, output should be zero (bias-free)
         let config = make_config();
         let weights = EncoderWeights::zeros(&config);
-        let enc = Encoder::new(config.clone()).unwrap();
+        let enc = Encoder::new(config.clone()).expect("value should be present");
         let x = vec![1.0_f32; config.in_channels];
-        let latent = enc.encode(&x, &weights).unwrap();
+        let latent = enc.encode(&x, &weights).expect("encode should succeed");
         // With zero weights, linear layers output 0
         for &v in &latent.mu {
             assert!(
@@ -421,7 +421,7 @@ mod tests {
     fn encoder_empty_input_rejected() {
         let config = make_config();
         let weights = EncoderWeights::zeros(&config);
-        let enc = Encoder::new(config).unwrap();
+        let enc = Encoder::new(config).expect("new should succeed");
         assert!(matches!(
             enc.encode(&[], &weights),
             Err(GenError::EmptyInput(_))
@@ -434,7 +434,7 @@ mod tests {
         let x = vec![1.0_f32; 4]; // batch=1, in=4
         let w1 = vec![0.0_f32; 8 * 4];
         let w2 = vec![0.0_f32; 8 * 8];
-        let out = block.forward(&x, &w1, &w2).unwrap();
+        let out = block.forward(&x, &w1, &w2).expect("forward should succeed");
         assert_eq!(out.len(), 8);
     }
 
@@ -444,7 +444,7 @@ mod tests {
         let x = vec![1.0_f32; 4];
         let w1 = vec![0.0_f32; 4 * 4];
         let w2 = vec![0.0_f32; 4 * 4];
-        let out = block.forward(&x, &w1, &w2).unwrap();
+        let out = block.forward(&x, &w1, &w2).expect("forward should succeed");
         // With zero weights, output = skip connection = input
         for (&o, &xi) in out.iter().zip(&x) {
             assert!(
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn encoder_num_params_positive() {
         let config = make_config();
-        let enc = Encoder::new(config).unwrap();
+        let enc = Encoder::new(config).expect("new should succeed");
         assert!(enc.num_params() > 0);
     }
 }

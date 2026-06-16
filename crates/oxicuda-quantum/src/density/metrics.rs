@@ -127,7 +127,8 @@ mod tests {
 
     #[test]
     fn pure_state_purity_is_one() {
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let sv = StateVector::new_zero_state(1)
+            .expect("n_qubits=1 is a valid qubit count so zero-state construction cannot fail");
         let dm = DensityMatrix::from_pure_state(&sv);
         let p = purity(&dm);
         assert!((p - 1.0).abs() < 1e-5, "purity={p}");
@@ -135,7 +136,8 @@ mod tests {
 
     #[test]
     fn pure_state_entropy_is_zero() {
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let sv = StateVector::new_zero_state(1)
+            .expect("n_qubits=1 is a valid qubit count so zero-state construction cannot fail");
         let dm = DensityMatrix::from_pure_state(&sv);
         let s = von_neumann_entropy(&dm);
         assert!(s.abs() < 1e-5, "entropy={s}");

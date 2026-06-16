@@ -412,24 +412,28 @@ mod tests {
     #[test]
     fn gbdt2nn_output_length() {
         let mut rng = LcgRng::new(42);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
-        let out = model.gbdt2nn(&[0, 1, 2, 3]).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
+        let out = model
+            .gbdt2nn(&[0, 1, 2, 3])
+            .expect("gbdt2nn should succeed");
         assert_eq!(out.len(), 2);
     }
 
     #[test]
     fn catnn_output_length() {
         let mut rng = LcgRng::new(42);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
-        let out = model.catnn(&[0, 1, 2]).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
+        let out = model.catnn(&[0, 1, 2]).expect("catnn should succeed");
         assert_eq!(out.len(), 2);
     }
 
     #[test]
     fn forward_output_length_and_sigmoid_range() {
         let mut rng = LcgRng::new(7);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
-        let out = model.forward(&[0, 1, 2, 3], &[0, 1, 2]).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
+        let out = model
+            .forward(&[0, 1, 2, 3], &[0, 1, 2])
+            .expect("forward should succeed");
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|v| v.is_finite()));
         assert!(out.iter().all(|&v| v > 0.0 && v < 1.0));
@@ -438,18 +442,22 @@ mod tests {
     #[test]
     fn leaf_embedding_lookup_changes_output() {
         let mut rng = LcgRng::new(11);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
-        let a = model.gbdt2nn(&[0, 0, 0, 0]).unwrap();
-        let b = model.gbdt2nn(&[1, 1, 1, 1]).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
+        let a = model
+            .gbdt2nn(&[0, 0, 0, 0])
+            .expect("gbdt2nn should succeed");
+        let b = model
+            .gbdt2nn(&[1, 1, 1, 1])
+            .expect("gbdt2nn should succeed");
         assert_ne!(a, b);
     }
 
     #[test]
     fn fm_pairwise_changes_with_cat_indices() {
         let mut rng = LcgRng::new(13);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
-        let a = model.catnn(&[0, 0, 0]).unwrap();
-        let b = model.catnn(&[1, 2, 3]).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
+        let a = model.catnn(&[0, 0, 0]).expect("catnn should succeed");
+        let b = model.catnn(&[1, 2, 3]).expect("catnn should succeed");
         assert_ne!(a, b);
     }
 
@@ -460,8 +468,8 @@ mod tests {
         // FM projection is the only differentiator. We check the interaction
         // by confirming catnn differs from the pure linear baseline.
         let mut rng = LcgRng::new(21);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
-        let out = model.catnn(&[1, 2, 3]).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
+        let out = model.catnn(&[1, 2, 3]).expect("catnn should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
         // Output is generally non-zero given random init + FM interaction.
         assert!(out.iter().any(|&v| v != 0.0));
@@ -471,7 +479,7 @@ mod tests {
     fn n_params_positive_and_formula() {
         let mut rng = LcgRng::new(42);
         let cfg = small_cfg();
-        let model = DeepGbm::new(cfg.clone(), &mut rng).unwrap();
+        let model = DeepGbm::new(cfg.clone(), &mut rng).expect("value should be present");
 
         let leaf = cfg.n_trees * cfg.n_leaves * cfg.leaf_embed_dim;
         // MLP: (n_trees*ed -> 16) -> (16 -> 8) -> (8 -> output_dim).
@@ -500,17 +508,21 @@ mod tests {
     fn deterministic_given_seed() {
         let mut rng_a = LcgRng::new(2024);
         let mut rng_b = LcgRng::new(2024);
-        let model_a = DeepGbm::new(small_cfg(), &mut rng_a).unwrap();
-        let model_b = DeepGbm::new(small_cfg(), &mut rng_b).unwrap();
-        let out_a = model_a.forward(&[0, 1, 2, 3], &[0, 1, 2]).unwrap();
-        let out_b = model_b.forward(&[0, 1, 2, 3], &[0, 1, 2]).unwrap();
+        let model_a = DeepGbm::new(small_cfg(), &mut rng_a).expect("value should be present");
+        let model_b = DeepGbm::new(small_cfg(), &mut rng_b).expect("value should be present");
+        let out_a = model_a
+            .forward(&[0, 1, 2, 3], &[0, 1, 2])
+            .expect("forward should succeed");
+        let out_b = model_b
+            .forward(&[0, 1, 2, 3], &[0, 1, 2])
+            .expect("forward should succeed");
         assert_eq!(out_a, out_b);
     }
 
     #[test]
     fn leaf_index_out_of_range_errs() {
         let mut rng = LcgRng::new(1);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
         // n_leaves = 8, so 8 is out of range.
         assert!(matches!(
             model.gbdt2nn(&[0, 1, 2, 8]),
@@ -521,7 +533,7 @@ mod tests {
     #[test]
     fn cat_index_out_of_range_errs() {
         let mut rng = LcgRng::new(1);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
         // field 0 cardinality = 5, so 5 is out of range.
         assert!(matches!(
             model.catnn(&[5, 0, 0]),
@@ -532,7 +544,7 @@ mod tests {
     #[test]
     fn leaf_indices_wrong_length_errs() {
         let mut rng = LcgRng::new(1);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
         assert!(matches!(
             model.gbdt2nn(&[0, 1, 2]),
             Err(TabularError::DimensionMismatch { .. })
@@ -542,7 +554,7 @@ mod tests {
     #[test]
     fn cat_indices_wrong_length_errs() {
         let mut rng = LcgRng::new(1);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
         assert!(matches!(
             model.catnn(&[0, 1]),
             Err(TabularError::DimensionMismatch { .. })
@@ -562,8 +574,8 @@ mod tests {
             output_dim: 1,
         };
         let mut rng = LcgRng::new(8);
-        let model = DeepGbm::new(cfg, &mut rng).unwrap();
-        let out = model.forward(&[1], &[2]).unwrap();
+        let model = DeepGbm::new(cfg, &mut rng).expect("new should succeed");
+        let out = model.forward(&[1], &[2]).expect("forward should succeed");
         assert_eq!(out.len(), 1);
         assert!(out[0] > 0.0 && out[0] < 1.0);
     }
@@ -571,15 +583,21 @@ mod tests {
     #[test]
     fn combination_uses_both_components() {
         let mut rng = LcgRng::new(31);
-        let mut model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
-        let base = model.forward(&[1, 2, 3, 4], &[1, 2, 3]).unwrap();
+        let mut model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
+        let base = model
+            .forward(&[1, 2, 3, 4], &[1, 2, 3])
+            .expect("forward should succeed");
         // Zeroing the CatNN weight must change the combined output.
-        model.set_w2(&[0.0, 0.0]).unwrap();
-        let no_cat = model.forward(&[1, 2, 3, 4], &[1, 2, 3]).unwrap();
+        model.set_w2(&[0.0, 0.0]).expect("set_w2 should succeed");
+        let no_cat = model
+            .forward(&[1, 2, 3, 4], &[1, 2, 3])
+            .expect("forward should succeed");
         assert_ne!(base, no_cat);
         // Now also zero the GBDT2NN weight: output becomes sigmoid(bias) = 0.5.
-        model.set_w1(&[0.0, 0.0]).unwrap();
-        let neither = model.forward(&[1, 2, 3, 4], &[1, 2, 3]).unwrap();
+        model.set_w1(&[0.0, 0.0]).expect("set_w1 should succeed");
+        let neither = model
+            .forward(&[1, 2, 3, 4], &[1, 2, 3])
+            .expect("forward should succeed");
         assert!(neither.iter().all(|&v| (v - 0.5).abs() < 1e-6));
     }
 
@@ -596,8 +614,8 @@ mod tests {
             output_dim: 2,
         };
         let mut rng = LcgRng::new(64);
-        let model = DeepGbm::new(cfg, &mut rng).unwrap();
-        let out = model.gbdt2nn(&[0, 1, 2]).unwrap();
+        let model = DeepGbm::new(cfg, &mut rng).expect("new should succeed");
+        let out = model.gbdt2nn(&[0, 1, 2]).expect("gbdt2nn should succeed");
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -605,9 +623,13 @@ mod tests {
     #[test]
     fn two_distinct_inputs_distinct_outputs() {
         let mut rng = LcgRng::new(77);
-        let model = DeepGbm::new(small_cfg(), &mut rng).unwrap();
-        let a = model.forward(&[0, 0, 0, 0], &[0, 0, 0]).unwrap();
-        let b = model.forward(&[1, 2, 3, 4], &[1, 2, 3]).unwrap();
+        let model = DeepGbm::new(small_cfg(), &mut rng).expect("value should be present");
+        let a = model
+            .forward(&[0, 0, 0, 0], &[0, 0, 0])
+            .expect("forward should succeed");
+        let b = model
+            .forward(&[1, 2, 3, 4], &[1, 2, 3])
+            .expect("forward should succeed");
         assert_ne!(a, b);
     }
 

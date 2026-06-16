@@ -41,19 +41,19 @@
 use crate::error::{NasError, NasResult};
 use crate::handle::LcgRng;
 
-/// Divisor that maps [`LcgRng::next_u32`] (range `[0, 2³¹)`) onto `[0, 1)`.
+/// Divisor that maps [`LcgRng::next_u32`] (range `[0, 2³²)`) onto `[0, 1)`.
 ///
 /// `LcgRng::next_u32` returns the top bits via a `state >> 33` shift, so its
-/// range is `[0, 2³¹)`. Dividing by `2³¹` therefore yields a proper unit-uniform
+/// range is `[0, 2³²)`. Dividing by `2³²` therefore yields a proper unit-uniform
 /// `f32` (the crate's `next_f32` divides by `2³²` and so only spans `[0, 0.5)` —
 /// we deliberately avoid it).
-const U31: f32 = 2_147_483_648.0;
+const U32: f32 = 4_294_967_296.0;
 
 /// Draw a unit-uniform `f32` in `[0, 1)` from the LCG, using the documented
-/// `next_u32 / 2³¹` convention (see [`U31`]).
+/// `next_u32 / 2³²` convention (see [`U32`]).
 #[inline]
 fn unit_uniform(rng: &mut LcgRng) -> f32 {
-    rng.next_u32() as f32 / U31
+    rng.next_u32() as f32 / U32
 }
 
 /// Hyper-parameters for the ENAS controller.
@@ -199,7 +199,7 @@ pub struct EnasController {
 impl EnasController {
     /// Create a controller with weights initialised from a small uniform
     /// distribution `U(−scale, scale)` using `rng` and the `next_u32 / 2³¹`
-    /// convention (see `U31`).
+    /// convention (see `U32`).
     ///
     /// # Errors
     /// Propagates [`EnasConfig::validate`].
@@ -376,7 +376,7 @@ impl EnasController {
     /// subsequent [`Self::reinforce_update`].
     ///
     /// Sampling uses the inverse-CDF method with a unit-uniform drawn via
-    /// `rng.next_u32() / 2³¹` (see `U31`).
+    /// `rng.next_u32() / 2³²` (see `U32`).
     ///
     /// # Errors
     /// Propagates [`EnasConfig::validate`].

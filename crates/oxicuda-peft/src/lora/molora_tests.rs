@@ -26,12 +26,15 @@ fn cfg(
 
 #[test]
 fn single_expert_matches_standard_lora_forward() {
-    let mut mo = MoLoraAdapter::new(cfg(5, 4, 2, 4.0, 1, 1, 1.0), 7).unwrap();
+    let mut mo = MoLoraAdapter::new(cfg(5, 4, 2, 4.0, 1, 1, 1.0), 7)
+        .expect("MoLoRA adapter creation should succeed with valid config");
     for (i, b) in mo.b_experts[0].iter_mut().enumerate() {
         *b = 0.1 * (i as f64 + 1.0);
     }
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3];
-    let y_mo = mo.forward(&x).unwrap();
+    let y_mo = mo
+        .forward(&x)
+        .expect("forward pass should succeed with valid input");
     let s = 4.0_f64 / 2.0;
     let t: Vec<f64> = (0..2)
         .map(|k| {
@@ -63,9 +66,12 @@ fn single_expert_matches_standard_lora_forward() {
 
 #[test]
 fn two_experts_top2_zero_b_gives_zero_output() {
-    let mo = MoLoraAdapter::new(cfg(6, 4, 2, 4.0, 2, 2, 1.0), 11).unwrap();
+    let mo = MoLoraAdapter::new(cfg(6, 4, 2, 4.0, 2, 2, 1.0), 11)
+        .expect("MoLoRA adapter creation should succeed with valid config");
     let x: Vec<f64> = (0..6).map(|i| i as f64 - 2.5).collect();
-    let y = mo.forward(&x).unwrap();
+    let y = mo
+        .forward(&x)
+        .expect("forward pass should succeed with valid input");
     for &v in &y {
         assert!(v.abs() < 1e-15, "expected zero output (B=0), got {v}");
     }
@@ -73,9 +79,12 @@ fn two_experts_top2_zero_b_gives_zero_output() {
 
 #[test]
 fn top_k_one_selects_single_expert() {
-    let mo = MoLoraAdapter::new(cfg(6, 4, 2, 4.0, 2, 1, 1.0), 11).unwrap();
+    let mo = MoLoraAdapter::new(cfg(6, 4, 2, 4.0, 2, 1, 1.0), 11)
+        .expect("MoLoRA adapter creation should succeed with valid config");
     let x = vec![1.0_f64; 6];
-    let (_, info) = mo.forward_with_route(&x).unwrap();
+    let (_, info) = mo
+        .forward_with_route(&x)
+        .expect("forward with route should succeed");
     assert_eq!(info.selected.len(), 1);
     let total: f64 = info.gates.iter().sum();
     assert!((total - 1.0).abs() < 1e-12);
@@ -126,20 +135,24 @@ fn rejects_non_positive_temperature() {
 
 #[test]
 fn forward_output_length_equals_out_features() {
-    let mut mo = MoLoraAdapter::new(cfg(5, 9, 2, 4.0, 3, 2, 1.0), 17).unwrap();
+    let mut mo = MoLoraAdapter::new(cfg(5, 9, 2, 4.0, 3, 2, 1.0), 17)
+        .expect("MoLoRA adapter creation should succeed with valid config");
     for b in mo.b_experts.iter_mut() {
         for (i, v) in b.iter_mut().enumerate() {
             *v = 0.05 * (i as f64 + 1.0);
         }
     }
     let x = vec![1.0_f64; 5];
-    let y = mo.forward(&x).unwrap();
+    let y = mo
+        .forward(&x)
+        .expect("forward pass should succeed with valid input");
     assert_eq!(y.len(), 9);
 }
 
 #[test]
 fn forward_rejects_wrong_length_x() {
-    let mo = MoLoraAdapter::new(cfg(5, 4, 2, 4.0, 2, 2, 1.0), 0).unwrap();
+    let mo = MoLoraAdapter::new(cfg(5, 4, 2, 4.0, 2, 2, 1.0), 0)
+        .expect("MoLoRA adapter creation should succeed with valid config");
     assert!(matches!(
         mo.forward(&[1.0_f64, 2.0, 3.0]),
         Err(PeftError::DimensionMismatch { .. })
@@ -148,7 +161,8 @@ fn forward_rejects_wrong_length_x() {
 
 #[test]
 fn backward_matches_finite_differences_on_b_expert() {
-    let mut mo = MoLoraAdapter::new(cfg(4, 3, 2, 4.0, 2, 2, 1.5), 99).unwrap();
+    let mut mo = MoLoraAdapter::new(cfg(4, 3, 2, 4.0, 2, 2, 1.5), 99)
+        .expect("MoLoRA adapter creation should succeed with valid config");
     for (k, b_k) in mo.b_experts.iter_mut().enumerate() {
         for (i, v) in b_k.iter_mut().enumerate() {
             *v = 0.1 * (i as f64 + 1.0) * (k as f64 + 1.0);
@@ -156,16 +170,20 @@ fn backward_matches_finite_differences_on_b_expert() {
     }
     let x = vec![0.5_f64, -1.0, 0.25, 0.75];
     let gy = vec![1.0_f64, -0.5, 0.25];
-    let (_, grad_b_all, _) = mo.backward(&x, &gy).unwrap();
+    let (_, grad_b_all, _) = mo.backward(&x, &gy).expect("backward pass should succeed");
     let eps = 1e-6_f64;
     let target_expert = 0_usize;
     let target_grad = grad_b_all[target_expert].clone();
     for (k, &analytic) in target_grad.iter().enumerate() {
         let saved = mo.b_experts[target_expert][k];
         mo.b_experts[target_expert][k] = saved + eps;
-        let yp = mo.forward(&x).unwrap();
+        let yp = mo
+            .forward(&x)
+            .expect("forward pass should succeed in finite-difference check");
         mo.b_experts[target_expert][k] = saved - eps;
-        let ym = mo.forward(&x).unwrap();
+        let ym = mo
+            .forward(&x)
+            .expect("forward pass should succeed in finite-difference check");
         mo.b_experts[target_expert][k] = saved;
         let lp: f64 = gy.iter().zip(yp.iter()).map(|(a, b)| a * b).sum();
         let lm: f64 = gy.iter().zip(ym.iter()).map(|(a, b)| a * b).sum();
@@ -179,7 +197,8 @@ fn backward_matches_finite_differences_on_b_expert() {
 
 #[test]
 fn backward_matches_finite_differences_on_w_gate() {
-    let mut mo = MoLoraAdapter::new(cfg(4, 3, 2, 4.0, 3, 2, 1.5), 99).unwrap();
+    let mut mo = MoLoraAdapter::new(cfg(4, 3, 2, 4.0, 3, 2, 1.5), 99)
+        .expect("MoLoRA adapter creation should succeed with valid config");
     for (k, b_k) in mo.b_experts.iter_mut().enumerate() {
         for (i, v) in b_k.iter_mut().enumerate() {
             *v = 0.1 * (i as f64 + 1.0) * (k as f64 + 1.0);
@@ -187,15 +206,19 @@ fn backward_matches_finite_differences_on_w_gate() {
     }
     let x = vec![0.5_f64, -1.0, 0.25, 0.75];
     let gy = vec![1.0_f64, -0.5, 0.25];
-    let (_, _, grad_w) = mo.backward(&x, &gy).unwrap();
+    let (_, _, grad_w) = mo.backward(&x, &gy).expect("backward pass should succeed");
     let eps = 1e-6_f64;
     let grad_w_snapshot = grad_w.clone();
     for (k, &analytic) in grad_w_snapshot.iter().enumerate() {
         let saved = mo.w_gate[k];
         mo.w_gate[k] = saved + eps;
-        let yp = mo.forward(&x).unwrap();
+        let yp = mo
+            .forward(&x)
+            .expect("forward pass should succeed in finite-difference check");
         mo.w_gate[k] = saved - eps;
-        let ym = mo.forward(&x).unwrap();
+        let ym = mo
+            .forward(&x)
+            .expect("forward pass should succeed in finite-difference check");
         mo.w_gate[k] = saved;
         let lp: f64 = gy.iter().zip(yp.iter()).map(|(a, b)| a * b).sum();
         let lm: f64 = gy.iter().zip(ym.iter()).map(|(a, b)| a * b).sum();
@@ -219,11 +242,17 @@ fn entropy(gates: &[f64]) -> f64 {
 
 #[test]
 fn lower_temperature_sharpens_gate() {
-    let warm = MoLoraAdapter::new(cfg(8, 4, 2, 4.0, 4, 4, 2.0), 23).unwrap();
-    let cold = MoLoraAdapter::new(cfg(8, 4, 2, 4.0, 4, 4, 0.1), 23).unwrap();
+    let warm = MoLoraAdapter::new(cfg(8, 4, 2, 4.0, 4, 4, 2.0), 23)
+        .expect("warm MoLoRA adapter creation should succeed with valid config");
+    let cold = MoLoraAdapter::new(cfg(8, 4, 2, 4.0, 4, 4, 0.1), 23)
+        .expect("cold MoLoRA adapter creation should succeed with valid config");
     let x: Vec<f64> = (0..8).map(|i| (i as f64 - 3.5) * 0.5).collect();
-    let (_, w_info) = warm.forward_with_route(&x).unwrap();
-    let (_, c_info) = cold.forward_with_route(&x).unwrap();
+    let (_, w_info) = warm
+        .forward_with_route(&x)
+        .expect("warm adapter forward with route should succeed");
+    let (_, c_info) = cold
+        .forward_with_route(&x)
+        .expect("cold adapter forward with route should succeed");
     let h_warm = entropy(&w_info.gates);
     let h_cold = entropy(&c_info.gates);
     assert!(
@@ -234,14 +263,19 @@ fn lower_temperature_sharpens_gate() {
 
 #[test]
 fn load_balance_var_zero_when_batch_empty() {
-    let mo = MoLoraAdapter::new(cfg(4, 4, 2, 4.0, 2, 2, 1.0), 0).unwrap();
-    let (ys, infos) = mo.forward_batch(&[]).unwrap();
+    let mo = MoLoraAdapter::new(cfg(4, 4, 2, 4.0, 2, 2, 1.0), 0)
+        .expect("MoLoRA adapter creation should succeed with valid config");
+    let (ys, infos) = mo
+        .forward_batch(&[])
+        .expect("batch forward should succeed with empty batch");
     assert!(ys.is_empty());
     assert!(infos.is_empty());
     let xs: Vec<Vec<f64>> = (0..3)
         .map(|i| (0..4).map(|j| (i * 4 + j) as f64 * 0.1).collect())
         .collect();
-    let (_, infos) = mo.forward_batch(&xs).unwrap();
+    let (_, infos) = mo
+        .forward_batch(&xs)
+        .expect("batch forward should succeed with valid inputs");
     let var = infos[0].load_balance_var;
     assert!(var >= 0.0, "load_balance_var must be non-negative");
     for info in &infos {
@@ -251,11 +285,14 @@ fn load_balance_var_zero_when_batch_empty() {
 
 #[test]
 fn forward_batch_returns_n_outputs_and_infos() {
-    let mo = MoLoraAdapter::new(cfg(4, 3, 2, 4.0, 3, 2, 1.0), 5).unwrap();
+    let mo = MoLoraAdapter::new(cfg(4, 3, 2, 4.0, 3, 2, 1.0), 5)
+        .expect("MoLoRA adapter creation should succeed with valid config");
     let xs: Vec<Vec<f64>> = (0..5)
         .map(|i| (0..4).map(|j| (i + j) as f64 * 0.1).collect())
         .collect();
-    let (ys, infos) = mo.forward_batch(&xs).unwrap();
+    let (ys, infos) = mo
+        .forward_batch(&xs)
+        .expect("batch forward should succeed with valid inputs");
     assert_eq!(ys.len(), 5);
     assert_eq!(infos.len(), 5);
     for y in &ys {
@@ -266,8 +303,10 @@ fn forward_batch_returns_n_outputs_and_infos() {
 #[test]
 fn deterministic_given_same_seed() {
     let c = cfg(6, 4, 2, 4.0, 3, 2, 1.0);
-    let m1 = MoLoraAdapter::new(c.clone(), 42).unwrap();
-    let m2 = MoLoraAdapter::new(c, 42).unwrap();
+    let m1 = MoLoraAdapter::new(c.clone(), 42)
+        .expect("MoLoRA adapter m1 creation should succeed with valid config");
+    let m2 = MoLoraAdapter::new(c, 42)
+        .expect("MoLoRA adapter m2 creation should succeed with valid config");
     assert_eq!(m1.a_experts, m2.a_experts);
     assert_eq!(m1.b_experts, m2.b_experts);
     assert_eq!(m1.w_gate, m2.w_gate);

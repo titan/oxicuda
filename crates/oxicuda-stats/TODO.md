@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.54).
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,360 (71 files, including 5,342 code + 164 comments + 489 blanks; markdown 365)
-- **Tests:** 160 passing (lib + e2e_tests)
+- **Actual SLoC:** 33,056 (137 files, including 5,342 code + 164 comments + 489 blanks; markdown 365)
+- **Tests:** 938 passing (lib + e2e_tests)
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -140,7 +140,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 160 passing
+- Tests: 938 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features
@@ -218,3 +218,14 @@ All six SM versions produce non-empty PTX strings and pass content-substring che
   the optional `ndarray` feature lands
 - [ ] Cross-link with `oxicuda-survival` for hazard regression and with `oxicuda-cvx`
   for constrained MLE (e.g., box-constrained quantile regression)
+
+---
+
+## v0.2.0 Extension Targets
+
+- [x] `circular/circular_stats.rs` — Circular/directional statistics (Mardia 1972): mean direction (atan2 of mean sin/cos), concentration parameter κ via Newton on modified Bessel ratio I₁/I₀=R̄, Rayleigh test, Watson-Williams F-test for mean direction equality
+- [ ] `copula/gaussian_copula.rs` — Gaussian copula (Sklar 1959, Li 2000): map marginals to U[0,1] via empirical CDF then Normal PPF; fit correlation Σ via maximum-likelihood on pseudo-observations; `GaussianCopula { rho: Vec<f32> }`
+- [ ] `copula/archimedean.rs` — Archimedean copulas (Frank/Clayton/Gumbel): generator φ(t) characterisation; maximum-likelihood parameter estimation; `ArchimedeanCopula { family: CopulaFamily, theta: f32 }`
+- [ ] `multivariate/manova_followup.rs` — MANOVA follow-up contrasts: Roy's greatest root test statistic; Pillai-Bartlett trace; discriminant function coefficients; post-hoc univariate ANOVA-like tests on canonical variates
+- [x] `bayes/dirichlet_mult.rs` — Dirichlet-Multinomial model (Minka 2003): conjugate prior for categorical counts; maximum-likelihood concentration parameter α via Newton (Minka's fixed-point iteration); `DirichletMultinomial`
+- [x] `time_series/acf_pacf.rs` — ACF/PACF computation: sample autocorrelation + Bartlett standard error; partial AC via Durbin-Levinson recursion; `acf(x: &[f32], max_lag: usize) -> Vec<f32>`, `pacf(x: &[f32], max_lag: usize) -> Vec<f32>`

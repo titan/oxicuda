@@ -604,7 +604,7 @@ mod tests {
                 CppnActivation::Sigmoid,
             ],
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     fn default_es_cfg() -> EsHyperNeatConfig {
@@ -783,7 +783,7 @@ mod tests {
             generation: 0,
         };
         let x = vec![0.1, -0.2, 0.3];
-        let out = es_hyperneat_forward(&state, &x).unwrap();
+        let out = es_hyperneat_forward(&state, &x).expect("es_hyperneat_forward should succeed");
         assert_eq!(out.len(), 2);
         for &v in &out {
             assert!(v.abs() <= 1.0 + 1e-10, "output must be in [-1,1]");
@@ -824,7 +824,8 @@ mod tests {
             n_evol_iters: 5,
             ..default_es_cfg()
         };
-        let state = es_hyperneat_run(|_sw, _sub| 1.0, &cfg).unwrap();
+        let state =
+            es_hyperneat_run(|_sw, _sub| 1.0, &cfg).expect("es_hyperneat_run should succeed");
         assert_eq!(state.generation, 5);
         assert!(state.best_fitness.is_finite());
     }
@@ -840,8 +841,8 @@ mod tests {
             seed: 7,
             ..default_es_cfg()
         };
-        let state =
-            es_hyperneat_run(|sw, _sub| -sw.iter().map(|w| w * w).sum::<f64>(), &cfg).unwrap();
+        let state = es_hyperneat_run(|sw, _sub| -sw.iter().map(|w| w * w).sum::<f64>(), &cfg)
+            .expect("value should be present");
         assert!(state.best_fitness.is_finite());
     }
 
@@ -853,7 +854,8 @@ mod tests {
             n_evol_iters: 3,
             ..default_es_cfg()
         };
-        let state = es_hyperneat_run(|_sw, _sub| 0.0, &cfg).unwrap();
+        let state =
+            es_hyperneat_run(|_sw, _sub| 0.0, &cfg).expect("es_hyperneat_run should succeed");
         let expected = state.discovered_substrate.n_weights();
         assert_eq!(
             state.substrate_weights.len(),

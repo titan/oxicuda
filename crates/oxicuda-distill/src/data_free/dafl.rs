@@ -158,7 +158,7 @@ mod tests {
         let mut rng = LcgRng::new(3);
         let generator = DaflGenerator::new(10, 32, 64, &mut rng);
         let z: Vec<f32> = (0..10).map(|i| i as f32 * 0.1).collect();
-        let out = generator.generate(&z).unwrap();
+        let out = generator.generate(&z).expect("generate should succeed");
         assert_eq!(out.len(), 64);
     }
 
@@ -173,7 +173,8 @@ mod tests {
     fn dafl_total_finite() {
         let t = vec![1.0_f32, 2.0, 3.0];
         let feat = vec![0.5_f32, 0.2, 0.8];
-        let l = dafl_total_generator_loss(&t, 2, &feat, 1.0, 1.0, 1.0).unwrap();
+        let l = dafl_total_generator_loss(&t, 2, &feat, 1.0, 1.0, 1.0)
+            .expect("dafl_total_generator_loss should succeed");
         assert!(l.is_finite());
     }
 }

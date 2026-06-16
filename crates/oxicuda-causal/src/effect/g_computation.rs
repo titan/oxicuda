@@ -435,7 +435,7 @@ mod tests {
             y[i] = 2.0 + 3.0 * t[i] + 0.5 * x[i] + 0.01 * rng_uniform(&mut rng);
         }
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, d, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, d, &t, &y, &cfg).expect("g_computation should succeed");
         assert!(
             (res.ate - 3.0).abs() < 0.05,
             "expected ATE ≈ 3.0, got {}",
@@ -475,7 +475,7 @@ mod tests {
             y[i] = 1.0 + 0.5 * x[i * d] - 0.3 * x[i * d + 1] + 0.02 * rng_uniform(&mut rng);
         }
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, d, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, d, &t, &y, &cfg).expect("g_computation should succeed");
         assert!(
             res.ate.abs() < 0.10,
             "expected null ATE near 0, got {}",
@@ -505,7 +505,7 @@ mod tests {
             y[i] = 0.5 + 0.3 * x[i] + tau * t[i] + 0.02 * rng_uniform(&mut rng);
         }
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, d, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, d, &t, &y, &cfg).expect("g_computation should succeed");
         // ATE = E[1 + 2X] = 1.0 (X is U(-1,1)).
         // ATT averages τ over treated (mostly x > 0) ≈ 1 + 2·E[X|X>0] = 1 + 1 = 2.
         assert!(
@@ -525,8 +525,8 @@ mod tests {
     fn deterministic() {
         let (x, t, y) = make_linear_dataset(200, 3, 1.5, 0.3, 7);
         let cfg = GComputationConfig::default();
-        let r1 = g_computation(&x, 200, 3, &t, &y, &cfg).unwrap();
-        let r2 = g_computation(&x, 200, 3, &t, &y, &cfg).unwrap();
+        let r1 = g_computation(&x, 200, 3, &t, &y, &cfg).expect("g_computation should succeed");
+        let r2 = g_computation(&x, 200, 3, &t, &y, &cfg).expect("g_computation should succeed");
         assert_eq!(r1.ate, r2.ate);
         assert_eq!(r1.att, r2.att);
         assert_eq!(r1.mu_1, r2.mu_1);
@@ -540,7 +540,7 @@ mod tests {
         let d = 4;
         let (x, t, y) = make_linear_dataset(n, d, 1.5, 0.0, 4242);
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, d, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, d, &t, &y, &cfg).expect("g_computation should succeed");
         assert!(
             (res.ate - 1.5).abs() < 0.10,
             "large-n ATE = {} (expected ~1.5)",
@@ -555,7 +555,7 @@ mod tests {
     fn d_equals_one() {
         let (x, t, y) = make_linear_dataset(300, 1, 2.0, 0.0, 1010);
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, 300, 1, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, 300, 1, &t, &y, &cfg).expect("g_computation should succeed");
         assert_eq!(res.mu_1.len(), 300);
         assert_eq!(res.mu_0.len(), 300);
         assert_eq!(res.coefficients.len(), 4); // 2*1 + 2
@@ -568,7 +568,7 @@ mod tests {
         let d = 5;
         let (x, t, y) = make_linear_dataset(n, d, 1.0, 0.0, 5050);
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, d, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, d, &t, &y, &cfg).expect("g_computation should succeed");
         assert_eq!(res.coefficients.len(), 12); // 2*5 + 2
         assert!(
             (res.ate - 1.0).abs() < 0.15,
@@ -583,7 +583,7 @@ mod tests {
         let d = 3;
         let (x, t, y) = make_linear_dataset(n, d, 0.8, 0.0, 1234);
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, d, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, d, &t, &y, &cfg).expect("g_computation should succeed");
         assert_eq!(res.mu_1.len(), n);
         assert_eq!(res.mu_0.len(), n);
         assert_eq!(res.coefficients.len(), 2 * d + 2);
@@ -612,7 +612,7 @@ mod tests {
             y[i] = 1.0 + 5.0 * t[i] + 0.5 * x[i] + 0.005 * rng_uniform(&mut rng);
         }
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, 1, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, 1, &t, &y, &cfg).expect("g_computation should succeed");
         let beta = &res.coefficients;
         assert!((beta[0] - 1.0).abs() < 0.05, "β_0 = {}", beta[0]);
         assert!((beta[1] - 5.0).abs() < 0.05, "β_T = {}", beta[1]);
@@ -638,7 +638,7 @@ mod tests {
             y[i] = 1.0 + 0.4 * x[i * d] + 0.05 * rng_uniform(&mut rng);
         }
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, d, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, d, &t, &y, &cfg).expect("g_computation should succeed");
         assert!(res.att.is_finite());
         // Manual check.
         let expected: f64 = (0..n).map(|i| y[i] - res.mu_0[i]).sum::<f64>() / n as f64;
@@ -653,7 +653,7 @@ mod tests {
         let (x, _, y) = make_linear_dataset(n, d, 1.0, 0.0, 333);
         let t = vec![0.0_f64; n];
         let cfg = GComputationConfig::default();
-        let res = g_computation(&x, n, d, &t, &y, &cfg).unwrap();
+        let res = g_computation(&x, n, d, &t, &y, &cfg).expect("g_computation should succeed");
         assert_eq!(res.att, 0.0);
         assert!(res.ate.is_finite());
     }

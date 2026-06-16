@@ -566,7 +566,7 @@ mod tests {
     fn new_valid_cfg_succeeds() {
         let mut rng = LcgRng::new(42);
         let cfg = default_cfg(5, 10, 8);
-        let model = Ials::new(cfg, &mut rng).unwrap();
+        let model = Ials::new(cfg, &mut rng).expect("new should succeed");
         assert_eq!(model.user_emb.len(), 5 * 8);
         assert_eq!(model.item_emb.len(), 10 * 8);
     }
@@ -607,7 +607,7 @@ mod tests {
     fn fit_empty_interactions_returns_err() {
         let mut rng = LcgRng::new(2);
         let cfg = default_cfg(5, 10, 4);
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
         let result = model.fit(&[], &mut rng);
         assert!(matches!(result, Err(RecsysError::EmptyInteraction)));
     }
@@ -616,9 +616,11 @@ mod tests {
     fn fit_single_interaction_succeeds() {
         let mut rng = LcgRng::new(3);
         let cfg = default_cfg(2, 3, 4);
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
-        model.fit(&[(0, 0)], &mut rng).unwrap();
-        let s = model.predict(0, 0).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
+        model
+            .fit(&[(0, 0)], &mut rng)
+            .expect("value should be present");
+        let s = model.predict(0, 0).expect("predict should succeed");
         assert!(s.is_finite());
     }
 
@@ -627,16 +629,18 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let mut cfg = default_cfg(4, 6, 8);
         cfg.n_epochs = 5;
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
         let interactions = vec![(0, 0), (0, 1), (1, 2), (2, 3), (3, 5)];
-        model.fit(&interactions, &mut rng).unwrap();
+        model
+            .fit(&interactions, &mut rng)
+            .expect("fit should succeed");
     }
 
     #[test]
     fn fit_out_of_bounds_item_returns_err() {
         let mut rng = LcgRng::new(7);
         let cfg = default_cfg(5, 10, 4);
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
         // item id = 10 is out of bounds for n_items = 10
         let result = model.fit(&[(0, 10)], &mut rng);
         assert!(matches!(result, Err(RecsysError::UnknownItem { .. })));
@@ -647,8 +651,10 @@ mod tests {
         let mut rng = LcgRng::new(11);
         let mut cfg = default_cfg(3, 5, 4);
         cfg.n_cg_steps = 1;
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
-        model.fit(&[(0, 0), (1, 1), (2, 2)], &mut rng).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
+        model
+            .fit(&[(0, 0), (1, 1), (2, 2)], &mut rng)
+            .expect("value should be present");
     }
 
     // ── Predict tests ─────────────────────────────────────────────────────
@@ -657,11 +663,11 @@ mod tests {
     fn predict_returns_finite_value_after_fit() {
         let mut rng = LcgRng::new(5);
         let cfg = default_cfg(5, 8, 6);
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
         model
             .fit(&[(0, 0), (0, 2), (1, 1), (2, 3)], &mut rng)
-            .unwrap();
-        let s = model.predict(0, 0).unwrap();
+            .expect("value should be present");
+        let s = model.predict(0, 0).expect("predict should succeed");
         assert!(s.is_finite(), "predict returned non-finite: {s}");
     }
 
@@ -669,7 +675,7 @@ mod tests {
     fn predict_unknown_user_returns_err() {
         let mut rng = LcgRng::new(6);
         let cfg = default_cfg(5, 8, 4);
-        let model = Ials::new(cfg, &mut rng).unwrap();
+        let model = Ials::new(cfg, &mut rng).expect("new should succeed");
         assert!(matches!(
             model.predict(5, 0),
             Err(RecsysError::UnknownUser { .. })
@@ -680,7 +686,7 @@ mod tests {
     fn predict_unknown_item_returns_err() {
         let mut rng = LcgRng::new(8);
         let cfg = default_cfg(5, 8, 4);
-        let model = Ials::new(cfg, &mut rng).unwrap();
+        let model = Ials::new(cfg, &mut rng).expect("new should succeed");
         assert!(matches!(
             model.predict(0, 8),
             Err(RecsysError::UnknownItem { .. })
@@ -691,9 +697,11 @@ mod tests {
     fn user_embedding_changes_after_fit() {
         let mut rng = LcgRng::new(77);
         let cfg = default_cfg(3, 5, 8);
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
         let before: Vec<f32> = model.user_emb.clone();
-        model.fit(&[(0, 0), (1, 2), (2, 4)], &mut rng).unwrap();
+        model
+            .fit(&[(0, 0), (1, 2), (2, 4)], &mut rng)
+            .expect("value should be present");
         let changed = before
             .iter()
             .zip(model.user_emb.iter())
@@ -707,9 +715,11 @@ mod tests {
     fn rank_items_returns_all_items() {
         let mut rng = LcgRng::new(13);
         let cfg = default_cfg(3, 7, 4);
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
-        model.fit(&[(0, 0), (1, 3), (2, 6)], &mut rng).unwrap();
-        let ranked = model.rank_items(0).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
+        model
+            .fit(&[(0, 0), (1, 3), (2, 6)], &mut rng)
+            .expect("value should be present");
+        let ranked = model.rank_items(0).expect("rank_items should succeed");
         assert_eq!(
             ranked.len(),
             7,
@@ -721,15 +731,15 @@ mod tests {
     fn rank_items_sorted_descending() {
         let mut rng = LcgRng::new(14);
         let cfg = default_cfg(3, 8, 6);
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
         model
             .fit(&[(0, 0), (0, 1), (1, 2), (2, 3)], &mut rng)
-            .unwrap();
-        let ranked = model.rank_items(0).unwrap();
+            .expect("value should be present");
+        let ranked = model.rank_items(0).expect("rank_items should succeed");
         // Verify scores are non-increasing.
         let scores: Vec<f32> = ranked
             .iter()
-            .map(|&i| model.predict(0, i).unwrap())
+            .map(|&i| model.predict(0, i).expect("predict should succeed"))
             .collect();
         for w in scores.windows(2) {
             assert!(
@@ -748,7 +758,7 @@ mod tests {
         let mut cfg = default_cfg(20, 10, 8);
         cfg.n_epochs = 10;
         cfg.n_cg_steps = 5;
-        let mut model = Ials::new(cfg, &mut rng).unwrap();
+        let mut model = Ials::new(cfg, &mut rng).expect("new should succeed");
 
         // Build interactions: item 3 is observed by all 20 users.
         let mut interactions: Vec<(usize, usize)> = (0..20).map(|u| (u, 3)).collect();
@@ -756,9 +766,11 @@ mod tests {
         for u in 0..5 {
             interactions.push((u, 0));
         }
-        model.fit(&interactions, &mut rng).unwrap();
+        model
+            .fit(&interactions, &mut rng)
+            .expect("fit should succeed");
 
-        let ranked = model.rank_items(0).unwrap();
+        let ranked = model.rank_items(0).expect("rank_items should succeed");
         // Item 3 should rank first for user 0 (it was the only item they interacted with).
         assert_eq!(
             ranked[0],
@@ -772,7 +784,7 @@ mod tests {
     fn rank_items_unknown_user_returns_err() {
         let mut rng = LcgRng::new(20);
         let cfg = default_cfg(3, 5, 4);
-        let model = Ials::new(cfg, &mut rng).unwrap();
+        let model = Ials::new(cfg, &mut rng).expect("new should succeed");
         assert!(matches!(
             model.rank_items(3),
             Err(RecsysError::UnknownUser { .. })
@@ -791,7 +803,8 @@ mod tests {
         let conf = vec![1.0_f32; 3];
         let pref = vec![1.0_f32, 0.0, 0.0];
         let x_init = vec![0.0_f32; 3];
-        let x = Ials::cg_solve(&y, 3, dim, &conf, &pref, &x_init, lambda, 20, 1e-6).unwrap();
+        let x = Ials::cg_solve(&y, 3, dim, &conf, &pref, &x_init, lambda, 20, 1e-6)
+            .expect("cg_solve should succeed");
         let expected = 1.0 / (1.0 + lambda);
         assert!(
             (x[0] - expected).abs() < 1e-4,
@@ -812,7 +825,8 @@ mod tests {
         let conf = vec![1.0 + alpha];
         let pref = vec![1.0_f32];
         let x_init = vec![0.0_f32; 2];
-        let x = Ials::cg_solve(&y, 1, 2, &conf, &pref, &x_init, lambda, 20, 1e-6).unwrap();
+        let x = Ials::cg_solve(&y, 1, 2, &conf, &pref, &x_init, lambda, 20, 1e-6)
+            .expect("cg_solve should succeed");
         let expected = (1.0 + alpha) / ((1.0 + alpha) + lambda);
         assert!(
             (x[0] - expected).abs() < 1e-4,
@@ -832,7 +846,7 @@ mod tests {
         let x_init = vec![0.0_f32; dim];
         let result = Ials::cg_solve(&y, n_other, dim, &conf, &pref, &x_init, 0.01, 5, 1e-4);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), dim);
+        assert_eq!(result.expect("result should be present").len(), dim);
     }
 
     #[test]

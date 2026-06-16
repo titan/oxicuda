@@ -316,7 +316,7 @@ mod tests {
             lo: -10.0,
             hi: 10.0,
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         // With overshoot=0.02, x_adv ≈ -0.02 (class 1 wins).
         assert!(
             res.adversarial[0] < 0.0,
@@ -356,7 +356,7 @@ mod tests {
             lo: -10.0,
             hi: 10.0,
         };
-        let res = deepfool(&x, 3, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 3, oracle, &cfg).expect("deepfool should succeed");
         assert!(res.n_iter <= 3, "took {} iterations", res.n_iter);
     }
 
@@ -377,7 +377,7 @@ mod tests {
             hi: 10.0,
             ..Default::default()
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         // Original class 0 (logits=[2,-1]); result must differ.
         assert_ne!(res.final_class, 0, "class should have changed");
     }
@@ -396,7 +396,7 @@ mod tests {
             hi: 10.0,
             ..Default::default()
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         assert!(res.l2_norm > 0.0, "perturbation l2_norm must be > 0");
     }
 
@@ -411,7 +411,7 @@ mod tests {
         let oracle = linear_oracle(weights, biases, n_classes, dim);
         let x = vec![0.5_f32; dim];
         let cfg = DeepFoolConfig::default();
-        let res = deepfool(&x, n_classes, oracle, &cfg).unwrap();
+        let res = deepfool(&x, n_classes, oracle, &cfg).expect("deepfool should succeed");
         assert_eq!(res.adversarial.len(), dim);
         assert_eq!(res.perturbation.len(), dim);
     }
@@ -429,7 +429,7 @@ mod tests {
             hi: 10.0,
             ..Default::default()
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         for (i, ((&adv_i, &x_i), &pert_i)) in res
             .adversarial
             .iter()
@@ -460,7 +460,7 @@ mod tests {
             hi: 1.0,
             ..Default::default()
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         for &v in &res.adversarial {
             assert!((0.0 - 1e-6..=1.0 + 1e-6).contains(&v), "out of [0,1]: {v}");
         }
@@ -479,7 +479,7 @@ mod tests {
             hi: 1.0,
             ..Default::default()
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         for &v in &res.adversarial {
             assert!(
                 (-1.0 - 1e-6..=1.0 + 1e-6).contains(&v),
@@ -502,7 +502,7 @@ mod tests {
             hi: 10.0,
             ..Default::default()
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         assert!(res.n_iter <= 20, "n_iter={} > max_iter=20", res.n_iter);
     }
 
@@ -572,7 +572,7 @@ mod tests {
             hi: 10.0,
             max_iter: 50,
         };
-        let res = deepfool(&x, 2, oracle_stateful, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle_stateful, &cfg).expect("deepfool should succeed");
         assert_ne!(res.final_class, 0);
     }
 
@@ -675,7 +675,7 @@ mod tests {
             lo: -20.0,
             hi: 20.0,
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         assert!(
             res.n_iter < cfg.max_iter,
             "expected to converge before max_iter, got n_iter={}",
@@ -719,7 +719,7 @@ mod tests {
             lo: -10.0,
             hi: 10.0,
         };
-        let res = deepfool(&x, 2, oracle, &cfg).unwrap();
+        let res = deepfool(&x, 2, oracle, &cfg).expect("deepfool should succeed");
         // Should return after iteration 0's check: n_iter == 1.
         assert_eq!(res.n_iter, 1, "expected n_iter=1, got {}", res.n_iter);
         assert_eq!(res.final_class, 1);

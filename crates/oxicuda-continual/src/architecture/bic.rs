@@ -228,7 +228,9 @@ mod tests {
     fn apply_identity_is_noop() {
         let layer = BicLayer::new();
         let logits = vec![0.5_f32, 1.0, -0.5, 2.0];
-        let out = layer.apply(&logits, 2).unwrap();
+        let out = layer
+            .apply(&logits, 2)
+            .expect("BIC layer application should succeed with valid logits");
         for (a, b) in logits.iter().zip(out.iter()) {
             assert!(
                 (a - b).abs() < 1e-7,
@@ -244,7 +246,9 @@ mod tests {
             beta: 1.0_f32,
         };
         let logits = vec![3.0_f32, 4.0, 2.0, 6.0];
-        let out = layer.apply(&logits, 2).unwrap();
+        let out = layer
+            .apply(&logits, 2)
+            .expect("BIC layer application should succeed with valid logits");
         assert!((out[0] - 3.0).abs() < 1e-7);
         assert!((out[1] - 4.0).abs() < 1e-7);
         assert!((out[2] - (0.5 * 2.0 + 1.0)).abs() < 1e-7);
@@ -269,7 +273,8 @@ mod tests {
             }
         }
         let cfg = BicConfig::default();
-        let bic = calibrate_bic(&logits, &labels, n_samples, n_classes, n_old, &cfg).unwrap();
+        let bic = calibrate_bic(&logits, &labels, n_samples, n_classes, n_old, &cfg)
+            .expect("BIC calibration should succeed with valid data");
         assert!(
             (bic.alpha - 1.0).abs() < 0.15,
             "alpha should stay near 1 for balanced data, got {}",
@@ -305,7 +310,8 @@ mod tests {
             max_iter: 3000,
             tol: 1e-6,
         };
-        let bic = calibrate_bic(&logits, &labels, n_samples, n_classes, n_old, &cfg).unwrap();
+        let bic = calibrate_bic(&logits, &labels, n_samples, n_classes, n_old, &cfg)
+            .expect("BIC calibration should succeed with valid data");
         assert!(
             bic.alpha < 1.0,
             "alpha should be < 1.0 to correct inflated new-class logits, got {}",
@@ -370,7 +376,7 @@ mod tests {
         let cfg = BicConfig::default();
         let bic = calibrate_bic(&logits, &labels, n_samples, n_classes, 0, &cfg);
         assert!(bic.is_ok(), "calibration with n_old=0 should succeed");
-        let layer = bic.unwrap();
+        let layer = bic.expect("BIC calibration result should be Ok");
         assert!(layer.alpha.is_finite() && layer.beta.is_finite());
     }
 
@@ -381,7 +387,9 @@ mod tests {
             beta: 5.0_f32,
         };
         let logits = vec![1.0_f32, 2.0, 3.0];
-        let out = layer.apply(&logits, logits.len()).unwrap();
+        let out = layer
+            .apply(&logits, logits.len())
+            .expect("BIC layer application should succeed with valid logits");
         for (a, b) in logits.iter().zip(out.iter()) {
             assert!((a - b).abs() < 1e-7);
         }

@@ -265,7 +265,7 @@ mod tests {
             signed_grad: vec![1_i8, 1],
             n_samples: 10,
         }];
-        SignedSgd::aggregate(&mut state, &updates, &cfg).unwrap();
+        SignedSgd::aggregate(&mut state, &updates, &cfg).expect("aggregate should succeed");
         assert!((state.params[0] - 4.9).abs() < 1e-5);
         assert!((state.params[1] - 2.9).abs() < 1e-5);
     }
@@ -295,7 +295,7 @@ mod tests {
                 n_samples: 1,
             },
         ];
-        SignedSgd::aggregate(&mut state, &updates, &cfg).unwrap();
+        SignedSgd::aggregate(&mut state, &updates, &cfg).expect("aggregate should succeed");
         // vote = 1+1-1 = 1 > 0 → direction = +1 → params -= 1*1 = -1
         assert!((state.params[0] - (-1.0)).abs() < 1e-5);
     }
@@ -320,7 +320,7 @@ mod tests {
                 n_samples: 1,
             },
         ];
-        SignedSgd::aggregate(&mut state, &updates, &cfg).unwrap();
+        SignedSgd::aggregate(&mut state, &updates, &cfg).expect("aggregate should succeed");
         // vote = 0 → direction = 0 → params unchanged
         assert!((state.params[0] - 7.0).abs() < 1e-5);
     }
@@ -347,7 +347,7 @@ mod tests {
                 n_samples: 1,
             },
         ];
-        SignedSgd::aggregate(&mut state, &updates, &cfg).unwrap();
+        SignedSgd::aggregate(&mut state, &updates, &cfg).expect("aggregate should succeed");
         // vote = 3*1 + 1*(-1) = 2 > 0 → direction = +1 → params -= 1
         assert!((state.params[0] - (-1.0)).abs() < 1e-5);
     }
@@ -366,9 +366,9 @@ mod tests {
             n_samples: 1,
         }];
         assert_eq!(state.round, 0);
-        SignedSgd::aggregate(&mut state, &updates, &cfg).unwrap();
+        SignedSgd::aggregate(&mut state, &updates, &cfg).expect("aggregate should succeed");
         assert_eq!(state.round, 1);
-        SignedSgd::aggregate(&mut state, &updates, &cfg).unwrap();
+        SignedSgd::aggregate(&mut state, &updates, &cfg).expect("aggregate should succeed");
         assert_eq!(state.round, 2);
     }
 
@@ -473,7 +473,7 @@ mod tests {
                 n_samples: 10,
             })
             .collect();
-        SignedSgd::aggregate(&mut state, &updates, &cfg).unwrap();
+        SignedSgd::aggregate(&mut state, &updates, &cfg).expect("aggregate should succeed");
         // Unanimous majority: direction = [+1, -1, +1]
         // params -= 0.5 * direction
         assert!(

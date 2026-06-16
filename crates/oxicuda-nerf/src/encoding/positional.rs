@@ -116,7 +116,7 @@ mod tests {
             input_dim: 3,
         };
         let input = vec![0.1_f32, 0.2, 0.3];
-        let out = positional_encode(&input, &cfg).unwrap();
+        let out = positional_encode(&input, &cfg).expect("positional_encode should succeed");
         assert_eq!(out.len(), cfg.output_dim());
     }
 

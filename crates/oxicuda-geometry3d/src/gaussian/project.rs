@@ -150,7 +150,7 @@ mod tests {
         let g = Gaussian3d::new_unit([0.0, 0.0, 5.0]); // in front of camera
         let view = identity_view();
         let cam = default_cam();
-        let pg = project_gaussian(&g, &view, &cam).unwrap();
+        let pg = project_gaussian(&g, &view, &cam).expect("project_gaussian should succeed");
         assert!(pg.valid, "Gaussian in front should be valid");
         assert!(pg.depth > 0.0, "Depth must be positive");
     }
@@ -160,7 +160,7 @@ mod tests {
         let g = Gaussian3d::new_unit([0.0, 0.0, -5.0]); // behind camera
         let view = identity_view();
         let cam = default_cam();
-        let pg = project_gaussian(&g, &view, &cam).unwrap();
+        let pg = project_gaussian(&g, &view, &cam).expect("project_gaussian should succeed");
         assert!(!pg.valid, "Gaussian behind camera should be invalid");
     }
 
@@ -170,7 +170,7 @@ mod tests {
         let g = Gaussian3d::new_unit([0.0, 0.0, 10.0]);
         let view = identity_view();
         let cam = default_cam();
-        let pg = project_gaussian(&g, &view, &cam).unwrap();
+        let pg = project_gaussian(&g, &view, &cam).expect("project_gaussian should succeed");
         // x_screen = fx * 0/10 + cx = cx = 320
         assert!((pg.xy[0] - 320.0).abs() < 1e-3, "x={}", pg.xy[0]);
         assert!((pg.xy[1] - 240.0).abs() < 1e-3, "y={}", pg.xy[1]);
@@ -181,7 +181,7 @@ mod tests {
         let g = Gaussian3d::new_unit([1.0, 0.0, 5.0]);
         let view = identity_view();
         let cam = default_cam();
-        let pg = project_gaussian(&g, &view, &cam).unwrap();
+        let pg = project_gaussian(&g, &view, &cam).expect("project_gaussian should succeed");
         assert!(pg.cov2d[0] > 0.0, "cov2d[0] must be positive");
         assert!(pg.cov2d[3] > 0.0, "cov2d[3] must be positive");
     }
@@ -194,7 +194,7 @@ mod tests {
             1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 5.0, // t_z = 5
         ];
         let cam = default_cam();
-        let pg = project_gaussian(&g, &view, &cam).unwrap();
+        let pg = project_gaussian(&g, &view, &cam).expect("project_gaussian should succeed");
         assert!(pg.valid, "Should be valid with t_z=5");
         assert!((pg.depth - 5.0).abs() < 1e-3);
     }

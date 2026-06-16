@@ -275,13 +275,16 @@ mod tests {
     #[test]
     fn forward_output_length() {
         let mut rng = LcgRng::new(1);
-        let ap = APrompt::new(cfg(2, 8, 2), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let n_q = 3;
         let n_kv = 5;
         let q = ramp(n_q * 8, 0.01);
         let k = ramp(n_kv * 8, 0.02);
         let v = ramp(n_kv * 8, 0.03);
-        let out = ap.forward(&q, &k, &v, n_q, n_kv).unwrap();
+        let out = ap
+            .forward(&q, &k, &v, n_q, n_kv)
+            .expect("forward should succeed with valid inputs");
         assert_eq!(out.len(), n_q * 8);
     }
 
@@ -289,7 +292,8 @@ mod tests {
     #[test]
     fn augmented_kv_len_formula() {
         let mut rng = LcgRng::new(2);
-        let ap = APrompt::new(cfg(4, 16, 4), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(4, 16, 4), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         assert_eq!(ap.augmented_kv_len(10), 14);
         assert_eq!(ap.augmented_kv_len(0), 4);
     }
@@ -298,7 +302,8 @@ mod tests {
     #[test]
     fn n_params_formula() {
         let mut rng = LcgRng::new(3);
-        let ap = APrompt::new(cfg(5, 12, 3), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(5, 12, 3), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         assert_eq!(ap.n_params(), 2 * 5 * 12);
     }
 
@@ -306,7 +311,8 @@ mod tests {
     #[test]
     fn zero_prompt_content_finite_output() {
         let mut rng = LcgRng::new(4);
-        let mut ap = APrompt::new(cfg(3, 8, 2), &mut rng).unwrap();
+        let mut ap = APrompt::new(cfg(3, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         for v in ap.prompt_keys.iter_mut() {
             *v = 0.0;
         }
@@ -318,7 +324,9 @@ mod tests {
         let q = ramp(n_q * 8, 0.05);
         let k = ramp(n_kv * 8, 0.07);
         let v = ramp(n_kv * 8, 0.09);
-        let out = ap.forward(&q, &k, &v, n_q, n_kv).unwrap();
+        let out = ap
+            .forward(&q, &k, &v, n_q, n_kv)
+            .expect("forward should succeed with zero prompt content");
         assert_eq!(out.len(), n_q * 8);
         for &o in &out {
             assert!(o.is_finite(), "output must be finite, got {o}");
@@ -329,7 +337,8 @@ mod tests {
     #[test]
     fn nonzero_prompt_values_change_output() {
         let mut rng = LcgRng::new(5);
-        let base = APrompt::new(cfg(2, 8, 2), &mut rng).unwrap();
+        let base = APrompt::new(cfg(2, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         // Clone with prompt_values zeroed.
         let mut zeroed = base.clone();
         for v in zeroed.prompt_values.iter_mut() {
@@ -345,8 +354,12 @@ mod tests {
         let q = ramp(n_q * 8, 0.1);
         let k = ramp(n_kv * 8, 0.05);
         let vv = ramp(n_kv * 8, 0.02);
-        let out_zero = zeroed.forward(&q, &k, &vv, n_q, n_kv).unwrap();
-        let out_large = large.forward(&q, &k, &vv, n_q, n_kv).unwrap();
+        let out_zero = zeroed
+            .forward(&q, &k, &vv, n_q, n_kv)
+            .expect("forward should succeed with zeroed prompt values");
+        let out_large = large
+            .forward(&q, &k, &vv, n_q, n_kv)
+            .expect("forward should succeed with large prompt values");
         let diff: f32 = out_zero
             .iter()
             .zip(out_large.iter())
@@ -359,7 +372,8 @@ mod tests {
     #[test]
     fn changing_keys_changes_output() {
         let mut rng = LcgRng::new(6);
-        let ap = APrompt::new(cfg(2, 8, 2), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let n_q = 2;
         let n_kv = 3;
         let q = ramp(n_q * 8, 0.1);
@@ -368,8 +382,12 @@ mod tests {
         // Perturb one key entry strongly.
         k2[0] += 5.0;
         let v = ramp(n_kv * 8, 0.02);
-        let out1 = ap.forward(&q, &k1, &v, n_q, n_kv).unwrap();
-        let out2 = ap.forward(&q, &k2, &v, n_q, n_kv).unwrap();
+        let out1 = ap
+            .forward(&q, &k1, &v, n_q, n_kv)
+            .expect("forward should succeed with original keys");
+        let out2 = ap
+            .forward(&q, &k2, &v, n_q, n_kv)
+            .expect("forward should succeed with perturbed keys");
         let diff: f32 = out1
             .iter()
             .zip(out2.iter())
@@ -383,16 +401,20 @@ mod tests {
     fn deterministic_same_seed() {
         let mut r1 = LcgRng::new(42);
         let mut r2 = LcgRng::new(42);
-        let a1 = APrompt::new(cfg(3, 8, 2), &mut r1).unwrap();
-        let a2 = APrompt::new(cfg(3, 8, 2), &mut r2).unwrap();
+        let a1 = APrompt::new(cfg(3, 8, 2), &mut r1)
+            .expect("APrompt::new should succeed with valid config");
+        let a2 = APrompt::new(cfg(3, 8, 2), &mut r2)
+            .expect("APrompt::new should succeed with valid config");
         assert_eq!(a1.prompt_keys, a2.prompt_keys);
         assert_eq!(a1.prompt_values, a2.prompt_values);
         let q = ramp(2 * 8, 0.03);
         let k = ramp(3 * 8, 0.04);
         let v = ramp(3 * 8, 0.05);
         assert_eq!(
-            a1.forward(&q, &k, &v, 2, 3).unwrap(),
-            a2.forward(&q, &k, &v, 2, 3).unwrap()
+            a1.forward(&q, &k, &v, 2, 3)
+                .expect("forward should succeed with valid inputs"),
+            a2.forward(&q, &k, &v, 2, 3)
+                .expect("forward should succeed with valid inputs")
         );
     }
 
@@ -400,13 +422,16 @@ mod tests {
     #[test]
     fn single_head_works() {
         let mut rng = LcgRng::new(8);
-        let ap = APrompt::new(cfg(2, 6, 1), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 6, 1), &mut rng)
+            .expect("APrompt::new should succeed with single-head config");
         let n_q = 2;
         let n_kv = 3;
         let q = ramp(n_q * 6, 0.1);
         let k = ramp(n_kv * 6, 0.05);
         let v = ramp(n_kv * 6, 0.02);
-        let out = ap.forward(&q, &k, &v, n_q, n_kv).unwrap();
+        let out = ap
+            .forward(&q, &k, &v, n_q, n_kv)
+            .expect("forward should succeed with single head");
         assert_eq!(out.len(), n_q * 6);
         for &o in &out {
             assert!(o.is_finite());
@@ -425,7 +450,8 @@ mod tests {
     #[test]
     fn queries_length_mismatch_errors() {
         let mut rng = LcgRng::new(10);
-        let ap = APrompt::new(cfg(2, 8, 2), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let bad_q = ramp(2 * 8 - 1, 0.1); // wrong length for n_q=2
         let k = ramp(3 * 8, 0.05);
         let v = ramp(3 * 8, 0.02);
@@ -437,7 +463,8 @@ mod tests {
     #[test]
     fn keys_length_mismatch_errors() {
         let mut rng = LcgRng::new(11);
-        let ap = APrompt::new(cfg(2, 8, 2), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let q = ramp(2 * 8, 0.1);
         let bad_k = ramp(3 * 8 + 2, 0.05);
         let v = ramp(3 * 8, 0.02);
@@ -449,7 +476,8 @@ mod tests {
     #[test]
     fn values_length_mismatch_errors() {
         let mut rng = LcgRng::new(12);
-        let ap = APrompt::new(cfg(2, 8, 2), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let q = ramp(2 * 8, 0.1);
         let k = ramp(3 * 8, 0.05);
         let bad_v = ramp(3 * 8 - 3, 0.02);
@@ -461,11 +489,14 @@ mod tests {
     #[test]
     fn single_query_single_kv_works() {
         let mut rng = LcgRng::new(13);
-        let ap = APrompt::new(cfg(2, 4, 2), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 4, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let q = ramp(4, 0.1);
         let k = ramp(4, 0.05);
         let v = ramp(4, 0.02);
-        let out = ap.forward(&q, &k, &v, 1, 1).unwrap();
+        let out = ap
+            .forward(&q, &k, &v, 1, 1)
+            .expect("forward should succeed with single query and single kv");
         assert_eq!(out.len(), 4);
         for &o in &out {
             assert!(o.is_finite());
@@ -480,13 +511,16 @@ mod tests {
         let n_heads = 2;
         let head_dim = d_model / n_heads;
         let n_prompt = 2;
-        let ap = APrompt::new(cfg(n_prompt, d_model, n_heads), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(n_prompt, d_model, n_heads), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let n_q = 3;
         let n_kv = 4;
         let q = ramp(n_q * d_model, 0.07);
         let k = ramp(n_kv * d_model, 0.05);
         let v = ramp(n_kv * d_model, 0.11);
-        let out = ap.forward(&q, &k, &v, n_q, n_kv).unwrap();
+        let out = ap
+            .forward(&q, &k, &v, n_q, n_kv)
+            .expect("forward should succeed with valid inputs");
 
         let total_kv = n_kv + n_prompt;
         // For each head and per-head dim, the output is a convex combination of
@@ -546,7 +580,8 @@ mod tests {
     #[test]
     fn err_n_q_zero() {
         let mut rng = LcgRng::new(18);
-        let ap = APrompt::new(cfg(2, 8, 2), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let res = ap.forward(&[], &ramp(3 * 8, 0.05), &ramp(3 * 8, 0.02), 0, 3);
         assert!(matches!(res, Err(PeftError::EmptyInput)));
     }
@@ -555,7 +590,8 @@ mod tests {
     #[test]
     fn err_n_kv_zero() {
         let mut rng = LcgRng::new(19);
-        let ap = APrompt::new(cfg(2, 8, 2), &mut rng).unwrap();
+        let ap = APrompt::new(cfg(2, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let res = ap.forward(&ramp(2 * 8, 0.1), &[], &[], 2, 0);
         assert!(matches!(res, Err(PeftError::EmptyInput)));
     }
@@ -564,11 +600,14 @@ mod tests {
     #[test]
     fn large_n_prompt_works() {
         let mut rng = LcgRng::new(20);
-        let ap = APrompt::new(cfg(32, 8, 2), &mut rng).unwrap(); // 32 prompts, 1 kv
+        let ap = APrompt::new(cfg(32, 8, 2), &mut rng)
+            .expect("APrompt::new should succeed with large n_prompt"); // 32 prompts, 1 kv
         let q = ramp(2 * 8, 0.1);
         let k = ramp(8, 0.05);
         let v = ramp(8, 0.02);
-        let out = ap.forward(&q, &k, &v, 2, 1).unwrap();
+        let out = ap
+            .forward(&q, &k, &v, 2, 1)
+            .expect("forward should succeed with large prompt count");
         assert_eq!(out.len(), 2 * 8);
         for &o in &out {
             assert!(o.is_finite());
@@ -584,7 +623,8 @@ mod tests {
         // attention weights sum to 1.
         let mut rng = LcgRng::new(21);
         let d_model = 4;
-        let ap0 = APrompt::new(cfg(3, d_model, 2), &mut rng).unwrap();
+        let ap0 = APrompt::new(cfg(3, d_model, 2), &mut rng)
+            .expect("APrompt::new should succeed with valid config");
         let mut ap = ap0;
         // Set prompt values to the constant 2.5 everywhere.
         for v in ap.prompt_values.iter_mut() {
@@ -596,7 +636,9 @@ mod tests {
         let k = ramp(n_kv * d_model, 0.1);
         // Original values also constant 2.5.
         let v = vec![2.5_f32; n_kv * d_model];
-        let out = ap.forward(&q, &k, &v, n_q, n_kv).unwrap();
+        let out = ap
+            .forward(&q, &k, &v, n_q, n_kv)
+            .expect("forward with uniform values should succeed");
         for &o in &out {
             assert!(
                 (o - 2.5).abs() < 1e-4,

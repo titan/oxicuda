@@ -162,7 +162,7 @@ mod tests {
     fn pav_already_monotone_input_unchanged() {
         let xs = vec![0.1_f32, 0.2, 0.3, 0.4];
         let ys = vec![0.0_f32, 0.0, 1.0, 1.0];
-        let r = IsotonicRegressor::fit(&xs, &ys).unwrap();
+        let r = IsotonicRegressor::fit(&xs, &ys).expect("fit should succeed");
         // already monotone, two blocks expected (after merging the equal-mean groups)
         assert!(!r.values.is_empty());
         for w in r.values.windows(2) {
@@ -174,7 +174,7 @@ mod tests {
     fn pav_reverse_inputs_collapses_to_mean() {
         let xs = vec![0.1_f32, 0.2, 0.3, 0.4];
         let ys = vec![1.0_f32, 1.0, 0.0, 0.0];
-        let r = IsotonicRegressor::fit(&xs, &ys).unwrap();
+        let r = IsotonicRegressor::fit(&xs, &ys).expect("fit should succeed");
         // PAV will pool everything into one block at mean = 0.5
         for &v in &r.values {
             assert!((v - 0.5).abs() < 1e-5);
@@ -185,11 +185,11 @@ mod tests {
     fn pav_predict_within_blocks() {
         let xs = vec![0.1_f32, 0.5, 0.9];
         let ys = vec![0.0_f32, 0.5, 1.0];
-        let r = IsotonicRegressor::fit(&xs, &ys).unwrap();
+        let r = IsotonicRegressor::fit(&xs, &ys).expect("fit should succeed");
         // x below first threshold falls into first block
         assert!((r.predict_one(0.05) - r.values[0]).abs() < 1e-6);
         // x above last threshold uses last block
-        let last_v = *r.values.last().unwrap();
+        let last_v = *r.values.last().expect("last should succeed");
         assert!((r.predict_one(0.99) - last_v).abs() < 1e-6);
     }
 
@@ -204,7 +204,7 @@ mod tests {
             xs.push(x);
             ys.push(y);
         }
-        let r = IsotonicRegressor::fit(&xs, &ys).unwrap();
+        let r = IsotonicRegressor::fit(&xs, &ys).expect("fit should succeed");
         let probs = r.predict(&xs);
         for w in probs.windows(2) {
             assert!(w[0] <= w[1] + 1e-6);
@@ -217,11 +217,13 @@ mod tests {
         let ys = vec![0.0_f32, 1.0];
         let ws = vec![3.0_f32, 1.0];
         // Weighted mean = 0.25
-        let r = IsotonicRegressor::fit_weighted(&xs, &ys, &ws).unwrap();
+        let r =
+            IsotonicRegressor::fit_weighted(&xs, &ys, &ws).expect("fit_weighted should succeed");
         // since ys are already monotone (0,1), no merging needed
         assert_eq!(r.values, vec![0.0, 1.0]);
         // try the reverse case
-        let r2 = IsotonicRegressor::fit_weighted(&xs, &[1.0, 0.0], &ws).unwrap();
+        let r2 = IsotonicRegressor::fit_weighted(&xs, &[1.0, 0.0], &ws)
+            .expect("fit_weighted should succeed");
         assert_eq!(r2.values.len(), 1);
         assert!((r2.values[0] - 0.75).abs() < 1e-5); // (3*1 + 1*0)/4
     }

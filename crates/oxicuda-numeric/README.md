@@ -75,7 +75,7 @@ fn main() -> NumericResult<()> {
 
 ## Status
 
-**Alpha** — 6,061 SLoC, 212 passing tests. API may evolve before v1.0.
+**Alpha** — 13,644 SLoC, 466 passing tests. API may evolve before v1.0.
 
 ## License
 

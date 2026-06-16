@@ -673,8 +673,10 @@ mod tests {
     fn scores_finite_nonneg() {
         let cfg = default_cfg();
         let (adj, feat) = make_chain_graph(cfg.n_nodes, cfg.n_features, 1);
-        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 42).unwrap();
-        let scores = dominant_score(&fit, &adj, &feat).unwrap();
+        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 42)
+            .expect("dominant_fit should succeed on valid chain graph");
+        let scores = dominant_score(&fit, &adj, &feat)
+            .expect("dominant_score should succeed on valid graph");
         for (i, &s) in scores.iter().enumerate() {
             assert!(s.is_finite(), "score[{i}] = {s} is not finite");
             assert!(s >= 0.0, "score[{i}] = {s} is negative");
@@ -687,8 +689,10 @@ mod tests {
     fn score_count_equals_n_nodes() {
         let cfg = default_cfg();
         let (adj, feat) = make_chain_graph(cfg.n_nodes, cfg.n_features, 2);
-        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 10).unwrap();
-        let scores = dominant_score(&fit, &adj, &feat).unwrap();
+        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 10)
+            .expect("dominant_fit should succeed");
+        let scores =
+            dominant_score(&fit, &adj, &feat).expect("dominant_score should return n_nodes scores");
         assert_eq!(scores.len(), cfg.n_nodes);
     }
 
@@ -726,8 +730,10 @@ mod tests {
             feat[(n - 1) * d + j] = 0.99;
         }
 
-        let fit = dominant_fit(&adj, &feat, n, d, &cfg, 77).unwrap();
-        let scores = dominant_score(&fit, &adj, &feat).unwrap();
+        let fit = dominant_fit(&adj, &feat, n, d, &cfg, 77)
+            .expect("dominant_fit should succeed for anomaly injection test");
+        let scores = dominant_score(&fit, &adj, &feat)
+            .expect("dominant_score should succeed for anomaly injection test");
 
         let anomaly_score = scores[n - 1];
         let normal_avg: f64 = scores[..n - 1].iter().sum::<f64>() / (n - 1) as f64;
@@ -748,8 +754,10 @@ mod tests {
     fn predict_len_equals_n_nodes() {
         let cfg = default_cfg();
         let (adj, feat) = make_chain_graph(cfg.n_nodes, cfg.n_features, 4);
-        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 4).unwrap();
-        let preds = dominant_predict(&fit, &adj, &feat, 0.5).unwrap();
+        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 4)
+            .expect("dominant_fit should succeed for predict test");
+        let preds = dominant_predict(&fit, &adj, &feat, 0.5)
+            .expect("dominant_predict should return n_nodes predictions");
         assert_eq!(preds.len(), cfg.n_nodes);
     }
 
@@ -795,8 +803,10 @@ mod tests {
         let mut cfg = default_cfg();
         cfg.alpha = 1.0;
         let (adj, feat) = make_chain_graph(cfg.n_nodes, cfg.n_features, 7);
-        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 7).unwrap();
-        let scores = dominant_score(&fit, &adj, &feat).unwrap();
+        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 7)
+            .expect("dominant_fit should succeed with alpha=1.0");
+        let scores = dominant_score(&fit, &adj, &feat)
+            .expect("dominant_score should succeed with alpha=1.0");
         assert_eq!(scores.len(), cfg.n_nodes);
         for &s in &scores {
             assert!(s.is_finite(), "score not finite with alpha=1.0: {s}");
@@ -811,8 +821,10 @@ mod tests {
         let mut cfg = default_cfg();
         cfg.alpha = 0.0;
         let (adj, feat) = make_chain_graph(cfg.n_nodes, cfg.n_features, 8);
-        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 8).unwrap();
-        let scores = dominant_score(&fit, &adj, &feat).unwrap();
+        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 8)
+            .expect("dominant_fit should succeed with alpha=0.0");
+        let scores = dominant_score(&fit, &adj, &feat)
+            .expect("dominant_score should succeed with alpha=0.0");
         assert_eq!(scores.len(), cfg.n_nodes);
         for &s in &scores {
             assert!(s.is_finite(), "score not finite with alpha=0.0: {s}");
@@ -843,11 +855,19 @@ mod tests {
             ..cfg_few.clone()
         };
 
-        let fit_few = dominant_fit(&adj, &feat, n, d, &cfg_few, 100).unwrap();
-        let fit_many = dominant_fit(&adj, &feat, n, d, &cfg_many, 100).unwrap();
+        let fit_few = dominant_fit(&adj, &feat, n, d, &cfg_few, 100)
+            .expect("dominant_fit should succeed with few epochs");
+        let fit_many = dominant_fit(&adj, &feat, n, d, &cfg_many, 100)
+            .expect("dominant_fit should succeed with many epochs");
 
-        let score_few: f64 = dominant_score(&fit_few, &adj, &feat).unwrap().iter().sum();
-        let score_many: f64 = dominant_score(&fit_many, &adj, &feat).unwrap().iter().sum();
+        let score_few: f64 = dominant_score(&fit_few, &adj, &feat)
+            .expect("dominant_score should succeed for few-epoch model")
+            .iter()
+            .sum();
+        let score_many: f64 = dominant_score(&fit_many, &adj, &feat)
+            .expect("dominant_score should succeed for many-epoch model")
+            .iter()
+            .sum();
 
         // More training should generally reduce reconstruction error
         // (allow some tolerance — not guaranteed on every seed)
@@ -872,8 +892,9 @@ mod tests {
             &cfg,
             11,
         )
-        .unwrap();
-        let scores = dominant_score(&fit, &adj_test, &feat_test).unwrap();
+        .expect("dominant_fit should succeed on training graph");
+        let scores = dominant_score(&fit, &adj_test, &feat_test)
+            .expect("dominant_score should succeed on different test graph with same dims");
         assert_eq!(scores.len(), cfg.n_nodes);
         for &s in &scores {
             assert!(s.is_finite());
@@ -886,11 +907,13 @@ mod tests {
     fn predict_threshold_zero_flags_all() {
         let cfg = default_cfg();
         let (adj, feat) = make_chain_graph(cfg.n_nodes, cfg.n_features, 11);
-        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 12).unwrap();
+        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 12)
+            .expect("dominant_fit should succeed for threshold-zero test");
         // All scores ≥ 0 and threshold = 0 → every non-zero score is flagged.
         // With a freshly initialised model all reconstruction errors > 0.
-        let scores = dominant_score(&fit, &adj, &feat).unwrap();
-        let preds = dominant_predict(&fit, &adj, &feat, 0.0).unwrap();
+        let scores = dominant_score(&fit, &adj, &feat).expect("dominant_score should succeed");
+        let preds = dominant_predict(&fit, &adj, &feat, 0.0)
+            .expect("dominant_predict should succeed at threshold zero");
         for (i, (&s, &p)) in scores.iter().zip(preds.iter()).enumerate() {
             if s > 0.0 {
                 assert!(
@@ -907,7 +930,8 @@ mod tests {
     fn error_on_feat_mismatch_during_score() {
         let cfg = default_cfg();
         let (adj, feat) = make_chain_graph(cfg.n_nodes, cfg.n_features, 12);
-        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 13).unwrap();
+        let fit = dominant_fit(&adj, &feat, cfg.n_nodes, cfg.n_features, &cfg, 13)
+            .expect("dominant_fit should succeed before testing feat mismatch");
         // Wrong feat size
         let bad_feat = vec![0.0_f64; cfg.n_nodes * cfg.n_features + 1];
         let result = dominant_score(&fit, &adj, &bad_feat);
@@ -933,8 +957,10 @@ mod tests {
             n_epochs: 3,
         };
         let (adj, feat) = make_chain_graph(n, d, 13);
-        let fit = dominant_fit(&adj, &feat, n, d, &cfg, 14).unwrap();
-        let scores = dominant_score(&fit, &adj, &feat).unwrap();
+        let fit = dominant_fit(&adj, &feat, n, d, &cfg, 14)
+            .expect("dominant_fit should succeed with single feature");
+        let scores = dominant_score(&fit, &adj, &feat)
+            .expect("dominant_score should succeed with single feature");
         assert_eq!(scores.len(), n);
         for &s in &scores {
             assert!(s.is_finite() && s >= 0.0);

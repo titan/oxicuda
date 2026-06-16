@@ -89,15 +89,24 @@ fn three_node_chain_ordering_root() {
     let data = three_node_chain(n, 42);
     let cfg = LingamConfig::default();
     let mut h = make_handle(1);
-    let res = Lingam::fit(&data, n, 3, &cfg, &mut h).unwrap();
+    let res =
+        Lingam::fit(&data, n, 3, &cfg, &mut h).expect("three-node chain Lingam fit should succeed");
     // The algorithm may not always recover the exact order, but the result
     // must be a valid permutation and the B matrix must be the correct size.
     assert!(is_permutation(&res.ordering, 3));
     assert_eq!(res.b.len(), 9);
     // x1 (index 0) should appear first or at least early in the ordering.
     // We accept ordering[0] == 0 or check that the ordering places 0 before 1.
-    let pos0 = res.ordering.iter().position(|&x| x == 0).unwrap();
-    let pos1 = res.ordering.iter().position(|&x| x == 1).unwrap();
+    let pos0 = res
+        .ordering
+        .iter()
+        .position(|&x| x == 0)
+        .expect("variable 0 must appear in the ordering");
+    let pos1 = res
+        .ordering
+        .iter()
+        .position(|&x| x == 1)
+        .expect("variable 1 must appear in the ordering");
     // x0 must come before x1 in the ordering (0 causes 1).
     assert!(pos0 < pos1, "ordering = {:?}", res.ordering);
 }
@@ -110,7 +119,8 @@ fn two_node_chain_b_coefficient() {
     let data = two_node_chain(n, 2.0, 99);
     let cfg = LingamConfig::default();
     let mut h = make_handle(7);
-    let res = Lingam::fit(&data, n, 2, &cfg, &mut h).unwrap();
+    let res =
+        Lingam::fit(&data, n, 2, &cfg, &mut h).expect("two-node chain Lingam fit should succeed");
     // Find the edge from x0 to x1 in the ordering.
     // B[i, j] = structural coefficient from j to i.
     // In the causal order x0 → x1, B[1][0] should ≈ -(−2) = 2 (since B = I − W).
@@ -134,8 +144,10 @@ fn deterministic_with_same_seed() {
     let cfg = LingamConfig::default();
     let mut h1 = make_handle(123);
     let mut h2 = make_handle(123);
-    let r1 = Lingam::fit(&data, n, 2, &cfg, &mut h1).unwrap();
-    let r2 = Lingam::fit(&data, n, 2, &cfg, &mut h2).unwrap();
+    let r1 = Lingam::fit(&data, n, 2, &cfg, &mut h1)
+        .expect("first Lingam fit with seed 123 should succeed");
+    let r2 = Lingam::fit(&data, n, 2, &cfg, &mut h2)
+        .expect("second Lingam fit with seed 123 should succeed");
     assert_eq!(r1.ordering, r2.ordering);
     assert_eq!(r1.b, r2.b);
     assert_eq!(r1.w, r2.w);
@@ -210,7 +222,7 @@ fn gauss_nonlinearity_two_node() {
     let mut h = make_handle(42);
     let res = Lingam::fit(&data, n, 2, &cfg, &mut h);
     assert!(res.is_ok(), "Gauss g function failed: {:?}", res.err());
-    let r = res.unwrap();
+    let r = res.expect("Lingam fit with Gauss g-function should succeed");
     assert_eq!(r.b.len(), 4);
     assert_eq!(r.w.len(), 4);
 }
@@ -227,7 +239,7 @@ fn cube_nonlinearity_two_node() {
     let mut h = make_handle(99);
     let res = Lingam::fit(&data, n, 2, &cfg, &mut h);
     assert!(res.is_ok(), "Cube g function failed: {:?}", res.err());
-    let r = res.unwrap();
+    let r = res.expect("Lingam fit with Cube g-function should succeed");
     assert_eq!(r.b.len(), 4);
     assert_eq!(r.w.len(), 4);
 }
@@ -253,7 +265,8 @@ fn b_matrix_has_correct_size() {
     }
     let cfg = LingamConfig::default();
     let mut h = make_handle(7);
-    let res = Lingam::fit(&data4, n, d, &cfg, &mut h).unwrap();
+    let res =
+        Lingam::fit(&data4, n, d, &cfg, &mut h).expect("four-node chain Lingam fit should succeed");
     assert_eq!(res.b.len(), d * d, "b should be d×d = {}", d * d);
     let _ = data; // suppress unused warning
 }
@@ -265,7 +278,8 @@ fn w_matrix_has_correct_size() {
     let data = two_node_chain(n, 1.2, 33);
     let cfg = LingamConfig::default();
     let mut h = make_handle(5);
-    let res = Lingam::fit(&data, n, 2, &cfg, &mut h).unwrap();
+    let res = Lingam::fit(&data, n, 2, &cfg, &mut h)
+        .expect("two-node chain Lingam fit for w-size test should succeed");
     assert_eq!(res.w.len(), 4);
 }
 
@@ -276,7 +290,8 @@ fn ordering_is_permutation_of_d() {
     let data = three_node_chain(n, 21);
     let cfg = LingamConfig::default();
     let mut h = make_handle(11);
-    let res = Lingam::fit(&data, n, 3, &cfg, &mut h).unwrap();
+    let res = Lingam::fit(&data, n, 3, &cfg, &mut h)
+        .expect("three-node chain Lingam fit for ordering test should succeed");
     assert!(
         is_permutation(&res.ordering, 3),
         "ordering = {:?} is not a permutation of 0..3",
@@ -291,7 +306,8 @@ fn d_equals_one_trivial() {
     let data: Vec<f64> = (0..n).map(|i| (i as f64) * 0.1 - 2.5).collect();
     let cfg = LingamConfig::default();
     let mut h = make_handle(2);
-    let res = Lingam::fit(&data, n, 1, &cfg, &mut h).unwrap();
+    let res =
+        Lingam::fit(&data, n, 1, &cfg, &mut h).expect("d=1 trivial Lingam fit should succeed");
     assert_eq!(res.ordering, vec![0]);
     assert_eq!(res.b.len(), 1);
     // B = I − W_scaled; for d=1, the diagonal of W_scaled is 1, so B[0][0] = 0.
@@ -336,7 +352,7 @@ fn large_n_smoke_test() {
     let mut h = make_handle(159);
     let res = Lingam::fit(&data, n, 3, &cfg, &mut h);
     assert!(res.is_ok(), "large-n smoke test failed: {:?}", res.err());
-    let r = res.unwrap();
+    let r = res.expect("large-n Lingam fit should succeed");
     assert!(is_permutation(&r.ordering, 3));
 }
 
@@ -376,7 +392,8 @@ fn all_result_fields_finite() {
     let data = three_node_chain(n, 100);
     let cfg = LingamConfig::default();
     let mut h = make_handle(50);
-    let res = Lingam::fit(&data, n, 3, &cfg, &mut h).unwrap();
+    let res = Lingam::fit(&data, n, 3, &cfg, &mut h)
+        .expect("three-node chain Lingam fit for finite-fields test should succeed");
     for &v in &res.b {
         assert!(v.is_finite(), "b contains non-finite: {v}");
     }
@@ -392,7 +409,8 @@ fn result_struct_fields_accessible() {
     let data = two_node_chain(n, 1.0, 22);
     let cfg = LingamConfig::default();
     let mut h = make_handle(8);
-    let res: LingamResult = Lingam::fit(&data, n, 2, &cfg, &mut h).unwrap();
+    let res: LingamResult = Lingam::fit(&data, n, 2, &cfg, &mut h)
+        .expect("two-node chain Lingam fit for struct access test should succeed");
     let _ordering: &Vec<usize> = &res.ordering;
     let _b: &Vec<f64> = &res.b;
     let _w: &Vec<f64> = &res.w;

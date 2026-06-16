@@ -175,7 +175,8 @@ mod tests {
     fn cnf_forward_zero_flow_no_log_det() {
         // f(z) = 0 → no change in z, tr = 0, delta_log_p = 0
         let z0 = vec![1.0_f32, 2.0];
-        let (z1, delta_log_p) = cnf_forward(&const_zero, &z0, 0.0, 1.0, 0.1).unwrap();
+        let (z1, delta_log_p) = cnf_forward(&const_zero, &z0, 0.0, 1.0, 0.1)
+            .expect("CNF forward pass with zero flow should succeed and produce no log-det change");
         assert!((z1[0] - z0[0]).abs() < 1e-5);
         assert!((z1[1] - z0[1]).abs() < 1e-5);
         assert!(delta_log_p.abs() < 1e-3);
@@ -185,7 +186,8 @@ mod tests {
     fn cnf_forward_expanding_flow_negative_log_p() {
         // Expanding flow: positive divergence → delta_log_p should be negative
         let z0 = vec![1.0_f32, 1.0];
-        let (_, delta_log_p) = cnf_forward(&linear_expand, &z0, 0.0, 1.0, 0.01).unwrap();
+        let (_, delta_log_p) = cnf_forward(&linear_expand, &z0, 0.0, 1.0, 0.01)
+            .expect("CNF forward pass with expanding linear flow should succeed");
         // tr(A) = 0.3 > 0, so -∫ tr dt < 0
         assert!(
             delta_log_p < 0.0,
@@ -196,7 +198,8 @@ mod tests {
     #[test]
     fn cnf_forward_shape_correct() {
         let z0 = vec![0.5_f32, -0.3, 1.2];
-        let (z1, dlp) = cnf_forward(&const_zero, &z0, 0.0, 0.5, 0.1).unwrap();
+        let (z1, dlp) = cnf_forward(&const_zero, &z0, 0.0, 0.5, 0.1)
+            .expect("CNF forward pass with zero flow should succeed");
         assert_eq!(z1.len(), 3);
         assert!(dlp.is_finite());
     }

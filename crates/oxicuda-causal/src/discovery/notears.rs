@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn gauss_jordan_identity() {
         let id = vec![1.0_f32, 0.0, 0.0, 1.0];
-        let inv = gauss_jordan_inv(&id, 2, 0.0).unwrap();
+        let inv = gauss_jordan_inv(&id, 2, 0.0).expect("gauss_jordan_inv should succeed");
         assert!((inv[0] - 1.0).abs() < 1e-5);
         assert!((inv[3] - 1.0).abs() < 1e-5);
     }
@@ -298,7 +298,7 @@ mod tests {
     fn expm_pade_zero_is_identity() {
         // expm(0) = I.
         let a = vec![0.0_f32; 9];
-        let e = expm_pade(&a, 3).unwrap();
+        let e = expm_pade(&a, 3).expect("expm_pade should succeed");
         for i in 0..3 {
             for j in 0..3 {
                 let want = if i == j { 1.0 } else { 0.0 };
@@ -315,7 +315,7 @@ mod tests {
         for (i, &x) in xs.iter().enumerate() {
             a[i * 3 + i] = x;
         }
-        let e = expm_pade(&a, 3).unwrap();
+        let e = expm_pade(&a, 3).expect("expm_pade should succeed");
         for (i, &x) in xs.iter().enumerate() {
             assert!(
                 (e[i * 3 + i] - x.exp()).abs() < 2e-3,
@@ -332,7 +332,7 @@ mod tests {
     fn expm_pade_nilpotent_is_exact_series() {
         // Strictly-upper nilpotent N (N^2 = 0): expm(N) = I + N exactly.
         let n = vec![0.0_f32, 0.4, 0.0, 0.0];
-        let e = expm_pade(&n, 2).unwrap();
+        let e = expm_pade(&n, 2).expect("expm_pade should succeed");
         assert!((e[0] - 1.0).abs() < 1e-4);
         assert!((e[1] - 0.4).abs() < 1e-3);
         assert!((e[2]).abs() < 1e-4);
@@ -358,7 +358,7 @@ mod tests {
         // Without scaling-and-squaring the bare Padé(1,1) is badly wrong here;
         // the scaled path must still recover diag(exp(x)) accurately.
         let a = vec![3.0_f32, 0.0, 0.0, -2.5];
-        let e = expm_pade(&a, 2).unwrap();
+        let e = expm_pade(&a, 2).expect("expm_pade should succeed");
         assert!(
             (e[0] - 3.0_f32.exp()).abs() / 3.0_f32.exp() < 5e-3,
             "exp(3) mismatch: got {}",

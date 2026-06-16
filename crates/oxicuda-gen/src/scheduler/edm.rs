@@ -356,7 +356,7 @@ mod tests {
     const TINY: f32 = 1e-6;
 
     fn default_sched() -> EdmScheduler {
-        EdmScheduler::new(EdmConfig::default()).unwrap()
+        EdmScheduler::new(EdmConfig::default()).expect("value should be present")
     }
 
     fn make_rng() -> LcgRng {
@@ -434,7 +434,7 @@ mod tests {
             sigma_data,
             ..EdmConfig::default()
         };
-        let s = EdmScheduler::new(cfg).unwrap();
+        let s = EdmScheduler::new(cfg).expect("new should succeed");
         let expected = 1.0 * sigma_data / (1.0 + sigma_data * sigma_data).sqrt();
         let got = s.c_out(1.0);
         assert!(
@@ -451,7 +451,7 @@ mod tests {
             sigma_data,
             ..EdmConfig::default()
         };
-        let s = EdmScheduler::new(cfg).unwrap();
+        let s = EdmScheduler::new(cfg).expect("new should succeed");
         let expected = 1.0 / sigma_data;
         let got = s.c_in(0.0);
         assert!(
@@ -495,7 +495,9 @@ mod tests {
         let s = default_sched();
         let x = vec![1.0_f32; 8];
         let f_out = vec![0.5_f32; 8];
-        let out = s.preconditioning_output(&x, 1.0, &f_out).unwrap();
+        let out = s
+            .preconditioning_output(&x, 1.0, &f_out)
+            .expect("preconditioning_output should succeed");
         assert_eq!(out.len(), 8);
     }
 
@@ -516,7 +518,9 @@ mod tests {
     fn ode_step_shape() {
         let s = default_sched();
         let x = vec![1.0_f32; 8];
-        let out = s.ode_step(&x, 1.0, 0.5, |xi, _| xi.to_vec()).unwrap();
+        let out = s
+            .ode_step(&x, 1.0, 0.5, |xi, _| xi.to_vec())
+            .expect("value should be present");
         assert_eq!(out.len(), 8);
     }
 
@@ -529,9 +533,11 @@ mod tests {
             heun_correction: false,
             ..EdmConfig::default()
         };
-        let s = EdmScheduler::new(cfg).unwrap();
+        let s = EdmScheduler::new(cfg).expect("new should succeed");
         let x = vec![2.0_f32; 4];
-        let out = s.ode_step(&x, 1.0, 0.5, |xi, _| xi.to_vec()).unwrap();
+        let out = s
+            .ode_step(&x, 1.0, 0.5, |xi, _| xi.to_vec())
+            .expect("value should be present");
         assert_eq!(out.len(), 4, "output shape preserved");
         // The identity denoiser gives d_cur = (x - x)/sigma = 0, so x_hat = x + dt*0 = x
         // (no change expected with identity denoiser in Euler mode)
@@ -556,7 +562,9 @@ mod tests {
     fn ode_step_finite_output() {
         let s = default_sched();
         let x = vec![1.0_f32, -1.0, 0.5];
-        let out = s.ode_step(&x, 2.0, 1.0, |xi, _| xi.to_vec()).unwrap();
+        let out = s
+            .ode_step(&x, 2.0, 1.0, |xi, _| xi.to_vec())
+            .expect("value should be present");
         assert!(out.iter().all(|v| v.is_finite()), "non-finite ODE output");
     }
 
@@ -594,7 +602,9 @@ mod tests {
         let s = default_sched();
         let x = vec![1.0_f32; 16];
         let mut rng = make_rng();
-        let out = s.sample(&x, |xi, _| xi.to_vec(), &mut rng).unwrap();
+        let out = s
+            .sample(&x, |xi, _| xi.to_vec(), &mut rng)
+            .expect("value should be present");
         assert_eq!(out.len(), 16);
     }
 
@@ -604,10 +614,12 @@ mod tests {
             n_steps: 1,
             ..EdmConfig::default()
         };
-        let s = EdmScheduler::new(cfg).unwrap();
+        let s = EdmScheduler::new(cfg).expect("new should succeed");
         let x = vec![2.0_f32; 4];
         let mut rng = make_rng();
-        let out = s.sample(&x, |xi, _| xi.to_vec(), &mut rng).unwrap();
+        let out = s
+            .sample(&x, |xi, _| xi.to_vec(), &mut rng)
+            .expect("value should be present");
         assert_eq!(out.len(), 4, "n_steps=1 sample shape");
     }
 
@@ -617,7 +629,9 @@ mod tests {
         let x = vec![1.0_f32; 8];
         let mut rng = make_rng();
         // Identity denoiser
-        let out = s.sample(&x, |xi, _| xi.to_vec(), &mut rng).unwrap();
+        let out = s
+            .sample(&x, |xi, _| xi.to_vec(), &mut rng)
+            .expect("value should be present");
         assert!(
             out.iter().all(|v| v.is_finite()),
             "non-finite sample output"

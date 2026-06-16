@@ -1,4 +1,5 @@
 pub mod cd_nod;
+pub mod dag_gnn;
 pub mod direct_lingam;
 pub mod fci;
 mod fci_numeric;
@@ -19,6 +20,7 @@ pub mod rfci;
 mod rfci_tests;
 
 pub use cd_nod::{CdNod, CdNodConfig, CdNodResult};
+pub use dag_gnn::{DagGnn, DagGnnConfig, DagGnnResult, dag_gnn};
 pub use direct_lingam::{DirectLingamConfig, DirectLingamResult, direct_lingam};
 pub use fci::{EdgeMark, Fci, FciConfig, Pag};
 pub use gfci::{Gfci, GfciConfig};

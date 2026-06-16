@@ -314,7 +314,7 @@ mod tests {
             n_samples,
             aggregation,
         })
-        .unwrap()
+        .expect("value should be present")
     }
 
     // ── select ──────────────────────────────────────────────────────────────
@@ -323,7 +323,7 @@ mod tests {
     fn select_returns_argmax_index() {
         let bon = make(4, ScoreAggregation::Max);
         let rewards = [0.1_f32, 0.9, 0.3, 0.5];
-        assert_eq!(bon.select(&rewards).unwrap(), 1);
+        assert_eq!(bon.select(&rewards).expect("select should succeed"), 1);
     }
 
     #[test]
@@ -331,7 +331,7 @@ mod tests {
         let bon = make(3, ScoreAggregation::Max);
         let rewards = [0.7_f32, 0.7, 0.2];
         assert_eq!(
-            bon.select(&rewards).unwrap(),
+            bon.select(&rewards).expect("select should succeed"),
             0,
             "tie should resolve to lowest index"
         );
@@ -340,14 +340,14 @@ mod tests {
     #[test]
     fn select_single_candidate_index_zero() {
         let bon = make(1, ScoreAggregation::Max);
-        assert_eq!(bon.select(&[42.0_f32]).unwrap(), 0);
+        assert_eq!(bon.select(&[42.0_f32]).expect("select should succeed"), 0);
     }
 
     #[test]
     fn select_all_equal_index_zero() {
         let bon = make(5, ScoreAggregation::Mean);
         let rewards = [1.0_f32, 1.0, 1.0, 1.0, 1.0];
-        assert_eq!(bon.select(&rewards).unwrap(), 0);
+        assert_eq!(bon.select(&rewards).expect("select should succeed"), 0);
     }
 
     // ── aggregate_score ───────────────────────────────────────────────────────
@@ -356,14 +356,26 @@ mod tests {
     fn aggregate_max_equals_max() {
         let bon = make(4, ScoreAggregation::Max);
         let rewards = [0.1_f32, 0.9, 0.3, 0.5];
-        assert!((bon.aggregate_score(&rewards).unwrap() - 0.9).abs() < 1e-6);
+        assert!(
+            (bon.aggregate_score(&rewards)
+                .expect("aggregate_score should succeed")
+                - 0.9)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]
     fn aggregate_mean_equals_mean() {
         let bon = make(4, ScoreAggregation::Mean);
         let rewards = [1.0_f32, 2.0, 3.0, 4.0];
-        assert!((bon.aggregate_score(&rewards).unwrap() - 2.5).abs() < 1e-6);
+        assert!(
+            (bon.aggregate_score(&rewards)
+                .expect("aggregate_score should succeed")
+                - 2.5)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]
@@ -371,21 +383,35 @@ mod tests {
         let bon = make(4, ScoreAggregation::TopKMean { k: 2 });
         let rewards = [1.0_f32, 4.0, 2.0, 3.0];
         // top-2 = {4, 3}; mean = 3.5
-        assert!((bon.aggregate_score(&rewards).unwrap() - 3.5).abs() < 1e-6);
+        assert!(
+            (bon.aggregate_score(&rewards)
+                .expect("aggregate_score should succeed")
+                - 3.5)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]
     fn aggregate_topk_full_equals_mean() {
         let bon = make(3, ScoreAggregation::TopKMean { k: 3 });
         let rewards = [1.0_f32, 2.0, 3.0];
-        assert!((bon.aggregate_score(&rewards).unwrap() - 2.0).abs() < 1e-6);
+        assert!(
+            (bon.aggregate_score(&rewards)
+                .expect("aggregate_score should succeed")
+                - 2.0)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]
     fn aggregate_softmax_in_min_max_range() {
         let bon = make(4, ScoreAggregation::SoftmaxWeighted { temperature: 1.0 });
         let rewards = [0.0_f32, 1.0, 2.0, 3.0];
-        let score = bon.aggregate_score(&rewards).unwrap();
+        let score = bon
+            .aggregate_score(&rewards)
+            .expect("aggregate_score should succeed");
         assert!(
             (0.0..=3.0).contains(&score),
             "softmax-weighted score {score} must lie in [min, max]"
@@ -401,7 +427,9 @@ mod tests {
     fn aggregate_softmax_tends_to_max_as_temp_small() {
         let bon = make(4, ScoreAggregation::SoftmaxWeighted { temperature: 1e-3 });
         let rewards = [0.0_f32, 1.0, 2.0, 5.0];
-        let score = bon.aggregate_score(&rewards).unwrap();
+        let score = bon
+            .aggregate_score(&rewards)
+            .expect("aggregate_score should succeed");
         assert!(
             (score - 5.0).abs() < 1e-2,
             "as temperature → 0 the score should approach max 5.0, got {score}"
@@ -413,7 +441,9 @@ mod tests {
         // Stable softmax must not overflow for large logits.
         let bon = make(3, ScoreAggregation::SoftmaxWeighted { temperature: 1.0 });
         let rewards = [100.0_f32, 200.0, 300.0];
-        let score = bon.aggregate_score(&rewards).unwrap();
+        let score = bon
+            .aggregate_score(&rewards)
+            .expect("aggregate_score should succeed");
         assert!(score.is_finite() && (100.0..=300.0).contains(&score));
     }
 
@@ -425,15 +455,21 @@ mod tests {
         // 3 candidates × 2 objectives:
         // c0 = [1, 1] → 1.0 ; c1 = [0, 4] → 2.0 ; c2 = [1, 2] → 1.5
         let candidate_rewards = [1.0_f32, 1.0, 0.0, 4.0, 1.0, 2.0];
-        assert_eq!(bon.select_multi(&candidate_rewards, 3, 2).unwrap(), 1);
+        assert_eq!(
+            bon.select_multi(&candidate_rewards, 3, 2)
+                .expect("select_multi should succeed"),
+            1
+        );
     }
 
     #[test]
     fn select_multi_single_objective_matches_select() {
         let bon = make(3, ScoreAggregation::Max);
         let rewards = [0.1_f32, 0.9, 0.3];
-        let multi = bon.select_multi(&rewards, 3, 1).unwrap();
-        assert_eq!(multi, bon.select(&rewards).unwrap());
+        let multi = bon
+            .select_multi(&rewards, 3, 1)
+            .expect("select_multi should succeed");
+        assert_eq!(multi, bon.select(&rewards).expect("select should succeed"));
     }
 
     #[test]
@@ -441,7 +477,11 @@ mod tests {
         let bon = make(2, ScoreAggregation::Max);
         // c0 = [1, 1] → 1.0 ; c1 = [2, 0] → 1.0 — tie → index 0
         let candidate_rewards = [1.0_f32, 1.0, 2.0, 0.0];
-        assert_eq!(bon.select_multi(&candidate_rewards, 2, 2).unwrap(), 0);
+        assert_eq!(
+            bon.select_multi(&candidate_rewards, 2, 2)
+                .expect("select_multi should succeed"),
+            0
+        );
     }
 
     // ── expected_best_reward ──────────────────────────────────────────────────
@@ -452,7 +492,9 @@ mod tests {
         let samples = [1.0_f32, 2.0, 3.0, 4.0, 5.0];
         let mean = samples.iter().sum::<f32>() / samples.len() as f32;
         let max = 5.0_f32;
-        let ebr = bon.expected_best_reward(&samples).unwrap();
+        let ebr = bon
+            .expected_best_reward(&samples)
+            .expect("expected_best_reward should succeed");
         assert!(
             ebr >= mean - 1e-5 && ebr <= max + 1e-5,
             "expected_best_reward {ebr} must lie in [mean {mean}, max {max}]"
@@ -464,7 +506,9 @@ mod tests {
         let bon = make(1, ScoreAggregation::Max);
         let samples = [1.0_f32, 2.0, 3.0, 4.0];
         let mean = samples.iter().sum::<f32>() / samples.len() as f32;
-        let ebr = bon.expected_best_reward(&samples).unwrap();
+        let ebr = bon
+            .expected_best_reward(&samples)
+            .expect("expected_best_reward should succeed");
         assert!(
             (ebr - mean).abs() < 1e-5,
             "for n_samples=1 expected_best_reward {ebr} should equal mean {mean}"
@@ -476,13 +520,13 @@ mod tests {
         let samples = [1.0_f32, 2.0, 3.0, 4.0, 5.0];
         let ebr_2 = make(2, ScoreAggregation::Max)
             .expected_best_reward(&samples)
-            .unwrap();
+            .expect("value should be present");
         let ebr_10 = make(10, ScoreAggregation::Max)
             .expected_best_reward(&samples)
-            .unwrap();
+            .expect("value should be present");
         let ebr_100 = make(100, ScoreAggregation::Max)
             .expected_best_reward(&samples)
-            .unwrap();
+            .expect("value should be present");
         assert!(
             ebr_2 < ebr_10 && ebr_10 < ebr_100,
             "expected_best_reward should increase with n_samples: {ebr_2} < {ebr_10} < {ebr_100}"
@@ -493,7 +537,9 @@ mod tests {
     fn expected_best_large_n_approaches_max() {
         let bon = make(10_000, ScoreAggregation::Max);
         let samples = [1.0_f32, 2.0, 3.0, 4.0, 5.0];
-        let ebr = bon.expected_best_reward(&samples).unwrap();
+        let ebr = bon
+            .expected_best_reward(&samples)
+            .expect("expected_best_reward should succeed");
         assert!(
             (ebr - 5.0).abs() < 1e-2,
             "for very large n the expected best should approach max 5.0, got {ebr}"
@@ -504,7 +550,9 @@ mod tests {
     fn expected_best_single_sample_equals_value() {
         let bon = make(7, ScoreAggregation::Max);
         let value = 4.25_f32;
-        let ebr = bon.expected_best_reward(&[value]).unwrap();
+        let ebr = bon
+            .expected_best_reward(&[value])
+            .expect("expected_best_reward should succeed");
         assert!((ebr - value).abs() < 1e-5);
     }
 
@@ -514,12 +562,21 @@ mod tests {
     fn deterministic_repeated_calls() {
         let bon = make(8, ScoreAggregation::SoftmaxWeighted { temperature: 0.7 });
         let rewards = [0.3_f32, 0.8, 0.1, 0.5, 0.9, 0.2, 0.6, 0.4];
-        let a = bon.aggregate_score(&rewards).unwrap();
-        let b = bon.aggregate_score(&rewards).unwrap();
-        let c = bon.aggregate_score(&rewards).unwrap();
+        let a = bon
+            .aggregate_score(&rewards)
+            .expect("aggregate_score should succeed");
+        let b = bon
+            .aggregate_score(&rewards)
+            .expect("aggregate_score should succeed");
+        let c = bon
+            .aggregate_score(&rewards)
+            .expect("aggregate_score should succeed");
         assert_eq!(a.to_bits(), b.to_bits());
         assert_eq!(b.to_bits(), c.to_bits());
-        assert_eq!(bon.select(&rewards).unwrap(), bon.select(&rewards).unwrap());
+        assert_eq!(
+            bon.select(&rewards).expect("select should succeed"),
+            bon.select(&rewards).expect("select should succeed")
+        );
     }
 
     // ── Error paths ─────────────────────────────────────────────────────────────

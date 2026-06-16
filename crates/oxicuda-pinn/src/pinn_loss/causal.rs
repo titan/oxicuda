@@ -228,7 +228,8 @@ mod tests {
     use super::*;
 
     fn default_loss() -> CausalPinnLoss {
-        CausalPinnLoss::new(CausalPinnConfig::default()).unwrap()
+        CausalPinnLoss::new(CausalPinnConfig::default())
+            .expect("CausalPinnLoss construction with default config should succeed")
     }
 
     // ── construction ──────────────────────────────────────────────────────────
@@ -299,7 +300,9 @@ mod tests {
     fn causal_weights_first_is_one() {
         let cl = default_loss();
         let r = vec![0.5_f32, 1.0, 2.0];
-        let w = cl.causality_weights(&r).unwrap();
+        let w = cl
+            .causality_weights(&r)
+            .expect("causal weight computation should succeed for valid residuals");
         assert!(
             (w[0] - 1.0_f32).abs() < 1e-7,
             "w[0] must be exactly 1.0, got {}",
@@ -311,7 +314,9 @@ mod tests {
     fn causal_weights_zero_residuals() {
         let cl = default_loss();
         let r = vec![0.0_f32; 8];
-        let w = cl.causality_weights(&r).unwrap();
+        let w = cl
+            .causality_weights(&r)
+            .expect("causal weight computation should succeed for zero residuals");
         for (i, &wi) in w.iter().enumerate() {
             assert!(
                 (wi - 1.0_f32).abs() < 1e-7,
@@ -327,9 +332,11 @@ mod tests {
             epsilon: 1.0,
             convergence_tol: 0.01,
         })
-        .unwrap();
+        .expect("CausalPinnLoss construction with epsilon=1.0 and tol=0.01 should succeed");
         let r = vec![10.0_f32, 10.0, 10.0];
-        let w = cl.causality_weights(&r).unwrap();
+        let w = cl
+            .causality_weights(&r)
+            .expect("causal weight computation should succeed for large residuals");
         assert!(w[1] < 1e-10, "w[1] should be near zero, got {}", w[1]);
         assert!(w[2] < 1e-10, "w[2] should be near zero, got {}", w[2]);
     }
@@ -340,9 +347,11 @@ mod tests {
             epsilon: 2.0,
             convergence_tol: 0.01,
         })
-        .unwrap();
+        .expect("CausalPinnLoss construction with epsilon=2.0 should succeed");
         let r = vec![0.5_f32, 0.8, 1.2, 0.3, 0.6];
-        let w = cl.causality_weights(&r).unwrap();
+        let w = cl
+            .causality_weights(&r)
+            .expect("causal weight computation should succeed for monotone-decreasing check");
         for i in 1..w.len() {
             assert!(
                 w[i] <= w[i - 1],
@@ -359,7 +368,9 @@ mod tests {
     fn causal_weights_length_equals_residuals() {
         let cl = default_loss();
         let r: Vec<f32> = (0..13).map(|i| i as f32 * 0.1).collect();
-        let w = cl.causality_weights(&r).unwrap();
+        let w = cl.causality_weights(&r).expect(
+            "causal weight computation should succeed and output length should equal input length",
+        );
         assert_eq!(w.len(), r.len(), "Output length must match input length");
     }
 
@@ -378,7 +389,9 @@ mod tests {
     fn causal_weighted_loss_zero_residuals() {
         let cl = default_loss();
         let r = vec![0.0_f32; 10];
-        let loss = cl.weighted_loss(&r).unwrap();
+        let loss = cl
+            .weighted_loss(&r)
+            .expect("causal weighted loss computation should succeed for zero residuals");
         assert!(loss.abs() < 1e-8, "Zero residuals → loss = 0, got {loss}");
     }
 
@@ -389,9 +402,11 @@ mod tests {
             epsilon: 1e-6,
             convergence_tol: 0.01,
         })
-        .unwrap();
+        .expect("CausalPinnLoss construction with tiny epsilon=1e-6 should succeed");
         let r = vec![0.5_f32, 1.0, -0.3, 0.8];
-        let causal_loss = cl.weighted_loss(&r).unwrap();
+        let causal_loss = cl
+            .weighted_loss(&r)
+            .expect("causal weighted loss computation should succeed for tiny epsilon");
         let mse: f32 = r.iter().map(|&x| x * x).sum::<f32>() / r.len() as f32;
         assert!(
             (causal_loss - mse).abs() < 1e-4,
@@ -405,9 +420,11 @@ mod tests {
             epsilon: 5.0,
             convergence_tol: 0.01,
         })
-        .unwrap();
+        .expect("CausalPinnLoss construction with epsilon=5.0 should succeed");
         let r = vec![-2.0_f32, 3.0, -1.5, 0.7, -0.1];
-        let loss = cl.weighted_loss(&r).unwrap();
+        let loss = cl
+            .weighted_loss(&r)
+            .expect("causal weighted loss should succeed for non-negative check");
         assert!(loss >= 0.0, "Loss must be non-negative, got {loss}");
     }
 
@@ -418,8 +435,12 @@ mod tests {
         let cl = default_loss();
         let r_bad_early = vec![10.0_f32, 1.0, 1.0, 1.0];
         let r_good_early = vec![0.01_f32, 1.0, 1.0, 1.0];
-        let loss_bad = cl.weighted_loss(&r_bad_early).unwrap();
-        let loss_good = cl.weighted_loss(&r_good_early).unwrap();
+        let loss_bad = cl
+            .weighted_loss(&r_bad_early)
+            .expect("causal weighted loss should succeed for bad early residuals");
+        let loss_good = cl
+            .weighted_loss(&r_good_early)
+            .expect("causal weighted loss should succeed for good early residuals");
         assert!(
             loss_good < loss_bad,
             "Good early residuals should reduce causal loss: {loss_good} < {loss_bad}"
@@ -431,7 +452,9 @@ mod tests {
         let cl = default_loss();
         let r = vec![3.0_f32];
         // Single point: w[0] = 1, loss = r[0]² / 1 = 9
-        let loss = cl.weighted_loss(&r).unwrap();
+        let loss = cl
+            .weighted_loss(&r)
+            .expect("causal weighted loss should succeed for single-point residual");
         assert!(
             (loss - 9.0_f32).abs() < 1e-6,
             "Single-point loss = r², got {loss}"
@@ -445,7 +468,11 @@ mod tests {
         // All-zero residuals → all weights = 1 → min weight = 1 > 1 - tol
         let cl = default_loss();
         let r = vec![0.0_f32; 20];
-        assert!(cl.is_converged(&r).unwrap(), "Should be converged");
+        assert!(
+            cl.is_converged(&r)
+                .expect("causal time-ordering convergence check should succeed for zero residuals"),
+            "Should be converged"
+        );
     }
 
     #[test]
@@ -454,9 +481,14 @@ mod tests {
             epsilon: 10.0,
             convergence_tol: 0.01,
         })
-        .unwrap();
+        .expect("CausalPinnLoss construction with epsilon=10.0 should succeed");
         let r = vec![5.0_f32, 5.0, 5.0];
-        assert!(!cl.is_converged(&r).unwrap(), "Should not be converged");
+        assert!(
+            !cl.is_converged(&r).expect(
+                "causal time-ordering convergence check should succeed for large residuals"
+            ),
+            "Should not be converged"
+        );
     }
 
     // ── partial_loss ──────────────────────────────────────────────────────────
@@ -466,7 +498,9 @@ mod tests {
         let cl = default_loss();
         let r = vec![3.0_f32, 10.0, 10.0]; // only index 0 matters
         // partial_loss(r, 0) uses sub=[r[0]], w[0]=1, loss = r[0]²/1 = 9
-        let loss = cl.partial_loss(&r, 0).unwrap();
+        let loss = cl
+            .partial_loss(&r, 0)
+            .expect("partial causal loss computation should succeed for k=0");
         assert!(
             (loss - 9.0_f32).abs() < 1e-6,
             "partial_loss with k=0 = r[0]², got {loss}"
@@ -489,7 +523,9 @@ mod tests {
         let cl = default_loss();
         let r = vec![-3.0_f32, 1.5, -2.0, 0.5];
         for k in 0..r.len() {
-            let loss = cl.partial_loss(&r, k).unwrap();
+            let loss = cl
+                .partial_loss(&r, k)
+                .expect("partial causal loss computation should succeed for valid k");
             assert!(
                 loss >= 0.0,
                 "partial_loss(k={k}) must be non-negative, got {loss}"
@@ -504,7 +540,9 @@ mod tests {
         let cl = default_loss();
         let r = vec![0.0_f32; 12];
         // All weights = 1 > any threshold in [0, 1)
-        let cov = cl.effective_coverage(&r, 0.5).unwrap();
+        let cov = cl
+            .effective_coverage(&r, 0.5)
+            .expect("effective coverage computation should succeed for zero residuals");
         assert!(
             (cov - 1.0_f32).abs() < 1e-7,
             "All-zero residuals → coverage = 1.0, got {cov}"
@@ -517,10 +555,12 @@ mod tests {
             epsilon: 100.0,
             convergence_tol: 0.01,
         })
-        .unwrap();
+        .expect("CausalPinnLoss construction with epsilon=100.0 should succeed");
         let r = vec![5.0_f32, 5.0, 5.0, 5.0, 5.0];
         // Later weights ≈ 0; only first point has weight = 1
-        let cov = cl.effective_coverage(&r, 0.5).unwrap();
+        let cov = cl
+            .effective_coverage(&r, 0.5)
+            .expect("effective coverage computation should succeed for large residuals");
         assert!(
             cov < 1.0,
             "Large residuals with high epsilon → partial coverage, got {cov}"
@@ -547,7 +587,9 @@ mod tests {
     fn cumulative_squared_residuals_shape() {
         let cl = default_loss();
         let r = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let cum = cl.cumulative_squared_residuals(&r).unwrap();
+        let cum = cl
+            .cumulative_squared_residuals(&r)
+            .expect("cumulative squared residuals computation should succeed for valid input");
         assert_eq!(cum.len(), r.len(), "Output length must match input");
     }
 
@@ -555,7 +597,9 @@ mod tests {
     fn cumulative_squared_residuals_nondecreasing() {
         let cl = default_loss();
         let r = vec![0.1_f32, 0.5, 0.0, 2.0, 0.3];
-        let cum = cl.cumulative_squared_residuals(&r).unwrap();
+        let cum = cl.cumulative_squared_residuals(&r).expect(
+            "cumulative squared residuals computation should succeed for non-decreasing check",
+        );
         for i in 1..cum.len() {
             assert!(
                 cum[i] >= cum[i - 1],
@@ -572,7 +616,9 @@ mod tests {
     fn cumulative_squared_residuals_values() {
         let cl = default_loss();
         let r = vec![2.0_f32, 3.0]; // r² = [4, 9]
-        let cum = cl.cumulative_squared_residuals(&r).unwrap();
+        let cum = cl
+            .cumulative_squared_residuals(&r)
+            .expect("cumulative squared residuals computation should succeed for value check");
         assert!(
             (cum[0] - 4.0_f32).abs() < 1e-6,
             "cum[0] = r[0]²=4, got {}",

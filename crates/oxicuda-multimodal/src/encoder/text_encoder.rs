@@ -378,7 +378,7 @@ mod tests {
         let cfg = BertConfig::tiny();
         let weights = BertWeights::zeros(&cfg);
         let token_ids = [0_u32, 1, 2, 3];
-        let out = BertEncoder::forward(&token_ids, &weights, &cfg).unwrap();
+        let out = BertEncoder::forward(&token_ids, &weights, &cfg).expect("forward should succeed");
         assert_eq!(out.len(), cfg.d_model);
     }
 
@@ -387,7 +387,7 @@ mod tests {
         let cfg = BertConfig::tiny();
         let weights = BertWeights::ones(&cfg);
         let token_ids = [0_u32, 1, 2, 3, 4];
-        let out = BertEncoder::forward(&token_ids, &weights, &cfg).unwrap();
+        let out = BertEncoder::forward(&token_ids, &weights, &cfg).expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -396,7 +396,7 @@ mod tests {
         let cfg = BertConfig::tiny();
         let weights = BertWeights::zeros(&cfg);
         let token_ids = [0_u32, 1, 2];
-        let out = BertEncoder::forward(&token_ids, &weights, &cfg).unwrap();
+        let out = BertEncoder::forward(&token_ids, &weights, &cfg).expect("forward should succeed");
         // With zero embeddings and zero weights, all outputs are zero
         for &v in &out {
             assert!(v.abs() < 1e-6, "expected ~0, got {v}");

@@ -254,7 +254,8 @@ mod tests {
         l2_normalize(&mut role);
         let filler = gaussian_vec(filler_dim, &mut rng);
         let bound = tensor_product_bind(&role, &filler);
-        let recovered = tensor_product_unbind(&bound, &role, role_dim, filler_dim).unwrap();
+        let recovered = tensor_product_unbind(&bound, &role, role_dim, filler_dim)
+            .expect("tensor_product_unbind should succeed");
         for (r, f) in recovered.iter().zip(filler.iter()) {
             assert!((r - f).abs() < 1e-5, "recovered {r} != filler {f}");
         }
@@ -266,7 +267,8 @@ mod tests {
         let role = vec![3.0f32, 0.0, 0.0]; // ‖role‖² = 9
         let filler = vec![2.0f32, -1.0];
         let bound = tensor_product_bind(&role, &filler);
-        let recovered = tensor_product_unbind(&bound, &role, 3, 2).unwrap();
+        let recovered = tensor_product_unbind(&bound, &role, 3, 2)
+            .expect("tensor_product_unbind should succeed");
         for (r, f) in recovered.iter().zip(filler.iter()) {
             assert!((r - f).abs() < 1e-5, "recovered {r} != filler {f}");
         }
@@ -281,7 +283,8 @@ mod tests {
         let role = gaussian_vec(role_dim, &mut rng);
         let filler = gaussian_vec(filler_dim, &mut rng);
         let bound = tensor_product_bind(&role, &filler);
-        let recovered = tensor_product_unbind(&bound, &role, role_dim, filler_dim).unwrap();
+        let recovered = tensor_product_unbind(&bound, &role, role_dim, filler_dim)
+            .expect("tensor_product_unbind should succeed");
         for (r, f) in recovered.iter().zip(filler.iter()) {
             assert!((r - f).abs() < 1e-4, "recovered {r} != filler {f}");
         }
@@ -296,10 +299,10 @@ mod tests {
         let n = 3;
         let roles = orthonormal_set(n, role_dim, &mut rng);
         let fillers: Vec<Vec<f32>> = (0..n).map(|_| gaussian_vec(filler_dim, &mut rng)).collect();
-        let bundle = tpr_encode(&roles, &fillers).unwrap();
+        let bundle = tpr_encode(&roles, &fillers).expect("tpr_encode should succeed");
         for i in 0..n {
-            let recovered =
-                tensor_product_unbind(&bundle, &roles[i], role_dim, filler_dim).unwrap();
+            let recovered = tensor_product_unbind(&bundle, &roles[i], role_dim, filler_dim)
+                .expect("tensor_product_unbind should succeed");
             for (r, f) in recovered.iter().zip(fillers[i].iter()) {
                 assert!(
                     (r - f).abs() < 1e-4,
@@ -314,7 +317,7 @@ mod tests {
         let a = vec![1.0f32, 2.0, 3.0];
         let b = vec![10.0f32, 20.0, 30.0];
         let c = vec![100.0f32, 200.0, 300.0];
-        let bundled = tpr_bundle(&[a, b, c]).unwrap();
+        let bundled = tpr_bundle(&[a, b, c]).expect("tpr_bundle should succeed");
         assert_eq!(bundled, vec![111.0, 222.0, 333.0]);
     }
 
@@ -322,12 +325,12 @@ mod tests {
     fn tpr_encode_equals_bind_each_plus_bundle() {
         let roles = vec![vec![1.0f32, 0.0], vec![0.0f32, 1.0]];
         let fillers = vec![vec![2.0f32, 3.0], vec![4.0f32, 5.0]];
-        let encoded = tpr_encode(&roles, &fillers).unwrap();
+        let encoded = tpr_encode(&roles, &fillers).expect("tpr_encode should succeed");
         let manual = tpr_bundle(&[
             tensor_product_bind(&roles[0], &fillers[0]),
             tensor_product_bind(&roles[1], &fillers[1]),
         ])
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(encoded, manual);
     }
 
@@ -340,8 +343,10 @@ mod tests {
         let roles = orthonormal_set(2, role_dim, &mut rng);
         let f0 = vec![1.0f32, 0.0, 0.0, 0.0];
         let f1 = vec![0.0f32, 1.0, 0.0, 0.0];
-        let bundle = tpr_encode(&roles, &[f0.clone(), f1.clone()]).unwrap();
-        let rec0 = tensor_product_unbind(&bundle, &roles[0], role_dim, filler_dim).unwrap();
+        let bundle =
+            tpr_encode(&roles, &[f0.clone(), f1.clone()]).expect("value should be present");
+        let rec0 = tensor_product_unbind(&bundle, &roles[0], role_dim, filler_dim)
+            .expect("tensor_product_unbind should succeed");
         // rec0 ≈ f0: component 0 ≈ 1, all others ≈ 0 (cross-talk from f1 is negligible).
         assert!((rec0[0] - 1.0).abs() < 1e-4, "rec0[0]={}", rec0[0]);
         for &v in &rec0[1..] {
@@ -361,7 +366,7 @@ mod tests {
             tensor_product_bind(&role, &f1),
             tensor_product_bind(&role, &f2),
         ])
-        .unwrap();
+        .expect("value should be present");
         for (l, r) in lhs.iter().zip(rhs.iter()) {
             assert!((l - r).abs() < 1e-5, "bilinearity broke: {l} != {r}");
         }
@@ -379,7 +384,7 @@ mod tests {
             tensor_product_bind(&r1, &filler),
             tensor_product_bind(&r2, &filler),
         ])
-        .unwrap();
+        .expect("value should be present");
         for (l, r) in lhs.iter().zip(rhs.iter()) {
             assert!((l - r).abs() < 1e-5, "bilinearity broke: {l} != {r}");
         }
@@ -473,7 +478,8 @@ mod tests {
         let filler = vec![5.0f32];
         let bound = tensor_product_bind(&role, &filler);
         assert_eq!(bound, vec![10.0]);
-        let recovered = tensor_product_unbind(&bound, &role, 1, 1).unwrap();
+        let recovered = tensor_product_unbind(&bound, &role, 1, 1)
+            .expect("tensor_product_unbind should succeed");
         assert!((recovered[0] - 5.0).abs() < 1e-6);
     }
 
@@ -489,7 +495,7 @@ mod tests {
     #[test]
     fn bundle_of_one_equals_that_binding() {
         let binding = tensor_product_bind(&[1.0, 2.0], &[3.0, 4.0]);
-        let bundled = tpr_bundle(std::slice::from_ref(&binding)).unwrap();
+        let bundled = tpr_bundle(std::slice::from_ref(&binding)).expect("value should be present");
         assert_eq!(bundled, binding);
     }
 
@@ -504,7 +510,8 @@ mod tests {
         let filler = gaussian_vec(filler_dim, &mut rng);
         let bound = tensor_product_bind(&role, &filler);
         assert_eq!(bound.len(), role_dim * filler_dim);
-        let recovered = tensor_product_unbind(&bound, &role, role_dim, filler_dim).unwrap();
+        let recovered = tensor_product_unbind(&bound, &role, role_dim, filler_dim)
+            .expect("tensor_product_unbind should succeed");
         for (r, f) in recovered.iter().zip(filler.iter()) {
             assert!((r - f).abs() < 1e-5, "recovered {r} != filler {f}");
         }

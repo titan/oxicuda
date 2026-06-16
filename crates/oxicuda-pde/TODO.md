@@ -11,7 +11,7 @@ discontinuous Galerkin in 1D with Legendre-Gauss-Lobatto nodes. Part of
 
 ## Implementation Status
 
-**Actual: 5,750 lines / 4,847 SLoC (49 files)** — implements the standard PDE-solver
+**Actual: 23,803 SLoC (96 files)** — implements the standard PDE-solver
 pipeline in pure Rust with no external linear-algebra dependencies. Includes
 7 PTX kernels × 6 SM versions covering the GPU-bandwidth-critical kernels.
 
@@ -130,21 +130,37 @@ pipeline in pure Rust with no external linear-algebra dependencies. Includes
   (van der Vorst 1992)
 
 #### P1 — Algorithmic Coverage
+- [x] `fem/poisson.rs` / `FemPoisson` — FEM-based Poisson solver combining P1 assembly, Dirichlet enforcement, and CG solve into a single high-level entry point; `FemPoisson { mesh, stiffness, load }` with `solve()` returning nodal solution vector
+- [x] `time/mol.rs` / `MethodOfLines` — Method of Lines semi-discretisation: replace spatial PDE terms with FDM/FEM stencils to produce an ODE system; `MethodOfLines { n_dofs, rhs_fn }` compatible with all time-steppers in `time/`
 - [x] `fdm/poisson_3d.rs` — 7-point 3D Laplacian with checkerboard Gauss-Seidel
 - [x] `fdm/wave_2d.rs` — 2D wave equation with leapfrog scheme
 - [x] `fdm/burgers_1d.rs` — Inviscid / viscous Burgers' equation with shock-capturing
   upwind / Lax-Wendroff / MUSCL
-- [ ] `fdm/navier_stokes_1d.rs` — 1D compressible Euler / Navier-Stokes scaffold
-- [ ] `fem/mixed_poisson.rs` — Raviart-Thomas mixed Poisson formulation
-- [ ] `fem/p3_triangle.rs` — Cubic P3 Lagrange element
+- [x] `fdm/navier_stokes_1d.rs` — 1D compressible Euler / Navier-Stokes scaffold
+- [x] `fem/mixed_poisson.rs` — Raviart-Thomas (RT0) + P0 mixed Poisson
+  (fem/mixed_poisson.rs -- σ=−∇u/div σ=f saddle system [[M,−Bᵀ],[B,0]]; exact RT0 mass via
+  3-edge-midpoint quadrature; constant per-element divergence ⇒ exact local conservation
+  ∫_T div σ_h=∫_T f; canonical global edge orientation; Dirichlet natural boundary term;
+  pure-Neumann nullspace pinned; dense indefinite solve + Schur-complement S=B M⁻¹ Bᵀ helper)
+- [x] `fem/p3_triangle.rs` — Cubic P3 Lagrange element
 - [x] `spectral/fourier_2d.rs` — 2D FFT-based Poisson solver
-- [ ] `spectral/chebyshev_2d.rs` — Chebyshev-Chebyshev tensor-product collocation
-- [ ] `multigrid/wcycle.rs` — W-cycle and FMG (Full Multigrid) variants
-- [ ] `multigrid/amg.rs` — Algebraic Multigrid (AMG) for unstructured problems
+- [x] `spectral/chebyshev_2d.rs` — Chebyshev-Chebyshev tensor-product collocation
+  (spectral/chebyshev_2d.rs -- tensor-product Chebyshev collocation Poisson on a rectangle;
+  D2=D1·D1 with (2/L)² chain-rule scale; Kronecker Laplacian L=(I_y⊗D2x)+(D2y⊗I_x);
+  Dirichlet by interior-only dense solve, BC moved to RHS; spectral max-error ≤1e-8 at N=20)
+- [x] `multigrid/wcycle.rs` — W-cycle and FMG (Full Multigrid) variants
+- [x] `multigrid/amg.rs` — Algebraic Multigrid (AMG) for unstructured problems
 - [ ] `solver/preconditioner_amg.rs` — AMG-as-preconditioner inside PCG
-- [ ] `dg/dg2d.rs` — 2D nodal DG on triangles with Lax-Friedrichs / Roe flux
-- [ ] `dg/dg_limiter.rs` — Slope limiter / WENO limiter for shock-capturing DG
-- [ ] `bc/periodic.rs` — Periodic-BC helper distinct from the FFT-spectral path
+- [x] `dg/dg_2d.rs` — 2D nodal DG (P1) on triangles with upwind / Lax-Friedrichs flux
+  (dg/dg_2d.rs -- P1 nodal DG for u_t+∇·(βu)=0 and inviscid Burgers; constant barycentric
+  gradients; volume term (∫_T f)·∇λ_i; per-edge 2-pt Gauss numerical-flux surface term;
+  closed-form P1 mass inverse; SSP-RK3; periodic edge matching + compact-support BC; CFL guard.
+  Discrete mass conserved to ~1e-12; Burgers shock at RH speed s=(uL+uR)/2)
+- [x] `dg/limiter_2d.rs` — Cockburn-Shu minmod slope limiter + Zhang-Shu MPP bound limiter
+  (dg/limiter_2d.rs -- geometry-aware minmod on edge-midpoint increments vs least-squares
+  cell-mean gradient [exact on linear data]; conservative redistribution keeps cell means
+  fixed; Zhang-Shu MPP scaling enforces strict [min u0,max u0] discrete maximum principle)
+- [x] `bc/periodic.rs` — Periodic-BC helper distinct from the FFT-spectral path
 
 #### P1 — Time Integration & PDE-Specific
 - [ ] `time/rk_implicit.rs` — Implicit Runge-Kutta (RadauIIA, Gauss-Legendre) for
@@ -161,6 +177,13 @@ pipeline in pure Rust with no external linear-algebra dependencies. Includes
   step adaptation
 - [ ] `pde_apps/advection_diffusion.rs` — Convection-diffusion benchmark
 - [ ] `pde_apps/stokes.rs` — Stokes flow with mixed FEM
+
+#### P2 — Algorithmic Research
+- [ ] `spectral/fourier_3d.rs` — 3D pseudo-spectral NS solver (Canuto 2006): FFT-based Poisson projector for incompressibility; de-aliased 3/2-rule; RK4 in time; `SpectralNS3D { nx, ny, nz, nu: f32 }`
+- [x] `fdm/crank_nicolson_2d.rs` — Crank-Nicolson 2D heat equation: ADI (Alternating Direction Implicit) Peaceman-Rachford splitting; tridiagonal solves in x/y direction alternately; O(n²) per time step; unconditionally stable
+- [ ] `dg/br2_elliptic.rs` — BR2 interior penalty DG (Bassi-Rebay 1997): auxiliary variable formulation for 2nd-order elliptic operators; symmetric, consistent, positive-definite; coercivity condition A≥n_faces/2 on penalty α
+- [ ] `fem/elasticity.rs` — Linear elasticity FEM: displacement formulation σ=λ(∇·u)I+μ(∇u+∇uᵀ); element stiffness via 3-point Gauss; Dirichlet/Neumann BC; `LinearElasticity2D { E: f32, nu: f32 }`
+- [ ] `pde/level_set.rs` — Level set method (Osher-Sethian 1988): signed-distance φ advected by velocity field; reinitialization via fast marching / Sussman redistancing; `LevelSetEvolution { phi: Vec<f32>, dt: f32 }`
 
 #### P2 — Adaptive / Advanced
 - [ ] `amr/octree.rs` — Adaptive mesh refinement via octree subdivision
@@ -198,7 +221,7 @@ Chebyshev DFT-derivative are all implemented from scratch.
 ## Quality Status
 
 - Warnings: 0 (clippy clean; `#![forbid(unsafe_code)]`)
-- Tests: 22 e2e tests passing (host-side); PTX kernel strings validated per SM version
+- Tests: 680 passing (22 e2e host-side tests + module unit tests); PTX kernel strings validated per SM version
 - `unwrap()` calls in production code: 0
 - `unsafe` code: forbidden at the crate level
 - macOS: compiles; GPU integration paths return `UnsupportedPlatform` at runtime

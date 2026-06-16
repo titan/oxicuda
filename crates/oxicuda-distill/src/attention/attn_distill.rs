@@ -73,7 +73,7 @@ mod tests {
     fn multi_head_finite() {
         let s: Vec<Vec<f32>> = vec![vec![0.3_f32, 0.7], vec![0.6, 0.4]];
         let t: Vec<Vec<f32>> = vec![vec![0.25_f32, 0.75], vec![0.55, 0.45]];
-        let loss = multi_head_attn_loss(&s, &t).unwrap();
+        let loss = multi_head_attn_loss(&s, &t).expect("multi_head_attn_loss should succeed");
         assert!(loss.is_finite() && loss >= 0.0);
     }
 }

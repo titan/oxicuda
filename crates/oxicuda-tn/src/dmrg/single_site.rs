@@ -1149,7 +1149,8 @@ mod tests {
         }
         // Overall the final energy should not be much worse than the first.
         assert!(
-            *energies.last().unwrap() <= *energies.first().unwrap() + 0.5,
+            *energies.last().expect("last should succeed")
+                <= *energies.first().expect("first should succeed") + 0.5,
             "final energy higher than initial: {:?}",
             energies
         );

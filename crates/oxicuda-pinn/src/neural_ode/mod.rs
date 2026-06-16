@@ -7,6 +7,7 @@ pub mod hamiltonian;
 pub mod latent_ode;
 pub mod neural_sde;
 pub mod solvers;
+pub mod symplectic;
 
 // Re-exports for HNN / LNN.
 pub use hamiltonian::{

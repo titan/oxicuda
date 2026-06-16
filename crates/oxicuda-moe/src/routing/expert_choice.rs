@@ -215,7 +215,8 @@ mod tests {
         };
         let x = vec![1.0_f32; n_tokens * input_dim];
         let gate_weights = vec![0.5_f32; n_experts * input_dim];
-        let result = expert_choice_route(&x, &gate_weights, n_tokens, &cfg).unwrap();
+        let result = expert_choice_route(&x, &gate_weights, n_tokens, &cfg)
+            .expect("expert_choice_route should succeed");
         // capacity = floor(8/2 * 1.0) = 4
         assert_eq!(result.capacity, 4);
         assert_eq!(result.token_indices.len(), n_experts * result.capacity);
@@ -246,7 +247,7 @@ mod tests {
             capacity,
             d_model,
         )
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(output.len(), n_tokens * d_model);
     }
 }

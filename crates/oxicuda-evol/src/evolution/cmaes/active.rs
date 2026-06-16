@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn test_config_new_valid() {
-        let cfg = ActiveCmaEsConfig::new(5).unwrap();
+        let cfg = ActiveCmaEsConfig::new(5).expect("new should succeed");
         assert_eq!(cfg.n, 5);
         assert!(cfg.sigma0 > 0.0);
         assert!(cfg.max_iter > 0);
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_state_new_dim_mismatch() {
-        let cfg = ActiveCmaEsConfig::new(3).unwrap();
+        let cfg = ActiveCmaEsConfig::new(3).expect("new should succeed");
         let mean = vec![0.0f64; 5]; // wrong length
         assert!(ActiveCmaEsState::new(mean, &cfg).is_err());
     }
@@ -466,8 +466,8 @@ mod tests {
     #[test]
     fn test_state_new_identity_covariance() {
         let n = 4;
-        let cfg = ActiveCmaEsConfig::new(n).unwrap();
-        let state = ActiveCmaEsState::new(vec![0.0f64; n], &cfg).unwrap();
+        let cfg = ActiveCmaEsConfig::new(n).expect("new should succeed");
+        let state = ActiveCmaEsState::new(vec![0.0f64; n], &cfg).expect("new should succeed");
         // Diagonal of initial C should be 1.0
         for i in 0..n {
             assert!((state.c_matrix[i * n + i] - 1.0).abs() < 1e-10);
@@ -484,23 +484,23 @@ mod tests {
 
     #[test]
     fn test_state_alpha_neg_positive() {
-        let cfg = ActiveCmaEsConfig::new(5).unwrap();
-        let state = ActiveCmaEsState::new(vec![0.0; 5], &cfg).unwrap();
+        let cfg = ActiveCmaEsConfig::new(5).expect("new should succeed");
+        let state = ActiveCmaEsState::new(vec![0.0; 5], &cfg).expect("new should succeed");
         assert!(state.alpha_neg > 0.0);
     }
 
     #[test]
     fn test_state_weights_sum_to_one() {
-        let cfg = ActiveCmaEsConfig::new(6).unwrap();
-        let state = ActiveCmaEsState::new(vec![0.0; 6], &cfg).unwrap();
+        let cfg = ActiveCmaEsConfig::new(6).expect("new should succeed");
+        let state = ActiveCmaEsState::new(vec![0.0; 6], &cfg).expect("new should succeed");
         let s: f64 = state.weights.iter().sum();
         assert!((s - 1.0).abs() < 1e-10, "weight sum = {s}");
     }
 
     #[test]
     fn test_state_mu_neg_positive() {
-        let cfg = ActiveCmaEsConfig::new(4).unwrap();
-        let state = ActiveCmaEsState::new(vec![0.0; 4], &cfg).unwrap();
+        let cfg = ActiveCmaEsConfig::new(4).expect("new should succeed");
+        let state = ActiveCmaEsState::new(vec![0.0; 4], &cfg).expect("new should succeed");
         assert!(state.mu_neg >= 1);
     }
 
@@ -515,9 +515,12 @@ mod tests {
             tol: 1e-6,
             seed: 1,
         };
-        let mut state = ActiveCmaEsState::new(vec![1.0, 1.0, 1.0], &cfg).unwrap();
+        let mut state =
+            ActiveCmaEsState::new(vec![1.0, 1.0, 1.0], &cfg).expect("new should succeed");
         let mut rng = LcgRng::new(1);
-        let best = state.step(&sphere, &mut rng, 3).unwrap();
+        let best = state
+            .step(&sphere, &mut rng, 3)
+            .expect("step should succeed");
         assert!(best.is_finite());
     }
 
@@ -530,12 +533,16 @@ mod tests {
             tol: 1e-6,
             seed: 2,
         };
-        let mut state = ActiveCmaEsState::new(vec![0.5, -0.5], &cfg).unwrap();
+        let mut state = ActiveCmaEsState::new(vec![0.5, -0.5], &cfg).expect("new should succeed");
         let mut rng = LcgRng::new(2);
         assert_eq!(state.generation, 0);
-        state.step(&sphere, &mut rng, 2).unwrap();
+        state
+            .step(&sphere, &mut rng, 2)
+            .expect("step should succeed");
         assert_eq!(state.generation, 1);
-        state.step(&sphere, &mut rng, 2).unwrap();
+        state
+            .step(&sphere, &mut rng, 2)
+            .expect("step should succeed");
         assert_eq!(state.generation, 2);
     }
 
@@ -548,10 +555,13 @@ mod tests {
             tol: 1e-8,
             seed: 3,
         };
-        let mut state = ActiveCmaEsState::new(vec![2.0, -1.0, 0.5], &cfg).unwrap();
+        let mut state =
+            ActiveCmaEsState::new(vec![2.0, -1.0, 0.5], &cfg).expect("new should succeed");
         let mut rng = LcgRng::new(3);
         for _ in 0..20 {
-            state.step(&sphere, &mut rng, 3).unwrap();
+            state
+                .step(&sphere, &mut rng, 3)
+                .expect("step should succeed");
         }
         // Diagonal should remain positive after negative updates
         for i in 0..3 {
@@ -574,7 +584,8 @@ mod tests {
             tol: 1e-8,
             seed: 42,
         };
-        let state = active_cmaes_run(sphere, &[1.0, 1.0], &cfg).unwrap();
+        let state =
+            active_cmaes_run(sphere, &[1.0, 1.0], &cfg).expect("active_cmaes_run should succeed");
         let val = sphere(&state.mean);
         assert!(val < 1.0, "sphere 2D: {val} not < 1.0");
     }
@@ -589,7 +600,7 @@ mod tests {
             seed: 77,
         };
         let init = vec![2.0; 5];
-        let state = active_cmaes_run(sphere, &init, &cfg).unwrap();
+        let state = active_cmaes_run(sphere, &init, &cfg).expect("active_cmaes_run should succeed");
         let val = sphere(&state.mean);
         assert!(val < 1.0, "sphere 5D: {val}");
     }
@@ -604,7 +615,8 @@ mod tests {
             seed: 11,
         };
         let init = vec![1.0, -1.0, 0.5];
-        let state = active_cmaes_run(ellipsoid, &init, &cfg).unwrap();
+        let state =
+            active_cmaes_run(ellipsoid, &init, &cfg).expect("active_cmaes_run should succeed");
         let val = ellipsoid(&state.mean);
         assert!(val < 10.0, "ellipsoid 3D: {val}");
     }
@@ -619,7 +631,8 @@ mod tests {
             seed: 99,
         };
         let init = vec![0.0, 0.0];
-        let state = active_cmaes_run(rosenbrock, &init, &cfg).unwrap();
+        let state =
+            active_cmaes_run(rosenbrock, &init, &cfg).expect("active_cmaes_run should succeed");
         let val = rosenbrock(&state.mean);
         assert!(val < 100.0, "rosenbrock 2D: {val}");
     }
@@ -636,7 +649,8 @@ mod tests {
             seed: 55,
         };
         let init = vec![1.0, -1.0];
-        let state = active_cmaes_run(rastrigin, &init, &cfg).unwrap();
+        let state =
+            active_cmaes_run(rastrigin, &init, &cfg).expect("active_cmaes_run should succeed");
         let final_val = rastrigin(&state.mean);
         // Worst possible near the corners ≈ 50; any decent run should do much better.
         assert!(final_val < 50.0, "rastrigin 2D: {final_val} not < 50.0");
@@ -644,7 +658,7 @@ mod tests {
 
     #[test]
     fn test_run_dimension_mismatch_error() {
-        let cfg = ActiveCmaEsConfig::new(3).unwrap();
+        let cfg = ActiveCmaEsConfig::new(3).expect("new should succeed");
         let init = vec![0.0; 5]; // wrong length
         assert!(active_cmaes_run(sphere, &init, &cfg).is_err());
     }
@@ -658,11 +672,14 @@ mod tests {
             tol: 1e-10,
             seed: 7,
         };
-        let mut state = ActiveCmaEsState::new(vec![0.5, 0.5, 0.5], &cfg).unwrap();
+        let mut state =
+            ActiveCmaEsState::new(vec![0.5, 0.5, 0.5], &cfg).expect("new should succeed");
         let mut rng = LcgRng::new(7);
         let sigma_init = state.sigma;
         for _ in 0..100 {
-            state.step(&sphere, &mut rng, 3).unwrap();
+            state
+                .step(&sphere, &mut rng, 3)
+                .expect("step should succeed");
         }
         // After 100 steps on sphere (near zero), sigma should have adapted
         assert!(

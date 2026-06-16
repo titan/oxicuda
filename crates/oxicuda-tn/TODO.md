@@ -9,7 +9,7 @@ decompositions. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.50
 
 ## Implementation Status
 
-**Actual: 5,928 lines / 4,935 SLoC (38 files)** — implements a complete tensor-network
+**Actual: 5,928 lines / 25,583 SLoC (73 files)** — implements a complete tensor-network
 stack in pure Rust with no external linear-algebra dependencies. SVD, Lanczos, and
 eigendecomposition are written from scratch (one-sided Jacobi SVD, Gram-Schmidt
 Lanczos, symmetric tridiagonal Jacobi). Includes 7 PTX kernels × 6 SM versions.
@@ -146,6 +146,10 @@ Lanczos, symmetric tridiagonal Jacobi). Includes 7 PTX kernels × 6 SM versions.
   sequence with even / odd alternation
 
 #### P2 — Advanced
+- [x] `tree/tree_tn.rs` — Tree Tensor Network with tree-shaped connectivity for hierarchical quantum systems (Shi 2006 PRA); balanced binary-tree layout + top-down / bottom-up contraction sweep; `TreeTensorNetwork`
+- [ ] `mps/isometry_tn.rs` — Isometric Tensor Network (isoTNS) in 2D via sequentially applied isometries from a reference site (Zaletel-Pollmann 2020 PRX Quantum); `IsometryTn`
+- [ ] `riemannian/riemannian_tn.rs` — Riemannian optimisation on the manifold of fixed-rank MPS tensors (Hauru 2021); retraction + vector transport for gradient descent; `RiemannianTnOptimizer`
+- [x] `mera/mera.rs` — Multi-scale Entanglement Renormalisation Ansatz (MERA) with binary disentangler + isometry layers (Vidal 2007 PRL); alternating-least-squares sweep; `Mera`
 - [x] `contraction/path_optimal.rs` — Exact optimal contraction path via dynamic
   programming (currently only greedy is provided)
 - [x] `contraction/network_simplify.rs` — Tensor-network simplification rules

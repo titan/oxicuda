@@ -7,9 +7,9 @@ NetworkX / SNAP / igraph-style toolkits. Part of [OxiCUDA](https://github.com/co
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,392 (79 files, tokei measurement)
+- **Actual SLoC:** 11,913 (98 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 7,043
-- **Tests:** 139 passing
+- **Tests:** 327 passing
 - **Vol.59 scope:** Complete classical graph-algorithm coverage (traversal, shortest
   paths, MST, max-flow, matching, connectivity, centrality, community detection,
   graph coloring, TSP, isomorphism). Complements oxicuda-graph (GNN-oriented) by
@@ -54,6 +54,10 @@ NetworkX / SNAP / igraph-style toolkits. Part of [OxiCUDA](https://github.com/co
 - [x] `shortest_path/a_star.rs` -- A* with admissible heuristic, falls back to Dijkstra
 - [x] `shortest_path/yen_k_shortest.rs` -- Yen's K-shortest paths via deviation method
 - [x] `shortest_path/bidijkstra.rs` -- Bidirectional Dijkstra (meet-in-the-middle)
+- [x] `shortest_path/transitive_closure.rs` -- Boolean Floyd-Warshall O(V^3) +
+  BFS-per-source O(V(V+E)) reachability with optional reflexive diagonal
+- [x] `shortest_path/transitive_reduction.rs` -- Unique DAG transitive reduction
+  (covering relation) via closure + cycle check (`NotADag` on cyclic input)
 
 #### Minimum Spanning Tree
 - [x] `mst/prim.rs` -- Prim's algorithm with priority queue from a source
@@ -79,6 +83,9 @@ NetworkX / SNAP / igraph-style toolkits. Part of [OxiCUDA](https://github.com/co
 - [x] `connectivity/bridges_tarjan.rs` -- Bridges via low-link
 - [x] `connectivity/articulation_points.rs` -- Articulation points (cut vertices)
 - [x] `connectivity/biconnected.rs` -- Biconnected components via edge stack
+- [x] `connectivity/k_core.rs` -- k-core decomposition via Batagelj-Zaversnik
+  O(V+E) bucket peeling: core numbers, degeneracy, degeneracy ordering, k-core
+  subgraph extraction (undirected; symmetric-adjacency on directed input)
 
 #### Centrality
 - [x] `centrality/degree_centrality.rs` -- Indegree / outdegree / undirected degree
@@ -109,12 +116,13 @@ NetworkX / SNAP / igraph-style toolkits. Part of [OxiCUDA](https://github.com/co
 #### Diagnostics & Tests
 - [x] `metrics/metrics.rs` -- diameter, radius, density, global clustering coefficient
   `3 * triangles / triplets`, transitivity
-- [x] `e2e_tests.rs` -- 30 cross-module integration tests (BFS line-graph distances;
+- [x] `e2e_tests.rs` -- 33 cross-module integration tests (BFS line-graph distances;
   DFS tree visits all; Dijkstra 4-node; Bellman-Ford negative-cycle detection;
   Floyd-Warshall = Dijkstra-all-pairs on positive; Prim = Kruskal weight; Edmonds-Karp
   = min-cut; Tarjan SCC on `[0->1,1->2,2->0,3->1]` = `{0,1,2},{3}`; PageRank sums to 1;
   Louvain modularity >= 0; A* zero-heuristic = Dijkstra; VF2 K_3 = K_3; Hopcroft-Karp
-  3x3 perfect; Hungarian = brute-force on 4x4; triangle count K_4 = 4; PTX x 6 SM)
+  3x3 perfect; Hungarian = brute-force on 4x4; triangle count K_4 = 4; PTX x 6 SM;
+  transitive-reduction preserves closure; k-core degeneracy; closure = BFS reach)
 - [x] `benches/graphalg_ops.rs` -- Criterion: 7 PTX kernels x all SM versions plus
   Dijkstra / BFS / PageRank / Floyd-Warshall / Edmonds-Karp / Louvain algo benches
 
@@ -135,8 +143,12 @@ NetworkX / SNAP / igraph-style toolkits. Part of [OxiCUDA](https://github.com/co
 - [ ] PageRank topology-aware partitioning and async pull/push hybrid for sm_90 NVLink
 
 #### P2 -- Algorithmic Extensions
+- [ ] Weighted general matching (`matching/weighted_general.rs`) — Galil 1986: O(n·m·α(n)) weighted general matching via augmenting paths; `WeightedGeneralMatching`
+- [ ] Parametric max-flow (`max_flow/parametric_maxflow.rs`) — Hochbaum 2008: solve a family of max-flow problems with parametrically varying capacities via monotone incremental pushes; `ParametricMaxFlow`
+- [ ] Planar graph separator (`separation/planar_separator.rs`) — Lipton-Tarjan 1979: O(√n) separator theorem for planar graphs via BFS levelling + balance split; `PlanarSeparator`
+- [x] Harmonic centrality (`centrality/harmonic.rs`) — Marchiori-Latora 2000: harmonic mean of inverse distances `Σ 1/d(v,u)` as the harmonic centrality, well-defined for disconnected graphs unlike closeness; `HarmonicCentrality`
 - [ ] Multi-GPU partitioned BFS / Dijkstra with edge-cut overlap
-- [ ] Delta-stepping shortest paths as an alternative to heap-based Dijkstra for GPU
+- [x] Delta-stepping shortest paths as an alternative to heap-based Dijkstra for GPU
 - [ ] Streaming dynamic graph updates (add/remove edge) for incremental SCC / PageRank
 - [ ] Persistent kernel path for `triangle_count` on repeated subgraph queries
 
@@ -156,7 +168,7 @@ implemented natively.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 139 passing (unit + 30 e2e cross-module)
+- Tests: 327 passing (unit + 33 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns
@@ -210,9 +222,9 @@ tuning is currently uniform; targeted tuning is tracked under Future Enhancement
 
 | Metric | Estimated (estimation.md Vol.59) | Actual |
 |--------|----------------------------------|--------|
-| SLoC | 70K-130K (median ~100K) | 6,392 |
-| Files | ~30-50 algorithm modules | 79 |
-| Tests | algorithm-grade coverage | 139 |
+| SLoC | 70K-130K (median ~100K) | 11,913 |
+| Files | ~30-50 algorithm modules | 98 |
+| Tests | algorithm-grade coverage | 327 |
 
 The gap to the median estimate reflects the estimation targeting full
 NetworkX-/SNAP-grade production parity including streaming dynamic graph algorithms,

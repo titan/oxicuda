@@ -9,8 +9,8 @@ alternatives to attention. Part of [OxiCUDA](https://github.com/cool-japan/oxicu
 
 ## Implementation Status
 
-- **Actual SLoC:** 10,396 (24 files, Rust 7,175 code + 1,870 comments + 1,351 blanks)
-- **Tests:** 339 passing (#[test] count in src/)
+- **Actual SLoC:** 14,798 (49 files, Rust 7,175 code + 1,870 comments + 1,351 blanks)
+- **Tests:** 627 passing (#[test] count in src/)
 - **Crate:** `oxicuda-mamba` -- Vol.19 State Space Model Primitives
 
 ### Completed [x]
@@ -105,7 +105,7 @@ alternatives to attention. Part of [OxiCUDA](https://github.com/cool-japan/oxicu
 - [ ] Selective-scan parallel (Blelloch) kernel exposed end-to-end through `MambaBlock`
       (currently CPU sequential reference + PTX template only)
 - [ ] FP16 / BF16 mixed-precision selective-scan (FP32 accumulation for `h`)
-- [ ] Mamba-2 SSD chunk-scan GPU dispatch via `ssd_chunk_ptx`
+- [x] Mamba-2 SSD chunk-scan GPU dispatch via `ssd_chunk_ptx`
 - [x] RWKV-5 / RWKV-6 time-mixing variants
 - [ ] Backwards pass for `selective_scan` (training support, not just inference)
 
@@ -115,12 +115,16 @@ alternatives to attention. Part of [OxiCUDA](https://github.com/cool-japan/oxicu
 - [x] FFT-based S4 convolutional mode (O(L log L) replacement for `naive_conv1d`) (s4/s4_fft.rs -- radix-2 Cooley-Tukey FFT, fft_conv1d matching naive_conv1d, causal O(L log L) s4_fft_conv)
 - [x] HiPPO-LegT / HiPPO-FOUT alternative HiPPO matrices
 - [x] Mamba MoE (Mixture-of-Experts) sparse routing layer (mamba_moe.rs -- per-token router top-k expert SSM blocks, renormalized softmax weighted sum, load-balance loss N·mean(f·P) for uniform usage)
-- [ ] Hybrid Mamba-Attention block (e.g. Jamba-style interleaving)
+- [x] Hybrid Mamba-Attention block (e.g. Jamba-style interleaving)
+- [ ] `ssm/mamba2.rs` — Mamba-2 / SSD (Dao-Gu 2024): State Space Duality; structured state space as semi-separable matrix multiplication; block-parallel SSD algorithm with chunked computation; O(T/C · C² · d) per layer
+- [ ] `ssm/s5.rs` — S5 (Smith 2022): parallel scan via diagonalisation; block-diagonal MIMO state matrix; parallel prefix scan for efficient training; `S5Layer { d_model, d_state, C_init: InitScheme }`
+- [ ] `ssm/liquid.rs` — Liquid S4 (Hasani 2022): neural ODE dynamics with liquid time-constant; learnable τ per neuron; express temporal dynamics within S4 framework; `LiquidS4 { tau_init: f32 }`
 
 #### P2 -- Nice-to-Have (Research / Advanced)
 - [ ] Quantised Mamba (Q-Mamba, INT8 / INT4 inference)
 - [x] xLSTM (sLSTM + mLSTM) experimental layer
 - [x] Hyena hierarchy long-conv layer (hyena.rs -- Poli 2023; implicit positional-MLP long-conv filter + multiplicative gating recurrence of order steps, reuses FFT conv)
+- [x] `mega/mega_block.rs` / `MegaBlock` — MEGA (Moving Average Equipped Gated Attention, Ma 2022): EMA-based token mixing (exponential moving average damping + positional bias) fused with single-head gated attention; `MegaConfig { d_model, d_state, chunk_size }`; `MegaBlock::forward` integrating EMA + gated attention + FFN residual
 - [ ] CUDA-Graph capture of multi-layer Mamba forward for inference
 - [ ] Distributed multi-GPU Mamba (sequence-parallel across long contexts)
 - [ ] State-checkpointing helper for long-context inference (kv-cache analogue)
@@ -138,7 +142,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 339 passing
+- Tests: 627 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)

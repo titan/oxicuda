@@ -178,7 +178,9 @@ mod tests {
         let n = 5;
         let coords = vec![0.0_f32; n * 2];
         let feats = vec![1.0_f32; n * 2];
-        let out = gno.forward(&coords, &feats, n).unwrap();
+        let out = gno
+            .forward(&coords, &feats, n)
+            .expect("GNO forward should succeed for valid input coordinates and features");
         assert_eq!(out.len(), n * 3);
     }
 
@@ -189,7 +191,9 @@ mod tests {
         let n = 4;
         let coords: Vec<f32> = (0..n * 2).map(|i| i as f32 * 0.3).collect();
         let feats: Vec<f32> = vec![0.1_f32; n * 2];
-        let out = gno.forward(&coords, &feats, n).unwrap();
+        let out = gno
+            .forward(&coords, &feats, n)
+            .expect("GNO forward should succeed and produce finite values");
         assert!(out.iter().all(|v| v.is_finite()), "GNO output not finite");
     }
 
@@ -201,7 +205,9 @@ mod tests {
         let n = 3;
         let coords = vec![1.0_f32, 0.0, 5.0, 0.0, 10.0, 0.0]; // 3 points far apart
         let feats = vec![1.0_f32; n * 2];
-        let out = gno.forward(&coords, &feats, n).unwrap();
+        let out = gno
+            .forward(&coords, &feats, n)
+            .expect("GNO forward with zero radius should succeed with only self-connections");
         // Each point only aggregates from itself (count=1 per node)
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -221,7 +227,9 @@ mod tests {
         let n = 4;
         let coords: Vec<f32> = (0..n * 2).map(|i| i as f32).collect();
         let feats = vec![1.0_f32; n * 2];
-        let out = gno.forward(&coords, &feats, n).unwrap();
+        let out = gno
+            .forward(&coords, &feats, n)
+            .expect("GNO forward with large radius including all nodes should succeed");
         assert_eq!(out.len(), n * 3);
         assert!(out.iter().all(|v| v.is_finite()));
     }

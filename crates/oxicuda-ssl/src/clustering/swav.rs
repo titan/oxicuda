@@ -278,7 +278,7 @@ mod tests {
         let n = 4;
         let k = 3;
         let mut q = vec![1.0_f32; n * k];
-        sinkhorn_knopp(&mut q, n, k, 5).unwrap();
+        sinkhorn_knopp(&mut q, n, k, 5).expect("sinkhorn_knopp should succeed");
         for v in &q {
             assert!((*v - 1.0 / k as f32).abs() < 1e-4, "v = {v}");
         }
@@ -292,7 +292,7 @@ mod tests {
         for (i, v) in q.iter_mut().enumerate() {
             *v = (i as f32 + 1.0) * 0.1;
         }
-        sinkhorn_knopp(&mut q, n, k, 5).unwrap();
+        sinkhorn_knopp(&mut q, n, k, 5).expect("sinkhorn_knopp should succeed");
         for i in 0..n {
             let s: f32 = q[i * k..(i + 1) * k].iter().sum();
             assert!((s - 1.0).abs() < 1e-4, "row sum = {s}");
@@ -322,7 +322,7 @@ mod tests {
         let z_b: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.027).cos()).collect();
         let protos: Vec<f32> = (0..k * d).map(|i| (i as f32 * 0.041).sin()).collect();
         let cfg = SwavConfig::default();
-        let l = swav_loss(&z_a, &z_b, &protos, n, d, k, &cfg).unwrap();
+        let l = swav_loss(&z_a, &z_b, &protos, n, d, k, &cfg).expect("swav_loss should succeed");
         assert!(l.is_finite() && l > 0.0);
     }
 

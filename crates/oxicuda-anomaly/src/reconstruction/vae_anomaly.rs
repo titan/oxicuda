@@ -276,13 +276,15 @@ mod tests {
     #[test]
     fn vae_encode_decode_shape() {
         let mut rng = LcgRng::new(7);
-        let vae = VaeAnomaly::new(&[8, 4], 2, &[2, 4, 8], &mut rng).unwrap();
+        let vae = VaeAnomaly::new(&[8, 4], 2, &[2, 4, 8], &mut rng).expect("VAE should initialize");
         let x = vec![0.5_f32; 8];
-        let (mu, lv) = vae.encode(&x).unwrap();
+        let (mu, lv) = vae.encode(&x).expect("VAE encode should succeed");
         assert_eq!(mu.len(), 2);
         assert_eq!(lv.len(), 2);
-        let z = vae.reparametrize(&mu, &lv, &mut rng).unwrap();
-        let xr = vae.decode(&z).unwrap();
+        let z = vae
+            .reparametrize(&mu, &lv, &mut rng)
+            .expect("VAE reparametrize should succeed");
+        let xr = vae.decode(&z).expect("VAE decode should succeed");
         assert_eq!(xr.len(), 8);
         assert!(xr.iter().all(|v| (0.0..=1.0).contains(v)));
     }
@@ -291,15 +293,19 @@ mod tests {
     fn vae_kl_zero_at_standard_normal() {
         let mu = vec![0.0_f32; 4];
         let lv = vec![0.0_f32; 4]; // log_var=0 → var=1
-        let kl = VaeAnomaly::kl_divergence(&mu, &lv).unwrap();
+        let kl = VaeAnomaly::kl_divergence(&mu, &lv)
+            .expect("KL divergence of standard normal should succeed");
         assert!(kl.abs() < 1e-5, "kl={kl}");
     }
 
     #[test]
     fn vae_score_finite_nonneg() {
         let mut rng = LcgRng::new(42);
-        let vae = VaeAnomaly::new(&[8, 4], 2, &[2, 4, 8], &mut rng).unwrap();
-        let s = vae.anomaly_score(&[0.2_f32; 8], &mut rng).unwrap();
+        let vae = VaeAnomaly::new(&[8, 4], 2, &[2, 4, 8], &mut rng)
+            .expect("VAE should initialize with valid dimensions");
+        let s = vae
+            .anomaly_score(&[0.2_f32; 8], &mut rng)
+            .expect("anomaly score computation should succeed");
         assert!(s.is_finite(), "score={s}");
     }
 }

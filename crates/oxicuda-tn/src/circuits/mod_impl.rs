@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn add_h_increases_depth() {
         let mut circ = Circuit::new(4);
-        circ.h(0).unwrap();
+        circ.h(0).expect("h should succeed");
         assert_eq!(circ.depth(), 1);
         assert_eq!(circ.n_two_qubit_gates(), 0);
     }
@@ -478,10 +478,10 @@ mod tests {
     #[test]
     fn n_two_qubit_gates_counts_correctly() {
         let mut circ = Circuit::new(4);
-        circ.h(0).unwrap();
-        circ.cnot(0, 1).unwrap();
-        circ.z(2).unwrap();
-        circ.cnot(2, 3).unwrap();
+        circ.h(0).expect("h should succeed");
+        circ.cnot(0, 1).expect("cnot should succeed");
+        circ.z(2).expect("z should succeed");
+        circ.cnot(2, 3).expect("cnot should succeed");
         assert_eq!(circ.depth(), 4);
         assert_eq!(circ.n_two_qubit_gates(), 2);
     }
@@ -494,7 +494,7 @@ mod tests {
         let (data, shapes) = product_state_zero(3);
         let (new_data, new_shapes) = circ
             .apply_to_mps(&data, &shapes, &CircuitConfig::default())
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(new_shapes, shapes);
         for (d1, d2) in new_data.iter().zip(data.iter()) {
             for (&a, &b) in d1.iter().zip(d2.iter()) {
@@ -507,11 +507,11 @@ mod tests {
     fn hadamard_on_product_state_creates_superposition() {
         // H|0⟩ = (|0⟩ + |1⟩)/√2, so amplitude[0] = amplitude[1] = 1/√2.
         let mut circ = Circuit::new(2);
-        circ.h(0).unwrap();
+        circ.h(0).expect("h should succeed");
         let (data, shapes) = product_state_zero(2);
         let (new_data, _new_shapes) = circ
             .apply_to_mps(&data, &shapes, &CircuitConfig::default())
-            .unwrap();
+            .expect("value should be present");
         // Site 0 should be [1/√2, 1/√2] (bond dim stays 1, shape [1,2,1])
         let s0 = &new_data[0];
         assert!((s0[0] - FRAC_1_SQRT_2).abs() < 1e-12, "s0[0] = {}", s0[0]);
@@ -522,12 +522,12 @@ mod tests {
     fn bell_state_has_bond_dim_2() {
         // H on qubit 0, CNOT on (0,1) → Bell state → bond dim should be 2.
         let mut circ = Circuit::new(2);
-        circ.h(0).unwrap();
-        circ.cnot(0, 1).unwrap();
+        circ.h(0).expect("h should succeed");
+        circ.cnot(0, 1).expect("cnot should succeed");
         let (data, shapes) = product_state_zero(2);
         let (_, new_shapes) = circ
             .apply_to_mps(&data, &shapes, &CircuitConfig::default())
-            .unwrap();
+            .expect("value should be present");
         // Bond dim at bond 0 = new_shapes[0][2]
         let bond_dim = new_shapes[0][2];
         assert!(
@@ -540,12 +540,12 @@ mod tests {
     #[test]
     fn bell_state_norm_preserved() {
         let mut circ = Circuit::new(2);
-        circ.h(0).unwrap();
-        circ.cnot(0, 1).unwrap();
+        circ.h(0).expect("h should succeed");
+        circ.cnot(0, 1).expect("cnot should succeed");
         let (data, shapes) = product_state_zero(2);
         let (new_data, new_shapes) = circ
             .apply_to_mps(&data, &shapes, &CircuitConfig::default())
-            .unwrap();
+            .expect("value should be present");
         let n2 = norm_sq(&new_data, &new_shapes);
         assert!((n2 - 1.0).abs() < 1e-10, "Bell state norm² = {n2}");
     }
@@ -553,11 +553,11 @@ mod tests {
     #[test]
     fn rx_zero_leaves_mps_unchanged() {
         let mut circ = Circuit::new(2);
-        circ.rx(0, 0.0).unwrap();
+        circ.rx(0, 0.0).expect("rx should succeed");
         let (data, shapes) = product_state_zero(2);
         let (new_data, _) = circ
             .apply_to_mps(&data, &shapes, &CircuitConfig::default())
-            .unwrap();
+            .expect("value should be present");
         for (&a, &b) in new_data[0].iter().zip(data[0].iter()) {
             assert!((a - b).abs() < 1e-14);
         }
@@ -567,11 +567,11 @@ mod tests {
     fn rx_pi_flips_zero_to_one() {
         // Rx(π)|0⟩ in the real approx gives [0, 1] up to sign (sin(π/2) = 1).
         let mut circ = Circuit::new(2);
-        circ.rx(0, PI).unwrap();
+        circ.rx(0, PI).expect("rx should succeed");
         let (data, shapes) = product_state_zero(2);
         let (new_data, _) = circ
             .apply_to_mps(&data, &shapes, &CircuitConfig::default())
-            .unwrap();
+            .expect("value should be present");
         // Rx(π) = [[0, -1],[1, 0]], so |0⟩ → [[0,-1],[1,0]] * [1, 0]^T = [0, 1]^T
         let s0 = &new_data[0];
         assert!(

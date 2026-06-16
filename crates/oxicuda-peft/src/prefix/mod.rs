@@ -17,3 +17,5 @@ pub use aprompt::{APrompt, APromptConfig};
 pub use attempt::{AttemptConfig, AttemptRouter};
 pub use prompt_pool::{PromptPool, PromptPoolConfig};
 pub use spot::{SoftPromptLibrary, SourceTask, SpotConfig};
+pub mod soft_prompt_v2;
+pub use soft_prompt_v2::{SoftPromptConfig, SoftPromptV2};

@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn platt_fit_separable_recovers_steep_slope() {
         let (s, y) = linearly_separable_dataset(200);
-        let p = PlattScaler::fit_default(&s, &y).unwrap();
+        let p = PlattScaler::fit_default(&s, &y).expect("fit_default should succeed");
         // Fitted slope must be positive and reasonably large for steeper than identity.
         assert!(p.a > 0.0);
         // Predictions for highly positive scores should approach 1.
@@ -312,7 +312,7 @@ mod tests {
         y.push(1);
         s.push(6.0);
         y.push(1);
-        let p = PlattScaler::fit_default(&s, &y).unwrap();
+        let p = PlattScaler::fit_default(&s, &y).expect("fit_default should succeed");
         assert!(p.predict_one(6.0) > 0.5);
     }
 
@@ -322,7 +322,7 @@ mod tests {
         // produce a sensible all-near-1 calibrator.
         let s: Vec<f32> = (0..50).map(|i| i as f32 * 0.1).collect();
         let y = vec![1_u8; 50];
-        let p = PlattScaler::fit_default(&s, &y).unwrap();
+        let p = PlattScaler::fit_default(&s, &y).expect("fit_default should succeed");
         assert!(p.predict_one(5.0) > 0.5);
     }
 }

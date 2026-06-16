@@ -121,28 +121,28 @@ mod tests {
     #[test]
     fn fps_m_zero_returns_empty() {
         let pts = make_grid(5);
-        let r = farthest_point_sample(&pts, 5, 0).unwrap();
+        let r = farthest_point_sample(&pts, 5, 0).expect("farthest_point_sample should succeed");
         assert!(r.is_empty());
     }
 
     #[test]
     fn fps_m_one_returns_index_zero() {
         let pts = make_grid(5);
-        let r = farthest_point_sample(&pts, 5, 1).unwrap();
+        let r = farthest_point_sample(&pts, 5, 1).expect("farthest_point_sample should succeed");
         assert_eq!(r, vec![0]);
     }
 
     #[test]
     fn fps_selects_correct_count() {
         let pts = make_grid(100);
-        let r = farthest_point_sample(&pts, 100, 10).unwrap();
+        let r = farthest_point_sample(&pts, 100, 10).expect("farthest_point_sample should succeed");
         assert_eq!(r.len(), 10);
     }
 
     #[test]
     fn fps_all_distinct() {
         let pts = make_grid(50);
-        let r = farthest_point_sample(&pts, 50, 20).unwrap();
+        let r = farthest_point_sample(&pts, 50, 20).expect("farthest_point_sample should succeed");
         let mut sorted = r.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -152,14 +152,14 @@ mod tests {
     #[test]
     fn fps_indices_in_range() {
         let pts = make_grid(30);
-        let r = farthest_point_sample(&pts, 30, 15).unwrap();
+        let r = farthest_point_sample(&pts, 30, 15).expect("farthest_point_sample should succeed");
         assert!(r.iter().all(|&i| i < 30));
     }
 
     #[test]
     fn fps_first_is_zero() {
         let pts = make_grid(20);
-        let r = farthest_point_sample(&pts, 20, 5).unwrap();
+        let r = farthest_point_sample(&pts, 20, 5).expect("farthest_point_sample should succeed");
         assert_eq!(r[0], 0, "FPS first selected must be index 0");
     }
 
@@ -173,7 +173,7 @@ mod tests {
             pts.push(0.0);
             pts.push(0.0);
         }
-        let r = farthest_point_sample(&pts, n, 3).unwrap();
+        let r = farthest_point_sample(&pts, n, 3).expect("farthest_point_sample should succeed");
         assert_eq!(r.len(), 3);
         // Should select 0, 9 (farthest from 0), and 4 or 5 (farthest from both)
         assert!(r.contains(&0));
@@ -183,8 +183,8 @@ mod tests {
     #[test]
     fn fps_deterministic() {
         let pts = make_grid(50);
-        let r1 = farthest_point_sample(&pts, 50, 10).unwrap();
-        let r2 = farthest_point_sample(&pts, 50, 10).unwrap();
+        let r1 = farthest_point_sample(&pts, 50, 10).expect("farthest_point_sample should succeed");
+        let r2 = farthest_point_sample(&pts, 50, 10).expect("farthest_point_sample should succeed");
         assert_eq!(r1, r2, "FPS must be deterministic");
     }
 
@@ -195,7 +195,7 @@ mod tests {
             0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0,
             1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
         ];
-        let r = farthest_point_sample(&pts, 8, 4).unwrap();
+        let r = farthest_point_sample(&pts, 8, 4).expect("farthest_point_sample should succeed");
         // Should select well-spread corners
         assert_eq!(r.len(), 4);
         let mut sorted = r.clone();

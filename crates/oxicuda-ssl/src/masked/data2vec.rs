@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn mask_exact_ratio() {
         let mut rng = LcgRng::new(42);
-        let mask = data2vec_mask(100, 0.65, &mut rng).unwrap();
+        let mask = data2vec_mask(100, 0.65, &mut rng).expect("data2vec_mask should succeed");
         let n_masked = mask.iter().filter(|&&v| v).count();
         assert_eq!(n_masked, 65, "expected 65 masked, got {n_masked}");
     }
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn mask_length() {
         let mut rng = LcgRng::new(7);
-        let mask = data2vec_mask(196, 0.75, &mut rng).unwrap();
+        let mask = data2vec_mask(196, 0.75, &mut rng).expect("data2vec_mask should succeed");
         assert_eq!(mask.len(), 196);
     }
 
@@ -479,7 +479,8 @@ mod tests {
             normalize_targets: false,
             ..Data2VecConfig::default()
         };
-        let result = data2vec_loss(&repr, &repr, &mask, n_tokens, dim, &cfg).unwrap();
+        let result = data2vec_loss(&repr, &repr, &mask, n_tokens, dim, &cfg)
+            .expect("data2vec_loss should succeed");
         assert!(result.loss.abs() < 1e-6, "loss={}", result.loss);
         assert_eq!(result.n_masked, 2);
         assert!((result.accuracy_at_1 - 0.0).abs() < 1e-7);
@@ -494,7 +495,8 @@ mod tests {
         let mask = vec![false; n_tokens];
         let v = vec![0.0_f32; n_tokens * dim];
         let cfg = Data2VecConfig::default();
-        let result = data2vec_loss(&v, &v, &mask, n_tokens, dim, &cfg).unwrap();
+        let result = data2vec_loss(&v, &v, &mask, n_tokens, dim, &cfg)
+            .expect("data2vec_loss should succeed");
         assert_eq!(result.n_masked, 0);
         assert!(result.loss.abs() < 1e-7);
     }
@@ -532,7 +534,9 @@ mod tests {
         let teacher_init = vec![1.0_f32, 2.0, 3.0];
         let online = vec![10.0_f32, 20.0, 30.0];
         let mut state = Data2VecState::new(&teacher_init);
-        state.update_teacher(&online, 0.0).unwrap();
+        state
+            .update_teacher(&online, 0.0)
+            .expect("update_teacher should succeed");
         // With m=0: teacher = 0*old + 1*online = online.
         for (&t, &o) in state.teacher().iter().zip(online.iter()) {
             assert!((t - o).abs() < 1e-6, "teacher={t} online={o}");
@@ -548,7 +552,9 @@ mod tests {
         let online = vec![0.0_f32, 0.0, 0.0];
         let mut state = Data2VecState::new(&teacher_init);
         let expected = state.teacher().to_vec();
-        state.update_teacher(&online, 1.0).unwrap();
+        state
+            .update_teacher(&online, 1.0)
+            .expect("update_teacher should succeed");
         // With m=1: teacher = 1*old + 0*online = old.
         for (&t, &e) in state.teacher().iter().zip(expected.iter()) {
             assert!((t - e).abs() < 1e-6, "teacher={t} expected={e}");
@@ -568,14 +574,15 @@ mod tests {
         rng.fill_normal(&mut student);
         rng.fill_normal(&mut teacher);
 
-        let mask = data2vec_mask(n_tokens, 0.5, &mut rng).unwrap();
+        let mask = data2vec_mask(n_tokens, 0.5, &mut rng).expect("data2vec_mask should succeed");
 
         let cfg = Data2VecConfig::default();
 
         let single = data2vec_loss(&student, &teacher, &mask, n_tokens, dim, &cfg)
-            .unwrap()
+            .expect("value should be present")
             .loss;
-        let batch = data2vec_batch_loss(&student, &teacher, &mask, 1, n_tokens, dim, &cfg).unwrap();
+        let batch = data2vec_batch_loss(&student, &teacher, &mask, 1, n_tokens, dim, &cfg)
+            .expect("data2vec_batch_loss should succeed");
 
         assert!(
             (single - batch).abs() < 1e-5,
@@ -600,12 +607,14 @@ mod tests {
 
         let mut masks = Vec::with_capacity(batch_size * n_tokens);
         for _ in 0..batch_size {
-            masks.extend(data2vec_mask(n_tokens, 0.65, &mut rng).unwrap());
+            masks.extend(
+                data2vec_mask(n_tokens, 0.65, &mut rng).expect("data2vec_mask should succeed"),
+            );
         }
 
         let cfg = Data2VecConfig::default();
         let loss = data2vec_batch_loss(&student, &teacher, &masks, batch_size, n_tokens, dim, &cfg)
-            .unwrap();
+            .expect("value should be present");
 
         assert!(loss.is_finite(), "loss={loss}");
         assert!(loss >= 0.0, "loss={loss}");

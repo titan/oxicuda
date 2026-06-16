@@ -650,7 +650,7 @@ mod tests {
 
     fn make_leo() -> Leo {
         let mut rng = LcgRng::new(42);
-        Leo::new(default_cfg(), &mut rng).unwrap()
+        Leo::new(default_cfg(), &mut rng).expect("value should be present")
     }
 
     fn support_data(cfg: &LeoConfig) -> (Vec<f32>, Vec<usize>) {
@@ -675,7 +675,7 @@ mod tests {
     fn encode_output_shape() {
         let leo = make_leo();
         let (support, _) = support_data(&leo.cfg);
-        let (z_mu, z_ls) = leo.encode(&support).unwrap();
+        let (z_mu, z_ls) = leo.encode(&support).expect("encode should succeed");
         assert_eq!(z_mu.len(), leo.cfg.latent_dim);
         assert_eq!(z_ls.len(), leo.cfg.latent_dim);
     }
@@ -684,7 +684,7 @@ mod tests {
     fn encode_log_sigma_clamped() {
         let leo = make_leo();
         let (support, _) = support_data(&leo.cfg);
-        let (_, z_ls) = leo.encode(&support).unwrap();
+        let (_, z_ls) = leo.encode(&support).expect("encode should succeed");
         for &v in &z_ls {
             assert!((-5.0..=5.0).contains(&v), "log_sigma out of [-5,5]: {v}");
         }
@@ -721,7 +721,7 @@ mod tests {
     fn decode_output_shape() {
         let leo = make_leo();
         let z = vec![0.0_f32; leo.cfg.latent_dim];
-        let (w, b) = leo.decode(&z).unwrap();
+        let (w, b) = leo.decode(&z).expect("decode should succeed");
         assert_eq!(w.len(), leo.cfg.n_way * leo.cfg.feat_dim);
         assert_eq!(b.len(), leo.cfg.n_way);
     }
@@ -730,7 +730,7 @@ mod tests {
     fn decode_finite_outputs() {
         let leo = make_leo();
         let z = vec![0.1_f32; leo.cfg.latent_dim];
-        let (w, b) = leo.decode(&z).unwrap();
+        let (w, b) = leo.decode(&z).expect("decode should succeed");
         assert!(w.iter().all(|v| v.is_finite()));
         assert!(b.iter().all(|v| v.is_finite()));
     }
@@ -747,7 +747,8 @@ mod tests {
         let b = vec![0.0_f32; nw];
         let feats = vec![0.0_f32; n_q * fd];
         let labels: Vec<usize> = (0..n_q).map(|i| i % nw).collect();
-        let (loss, acc) = Leo::query_loss(&w, &b, &feats, &labels, nw, fd).unwrap();
+        let (loss, acc) =
+            Leo::query_loss(&w, &b, &feats, &labels, nw, fd).expect("query_loss should succeed");
         assert!(loss.is_finite());
         assert!(acc.is_finite());
     }
@@ -764,7 +765,8 @@ mod tests {
         let feats = vec![0.0_f32; n_q * fd];
         // balanced labels
         let labels: Vec<usize> = (0..n_q).map(|i| i % nw).collect();
-        let (_loss, acc) = Leo::query_loss(&w, &b, &feats, &labels, nw, fd).unwrap();
+        let (_loss, acc) =
+            Leo::query_loss(&w, &b, &feats, &labels, nw, fd).expect("query_loss should succeed");
         // Uniform predictor: accuracy ≈ 1/n_way (all ties break to class 0, so first class wins)
         // Just check it's in [0,1]
         assert!((0.0..=1.0).contains(&acc));
@@ -810,7 +812,7 @@ mod tests {
                 cfg.feat_dim,
                 6,
             )
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(z_final.len(), cfg.latent_dim);
     }
 
@@ -822,9 +824,9 @@ mod tests {
         let (q_feats, q_labels) = query_data(cfg, 6);
 
         let z_init = vec![0.1_f32; cfg.latent_dim];
-        let (w0, b0) = leo.decode(&z_init).unwrap();
-        let (loss0, _) =
-            Leo::query_loss(&w0, &b0, &s_feats, &s_labels, cfg.n_way, cfg.feat_dim).unwrap();
+        let (w0, b0) = leo.decode(&z_init).expect("decode should succeed");
+        let (loss0, _) = Leo::query_loss(&w0, &b0, &s_feats, &s_labels, cfg.n_way, cfg.feat_dim)
+            .expect("query_loss should succeed");
 
         let z_final = leo
             .inner_loop(
@@ -837,10 +839,10 @@ mod tests {
                 cfg.feat_dim,
                 6,
             )
-            .unwrap();
-        let (w1, b1) = leo.decode(&z_final).unwrap();
-        let (loss1, _) =
-            Leo::query_loss(&w1, &b1, &s_feats, &s_labels, cfg.n_way, cfg.feat_dim).unwrap();
+            .expect("value should be present");
+        let (w1, b1) = leo.decode(&z_final).expect("decode should succeed");
+        let (loss1, _) = Leo::query_loss(&w1, &b1, &s_feats, &s_labels, cfg.n_way, cfg.feat_dim)
+            .expect("query_loss should succeed");
 
         // Loss should not increase (may be equal if gradient is zero)
         assert!(
@@ -860,7 +862,7 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let res = leo
             .forward(&s_feats, &s_labels, &q_feats, &q_labels, &mut rng)
-            .unwrap();
+            .expect("value should be present");
         assert!(res.query_loss.is_finite());
         assert!(res.kl_loss.is_finite());
     }
@@ -874,7 +876,7 @@ mod tests {
         let mut rng = LcgRng::new(7777);
         let res = leo
             .forward(&s_feats, &s_labels, &q_feats, &q_labels, &mut rng)
-            .unwrap();
+            .expect("value should be present");
         assert!(res.kl_loss >= 0.0, "KL loss must be non-negative");
     }
 
@@ -887,7 +889,7 @@ mod tests {
         let mut rng = LcgRng::new(2025);
         let res = leo
             .forward(&s_feats, &s_labels, &q_feats, &q_labels, &mut rng)
-            .unwrap();
+            .expect("value should be present");
         assert!(
             (0.0..=1.0).contains(&res.query_accuracy),
             "Accuracy must be in [0,1]: {}",

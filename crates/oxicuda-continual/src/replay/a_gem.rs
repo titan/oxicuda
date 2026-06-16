@@ -108,7 +108,8 @@ mod tests {
         // g aligned with g_ref → g · g_ref > 0 ≥ -margin = 0 → no projection
         let g = vec![1.0_f32, 0.0, 0.0];
         let g_ref = vec![1.0_f32, 0.0, 0.0];
-        let g_proj = a_gem_project(&g, &g_ref, 0.0).unwrap();
+        let g_proj = a_gem_project(&g, &g_ref, 0.0)
+            .expect("A-GEM gradient projection should succeed with valid gradients");
         for (a, b) in g.iter().zip(g_proj.iter()) {
             assert!(
                 (a - b).abs() < 1e-6,
@@ -125,7 +126,8 @@ mod tests {
         // g' = g - (-1)*g_ref = [-1,0] + [1,0] = [0, 0] → orthogonal
         let g = vec![-1.0_f32, 0.0];
         let g_ref = vec![1.0_f32, 0.0];
-        let g_proj = a_gem_project(&g, &g_ref, 0.0).unwrap();
+        let g_proj = a_gem_project(&g, &g_ref, 0.0)
+            .expect("A-GEM gradient projection should succeed with valid gradients");
         let dot_after = dot(&g_proj, &g_ref);
         assert!(
             dot_after.abs() < 1e-5,
@@ -140,7 +142,8 @@ mod tests {
         let g = vec![-0.5_f32, 1.0];
         let g_ref = vec![1.0_f32, 0.0]; // g · g_ref = -0.5
         let margin = 0.3;
-        let g_proj = a_gem_project(&g, &g_ref, margin).unwrap();
+        let g_proj = a_gem_project(&g, &g_ref, margin)
+            .expect("A-GEM gradient projection should succeed with valid gradients");
         let dot_after = dot(&g_proj, &g_ref);
         assert!(
             dot_after >= -margin - 1e-5,
@@ -153,7 +156,8 @@ mod tests {
         // g · g_ref = 0.5, margin = 1.0 → 0.5 >= -1.0 → no projection
         let g = vec![0.5_f32, 0.0];
         let g_ref = vec![1.0_f32, 0.0];
-        let g_proj = a_gem_project(&g, &g_ref, 1.0).unwrap();
+        let g_proj = a_gem_project(&g, &g_ref, 1.0)
+            .expect("A-GEM gradient projection should succeed with valid gradients");
         assert!((g_proj[0] - 0.5).abs() < 1e-6);
     }
 
@@ -173,7 +177,8 @@ mod tests {
     #[test]
     fn average_gradients_correct() {
         let grads = vec![vec![1.0_f32, 2.0], vec![3.0_f32, 4.0]];
-        let avg = average_gradients(&grads).unwrap();
+        let avg = average_gradients(&grads)
+            .expect("gradient averaging should succeed with valid gradients");
         assert!((avg[0] - 2.0).abs() < 1e-6);
         assert!((avg[1] - 3.0).abs() < 1e-6);
     }

@@ -799,7 +799,10 @@ mod tests {
         let targets = vec![0.5_f32; n_train * k];
         esn.fit_readout(&states, &targets, n_train).expect("fit ok");
         assert!(esn.w_out.is_some());
-        assert_eq!(esn.w_out.as_ref().unwrap().len(), k * d);
+        assert_eq!(
+            esn.w_out.as_ref().expect("as_ref should succeed").len(),
+            k * d
+        );
     }
 
     #[test]

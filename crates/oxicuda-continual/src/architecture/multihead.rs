@@ -558,7 +558,8 @@ mod tests {
     #[test]
     fn multihead_new_correct_dims() {
         let cfg = make_cfg();
-        let state = multihead_new(&cfg, 1).unwrap();
+        let state =
+            multihead_new(&cfg, 1).expect("multihead state should initialize with valid config");
         assert_eq!(state.input_dim, 4);
         assert_eq!(state.hidden_dim, 8);
         assert_eq!(state.rep_dim, 4); // hidden_dim / 2
@@ -571,46 +572,62 @@ mod tests {
     #[test]
     fn multihead_add_task_appends_head() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 2).unwrap();
-        multihead_add_task(&mut state, 3, 0, 10).unwrap();
-        multihead_add_task(&mut state, 5, 1, 11).unwrap();
+        let mut state =
+            multihead_new(&cfg, 2).expect("multihead state should initialize with valid config");
+        multihead_add_task(&mut state, 3, 0, 10).expect("adding task head should succeed");
+        multihead_add_task(&mut state, 5, 1, 11).expect("adding task head should succeed");
         assert_eq!(multihead_n_tasks(&state), 2);
-        assert_eq!(multihead_n_classes_for_task(&state, 0).unwrap(), 3);
-        assert_eq!(multihead_n_classes_for_task(&state, 1).unwrap(), 5);
+        assert_eq!(
+            multihead_n_classes_for_task(&state, 0)
+                .expect("class count should be accessible for valid task"),
+            3
+        );
+        assert_eq!(
+            multihead_n_classes_for_task(&state, 1)
+                .expect("class count should be accessible for valid task"),
+            5
+        );
     }
 
     #[test]
     fn multihead_predict_task_aware_valid_class() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 3).unwrap();
-        multihead_add_task(&mut state, 4, 0, 20).unwrap();
+        let mut state =
+            multihead_new(&cfg, 3).expect("multihead state should initialize with valid config");
+        multihead_add_task(&mut state, 4, 0, 20).expect("adding task head should succeed");
         let x = vec![0.1_f64; 4];
-        let pred = multihead_predict(&state, &x, 0).unwrap();
+        let pred = multihead_predict(&state, &x, 0)
+            .expect("multihead prediction should succeed on valid input");
         assert!(pred < 4);
     }
 
     #[test]
     fn multihead_predict_unknown_task_returns_valid() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 4).unwrap();
-        multihead_add_task(&mut state, 3, 10, 30).unwrap();
-        multihead_add_task(&mut state, 2, 20, 31).unwrap();
+        let mut state =
+            multihead_new(&cfg, 4).expect("multihead state should initialize with valid config");
+        multihead_add_task(&mut state, 3, 10, 30).expect("adding task head should succeed");
+        multihead_add_task(&mut state, 2, 20, 31).expect("adding task head should succeed");
         let x = vec![0.5_f64; 4];
-        let (tid, cid) = multihead_predict_unknown_task(&state, &x).unwrap();
+        let (tid, cid) = multihead_predict_unknown_task(&state, &x)
+            .expect("unknown-task prediction should succeed");
         assert!(tid == 10 || tid == 20);
-        let n_cls = multihead_n_classes_for_task(&state, tid).unwrap();
+        let n_cls = multihead_n_classes_for_task(&state, tid)
+            .expect("class count should be accessible for valid task");
         assert!(cid < n_cls);
     }
 
     #[test]
     fn multihead_fit_task_returns_finite_loss() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 5).unwrap();
-        multihead_add_task(&mut state, 3, 0, 40).unwrap();
+        let mut state =
+            multihead_new(&cfg, 5).expect("multihead state should initialize with valid config");
+        multihead_add_task(&mut state, 3, 0, 40).expect("adding task head should succeed");
         let x: Vec<f64> = (0..4 * 6).map(|i| i as f64 * 0.05).collect();
         let y: Vec<usize> = vec![0, 1, 2, 0, 1, 2];
         let mut rng = LcgRng::new(50);
-        let loss = multihead_fit_task(&mut state, &x, &y, 6, 0, &mut rng).unwrap();
+        let loss = multihead_fit_task(&mut state, &x, &y, 6, 0, &mut rng)
+            .expect("multihead task fitting should succeed with valid data");
         assert!(loss.is_finite());
         assert!(loss >= 0.0);
     }
@@ -626,17 +643,19 @@ mod tests {
             lr: 0.5,
             n_epochs: 5,
         };
-        let mut state = multihead_new(&cfg, 6).unwrap();
+        let mut state =
+            multihead_new(&cfg, 6).expect("multihead state should initialize with valid config");
         // Force positive backbone weights so all hidden units fire (no dying ReLU).
         state.backbone_w1.iter_mut().for_each(|w| *w = 0.1);
         state.backbone_w2.iter_mut().for_each(|w| *w = 0.1);
-        multihead_add_task(&mut state, 3, 0, 50).unwrap();
+        multihead_add_task(&mut state, 3, 0, 50).expect("adding task head should succeed");
         let head_before = state.heads[0].weights.clone();
         let x: Vec<f64> = (0..4 * 5).map(|i| (i as f64 + 1.0) * 0.5).collect();
         let y: Vec<usize> = vec![0, 1, 2, 0, 1];
         let mut rng = LcgRng::new(60);
         let backbone_b2_before = state.backbone_b2.clone();
-        multihead_fit_task(&mut state, &x, &y, 5, 0, &mut rng).unwrap();
+        multihead_fit_task(&mut state, &x, &y, 5, 0, &mut rng)
+            .expect("multihead task fitting should succeed with valid data");
         // Check backbone layer-2 weights (closer to loss, easier to update)
         let backbone_changed = backbone_b2_before
             .iter()
@@ -653,15 +672,17 @@ mod tests {
     #[test]
     fn multihead_other_heads_frozen_during_training() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 7).unwrap();
-        multihead_add_task(&mut state, 2, 0, 60).unwrap();
-        multihead_add_task(&mut state, 3, 1, 61).unwrap();
+        let mut state =
+            multihead_new(&cfg, 7).expect("multihead state should initialize with valid config");
+        multihead_add_task(&mut state, 2, 0, 60).expect("adding task head should succeed");
+        multihead_add_task(&mut state, 3, 1, 61).expect("adding task head should succeed");
         let head1_before = state.heads[1].weights.clone();
         // Train on task 0
         let x: Vec<f64> = (0..4 * 4).map(|i| i as f64 * 0.1).collect();
         let y = vec![0_usize, 1, 0, 1];
         let mut rng = LcgRng::new(70);
-        multihead_fit_task(&mut state, &x, &y, 4, 0, &mut rng).unwrap();
+        multihead_fit_task(&mut state, &x, &y, 4, 0, &mut rng)
+            .expect("multihead task fitting should succeed with valid data");
         // Task 1 head must not have changed
         assert_eq!(state.heads[1].weights, head1_before, "task 1 head frozen");
     }
@@ -669,7 +690,8 @@ mod tests {
     #[test]
     fn multihead_n_classes_for_unknown_task_errors() {
         let cfg = make_cfg();
-        let state = multihead_new(&cfg, 8).unwrap();
+        let state =
+            multihead_new(&cfg, 8).expect("multihead state should initialize with valid config");
         let res = multihead_n_classes_for_task(&state, 99);
         assert!(res.is_err());
     }
@@ -677,7 +699,8 @@ mod tests {
     #[test]
     fn multihead_predict_on_empty_errors() {
         let cfg = make_cfg();
-        let state = multihead_new(&cfg, 9).unwrap();
+        let state =
+            multihead_new(&cfg, 9).expect("multihead state should initialize with valid config");
         let x = vec![0.0_f64; 4];
         let res = multihead_predict_unknown_task(&state, &x);
         assert!(res.is_err());
@@ -686,8 +709,9 @@ mod tests {
     #[test]
     fn multihead_fit_task_wrong_n_errors() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 10).unwrap();
-        multihead_add_task(&mut state, 3, 0, 70).unwrap();
+        let mut state =
+            multihead_new(&cfg, 10).expect("multihead state should initialize with valid config");
+        multihead_add_task(&mut state, 3, 0, 70).expect("adding task head should succeed");
         let x = vec![0.0_f64; 4 * 3];
         let y = vec![0_usize, 1]; // n=3 but y has 2
         let mut rng = LcgRng::new(80);
@@ -698,7 +722,8 @@ mod tests {
     #[test]
     fn multihead_add_zero_classes_errors() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 11).unwrap();
+        let mut state =
+            multihead_new(&cfg, 11).expect("multihead state should initialize with valid config");
         let res = multihead_add_task(&mut state, 0, 0, 90);
         assert!(res.is_err());
     }
@@ -706,7 +731,8 @@ mod tests {
     #[test]
     fn multihead_backbone_weights_xavier_range() {
         let cfg = make_cfg();
-        let state = multihead_new(&cfg, 12).unwrap();
+        let state =
+            multihead_new(&cfg, 12).expect("multihead state should initialize with valid config");
         let scale = xavier_scale(cfg.input_dim, cfg.hidden_dim);
         for &w in &state.backbone_w1 {
             assert!(
@@ -719,8 +745,9 @@ mod tests {
     #[test]
     fn multihead_predict_dim_mismatch_errors() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 13).unwrap();
-        multihead_add_task(&mut state, 3, 0, 100).unwrap();
+        let mut state =
+            multihead_new(&cfg, 13).expect("multihead state should initialize with valid config");
+        multihead_add_task(&mut state, 3, 0, 100).expect("adding task head should succeed");
         let x = vec![0.0_f64; 10]; // wrong
         let res = multihead_predict(&state, &x, 0);
         assert!(res.is_err());
@@ -729,21 +756,24 @@ mod tests {
     #[test]
     fn multihead_multiple_tasks_sequential_training() {
         let cfg = make_cfg();
-        let mut state = multihead_new(&cfg, 14).unwrap();
-        multihead_add_task(&mut state, 2, 0, 200).unwrap();
-        multihead_add_task(&mut state, 3, 1, 201).unwrap();
+        let mut state =
+            multihead_new(&cfg, 14).expect("multihead state should initialize with valid config");
+        multihead_add_task(&mut state, 2, 0, 200).expect("adding task head should succeed");
+        multihead_add_task(&mut state, 3, 1, 201).expect("adding task head should succeed");
 
         let mut rng = LcgRng::new(202);
 
         // Train task 0
         let x0: Vec<f64> = (0..4 * 4).map(|i| i as f64 * 0.05).collect();
         let y0 = vec![0_usize, 1, 0, 1];
-        let loss0 = multihead_fit_task(&mut state, &x0, &y0, 4, 0, &mut rng).unwrap();
+        let loss0 = multihead_fit_task(&mut state, &x0, &y0, 4, 0, &mut rng)
+            .expect("multihead task fitting should succeed with valid data");
 
         // Train task 1
         let x1: Vec<f64> = (0..4 * 6).map(|i| (i as f64 + 1.0) * 0.03).collect();
         let y1 = vec![0_usize, 1, 2, 0, 1, 2];
-        let loss1 = multihead_fit_task(&mut state, &x1, &y1, 6, 1, &mut rng).unwrap();
+        let loss1 = multihead_fit_task(&mut state, &x1, &y1, 6, 1, &mut rng)
+            .expect("multihead task fitting should succeed with valid data");
 
         assert!(loss0.is_finite() && loss0 >= 0.0);
         assert!(loss1.is_finite() && loss1 >= 0.0);

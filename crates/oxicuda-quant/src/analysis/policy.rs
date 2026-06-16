@@ -183,10 +183,16 @@ mod tests {
         // Layer 0 is very sensitive (high MSE at low bits), layer 1 is not.
         let s0 = make_sensitivity("l0", &[2, 4, 8], &[0.5, 0.05, 0.001]);
         let s1 = make_sensitivity("l1", &[2, 4, 8], &[0.01, 0.005, 0.001]);
-        let policy = MixedPrecisionPolicy::from_sensitivity(&[s0, s1], 5.0).unwrap();
+        let policy = MixedPrecisionPolicy::from_sensitivity(&[s0, s1], 5.0)
+            .expect("from_sensitivity should succeed");
         // l0 should get more bits than l1.
         assert!(
-            policy.bits_for_layer("l0").unwrap() >= policy.bits_for_layer("l1").unwrap(),
+            policy
+                .bits_for_layer("l0")
+                .expect("bits_for_layer should succeed")
+                >= policy
+                    .bits_for_layer("l1")
+                    .expect("bits_for_layer should succeed"),
             "l0 (sensitive) should get >= bits than l1"
         );
     }
@@ -196,7 +202,8 @@ mod tests {
         let s0 = make_sensitivity("l0", &[2, 4, 8], &[0.5, 0.05, 0.001]);
         let s1 = make_sensitivity("l1", &[2, 4, 8], &[0.5, 0.05, 0.001]);
         let target = 4.0_f32;
-        let policy = MixedPrecisionPolicy::from_sensitivity(&[s0, s1], target).unwrap();
+        let policy = MixedPrecisionPolicy::from_sensitivity(&[s0, s1], target)
+            .expect("from_sensitivity should succeed");
         let avg = policy.effective_average_bits();
         assert!(
             avg >= target,
@@ -207,7 +214,8 @@ mod tests {
     #[test]
     fn single_layer_policy() {
         let s = make_sensitivity("only", &[2, 4, 8], &[0.3, 0.02, 0.001]);
-        let policy = MixedPrecisionPolicy::from_sensitivity(&[s], 4.0).unwrap();
+        let policy = MixedPrecisionPolicy::from_sensitivity(&[s], 4.0)
+            .expect("from_sensitivity should succeed");
         assert_eq!(policy.n_layers(), 1);
         assert_abs_diff_eq!(policy.effective_average_bits(), 4.0, epsilon = 1.0);
     }
@@ -234,7 +242,8 @@ mod tests {
     fn bits_for_layer_lookup() {
         let s0 = make_sensitivity("attn", &[2, 4, 8], &[0.5, 0.05, 0.001]);
         let s1 = make_sensitivity("ffn", &[2, 4, 8], &[0.1, 0.01, 0.001]);
-        let policy = MixedPrecisionPolicy::from_sensitivity(&[s0, s1], 4.0).unwrap();
+        let policy = MixedPrecisionPolicy::from_sensitivity(&[s0, s1], 4.0)
+            .expect("from_sensitivity should succeed");
         assert!(policy.bits_for_layer("attn").is_some());
         assert!(policy.bits_for_layer("ffn").is_some());
         assert!(policy.bits_for_layer("unknown").is_none());
@@ -245,7 +254,8 @@ mod tests {
         // target = 2.0 = minimum → all layers should stay at 2 bits.
         let s0 = make_sensitivity("l0", &[2, 4, 8], &[0.5, 0.05, 0.001]);
         let s1 = make_sensitivity("l1", &[2, 4, 8], &[0.4, 0.04, 0.001]);
-        let policy = MixedPrecisionPolicy::from_sensitivity(&[s0, s1], 2.0).unwrap();
+        let policy = MixedPrecisionPolicy::from_sensitivity(&[s0, s1], 2.0)
+            .expect("from_sensitivity should succeed");
         for &b in &policy.layer_bits {
             assert!(b >= 2, "all layers should be at minimum bits");
         }

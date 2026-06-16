@@ -287,7 +287,7 @@ mod tests {
     fn layer_norm_output_shape() {
         let ln = LayerNorm::ones(8);
         let input = vec![1.0_f32; 4 * 8];
-        let out = ln.forward(&input, 4).unwrap();
+        let out = ln.forward(&input, 4).expect("forward should succeed");
         assert_eq!(out.len(), 4 * 8);
     }
 
@@ -295,7 +295,7 @@ mod tests {
     fn layer_norm_zero_mean_unit_var() {
         let ln = LayerNorm::ones(4);
         let input = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let out = ln.forward(&input, 1).unwrap();
+        let out = ln.forward(&input, 1).expect("forward should succeed");
         let mean = out.iter().sum::<f32>() / 4.0;
         let var = out.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / 4.0;
         assert!(mean.abs() < 1e-4, "mean={mean}");
@@ -314,7 +314,7 @@ mod tests {
     fn feed_forward_output_shape() {
         let ffn = FeedForward::zeros(8, 16);
         let input = vec![1.0_f32; 3 * 8];
-        let out = ffn.forward(&input, 3).unwrap();
+        let out = ffn.forward(&input, 3).expect("forward should succeed");
         assert_eq!(out.len(), 3 * 8);
     }
 
@@ -337,7 +337,9 @@ mod tests {
 
         let q = vec![0.1_f32; 4 * d];
         let ctx = vec![0.2_f32; 6 * d];
-        let out = block.forward(&q, &ctx, 4, 6).unwrap();
+        let out = block
+            .forward(&q, &ctx, 4, 6)
+            .expect("forward should succeed");
         assert_eq!(out.len(), 4 * d);
     }
 
@@ -349,7 +351,9 @@ mod tests {
 
         let q = vec![0.1_f32; 3 * d];
         let ctx = vec![0.2_f32; 5 * d];
-        let out = block.forward(&q, &ctx, 3, 5).unwrap();
+        let out = block
+            .forward(&q, &ctx, 3, 5)
+            .expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -362,7 +366,9 @@ mod tests {
 
         let q: Vec<f32> = (0..(4 * d)).map(|i| (i as f32) * 0.01).collect();
         let ctx = vec![0.5_f32; 3 * d];
-        let out = block.forward(&q, &ctx, 4, 3).unwrap();
+        let out = block
+            .forward(&q, &ctx, 4, 3)
+            .expect("forward should succeed");
         // Output should still contain the residual-added input signal
         assert_eq!(out.len(), 4 * d);
         // At least the norms should not blow up

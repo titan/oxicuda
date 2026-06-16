@@ -13,3 +13,9 @@ pub mod poisson_input;
 pub mod rate;
 /// Time-To-First-Spike latency coding.
 pub mod temporal;
+/// Temporal-contrast (event-camera) spike encoding (Brandli et al. 2014).
+pub mod temporal_contrast;
+
+pub use temporal_contrast::{
+    TemporalContrastConfig, TemporalContrastState, temporal_contrast_encode, temporal_contrast_step,
+};

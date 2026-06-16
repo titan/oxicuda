@@ -231,22 +231,26 @@ mod tests {
     #[test]
     fn bank_new_and_forward() {
         let mut rng = LcgRng::new(0);
-        let bank = ExpertBank::new(4, 8, 32, ExpertActivation::Gelu, &mut rng).unwrap();
+        let bank = ExpertBank::new(4, 8, 32, ExpertActivation::Gelu, &mut rng)
+            .expect("new should succeed");
         let x = vec![0.5_f32; 8];
-        let out = bank.forward_expert(0, &x, 1).unwrap();
+        let out = bank
+            .forward_expert(0, &x, 1)
+            .expect("forward_expert should succeed");
         assert_eq!(out.len(), 8);
     }
 
     #[test]
     fn bank_dispatch_skips_overflow() {
         let mut rng = LcgRng::new(1);
-        let bank = ExpertBank::new(2, 4, 16, ExpertActivation::Relu, &mut rng).unwrap();
+        let bank = ExpertBank::new(2, 4, 16, ExpertActivation::Relu, &mut rng)
+            .expect("new should succeed");
         let x = vec![1.0_f32; 3 * 4];
         let assignments = [0_usize, usize::MAX, 1];
         let scores = [1.0_f32, 0.0, 0.5];
         let out = bank
             .forward_dispatched(&x, &assignments, 3, &scores)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), 3 * 4);
         // Dropped token should produce zero output
         let dropped_row = &out[4..8];
@@ -256,13 +260,13 @@ mod tests {
     #[test]
     fn swiglu_bank_dispatch() {
         let mut rng = LcgRng::new(5);
-        let bank = SwiGluBank::new(4, 8, 32, &mut rng).unwrap();
+        let bank = SwiGluBank::new(4, 8, 32, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32; 4 * 8];
         let assignments = [0_usize, 1, 2, 3];
         let scores = [0.8_f32, 0.6, 0.7, 0.9];
         let out = bank
             .forward_dispatched(&x, &assignments, 4, &scores)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), 4 * 8);
         assert!(out.iter().all(|v| v.is_finite()));
     }

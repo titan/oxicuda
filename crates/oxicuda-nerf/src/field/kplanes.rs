@@ -334,7 +334,7 @@ mod tests {
 
     fn make_kplanes(seed: u64) -> KPlanes {
         let mut rng = LcgRng::new(seed);
-        KPlanes::new(default_cfg(), &mut rng).unwrap()
+        KPlanes::new(default_cfg(), &mut rng).expect("value should be present")
     }
 
     /// Overwrite every cell of `plane_idx` with the same `feature` vector.
@@ -360,7 +360,9 @@ mod tests {
     #[test]
     fn interpolate_plane_returns_feature_dim() {
         let kp = make_kplanes(1);
-        let f = kp.interpolate_plane(0, 0.3, 0.7).unwrap();
+        let f = kp
+            .interpolate_plane(0, 0.3, 0.7)
+            .expect("interpolate_plane should succeed");
         assert_eq!(f.len(), kp.cfg.feature_dim);
     }
 
@@ -377,7 +379,9 @@ mod tests {
         let last = (kp.cfg.resolution - 1) as f32;
         let u = 3.0 / last;
         let v = 5.0 / last;
-        let f = kp.interpolate_plane(0, u, v).unwrap();
+        let f = kp
+            .interpolate_plane(0, u, v)
+            .expect("interpolate_plane should succeed");
         for (got, want) in f.iter().zip(target.iter()) {
             assert!((got - want).abs() < 1e-4, "got {got}, want {want}");
         }
@@ -398,7 +402,9 @@ mod tests {
         let last = (kp.cfg.resolution - 1) as f32;
         let u = 0.5 / last;
         let v = 0.5 / last;
-        let f = kp.interpolate_plane(0, u, v).unwrap();
+        let f = kp
+            .interpolate_plane(0, u, v)
+            .expect("interpolate_plane should succeed");
         for got in &f {
             assert!((got - 0.25).abs() < 1e-4, "expected 0.25, got {got}");
         }
@@ -407,7 +413,9 @@ mod tests {
     #[test]
     fn query_features_length() {
         let kp = make_kplanes(4);
-        let f = kp.query_features([0.0, 0.0, 0.0]).unwrap();
+        let f = kp
+            .query_features([0.0, 0.0, 0.0])
+            .expect("query_features should succeed");
         assert_eq!(f.len(), kp.cfg.feature_dim);
     }
 
@@ -418,7 +426,9 @@ mod tests {
         fill_plane(&mut kp, 0, &[2.0, 3.0, 4.0, 5.0]);
         fill_plane(&mut kp, 1, &[1.0, 2.0, 1.0, 2.0]);
         fill_plane(&mut kp, 2, &[3.0, 1.0, 2.0, 1.0]);
-        let f = kp.query_features([0.1, -0.2, 0.3]).unwrap();
+        let f = kp
+            .query_features([0.1, -0.2, 0.3])
+            .expect("query_features should succeed");
         let expect = [
             2.0 * 1.0 * 3.0,
             3.0 * 2.0 * 1.0,
@@ -439,7 +449,7 @@ mod tests {
             [-0.9, 0.9, -0.1],
             [1.0, 1.0, 1.0],
         ] {
-            let d = kp.query_density(xyz).unwrap();
+            let d = kp.query_density(xyz).expect("query_density should succeed");
             assert!(d >= 0.0, "density {d} should be >= 0");
         }
     }
@@ -447,7 +457,9 @@ mod tests {
     #[test]
     fn query_color_length_and_range() {
         let kp = make_kplanes(7);
-        let c = kp.query_color([0.1, 0.2, 0.3], [0.0, 0.0, 1.0]).unwrap();
+        let c = kp
+            .query_color([0.1, 0.2, 0.3], [0.0, 0.0, 1.0])
+            .expect("query_color should succeed");
         assert_eq!(c.len(), 3);
         for &v in &c {
             assert!((0.0..=1.0).contains(&v), "colour {v} out of [0,1]");
@@ -458,24 +470,38 @@ mod tests {
     fn out_of_bounds_is_clamped() {
         let kp = make_kplanes(8);
         // Far outside bounds → must not panic and must equal the clamped border.
-        let far = kp.query_features([100.0, 100.0, 100.0]).unwrap();
-        let border = kp.query_features([1.0, 1.0, 1.0]).unwrap();
+        let far = kp
+            .query_features([100.0, 100.0, 100.0])
+            .expect("query_features should succeed");
+        let border = kp
+            .query_features([1.0, 1.0, 1.0])
+            .expect("query_features should succeed");
         for (a, b) in far.iter().zip(border.iter()) {
             assert!((a - b).abs() < 1e-5);
         }
         // Also the negative extreme.
-        let _ = kp.query_density([-50.0, -50.0, -50.0]).unwrap();
+        let _ = kp
+            .query_density([-50.0, -50.0, -50.0])
+            .expect("query_density should succeed");
     }
 
     #[test]
     fn deterministic_given_seed() {
         let a = make_kplanes(123);
         let b = make_kplanes(123);
-        let fa = a.query_features([0.2, 0.3, 0.4]).unwrap();
-        let fb = b.query_features([0.2, 0.3, 0.4]).unwrap();
+        let fa = a
+            .query_features([0.2, 0.3, 0.4])
+            .expect("query_features should succeed");
+        let fb = b
+            .query_features([0.2, 0.3, 0.4])
+            .expect("query_features should succeed");
         assert_eq!(fa, fb);
-        let da = a.query_density([0.2, 0.3, 0.4]).unwrap();
-        let db = b.query_density([0.2, 0.3, 0.4]).unwrap();
+        let da = a
+            .query_density([0.2, 0.3, 0.4])
+            .expect("query_density should succeed");
+        let db = b
+            .query_density([0.2, 0.3, 0.4])
+            .expect("query_density should succeed");
         assert_eq!(da, db);
     }
 
@@ -492,10 +518,14 @@ mod tests {
     #[test]
     fn changing_plane_changes_features() {
         let mut kp = make_kplanes(10);
-        let before = kp.query_features([0.0, 0.0, 0.0]).unwrap();
+        let before = kp
+            .query_features([0.0, 0.0, 0.0])
+            .expect("query_features should succeed");
         // Perturb the first cell of plane 0 substantially.
         kp.planes[0][0] += 5.0;
-        let after = kp.query_features([-1.0, -1.0, -1.0]).unwrap();
+        let after = kp
+            .query_features([-1.0, -1.0, -1.0])
+            .expect("query_features should succeed");
         let changed = before
             .iter()
             .zip(after.iter())
@@ -552,17 +582,27 @@ mod tests {
     fn corner_xyz_queries_succeed() {
         let kp = make_kplanes(13);
         // Both bounds corners must evaluate without error.
-        let _ = kp.query_density(kp.cfg.bounds_min).unwrap();
-        let _ = kp.query_density(kp.cfg.bounds_max).unwrap();
-        let c = kp.query_color(kp.cfg.bounds_max, [1.0, 0.0, 0.0]).unwrap();
+        let _ = kp
+            .query_density(kp.cfg.bounds_min)
+            .expect("query_density should succeed");
+        let _ = kp
+            .query_density(kp.cfg.bounds_max)
+            .expect("query_density should succeed");
+        let c = kp
+            .query_color(kp.cfg.bounds_max, [1.0, 0.0, 0.0])
+            .expect("query_color should succeed");
         assert_eq!(c.len(), 3);
     }
 
     #[test]
     fn two_distinct_points_distinct_features() {
         let kp = make_kplanes(14);
-        let f1 = kp.query_features([-0.8, -0.6, -0.4]).unwrap();
-        let f2 = kp.query_features([0.4, 0.6, 0.8]).unwrap();
+        let f1 = kp
+            .query_features([-0.8, -0.6, -0.4])
+            .expect("query_features should succeed");
+        let f2 = kp
+            .query_features([0.4, 0.6, 0.8])
+            .expect("query_features should succeed");
         let differ = f1.iter().zip(f2.iter()).any(|(a, b)| (a - b).abs() > 1e-6);
         assert!(differ, "distinct points should yield distinct features");
     }
@@ -573,8 +613,10 @@ mod tests {
         let mut cfg = default_cfg();
         cfg.sh_degree = 0;
         let mut rng = LcgRng::new(15);
-        let kp = KPlanes::new(cfg, &mut rng).unwrap();
-        let c = kp.query_color([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
+        let kp = KPlanes::new(cfg, &mut rng).expect("new should succeed");
+        let c = kp
+            .query_color([0.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+            .expect("query_color should succeed");
         assert_eq!(c.len(), 3);
         for &v in &c {
             assert!((0.0..=1.0).contains(&v));

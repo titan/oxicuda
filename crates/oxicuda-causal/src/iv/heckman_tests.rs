@@ -87,7 +87,8 @@ fn test_heckman_no_selection_matches_ols() {
     let d_x = 2_usize;
     let (y, selected, x, z) = make_no_selection_dgp(n, d_x, 42);
     let cfg = HeckmanConfig::default();
-    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg).unwrap();
+    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg)
+        .expect("Heckman estimation should succeed for no-selection DGP");
     assert_eq!(r.beta.len(), d_x + 1);
     assert_eq!(r.se.len(), d_x + 1);
     assert_eq!(r.n_selected, n);
@@ -111,7 +112,8 @@ fn test_heckman_lambda_small_under_random_selection() {
     let n = 600_usize;
     let (y, selected, x, z) = make_selection_dgp(n, 0.0, 17);
     let cfg = HeckmanConfig::default();
-    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg).unwrap();
+    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg)
+        .expect("Heckman estimation should succeed for random selection DGP");
     // ρ̂ = lambda_coef / sigma_e ought to be close to zero.
     assert!(
         r.rho.abs() < 0.5,
@@ -126,7 +128,8 @@ fn test_heckman_lambda_significant_under_correlated_selection() {
     let n = 800_usize;
     let (y, selected, x, z) = make_selection_dgp(n, 0.8, 23);
     let cfg = HeckmanConfig::default();
-    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg).unwrap();
+    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg)
+        .expect("Heckman estimation should succeed for correlated selection DGP");
     assert!(
         r.lambda_coef.abs() > 0.05,
         "lambda_coef = {} should be clearly nonzero",
@@ -143,7 +146,8 @@ fn test_heckman_probit_converges_quickly() {
         probit_max_iters: 50,
         ..HeckmanConfig::default()
     };
-    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg).unwrap();
+    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg)
+        .expect("Heckman estimation should succeed with 50 probit iterations");
     assert!(r.sigma_e.is_finite() && r.sigma_e > 0.0);
 }
 
@@ -230,8 +234,10 @@ fn test_heckman_deterministic() {
     let n = 200_usize;
     let (y, selected, x, z) = make_selection_dgp(n, 0.5, 99);
     let cfg = HeckmanConfig::default();
-    let a = Heckman::estimate(&y, &selected, &x, &z, &cfg).unwrap();
-    let b = Heckman::estimate(&y, &selected, &x, &z, &cfg).unwrap();
+    let a = Heckman::estimate(&y, &selected, &x, &z, &cfg)
+        .expect("Heckman first call should succeed for determinism test");
+    let b = Heckman::estimate(&y, &selected, &x, &z, &cfg)
+        .expect("Heckman second call should succeed for determinism test");
     assert_eq!(a.beta, b.beta);
     assert_eq!(a.lambda_coef, b.lambda_coef);
     assert_eq!(a.sigma_e, b.sigma_e);
@@ -246,7 +252,8 @@ fn test_heckman_newton_no_explosion() {
     let n = 400_usize;
     let (y, selected, x, z) = make_selection_dgp(n, 0.6, 314);
     let cfg = HeckmanConfig::default();
-    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg).unwrap();
+    let r = Heckman::estimate(&y, &selected, &x, &z, &cfg)
+        .expect("Heckman estimation should succeed for Newton stability test");
     assert!(r.sigma_e.is_finite() && r.sigma_e > 0.0);
     for &b in r.beta.iter() {
         assert!(b.is_finite(), "non-finite beta {b}");
@@ -258,7 +265,8 @@ fn test_heckman_newton_no_explosion() {
 fn test_heckman_rho_in_open_unit_interval() {
     let n = 250_usize;
     let (y, selected, x, z) = make_selection_dgp(n, 0.7, 271);
-    let r = Heckman::estimate(&y, &selected, &x, &z, &HeckmanConfig::default()).unwrap();
+    let r = Heckman::estimate(&y, &selected, &x, &z, &HeckmanConfig::default())
+        .expect("Heckman estimation should succeed for rho range test");
     assert!(r.rho > -1.0 && r.rho < 1.0, "rho = {} out of range", r.rho);
 }
 
@@ -267,7 +275,8 @@ fn test_heckman_rho_in_open_unit_interval() {
 fn test_heckman_robust_se_positive_finite() {
     let n = 400_usize;
     let (y, selected, x, z) = make_selection_dgp(n, 0.3, 1234);
-    let r = Heckman::estimate(&y, &selected, &x, &z, &HeckmanConfig::default()).unwrap();
+    let r = Heckman::estimate(&y, &selected, &x, &z, &HeckmanConfig::default())
+        .expect("value should be present");
     for &s in r.se.iter() {
         assert!(s.is_finite() && s >= 0.0, "se = {s}");
     }
@@ -281,7 +290,8 @@ fn test_heckman_recovers_beta_within_tolerance() {
     let n = 800_usize;
     let (y, selected, x, z) = make_selection_dgp(n, 0.5, 2718);
     let true_beta = [1.0_f64, -0.5];
-    let r = Heckman::estimate(&y, &selected, &x, &z, &HeckmanConfig::default()).unwrap();
+    let r = Heckman::estimate(&y, &selected, &x, &z, &HeckmanConfig::default())
+        .expect("value should be present");
     // β is [intercept, true_beta[0], true_beta[1]].
     for (j, &tb) in true_beta.iter().enumerate() {
         let beta_hat = r.beta[1 + j];
@@ -301,8 +311,8 @@ fn test_heckman_recovers_beta_within_tolerance() {
 fn test_heckman_result_sizes() {
     let n = 200_usize;
     let (y, selected, x, z) = make_selection_dgp(n, 0.4, 9876);
-    let r: HeckmanResult =
-        Heckman::estimate(&y, &selected, &x, &z, &HeckmanConfig::default()).unwrap();
+    let r: HeckmanResult = Heckman::estimate(&y, &selected, &x, &z, &HeckmanConfig::default())
+        .expect("value should be present");
     let d_x = 2;
     assert_eq!(r.beta.len(), d_x + 1);
     assert_eq!(r.se.len(), d_x + 1);

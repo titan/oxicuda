@@ -764,7 +764,7 @@ mod tests {
         };
         let result = nerv_fit(&x, n, dim, &cfg, &mut rng);
         assert!(result.is_ok(), "NeRV lambda=1.0 failed: {:?}", result.err());
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert_eq!(r.embedding.len(), n * 2);
         assert!(r.embedding.iter().all(|v| v.is_finite()));
     }
@@ -786,7 +786,7 @@ mod tests {
         };
         let result = nerv_fit(&x, n, dim, &cfg, &mut rng);
         assert!(result.is_ok(), "NeRV lambda=0.0 failed: {:?}", result.err());
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert!(r.embedding.iter().all(|v| v.is_finite()));
     }
 
@@ -807,7 +807,7 @@ mod tests {
         };
         let result = jse_fit(&x, n, dim, &cfg, &mut rng);
         assert!(result.is_ok(), "JSE kappa=0.5 failed: {:?}", result.err());
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert!(r.embedding.iter().all(|v| v.is_finite()));
     }
 

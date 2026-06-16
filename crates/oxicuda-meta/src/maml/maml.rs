@@ -7,7 +7,7 @@ pub struct MamlConfig {
     pub n_inner_steps: usize,
 }
 
-fn task_loss_at_params(
+pub(crate) fn task_loss_at_params(
     params: &[f32],
     support_x: &[f32],
     support_y: &[u32],
@@ -131,8 +131,8 @@ mod tests {
             inner_lr: 0.01,
             n_inner_steps: 2,
         };
-        let adapted =
-            maml_adapt(&params, &support_x, &support_y, n_classes, feat_dim, &cfg).unwrap();
+        let adapted = maml_adapt(&params, &support_x, &support_y, n_classes, feat_dim, &cfg)
+            .expect("maml_adapt should succeed");
         assert_ne!(params, adapted);
     }
 }

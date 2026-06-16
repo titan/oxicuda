@@ -10,7 +10,7 @@ data augmentation. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol
 
 ## Implementation Status
 
-- **Actual SLoC:** 4,262 (25 files)
+- **Actual SLoC:** 13,881 (47 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
@@ -91,6 +91,10 @@ data augmentation. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol
 - [ ] Wire `ptx_kernels::*` strings through `oxicuda-launch::Kernel::from_module` for end-to-end GPU execution (PTX strings are emitted; CPU paths are the authoritative reference)
 - [ ] GPU-resident `nt_xent_softmax_ptx` integrated with `oxicuda-blas` GEMM for the `Z @ Z^T` similarity step
 - [ ] GPU-resident `momentum_update_ptx` parameter update fused with optimiser step
+- [x] `ssl/i_jepa.rs` — I-JEPA (Assran 2023): Image Joint Embedding Predictive Architecture; context encoder + target encoder (EMA); predict target patch representations from context; no pixel reconstruction
+- [x] `ssl/data2vec.rs` — data2vec (Baevski 2022): top-K layers average of masked teacher as regression targets; works across modalities (text/audio/vision) by replacing modality-specific tokens
+- [x] `ssl/dino_v2.rs` — DINOv2 (Oquab 2023): curated data + KoLeo regularisation + iBOT patch-level loss + center momentum normalization; `DinoV2Config { n_register_tokens: usize }`
+- [x] `ssl/jem.rs` — JEM (Grathwohl 2019): joint energy model; classifier p(y|x) = exp(f_y(x))/Z reinterprets as energy; MCMC sampling for generation; contrastive divergence gradient
 
 ## Dependencies
 

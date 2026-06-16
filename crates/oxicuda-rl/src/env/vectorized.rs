@@ -45,7 +45,7 @@ pub struct VecStepResult {
 ///
 /// let envs: Vec<_> = (0..4).map(|_| LinearQuadraticEnv::new(3, 50)).collect();
 /// let mut ve = VecEnv::new(envs);
-/// let obs = ve.reset_all().unwrap();
+/// let obs = ve.reset_all().expect("reset_all should succeed");
 /// assert_eq!(obs.len(), 4 * 3);
 /// ```
 #[derive(Debug)]

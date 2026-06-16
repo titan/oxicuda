@@ -250,7 +250,7 @@ mod tests {
             sigma: r * 2.0 / 3.0,
         };
         let mut rng = LcgRng::new(42);
-        KPConv::new(cfg, &mut rng).unwrap()
+        KPConv::new(cfg, &mut rng).expect("new should succeed")
     }
 
     fn make_centers(n: usize, seed: u64) -> Vec<f32> {
@@ -290,7 +290,7 @@ mod tests {
         let idx = dense_neighbors(n, m);
         let out = kp
             .forward(&centers, n, &support, m, &feats, &idx, m)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), n * 8);
     }
 
@@ -305,7 +305,7 @@ mod tests {
         let idx = dense_neighbors(n, m);
         let out = kp
             .forward(&centers, n, &support, m, &feats, &idx, m)
-            .unwrap();
+            .expect("value should be present");
         assert!(out.iter().all(|v| v.is_finite()), "output must be finite");
     }
 
@@ -320,7 +320,7 @@ mod tests {
         let idx = dense_neighbors(n, m);
         let out = kp
             .forward(&centers, n, &support, m, &feats, &idx, m)
-            .unwrap();
+            .expect("value should be present");
         assert!(
             out.iter().all(|&v| v == 0.0),
             "zero features must yield zero output"
@@ -373,7 +373,7 @@ mod tests {
         let idx = vec![0_i64; n];
         let out = kp
             .forward(&centers, n, &support, m, &feats, &idx, 1)
-            .unwrap();
+            .expect("value should be present");
         // Non-zero features with non-zero influence -> output should not all be zero
         let all_zero = out.iter().all(|&v| v == 0.0);
         assert!(
@@ -393,7 +393,7 @@ mod tests {
         let idx = vec![i64::MAX; n * m]; // all padding
         let out = kp
             .forward(&centers, n, &support, m, &feats, &idx, m)
-            .unwrap();
+            .expect("value should be present");
         assert!(
             out.iter().all(|&v| v == 0.0),
             "all-padding neighbor idx must yield zero output"
@@ -414,7 +414,7 @@ mod tests {
             sigma,
         };
         let mut rng = LcgRng::new(0);
-        let kp = KPConv::new(cfg, &mut rng).unwrap();
+        let kp = KPConv::new(cfg, &mut rng).expect("new should succeed");
 
         let center = vec![0.0_f32, 0.0, 0.0];
         let support = vec![
@@ -430,10 +430,10 @@ mod tests {
 
         let out_a = kp
             .forward(&center, 1, &support, 2, &feats, &idx_a, 1)
-            .unwrap();
+            .expect("value should be present");
         let out_b = kp
             .forward(&center, 1, &support, 2, &feats, &idx_b, 1)
-            .unwrap();
+            .expect("value should be present");
 
         // out_a should have larger magnitude than out_b
         assert!(
@@ -455,7 +455,7 @@ mod tests {
             sigma,
         };
         let mut rng = LcgRng::new(7);
-        let kp = KPConv::new(cfg, &mut rng).unwrap();
+        let kp = KPConv::new(cfg, &mut rng).expect("new should succeed");
         // K=1 -> kernel_points = [0,0,0]
         assert_eq!(kp.kernel_points.len(), 3);
         assert_eq!(kp.kernel_points[0], 0.0);
@@ -469,7 +469,7 @@ mod tests {
         let idx = vec![0_i64];
         let out = kp
             .forward(&center, 1, &support, 1, &feats, &idx, 1)
-            .unwrap();
+            .expect("value should be present");
         // h=1.0, feat=1.0, weight=w -> out = w
         let expected = kp.weights[0]; // only one weight
         assert!(
@@ -493,7 +493,7 @@ mod tests {
             sigma,
         };
         let mut rng = LcgRng::new(5);
-        let kp = KPConv::new(cfg, &mut rng).unwrap();
+        let kp = KPConv::new(cfg, &mut rng).expect("new should succeed");
 
         let center = vec![0.0_f32, 0.0, 0.0];
         // Place neighbor at (100, 100, 100) so r_j = (100,100,100) and dist from any kp
@@ -503,7 +503,7 @@ mod tests {
         let idx = vec![0_i64];
         let out = kp
             .forward(&center, 1, &support, 1, &feats, &idx, 1)
-            .unwrap();
+            .expect("value should be present");
         assert!(
             out.iter().all(|&v| v == 0.0),
             "neighbor far from all kernel points must contribute 0"
@@ -569,7 +569,7 @@ mod tests {
             sigma: 0.667,
         };
         let mut rng = LcgRng::new(0);
-        let kp = KPConv::new(cfg, &mut rng).unwrap();
+        let kp = KPConv::new(cfg, &mut rng).expect("new should succeed");
         let n = 3;
         let m = 5;
         let centers = make_centers(n, 1);
@@ -578,7 +578,7 @@ mod tests {
         let idx = dense_neighbors(n, m);
         let out = kp
             .forward(&centers, n, &support, m, &feats, &idx, m)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), n * 4);
     }
 
@@ -601,7 +601,7 @@ mod tests {
         }
         let out = kp
             .forward(&centers, n, &support, m, &feats, &idx, max_nb)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), n * 8);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -616,7 +616,7 @@ mod tests {
             sigma: 2.0 / 3.0,
         };
         let mut rng1 = LcgRng::new(77);
-        let kp = KPConv::new(cfg, &mut rng1).unwrap();
+        let kp = KPConv::new(cfg, &mut rng1).expect("new should succeed");
 
         let n = 5;
         let m = 10;
@@ -627,10 +627,10 @@ mod tests {
 
         let out1 = kp
             .forward(&centers, n, &support, m, &feats, &idx, m)
-            .unwrap();
+            .expect("value should be present");
         let out2 = kp
             .forward(&centers, n, &support, m, &feats, &idx, m)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out1, out2, "forward must be deterministic");
     }
 }

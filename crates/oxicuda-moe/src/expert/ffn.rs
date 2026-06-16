@@ -278,7 +278,7 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let ffn = ExpertFfn::new(16, 64, ExpertActivation::Gelu, &mut rng);
         let x = vec![0.5_f32; 16];
-        let out = ffn.forward(&x).unwrap();
+        let out = ffn.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), 16);
     }
 
@@ -287,7 +287,9 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let ffn = ExpertFfn::new(16, 64, ExpertActivation::Silu, &mut rng);
         let x = vec![0.5_f32; 4 * 16];
-        let out = ffn.forward_batch(&x, 4).unwrap();
+        let out = ffn
+            .forward_batch(&x, 4)
+            .expect("forward_batch should succeed");
         assert_eq!(out.len(), 4 * 16);
     }
 
@@ -296,7 +298,7 @@ mod tests {
         let mut rng = LcgRng::new(13);
         let ffn = ExpertFfn::new(8, 32, ExpertActivation::Relu, &mut rng);
         let x = vec![1.0_f32; 8];
-        let out = ffn.forward(&x).unwrap();
+        let out = ffn.forward(&x).expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -305,7 +307,7 @@ mod tests {
         let mut rng = LcgRng::new(7);
         let exp = SwiGluExpert::new(16, 64, &mut rng);
         let x = vec![0.3_f32; 16];
-        let out = exp.forward(&x).unwrap();
+        let out = exp.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), 16);
     }
 
@@ -314,7 +316,7 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let exp = SwiGluExpert::new(8, 32, &mut rng);
         let x = vec![1.0_f32; 8];
-        let out = exp.forward(&x).unwrap();
+        let out = exp.forward(&x).expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 

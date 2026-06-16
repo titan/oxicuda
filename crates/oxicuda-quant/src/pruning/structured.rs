@@ -207,7 +207,7 @@ mod tests {
         }
 
         let p = StructuredPruner::new(0.5, PruneGranularity::Channel { n_out, n_in });
-        let mask = p.compute_mask(&w).unwrap();
+        let mask = p.compute_mask(&w).expect("compute_mask should succeed");
         // Sparsity = 2 channels / 4 channels = 0.5 in channel count
         // = 8 weights / 16 weights = 0.5 sparsity
         assert_abs_diff_eq!(mask.sparsity(), 0.5, epsilon = 0.01);
@@ -230,7 +230,7 @@ mod tests {
             1.0, 1.0, // channel 1: large norm
             0.5, 0.5, // channel 2: medium norm
         ];
-        let _mask = p.prune(&mut w).unwrap();
+        let _mask = p.prune(&mut w).expect("prune should succeed");
         // Channel 0 should be zeroed.
         assert_abs_diff_eq!(w[0], 0.0, epsilon = 1e-7);
         assert_abs_diff_eq!(w[1], 0.0, epsilon = 1e-7);
@@ -260,7 +260,7 @@ mod tests {
         for k in 0..filter_size {
             w[2 * filter_size + k] = 1.0;
         }
-        let mask = p.compute_mask(&w).unwrap();
+        let mask = p.compute_mask(&w).expect("compute_mask should succeed");
         assert_eq!(mask.len(), n_filters * filter_size);
     }
 

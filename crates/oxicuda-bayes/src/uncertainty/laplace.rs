@@ -182,7 +182,8 @@ mod tests {
         let map = vec![0.5_f32, -0.5];
         let phi = vec![1.0_f32, 0.0, 0.0, 1.0, 1.0, 1.0];
         let labels = vec![1_u8, 0, 1];
-        let l = LastLayerLaplace::fit_binary_logistic(&map, &phi, &labels, 1.0).unwrap();
+        let l = LastLayerLaplace::fit_binary_logistic(&map, &phi, &labels, 1.0)
+            .expect("fit_binary_logistic should succeed");
         assert_eq!(l.map_weights, map);
         assert_eq!(l.precision_diag.len(), 2);
         // precision starts at α=1 then has positive contributions; should be > 1
@@ -198,7 +199,9 @@ mod tests {
             precision_diag: vec![1.0, 1.0],
             prior_precision: 1.0,
         };
-        let (mu, var) = l.predictive_logit(&phi).unwrap();
+        let (mu, var) = l
+            .predictive_logit(&phi)
+            .expect("predictive_logit should succeed");
         assert!((mu - 0.5).abs() < 1e-6);
         // var = 1²/1 + 0²/1 = 1.0
         assert!((var - 1.0).abs() < 1e-6);
@@ -211,9 +214,13 @@ mod tests {
             precision_diag: vec![10.0, 10.0],
             prior_precision: 1.0,
         };
-        let p = l.predictive_probability(&[0.0_f32, 0.0]).unwrap();
+        let p = l
+            .predictive_probability(&[0.0_f32, 0.0])
+            .expect("predictive_probability should succeed");
         assert!((p - 0.5).abs() < 1e-5);
-        let p2 = l.predictive_probability(&[1.0_f32, 1.0]).unwrap();
+        let p2 = l
+            .predictive_probability(&[1.0_f32, 1.0])
+            .expect("predictive_probability should succeed");
         assert!((0.0..=1.0).contains(&p2));
     }
 
@@ -224,11 +231,15 @@ mod tests {
             precision_diag: vec![1.0],
             prior_precision: 1.0,
         };
-        let p_certain = l.predictive_probability(&[3.0_f32]).unwrap();
+        let p_certain = l
+            .predictive_probability(&[3.0_f32])
+            .expect("predictive_probability should succeed");
         // Reduce precision to inflate variance and the prediction should move
         // toward 0.5.
         l.precision_diag = vec![0.01];
-        let p_uncertain = l.predictive_probability(&[3.0_f32]).unwrap();
+        let p_uncertain = l
+            .predictive_probability(&[3.0_f32])
+            .expect("predictive_probability should succeed");
         assert!(p_uncertain < p_certain);
         assert!(p_uncertain > 0.5);
     }
@@ -241,7 +252,9 @@ mod tests {
             precision_diag: vec![1.0; 3],
             prior_precision: 1.0,
         };
-        let s = l.sample_weights(&mut rng).unwrap();
+        let s = l
+            .sample_weights(&mut rng)
+            .expect("sample_weights should succeed");
         assert_eq!(s.len(), 3);
     }
 

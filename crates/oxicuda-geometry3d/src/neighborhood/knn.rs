@@ -78,7 +78,7 @@ mod tests {
     fn knn_basic() {
         let pts: Vec<f32> = (0..5).flat_map(|i| vec![i as f32, 0.0, 0.0]).collect();
         let queries = vec![2.1_f32, 0.0, 0.0];
-        let (idx, dists) = knn(&queries, 1, &pts, 5, 2).unwrap();
+        let (idx, dists) = knn(&queries, 1, &pts, 5, 2).expect("knn should succeed");
         // nearest to 2.1 should be 2 and 3
         assert!(idx[0] == 2 || idx[0] == 3);
         assert!(dists[0] <= dists[1]);
@@ -104,7 +104,7 @@ mod tests {
     fn knn_sorted_distances() {
         let pts: Vec<f32> = (0..10).flat_map(|i| vec![i as f32, 0.0, 0.0]).collect();
         let q = vec![4.5_f32, 0.0, 0.0];
-        let (_, dists) = knn(&q, 1, &pts, 10, 5).unwrap();
+        let (_, dists) = knn(&q, 1, &pts, 10, 5).expect("knn should succeed");
         for w in dists.windows(2) {
             assert!(w[0] <= w[1], "distances should be sorted ascending");
         }
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn knn_self_distance_zero() {
         let pts: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let (_, dists) = knn(&pts, 2, &pts, 2, 1).unwrap();
+        let (_, dists) = knn(&pts, 2, &pts, 2, 1).expect("knn should succeed");
         assert!(dists[0] < 1e-6);
         assert!(dists[1] < 1e-6);
     }

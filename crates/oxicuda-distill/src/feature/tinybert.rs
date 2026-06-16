@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn attention_mse_identical() {
         let attn: Vec<f32> = (0..9).map(|i| i as f32 * 0.1).collect(); // 3×3
-        let loss = attention_mse(&attn, &attn, 3, false).unwrap();
+        let loss = attention_mse(&attn, &attn, 3, false).expect("attention_mse should succeed");
         assert!(loss.abs() < 1e-10, "identical attns → MSE ≈ 0, got {loss}");
     }
 
@@ -420,7 +420,7 @@ mod tests {
     fn attention_mse_nonneg() {
         let t: Vec<f32> = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
         let s: Vec<f32> = vec![0.5, 0.5, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0, 1.0];
-        let loss = attention_mse(&t, &s, 3, false).unwrap();
+        let loss = attention_mse(&t, &s, 3, false).expect("attention_mse should succeed");
         assert!(loss >= 0.0, "MSE must be non-negative");
     }
 
@@ -432,7 +432,7 @@ mod tests {
         let s: Vec<f32> = (0..16).map(|i| (15 - i) as f32).collect();
         let result = attention_mse(&t, &s, 4, true);
         assert!(result.is_ok(), "use_softmax=true should not error");
-        assert!(result.unwrap().is_finite());
+        assert!(result.expect("result should be present").is_finite());
     }
 
     // ── 4. attention_mse_no_softmax ─────────────────────────────────────────
@@ -443,7 +443,7 @@ mod tests {
         let s: Vec<f32> = (0..16).map(|i| i as f32 * 0.04).collect();
         let result = attention_mse(&t, &s, 4, false);
         assert!(result.is_ok(), "use_softmax=false should not error");
-        assert!(result.unwrap().is_finite());
+        assert!(result.expect("result should be present").is_finite());
     }
 
     // ── 5. hidden_mse_identical (W=I when d_s==d_t special case via random W) ─
@@ -462,7 +462,7 @@ mod tests {
             d_teacher: d,
         };
         let h: Vec<f32> = (0..8).map(|i| i as f32).collect(); // seq_len=2, d=4
-        let loss = hidden_mse(&h, &h, 2, &proj).unwrap();
+        let loss = hidden_mse(&h, &h, 2, &proj).expect("hidden_mse should succeed");
         assert!(loss.abs() < 1e-10, "identity proj + same input → MSE ≈ 0");
     }
 
@@ -471,10 +471,10 @@ mod tests {
     #[test]
     fn hidden_mse_nonneg() {
         let mut rng = make_rng();
-        let proj = TinyBertProjection::new(8, 16, &mut rng).unwrap();
+        let proj = TinyBertProjection::new(8, 16, &mut rng).expect("new should succeed");
         let t: Vec<f32> = (0..32).map(|i| i as f32 * 0.1).collect(); // seq_len=2, d_t=16
         let s: Vec<f32> = (0..16).map(|i| i as f32 * 0.2).collect(); // seq_len=2, d_s=8
-        let loss = hidden_mse(&t, &s, 2, &proj).unwrap();
+        let loss = hidden_mse(&t, &s, 2, &proj).expect("hidden_mse should succeed");
         assert!(loss >= 0.0 && loss.is_finite());
     }
 
@@ -483,13 +483,13 @@ mod tests {
     #[test]
     fn hidden_mse_shape_check() {
         let mut rng = make_rng();
-        let proj = TinyBertProjection::new(8, 16, &mut rng).unwrap();
+        let proj = TinyBertProjection::new(8, 16, &mut rng).expect("new should succeed");
         // seq_len=4, d_s=8, d_t=16
         let t: Vec<f32> = vec![0.0_f32; 4 * 16];
         let s: Vec<f32> = vec![0.0_f32; 4 * 8];
         let result = hidden_mse(&t, &s, 4, &proj);
         assert!(result.is_ok(), "seq_len=4, d_s=8, d_t=16 should work");
-        assert!(result.unwrap().is_finite());
+        assert!(result.expect("result should be present").is_finite());
     }
 
     // ── 8. embedding_mse_runs ───────────────────────────────────────────────
@@ -497,12 +497,12 @@ mod tests {
     #[test]
     fn embedding_mse_runs() {
         let mut rng = make_rng();
-        let proj = TinyBertProjection::new(4, 8, &mut rng).unwrap();
+        let proj = TinyBertProjection::new(4, 8, &mut rng).expect("new should succeed");
         let t = vec![1.0_f32; 16]; // seq_len=2, d_t=8
         let s = vec![0.5_f32; 8]; // seq_len=2, d_s=4
         let result = embedding_mse(&t, &s, 2, &proj);
         assert!(result.is_ok());
-        assert!(result.unwrap().is_finite());
+        assert!(result.expect("result should be present").is_finite());
     }
 
     // ── 9. prediction_loss_identical ────────────────────────────────────────
@@ -510,7 +510,7 @@ mod tests {
     #[test]
     fn prediction_loss_identical() {
         let logits = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let loss = prediction_loss(&logits, &logits, 1.0).unwrap();
+        let loss = prediction_loss(&logits, &logits, 1.0).expect("prediction_loss should succeed");
         assert!(
             loss.abs() < 1e-5,
             "identical logits → pred loss ≈ 0, got {loss}"
@@ -523,7 +523,7 @@ mod tests {
     fn prediction_loss_nonneg() {
         let t = vec![2.0_f32, 1.0, 0.0];
         let s = vec![0.5_f32, 1.5, 1.0];
-        let loss = prediction_loss(&t, &s, 2.0).unwrap();
+        let loss = prediction_loss(&t, &s, 2.0).expect("prediction_loss should succeed");
         assert!(loss >= 0.0 && loss.is_finite());
     }
 
@@ -533,8 +533,8 @@ mod tests {
     fn prediction_loss_temperature_scale() {
         let t = vec![3.0_f32, 1.0, 0.0];
         let s = vec![1.0_f32, 2.0, 0.5];
-        let loss_t1 = prediction_loss(&t, &s, 1.0).unwrap();
-        let loss_t2 = prediction_loss(&t, &s, 2.0).unwrap();
+        let loss_t1 = prediction_loss(&t, &s, 1.0).expect("prediction_loss should succeed");
+        let loss_t2 = prediction_loss(&t, &s, 2.0).expect("prediction_loss should succeed");
         // Losses at different temperatures must differ
         assert!(
             (loss_t1 - loss_t2).abs() > 1e-6,
@@ -550,9 +550,9 @@ mod tests {
         let d_s = 6usize;
         let d_t = 12usize;
         let seq_len = 5usize;
-        let proj = TinyBertProjection::new(d_s, d_t, &mut rng).unwrap();
+        let proj = TinyBertProjection::new(d_s, d_t, &mut rng).expect("new should succeed");
         let h_s: Vec<f32> = (0..seq_len * d_s).map(|i| i as f32 * 0.01).collect();
-        let out = proj.project(&h_s, seq_len).unwrap();
+        let out = proj.project(&h_s, seq_len).expect("project should succeed");
         assert_eq!(out.len(), seq_len * d_t);
     }
 
@@ -568,7 +568,7 @@ mod tests {
             d_teacher: 8,
             temperature: 1.0,
         };
-        let agg = TinyBertGeneralLoss::new(&cfg, &mut rng).unwrap();
+        let agg = TinyBertGeneralLoss::new(&cfg, &mut rng).expect("new should succeed");
         let seq_len = 4usize;
 
         let t_emb = vec![0.1_f32; seq_len * cfg.d_teacher];
@@ -590,7 +590,7 @@ mod tests {
             .compute(
                 &t_emb, &s_emb, &t_attns, &s_attns, &t_hiddens, &s_hiddens, seq_len, &cfg,
             )
-            .unwrap();
+            .expect("value should be present");
         assert!(loss.is_finite(), "general loss must be finite");
         assert!(loss >= 0.0, "general loss must be non-negative");
     }
@@ -607,7 +607,7 @@ mod tests {
             d_teacher: 8,
             temperature: 1.0,
         };
-        let agg = TinyBertGeneralLoss::new(&cfg, &mut rng).unwrap();
+        let agg = TinyBertGeneralLoss::new(&cfg, &mut rng).expect("new should succeed");
         let seq_len = 2usize;
         let t_emb = vec![0.5_f32; seq_len * cfg.d_teacher];
         let s_emb = vec![0.3_f32; seq_len * cfg.d_student];
@@ -639,7 +639,7 @@ mod tests {
     #[test]
     fn hidden_mse_dim_mismatch() {
         let mut rng = make_rng();
-        let proj = TinyBertProjection::new(4, 8, &mut rng).unwrap();
+        let proj = TinyBertProjection::new(4, 8, &mut rng).expect("new should succeed");
         let t = vec![0.0_f32; 8]; // seq_len=1, d_t=8
         let s = vec![0.0_f32; 5]; // wrong: 5 instead of 4
         let result = hidden_mse(&t, &s, 1, &proj);

@@ -19,8 +19,8 @@
 //! use oxicuda_mamba::handle::LcgRng;
 //!
 //! let mut rng = LcgRng::new(42);
-//! let slstm = SLstm::new(SLstmConfig { input_dim: 16, hidden_dim: 8, n_heads: 2, r: 2 }, &mut rng).unwrap();
-//! let mlstm = MLstm::new(MLstmConfig { input_dim: 16, head_dim: 8, n_heads: 2 }, &mut rng).unwrap();
+//! let slstm = SLstm::new(SLstmConfig { input_dim: 16, hidden_dim: 8, n_heads: 2, r: 2 }, &mut rng).expect("new should succeed");
+//! let mlstm = MLstm::new(MLstmConfig { input_dim: 16, head_dim: 8, n_heads: 2 }, &mut rng).expect("new should succeed");
 //! ```
 
 pub mod mlstm;

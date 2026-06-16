@@ -70,7 +70,8 @@ mod tests {
 
     #[test]
     fn poisson_residual_analytic_near_zero() {
-        let ok = poisson_residual_check(0.5, 0.5, 1e-3).unwrap();
+        let ok = poisson_residual_check(0.5, 0.5, 1e-3)
+            .expect("poisson_residual_check should succeed for interior point (0.5, 0.5)");
         assert!(
             ok,
             "Poisson residual on analytic solution should be near zero"
@@ -83,7 +84,8 @@ mod tests {
             for j in 1..5 {
                 let x = i as f32 / 5.0;
                 let y = j as f32 / 5.0;
-                let ok = poisson_residual_check(x, y, 1e-3).unwrap();
+                let ok = poisson_residual_check(x, y, 1e-3)
+                    .expect("poisson_residual_check should succeed for interior grid point");
                 assert!(ok, "Poisson grid residual failed at ({x}, {y})");
             }
         }
@@ -91,7 +93,8 @@ mod tests {
 
     #[test]
     fn poisson_residual_formula() {
-        let r = poisson_residual(1.0, -2.0, 3.0).unwrap();
+        let r = poisson_residual(1.0, -2.0, 3.0)
+            .expect("poisson_residual should succeed for finite inputs u_xx=1.0, u_yy=-2.0, f=3.0");
         assert!((r - (1.0 + -2.0 - 3.0)).abs() < 1e-6);
     }
 

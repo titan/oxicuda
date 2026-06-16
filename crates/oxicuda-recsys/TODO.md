@@ -10,7 +10,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
 
 ## Implementation Status
 
-- **Actual SLoC:** 3,964 total lines (3,435 code, 33 files)
+- **Actual SLoC:** 15,092 total lines (3,435 code, 59 files)
 - **Coverage:** ALS implicit-feedback, BPR pairwise ranking, NMF multiplicative
   updates; Neural CF (GMF ⊕ MLP); Two-Tower DSSM; DeepFM (linear + 2nd-order FM
   + Deep MLP); AutoInt multi-head self-attention over field embeddings;
@@ -84,7 +84,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
   contains `.target sm_x` × all SM versions)
 - [x] Benchmarks (`benches/recsys_ops.rs`) — PTX group (`als_step`,
   `dot_score` × 4 SM) + NDCG@10 bench + LCG RNG bench
-- **Tests:** 12 passing
+- **Tests:** 417 passing
 
 ### Future Enhancements
 
@@ -102,17 +102,17 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
 - [x] EASE / EASER closed-form item-item recommender
 
 #### P1 — Neural Model Extensions
-- [ ] Transformer4Rec (full encoder block reuse)
+- [x] Transformer4Rec (full encoder block reuse)
 - [x] xDeepFM CIN (Compressed Interaction Network) feature crossings
 - [x] DIN / DIEN attention-over-history click-through rate models (sequential/din.rs -- Zhou 2018 KDD; local activation unit attention a(h_i, target) over user history → weighted-sum interest rep + concat target + MLP → CTR; DIEN remains for future)
 - [x] DLRM (Deep Learning Recommendation Model) embedding + interaction tower (dlrm.rs -- Naumov 2019; per-field embedding tables + bottom MLP dense→embed_dim + upper-triangular pairwise dot-product interaction + top MLP → CTR)
 - [x] FiBiNET bilinear feature interaction layer (fibinet.rs -- Huang 2019; SENET squeeze-excitation field reweighting + bilinear field-pair interaction p_i∘(W·p_j) over FieldAll/FieldEach/FieldInteraction + DNN)
 
 #### P1 — Graph Recommenders
-- [ ] PinSAGE neighbor-sampling GraphSAGE variant
-- [ ] HGNN (heterogeneous graph neural network) for multi-relation graphs
+- [x] PinSAGE neighbor-sampling GraphSAGE variant
+- [x] HGNN (heterogeneous graph neural network) for multi-relation graphs
 - [x] KGAT (knowledge-graph attention) — fuse KG embeddings with user-item graph (graph_recsys/kgat.rs -- Wang 2019 KDD; relation-aware attention π(h,r,t)=tanh(W_r(e_h+e_r))ᵀtanh(W_r e_t), softmax-normalized propagation, n_layers concatenation, inner-product score)
-- [ ] UltraGCN — pre-computed weighted neighborhood replacing iterative GCN
+- [x] UltraGCN — pre-computed weighted neighborhood replacing iterative GCN
 
 #### P1 — Sequence Models
 - [ ] CL4SRec / DuoRec contrastive learning losses for sequential recsys
@@ -127,9 +127,13 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
 - [ ] Distributed BPR / contrastive in-batch negatives
 
 #### P2 — Evaluation & Tooling
-- [ ] Diversity / coverage / novelty metrics
+- [x] Diversity / coverage / novelty metrics
 - [ ] Calibration & fairness-aware ranking metrics
-- [ ] Off-policy evaluation (IPS, SNIPS, doubly-robust estimators)
+- [ ] LLM4Rec LLM-augmented recommendation (`llm/llm4rec.rs`) — Bao 2023: LLM-based item explanation + natural-language user profile construction with in-context learning for cold-start recommendation; `Llm4Rec`
+- [ ] GraphRec interaction-aware graph recommender (`graph_recsys/graphrec.rs`) — Fan 2019 WWW: dual aggregation over item-space and social-space graphs with attention-weighted interactions; `GraphRec`
+- [ ] Fairness-aware ranking exposure control (`ranking/fairness_ranking.rs`) — Singh-Joachims 2018 KDD: exposure-fairness constraint via deterministic ranking + constraint LP for proportional exposure across demographic groups; `FairnessRanker`
+- [x] MIND multi-interest network (`sequential/mind.rs`) — Li 2019 CIKM: capsule dynamic routing over user history to extract multiple interest vectors for diverse candidate retrieval; `MindNetwork`
+- [x] Off-policy evaluation (IPS, SNIPS, doubly-robust estimators)
 - [ ] Cold-start handling (content-based fallback)
 
 ## Dependencies
@@ -145,7 +149,7 @@ as strings. No oxicuda-driver / -memory / -launch dependency at this layer.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 12 passing (ALS, BPR, NMF, NCF, TwoTower, DeepFM, WideDeep, SASRec,
+- Tests: 417 passing (ALS, BPR, NMF, NCF, TwoTower, DeepFM, WideDeep, SASRec,
   LightGCN, NDCG, uniform-neg, PTX × 6 SM)
 - unwrap() calls: 0 in production code
 - macOS: compiles but returns `UnsupportedPlatform` at runtime when actual launch

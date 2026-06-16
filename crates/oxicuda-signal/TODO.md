@@ -6,7 +6,7 @@ GPU-accelerated signal, audio, and image processing primitives — pure-Rust rep
 
 ## Implementation Status
 
-**Actual: 9,234 SLoC across 35 files**
+**Actual: 12,276 SLoC across 55 files**
 
 Vol.6 covers DCT/DWT transforms, audio analysis (STFT, mel, MFCC, spectrogram metrics),
 window functions and their analysis metrics, FIR/IIR/Wiener filters, correlation
@@ -49,7 +49,14 @@ GPU-hardware verification.
 #### FIR/IIR filters (`filter/`)
 - [x] `filter/fir.rs` -- FIR design: lowpass/highpass/bandpass/bandstop via windowed sinc; raised cosine / RRC; direct-form apply with zero / circular / reflect / replicate padding; freq response; PTX direct-form kernel (≤ 64 taps)
 - [x] `filter/iir.rs` -- IIR Biquad sections: lowpass/highpass/bandpass/peaking EQ + freq response; general-order IIR apply (Direct Form II Transposed); Butterworth pole design + SOS cascade
+- [x] `filter/remez.rs` -- Parks-McClellan / Remez exchange equiripple FIR design (type-I): `remez` + `RemezBand` + lowpass/highpass/bandpass/bandstop constructors; barycentric Lagrange interpolation, alternation-theorem extremum exchange, DCT-I impulse-response recovery
 - [x] `filter/wiener.rs` -- Wiener filter: spectral noise PSD estimation + gain computation + batch apply + local 1D Wiener
+
+#### Spectral estimation (`spectral/`)
+- [x] `spectral/welch.rs` -- power spectral density estimators: `periodogram`, Welch's averaged periodogram (`welch`, overlap + mean-detrend + density/spectrum scaling), Bartlett (`bartlett_psd`), sine-taper multitaper (`multitaper_psd`); one-sided Parseval-calibrated output via self-contained radix-2 FFT
+
+#### Resampling (`resample/`)
+- [x] `resample/polyphase.rs` -- rational sample-rate conversion (`resample_poly`, `resample_rate`): gcd ratio reduction, Kaiser-windowed-sinc anti-alias prototype (reusing `filter::design_lowpass`), efficient polyphase commutator (no zero-stuffing), group-delay compensation, `ceil(N·up/down)` output length
 
 #### Correlation (`correlation/`)
 - [x] `correlation/autocorr.rs` -- biased / unbiased / normalised autocorrelation, autocovariance, partial autocorrelation (PACF), Ljung-Box Q-statistic
@@ -75,6 +82,9 @@ GPU-hardware verification.
 - [x] Direct-form FIR PTX kernel (≤ 64-tap fast path)
 - [x] General-order IIR via Direct Form II Transposed
 - [x] Butterworth SOS cascade
+- [x] Parks-McClellan / Remez exchange equiripple FIR design (type-I, minimax-optimal)
+- [x] Welch / Bartlett / sine-taper multitaper PSD estimation
+- [x] Polyphase rational resampling (anti-aliased `up/down` sample-rate conversion)
 - [x] Wiener filter (spectral + local 1D)
 - [x] GCC-PHAT for time-of-arrival estimation
 - [x] Spectral feature metrics (centroid, rolloff, flatness, LUFS, MFCC distance)
@@ -85,6 +95,14 @@ GPU-hardware verification.
 - [x] Soft-NMS and 2D heatmap NMS for keypoint / detection post-processing
 - [x] Sobel angle (gradient orientation)
 - [x] Padding modes (zero, circular, reflect, replicate) across FIR / correlation
+
+#### P2 — Nice-to-Have (Algorithmic Extensions)
+- [x] Savitzky-Golay polynomial smoothing (`filter/savgol.rs`) — Savitzky-Golay 1964; least-squares polynomial fitting over sliding window with arbitrary derivative order; `SavgolFilter`
+- [x] Continuous Wavelet Transform (`cwt/cwt.rs`) — scalogram via convolution with Morlet/Ricker/Paul wavelets across log-scale bank; `CwtPlan`
+- [x] Kalman filter + RTS smoother (`filter/kalman.rs`) — linear Kalman predict-update cycle + Rauch-Tung-Striebel backward smoother for optimal linear state estimation; `KalmanFilter`
+- [ ] MP3/AAC aligned DCT basis (`dct/mp3_dct.rs`) — 36-point and 18-point MDCT variants matching ISO 11172-3 short/long block window switching; `Mp3MdctPlan`
+- [x] `beamform/mvdr.rs` / `MVDR` — Minimum Variance Distortionless Response beamformer: spatial covariance matrix R estimation from multichannel snapshots; MVDR weight w = R⁻¹d / (dᴴR⁻¹d); array gain and beam-pattern metrics; `MvdrBeamformer { n_mics, freq_hz }`
+- [x] `beamform/delay_and_sum.rs` — Delay-and-Sum beamformer: per-microphone fractional-sample delay via polyphase FIR interpolation; steering vector from far-field direction-of-arrival; coherent summation; `DelayAndSumBeamformer`
 
 #### Outstanding — Hardware Verification
 - [ ] (P0) All DCT/DWT/STFT/MFCC PTX kernels round-trip-verified on Linux + NVIDIA hardware
@@ -110,7 +128,7 @@ GPU-hardware verification.
 ## Quality Status
 
 - Warnings: 0 (clippy + rustdoc clean)
-- Tests: 231 passing
+- Tests: 414 passing
 - unwrap() calls: 0 (production code)
 - All public functions return `SignalResult<T>` for fallible paths
 - macOS: compiles, PTX-generation tests run; GPU-execution tests gated behind `feature = "gpu-tests"` and return `UnsupportedPlatform`
@@ -128,6 +146,9 @@ GPU-hardware verification.
 | F7 | FIR design + apply (windowed sinc, raised cosine, RRC) | `filter/fir.rs` | [x] |
 | F8 | IIR Biquad / SOS / Butterworth | `filter/iir.rs` | [x] |
 | F9 | Wiener filtering (spectral + local) | `filter/wiener.rs` | [x] |
+| F16 | Parks-McClellan / Remez equiripple FIR design | `filter/remez.rs` | [x] |
+| F17 | Welch / Bartlett / multitaper PSD estimation | `spectral/welch.rs` | [x] |
+| F18 | Polyphase rational resampling | `resample/polyphase.rs` | [x] |
 | F10 | Auto- / cross-correlation, convolution | `correlation/` | [x] |
 | F11 | GCC-PHAT, phase correlation | `correlation/crosscorr.rs` | [x] |
 | F12 | Gaussian blur (separable) | `image/gaussian_blur.rs` | [x] |

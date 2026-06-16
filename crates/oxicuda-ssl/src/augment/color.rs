@@ -113,7 +113,7 @@ mod tests {
         let w = 4;
         let mut img = sample_image(h, w);
         let original = img.clone();
-        color_jitter(&mut img, h, w, 0.0, &mut rng).unwrap();
+        color_jitter(&mut img, h, w, 0.0, &mut rng).expect("color_jitter should succeed");
         assert_eq!(img, original);
     }
 
@@ -123,7 +123,7 @@ mod tests {
         let h = 4;
         let w = 4;
         let mut img = vec![0.9_f32; 3 * h * w];
-        color_jitter(&mut img, h, w, 1.0, &mut rng).unwrap();
+        color_jitter(&mut img, h, w, 1.0, &mut rng).expect("color_jitter should succeed");
         for v in &img {
             assert!((0.0..=1.0).contains(v));
         }
@@ -152,7 +152,8 @@ mod tests {
         let w = 4;
         let mut img = sample_image(h, w);
         let original = img.clone();
-        let converted = random_grayscale_chw(&mut img, h, w, 0.0, &mut rng).unwrap();
+        let converted = random_grayscale_chw(&mut img, h, w, 0.0, &mut rng)
+            .expect("random_grayscale_chw should succeed");
         assert!(!converted);
         assert_eq!(img, original);
     }
@@ -165,7 +166,8 @@ mod tests {
         let mut img = vec![
             1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5,
         ];
-        let converted = random_grayscale_chw(&mut img, h, w, 1.0, &mut rng).unwrap();
+        let converted = random_grayscale_chw(&mut img, h, w, 1.0, &mut rng)
+            .expect("random_grayscale_chw should succeed");
         assert!(converted);
         // All channels equal after conversion.
         let plane = h * w;

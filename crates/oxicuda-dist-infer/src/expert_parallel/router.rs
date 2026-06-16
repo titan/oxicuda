@@ -170,13 +170,13 @@ mod tests {
     #[test]
     fn top1_routing_selects_max_logit() {
         // 3 tokens, 4 experts, top_k=1
-        let router = TopKRouter::new(4, 1).unwrap();
+        let router = TopKRouter::new(4, 1).expect("new should succeed");
         let logits = vec![
             0.0_f32, 1.0, 0.5, -1.0, // token 0 → expert 1
             2.0, 0.0, 0.0, 0.0, // token 1 → expert 0
             -1.0, -2.0, 3.0, 0.0, // token 2 → expert 2
         ];
-        let plan = router.route(&logits, 3).unwrap();
+        let plan = router.route(&logits, 3).expect("route should succeed");
         assert_eq!(plan.entries.len(), 3);
         assert_eq!(plan.entries[0].expert_idx, 1);
         assert_eq!(plan.entries[1].expert_idx, 0);
@@ -185,9 +185,9 @@ mod tests {
 
     #[test]
     fn top2_routing_gives_two_entries_per_token() {
-        let router = TopKRouter::new(4, 2).unwrap();
+        let router = TopKRouter::new(4, 2).expect("new should succeed");
         let logits = vec![1.0_f32, 2.0, 0.0, -1.0]; // 1 token, 4 experts
-        let plan = router.route(&logits, 1).unwrap();
+        let plan = router.route(&logits, 1).expect("route should succeed");
         assert_eq!(plan.entries.len(), 2);
         // Top-2 are expert 1 (logit=2) and expert 0 (logit=1)
         let experts: Vec<usize> = plan.entries.iter().map(|e| e.expert_idx).collect();
@@ -197,16 +197,16 @@ mod tests {
 
     #[test]
     fn routing_weights_sum_to_one() {
-        let router = TopKRouter::new(8, 3).unwrap();
+        let router = TopKRouter::new(8, 3).expect("new should succeed");
         let logits: Vec<f32> = (0..8).map(|i| i as f32).collect(); // 1 token
-        let plan = router.route(&logits, 1).unwrap();
+        let plan = router.route(&logits, 1).expect("route should succeed");
         let sum: f32 = plan.entries.iter().map(|e| e.weight).sum();
         assert!((sum - 1.0).abs() < 1e-5, "weights must sum to 1, got {sum}");
     }
 
     #[test]
     fn expert_load_counts_correctly() {
-        let router = TopKRouter::new(2, 1).unwrap();
+        let router = TopKRouter::new(2, 1).expect("new should succeed");
         // 4 tokens: expert 0 gets tokens 0,2; expert 1 gets tokens 1,3
         let logits = vec![
             1.0_f32, 0.0, // tok0 → exp0
@@ -214,7 +214,7 @@ mod tests {
             1.0, 0.0, // tok2 → exp0
             0.0, 1.0, // tok3 → exp1
         ];
-        let plan = router.route(&logits, 4).unwrap();
+        let plan = router.route(&logits, 4).expect("route should succeed");
         assert_eq!(plan.expert_load[0], 2);
         assert_eq!(plan.expert_load[1], 2);
         assert_eq!(plan.expert_offset(0), 0);
@@ -223,12 +223,12 @@ mod tests {
 
     #[test]
     fn load_balance_cv_perfectly_balanced_is_zero() {
-        let router = TopKRouter::new(4, 1).unwrap();
+        let router = TopKRouter::new(4, 1).expect("new should succeed");
         // 4 tokens, each going to a different expert
         let logits = vec![
             1.0_f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
-        let plan = router.route(&logits, 4).unwrap();
+        let plan = router.route(&logits, 4).expect("route should succeed");
         let cv = TopKRouter::load_balance_cv(&plan);
         assert!(cv < 1e-6, "perfectly balanced should have cv=0, got {cv}");
     }
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn logit_dimension_mismatch_errors() {
-        let router = TopKRouter::new(4, 1).unwrap();
+        let router = TopKRouter::new(4, 1).expect("new should succeed");
         let err = router.route(&[0.0; 3], 2).unwrap_err(); // expects 8 elements
         assert!(matches!(
             err,

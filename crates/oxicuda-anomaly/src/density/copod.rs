@@ -173,8 +173,11 @@ mod tests {
     fn copod_fit_score() {
         let data = make_data();
         let mut det = Copod::new();
-        det.fit(&data, 20, 2).unwrap();
-        let s = det.score(&[5.0_f32, 10.0]).unwrap();
+        det.fit(&data, 20, 2)
+            .expect("fit should succeed with valid 20-sample 2-feature data");
+        let s = det
+            .score(&[5.0_f32, 10.0])
+            .expect("score should succeed after successful fit");
         assert!(s.is_finite() && s >= 0.0, "s={s}");
     }
 
@@ -182,9 +185,14 @@ mod tests {
     fn copod_extreme_outlier_higher() {
         let data = make_data();
         let mut det = Copod::new();
-        det.fit(&data, 20, 2).unwrap();
-        let s_normal = det.score(&[10.0_f32, 20.0]).unwrap();
-        let s_outlier = det.score(&[1000.0_f32, 2000.0]).unwrap();
+        det.fit(&data, 20, 2)
+            .expect("fit should succeed with valid 20-sample 2-feature data");
+        let s_normal = det
+            .score(&[10.0_f32, 20.0])
+            .expect("score should succeed for inlier point");
+        let s_outlier = det
+            .score(&[1000.0_f32, 2000.0])
+            .expect("score should succeed for outlier point");
         assert!(s_outlier > s_normal, "{s_outlier} should > {s_normal}");
     }
 
@@ -192,8 +200,11 @@ mod tests {
     fn copod_skew_adjusted_finite() {
         let data = make_data();
         let mut det = Copod::new();
-        det.fit(&data, 20, 2).unwrap();
-        let s = det.score_skew_adjusted(&[5.0_f32, 10.0]).unwrap();
+        det.fit(&data, 20, 2)
+            .expect("fit should succeed with valid 20-sample 2-feature data");
+        let s = det
+            .score_skew_adjusted(&[5.0_f32, 10.0])
+            .expect("skew-adjusted score should succeed after fit");
         assert!(s.is_finite(), "s={s}");
     }
 }

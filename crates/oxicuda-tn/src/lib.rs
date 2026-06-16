@@ -22,12 +22,14 @@
 
 #![forbid(unsafe_code)]
 
+pub mod blocksparse;
 pub mod circuits;
 pub mod contraction;
 pub mod cp;
 pub mod dmrg;
 pub mod error;
 pub mod handle;
+pub mod mera;
 pub mod metrics;
 pub mod mpo;
 pub mod mps;
@@ -35,9 +37,13 @@ pub mod peps;
 pub mod ptx_kernels;
 pub mod svd;
 pub mod tebd;
+pub mod tr;
+pub mod tree;
+pub mod trg;
 pub mod tt;
 pub mod tucker;
 
+pub use blocksparse::{BlockKey, BlockSparseTensor};
 pub use circuits::{Circuit, CircuitConfig, CircuitGate, compile_circuit_to_tebd_gates};
 pub use contraction::path_optimal::{
     ContractionPathConfig, DpEntry, OptimalPath, TensorSpec, build_index_dims, compare_with_greedy,
@@ -45,6 +51,7 @@ pub use contraction::path_optimal::{
 };
 pub use error::{TnError, TnResult};
 pub use handle::{LcgRng, SmVersion, TnHandle};
+pub use mera::MeraLayer;
 pub use metrics::{
     LoschmidtConfig, LoschmidtResult, ReturnProbResult, StructureFactorConfig,
     StructureFactorResult, SzOperator, loschmidt_echo, mpo_expectation_value,
@@ -64,6 +71,10 @@ pub use peps::simple_update::{
     PepsLambdas, SimpleUpdateConfig, SimpleUpdateResult, simple_update_energy, simple_update_init,
     simple_update_run, simple_update_step_h, simple_update_step_v,
 };
+pub use tr::{TrCore, TrTensor, tr_svd};
+pub use tree::{TreeTensorNetwork, TtnNode};
+pub use trg::ising::{ising_tensor, onsager_log_z_per_site};
+pub use trg::{LatticeTensor, trg_partition_log, trg_step};
 
 #[cfg(test)]
 mod e2e_tests;

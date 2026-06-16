@@ -316,20 +316,24 @@ mod tests {
     #[test]
     fn attention_weight_is_finite() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let h = random_vec(6, &mut rng);
         let target = random_vec(6, &mut rng);
-        let a = model.attention_weight(&h, &target).unwrap();
+        let a = model
+            .attention_weight(&h, &target)
+            .expect("attention_weight should succeed");
         assert!(a.is_finite(), "attention weight must be finite, got {a}");
     }
 
     #[test]
     fn attention_over_history_returns_n_history_values() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let history = random_vec(4 * 6, &mut rng);
         let target = random_vec(6, &mut rng);
-        let weights = model.attention_over_history(&history, 4, &target).unwrap();
+        let weights = model
+            .attention_over_history(&history, 4, &target)
+            .expect("attention_over_history should succeed");
         assert_eq!(weights.len(), 4);
         for &w in &weights {
             assert!(w.is_finite(), "weight must be finite, got {w}");
@@ -339,7 +343,7 @@ mod tests {
     #[test]
     fn interest_rep_empty_history_errors() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let history: Vec<f32> = vec![];
         let target = random_vec(6, &mut rng);
         assert!(matches!(
@@ -351,16 +355,16 @@ mod tests {
     #[test]
     fn target_change_changes_attention() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let history = random_vec(3 * 6, &mut rng);
         let target_a = random_vec(6, &mut rng);
         let target_b = random_vec(6, &mut rng);
         let weights_a = model
             .attention_over_history(&history, 3, &target_a)
-            .unwrap();
+            .expect("value should be present");
         let weights_b = model
             .attention_over_history(&history, 3, &target_b)
-            .unwrap();
+            .expect("value should be present");
         let diff: f32 = weights_a
             .iter()
             .zip(weights_b.iter())
@@ -375,12 +379,16 @@ mod tests {
     #[test]
     fn history_change_changes_interest_rep() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let history_a = random_vec(3 * 6, &mut rng);
         let history_b = random_vec(3 * 6, &mut rng);
         let target = random_vec(6, &mut rng);
-        let int_a = model.interest_rep(&history_a, 3, &target).unwrap();
-        let int_b = model.interest_rep(&history_b, 3, &target).unwrap();
+        let int_a = model
+            .interest_rep(&history_a, 3, &target)
+            .expect("interest_rep should succeed");
+        let int_b = model
+            .interest_rep(&history_b, 3, &target)
+            .expect("interest_rep should succeed");
         let diff: f32 = int_a
             .iter()
             .zip(int_b.iter())
@@ -395,10 +403,12 @@ mod tests {
     #[test]
     fn forward_returns_probability_in_open_unit_interval() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let history = random_vec(5 * 6, &mut rng);
         let target = random_vec(6, &mut rng);
-        let p = model.forward(&history, 5, &target).unwrap();
+        let p = model
+            .forward(&history, 5, &target)
+            .expect("forward should succeed");
         assert!(p.is_finite(), "probability must be finite, got {p}");
         assert!(p > 0.0 && p < 1.0, "probability {p} not in (0,1)");
     }
@@ -406,11 +416,15 @@ mod tests {
     #[test]
     fn n_history_one_interest_equals_a_times_h() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let h = random_vec(6, &mut rng);
         let target = random_vec(6, &mut rng);
-        let a = model.attention_weight(&h, &target).unwrap();
-        let interest = model.interest_rep(&h, 1, &target).unwrap();
+        let a = model
+            .attention_weight(&h, &target)
+            .expect("attention_weight should succeed");
+        let interest = model
+            .interest_rep(&h, 1, &target)
+            .expect("interest_rep should succeed");
         assert_eq!(interest.len(), 6);
         for k in 0..6 {
             assert!(
@@ -426,20 +440,24 @@ mod tests {
     fn deterministic_given_seed() {
         let mut rng_a = LcgRng::new(11);
         let mut rng_b = LcgRng::new(11);
-        let model_a = Din::new(default_cfg(), &mut rng_a).unwrap();
-        let model_b = Din::new(default_cfg(), &mut rng_b).unwrap();
+        let model_a = Din::new(default_cfg(), &mut rng_a).expect("value should be present");
+        let model_b = Din::new(default_cfg(), &mut rng_b).expect("value should be present");
         let mut rng_in = LcgRng::new(999);
         let history = random_vec(4 * 6, &mut rng_in);
         let target = random_vec(6, &mut rng_in);
-        let pa = model_a.forward(&history, 4, &target).unwrap();
-        let pb = model_b.forward(&history, 4, &target).unwrap();
+        let pa = model_a
+            .forward(&history, 4, &target)
+            .expect("forward should succeed");
+        let pb = model_b
+            .forward(&history, 4, &target)
+            .expect("forward should succeed");
         assert!((pa - pb).abs() < 1e-6, "same seed must give same output");
     }
 
     #[test]
     fn n_params_is_positive() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let n = model.n_params();
         assert!(n > 0, "n_params must be > 0, got {n}");
         // Expected: attention MLP (4d→h→1) + top MLP (3d→h0→h1→1).
@@ -518,7 +536,7 @@ mod tests {
             attention_hidden: 8,
             mlp_hidden: vec![16],
         };
-        let model = Din::new(cfg, &mut rng).unwrap();
+        let model = Din::new(cfg, &mut rng).expect("new should succeed");
         let history = random_vec(4 * 6, &mut rng);
         let target = random_vec(6, &mut rng);
         assert!(matches!(
@@ -530,7 +548,7 @@ mod tests {
     #[test]
     fn err_history_wrong_length() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let history = vec![0.0_f32; 3 * 6 - 1];
         let target = random_vec(6, &mut rng);
         assert!(matches!(
@@ -542,7 +560,7 @@ mod tests {
     #[test]
     fn err_target_wrong_length() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let history = random_vec(3 * 6, &mut rng);
         let target = vec![0.0_f32; 5];
         assert!(matches!(
@@ -558,10 +576,12 @@ mod tests {
         // and a non-trivial bias-free linear final layer, the chance of the
         // sum landing exactly on 1.0 by accident is negligible.
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let history = random_vec(5 * 6, &mut rng);
         let target = random_vec(6, &mut rng);
-        let weights = model.attention_over_history(&history, 5, &target).unwrap();
+        let weights = model
+            .attention_over_history(&history, 5, &target)
+            .expect("attention_over_history should succeed");
         let s: f32 = weights.iter().sum();
         assert!(
             (s - 1.0).abs() > 1e-3,
@@ -576,7 +596,7 @@ mod tests {
         // every component of `interest` is a uniform scalar times the
         // corresponding component of `h`.
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let d = 6_usize;
         let h = random_vec(d, &mut rng);
         let mut history = Vec::with_capacity(4 * d);
@@ -584,7 +604,9 @@ mod tests {
             history.extend_from_slice(&h);
         }
         let target = random_vec(d, &mut rng);
-        let interest = model.interest_rep(&history, 4, &target).unwrap();
+        let interest = model
+            .interest_rep(&history, 4, &target)
+            .expect("interest_rep should succeed");
         // Look up the implied scalar from a non-zero component (use the one
         // with largest |h[k]| to maximise numerical stability).
         let (k_max, _) = h
@@ -610,7 +632,7 @@ mod tests {
     #[test]
     fn identical_history_items_get_identical_attention() {
         let mut rng = make_rng();
-        let model = Din::new(default_cfg(), &mut rng).unwrap();
+        let model = Din::new(default_cfg(), &mut rng).expect("value should be present");
         let d = 6_usize;
         let h = random_vec(d, &mut rng);
         let mut history = Vec::with_capacity(3 * d);
@@ -618,7 +640,9 @@ mod tests {
             history.extend_from_slice(&h);
         }
         let target = random_vec(d, &mut rng);
-        let weights = model.attention_over_history(&history, 3, &target).unwrap();
+        let weights = model
+            .attention_over_history(&history, 3, &target)
+            .expect("attention_over_history should succeed");
         for i in 1..3 {
             assert!(
                 (weights[0] - weights[i]).abs() < 1e-5,

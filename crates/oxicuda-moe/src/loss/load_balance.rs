@@ -132,7 +132,8 @@ mod tests {
         let router_logits = vec![1.0_f32; n_tokens * n_experts];
         // Assign tokens round-robin
         let assignments: Vec<usize> = (0..n_tokens).map(|t| t % n_experts).collect();
-        let loss = load_balance_loss(&router_logits, &assignments, n_tokens, n_experts).unwrap();
+        let loss = load_balance_loss(&router_logits, &assignments, n_tokens, n_experts)
+            .expect("load_balance_loss should succeed");
         assert!(loss.is_finite() && loss >= 0.0, "loss={loss}");
     }
 
@@ -142,7 +143,8 @@ mod tests {
         let n_experts = 2;
         let router_logits = vec![0.5_f32; n_tokens * n_experts];
         let assignments = [0_usize, 0, 1, 1];
-        let stats = compute_load_stats(&router_logits, &assignments, n_tokens, n_experts).unwrap();
+        let stats = compute_load_stats(&router_logits, &assignments, n_tokens, n_experts)
+            .expect("compute_load_stats should succeed");
         let f_sum: f32 = stats.f.iter().sum();
         assert!((f_sum - 1.0).abs() < 1e-5, "f_sum={f_sum}");
         let p_sum: f32 = stats.p.iter().sum();

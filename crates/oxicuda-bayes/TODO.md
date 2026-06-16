@@ -9,7 +9,7 @@ calibration metrics and post-hoc recalibration. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,000 (24 files)
+- **Actual SLoC:** 18,258 (57 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
@@ -62,15 +62,20 @@ calibration metrics and post-hoc recalibration. Part of
 ### Future Enhancements
 
 #### P0 -- Critical (Algorithm Coverage Gaps)
-- [ ] Full-covariance Laplace approximation -- current `LastLayerLaplace` uses a diagonal Hessian; add KFAC / dense block fits to capture parameter correlations (Daxberger 2021 full-Laplace)
+- [x] Full-covariance Laplace approximation -- current `LastLayerLaplace` uses a diagonal Hessian; add KFAC / dense block fits to capture parameter correlations (Daxberger 2021 full-Laplace)
 - [x] Functional Laplace / linearised-Laplace predictive -- exact posterior predictive via Jacobian linearisation rather than probit approximation (uncertainty/functional_laplace.rs -- Immer 2021; GGN posterior precision H=prior_prec·I+Σ JᵀJ, Σ=H⁻¹, predictive var=J Σ Jᵀ, mean=MAP output via local linearization)
 - [x] BayesGRU -- Bayesian Gated Recurrent Unit via BBB (BayesLSTM / BayesAttention remain for a future wave)
+- [ ] `gp/sparse_gp_fitc.rs` — Sparse GP FITC/PITC (Titsias 2009): inducing-points variational lower bound ELBO=log 𝒩(y; KₙₘK_mm⁻¹μ, σ²I+Qₙₙ-diag(Kₙₙ-Qₙₙ)) + KL(q(f_m)‖p(f_m)); O(nm²) per gradient step vs O(n³) full GP
+- [x] `layers/bayes_lstm.rs` — Bayesian LSTM (BBB, Fortunato 2017): weight mean+log-var reparameterised; forward = deterministic LSTM with noise + KL penalty; `BayesLstm` struct with `sample()` + `kl_divergence()`
 
 #### P1 -- Important (Variational Inference Depth)
 - [x] Real NVP / IAF / MAF normalising flows — variational/real_nvp.rs (affine coupling layers with alternating masks, exact inverse, log-det-Jacobian; IAF/MAF remain future)
 - [x] Stein Variational Gradient Descent (SVGD) — variational/svgd.rs (RBF kernel, median heuristic, Stein operator with score + kernel-gradient, particle update; Liu & Wang 2016 NeurIPS)
 - [x] Hamiltonian Monte Carlo + NUTS posterior sampler -- gradient-based MCMC for small-network reference posteriors
 - [x] Variational continual learning helpers -- online VI updates with prior replacement for sequential tasks (Nguyen 2018) (variational/vcl.rs -- Nguyen 2018; mean-field Gaussian online VI, closed-form KL(q‖prior), ELBO step, consolidate posterior→next prior, reparameterized sample)
+- [ ] `gp/deep_gp.rs` — Deep Gaussian Processes (Damianou-Lawrence 2013): doubly-stochastic VI; GP layers f^(l+1)=GP(f^(l)); DSVI ELBO = Σ E_q[log p(y|f_L)] - Σ_l KL(q(u_l)‖p(u_l)); inducing-point approx per layer
+- [ ] `variational/nvae.rs` — Nouveau VAE (Vahdat-Kautz 2020): hierarchical VAE with residual normalising flows at each level; bidirectional encoder + top-down decoder; KL balancing via free-bits heuristic
+- [x] `variational/iaf_flow.rs` — Inverse Autoregressive Flow (Kingma 2016): IAF posterior q(z|x) = T_t∘…∘T_1(ε); each T invertible autoregressive; exact density via change-of-variables; complements existing `real_nvp.rs`
 
 #### P2 -- Nice-to-Have (Calibration & Reporting Extensions)
 - [x] Histogram binning calibration -- non-parametric bin-wise recalibration as a complement to isotonic / Platt
@@ -78,6 +83,9 @@ calibration metrics and post-hoc recalibration. Part of
 - [x] Multi-class temperature with vector scaling / matrix scaling -- per-class temperature and full affine recalibration heads
 - [ ] Class-conditional calibration metrics -- per-class ECE / reliability diagrams in addition to the existing top-1 metrics
 - [x] Conformal prediction wrappers -- split / inductive conformal intervals using the existing top-1 score machinery
+- [x] `calibration/ece_classwise.rs` — Class-wise ECE (Kull 2019): per-class calibration curve, adaptive equal-mass binning, multiclass reliability diagram; complements existing top-1 ECE
+- [x] `uncertainty/evidential.rs` — Evidential Deep Learning (Sensoy 2018): Dirichlet output parameterisation; uncertainty = total variance decomposed into aleatoric + epistemic via Dir(α); NIG prior for regression
+- [x] `mc/convergence_diagnostics.rs` — MCMC convergence diagnostics: R-hat (Gelman-Rubin 1992) for multi-chain runs; effective sample size (ESS) via autocorrelation; Geweke Z-test; integrate with `variational/hmc.rs`
 
 #### GPU Launcher Wiring
 - [ ] Wire `ptx_kernels::*` strings through `oxicuda-launch::Kernel::from_module` for end-to-end GPU execution (currently only the PTX strings are emitted; CPU paths are the authoritative reference)

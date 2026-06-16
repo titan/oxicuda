@@ -265,16 +265,16 @@ mod tests {
             ep: 2,
         };
         // rank 0 → (tp=0, sp=0, ep=0)
-        let c0 = RankCoordinates::from_global(0, &cfg).unwrap();
+        let c0 = RankCoordinates::from_global(0, &cfg).expect("from_global should succeed");
         assert_eq!((c0.tp_rank, c0.sp_rank, c0.ep_rank), (0, 0, 0));
         // rank 1 → (tp=1, sp=0, ep=0)
-        let c1 = RankCoordinates::from_global(1, &cfg).unwrap();
+        let c1 = RankCoordinates::from_global(1, &cfg).expect("from_global should succeed");
         assert_eq!((c1.tp_rank, c1.sp_rank, c1.ep_rank), (1, 0, 0));
         // rank 2 → (tp=0, sp=1, ep=0)
-        let c2 = RankCoordinates::from_global(2, &cfg).unwrap();
+        let c2 = RankCoordinates::from_global(2, &cfg).expect("from_global should succeed");
         assert_eq!((c2.tp_rank, c2.sp_rank, c2.ep_rank), (0, 1, 0));
         // rank 7 → (tp=1, sp=1, ep=1)
-        let c7 = RankCoordinates::from_global(7, &cfg).unwrap();
+        let c7 = RankCoordinates::from_global(7, &cfg).expect("from_global should succeed");
         assert_eq!((c7.tp_rank, c7.sp_rank, c7.ep_rank), (1, 1, 1));
         // round-trip
         assert_eq!(c7.to_global(&cfg), 7);
@@ -314,7 +314,7 @@ mod tests {
             sp: 1,
             ep: 1,
         };
-        let coords = RankCoordinates::from_global(0, &cfg).unwrap();
+        let coords = RankCoordinates::from_global(0, &cfg).expect("from_global should succeed");
         // tp_rank=0 peer with tp_rank=3 should be global rank 3
         assert_eq!(coords.peer_tp(3, &cfg), 3);
     }
@@ -327,7 +327,7 @@ mod tests {
             ep: 1,
         };
         // rank 0 → tp=0, sp=0. peer_sp(3) → ep=0, sp=3, tp=0 → global=6
-        let coords = RankCoordinates::from_global(0, &cfg).unwrap();
+        let coords = RankCoordinates::from_global(0, &cfg).expect("from_global should succeed");
         assert_eq!(coords.peer_sp(3, &cfg), 6);
     }
 
@@ -339,7 +339,8 @@ mod tests {
             ep: 1,
         };
         for rank in 0..4 {
-            let h = DistInferHandle::new(rank as i32, SmVersion(90), rank, cfg).unwrap();
+            let h = DistInferHandle::new(rank as i32, SmVersion(90), rank, cfg)
+                .expect("value should be present");
             assert_eq!(h.tp_rank(), rank);
             assert_eq!(h.sp_rank(), 0);
             assert_eq!(h.ep_rank(), 0);

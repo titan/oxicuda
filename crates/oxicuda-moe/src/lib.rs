@@ -3,7 +3,9 @@
 //! Mixture of Experts (MoE) primitives for OxiCUDA.
 //!
 //! Implements Switch Transformer, Top-K routing, Expert Choice, Soft MoE,
-//! load balancing, and associated PTX kernels for GPU execution.
+//! Gumbel-softmax stochastic routing, expert-parallel all-to-all dispatch,
+//! MegaBlocks block-sparse dispatch, load balancing, and associated PTX kernels
+//! for GPU execution.
 
 pub mod error;
 pub mod expert;
@@ -11,6 +13,7 @@ pub mod handle;
 pub mod layer;
 pub mod loss;
 pub mod metrics;
+pub mod moe;
 pub mod ptx_kernels;
 pub mod routing;
 
@@ -18,6 +21,10 @@ pub mod routing;
 pub mod prelude {
     pub use crate::error::{MoeError, MoeResult};
     pub use crate::expert::bank::{ExpertBank, SwiGluBank};
+    pub use crate::expert::block_sparse::{
+        BlockSparseDispatcher, BlockSparseLayout, PAD_ROW, build_block_sparse_layout,
+        gather_tokens, scatter_tokens,
+    };
     pub use crate::expert::ffn::{ExpertActivation, ExpertFfn, SwiGluExpert};
     pub use crate::handle::{LcgRng, MoeHandle, SmVersion};
     pub use crate::layer::moe_layer::{MoeLayer, MoeLayerConfig, MoeLayerOutput};
@@ -25,6 +32,14 @@ pub mod prelude {
     pub use crate::loss::load_balance::{LoadStats, compute_load_stats, load_balance_loss};
     pub use crate::loss::router_z::router_z_loss;
     pub use crate::metrics::utilization::{ExpertUtilization, compute_utilization};
+    pub use crate::moe::hierarchical::{
+        HierarchicalConfig, HierarchicalMoeLayer, HierarchicalOutput, HierarchicalRouteResult,
+    };
+    pub use crate::moe::lora_moe::{LoraExpert, LoraMoe, LoraMoeConfig, LoraMoeOutput};
+    pub use crate::moe::mixtral::{
+        MixtralConfig, MixtralMoeLayer, MixtralOutput, MixtralRoutingInfo,
+        mixtral_load_balance_loss,
+    };
     pub use crate::ptx_kernels::{
         expert_combine_ptx, expert_dispatch_ptx, expert_ffn_ptx, f32_hex, load_balance_loss_ptx,
         router_z_loss_ptx, soft_moe_dispatch_ptx, top_k_gate_ptx,
@@ -32,9 +47,30 @@ pub mod prelude {
     pub use crate::routing::expert_choice::{
         ExpertChoiceConfig, ExpertChoiceResult, expert_choice_combine, expert_choice_route,
     };
+    pub use crate::routing::expert_dropout::{ExpertDropout, ExpertDropoutConfig};
+    pub use crate::routing::expert_parallel::{
+        ExpertParallelConfig, ExpertParallelPlan, TokenPlacement, build_dispatch_plan,
+        combine_all_to_all, dispatch_all_to_all,
+    };
+    pub use crate::routing::gumbel::{
+        GumbelConfig, GumbelRouteResult, GumbelRouter, gumbel_softmax,
+    };
     pub use crate::routing::hash::{HashRouter, HashRoutingConfig};
     pub use crate::routing::multi_gate::{MultiGateConfig, MultiGateRouter};
+    pub use crate::routing::noisy_top_k::{
+        NoisyTopKConfig, NoisyTopKResult, NoisyTopKRouter, softplus,
+    };
+    pub use crate::routing::shared_expert::{
+        SharedExpertConfig, SharedExpertResult, shared_expert_combine, shared_expert_route,
+        total_experts,
+    };
+    pub use crate::routing::sinkhorn_route::{
+        SinkhornRouteConfig, SinkhornRouteResult, marginal_deviation, sinkhorn_route,
+    };
     pub use crate::routing::soft_moe::{SoftMoeConfig, SoftMoeRouter};
+    pub use crate::routing::st_moe::{
+        StMoeConfig, StMoeLayer, StMoeOutput, StMoeRouting, st_load_balance_loss, st_router_z_loss,
+    };
     pub use crate::routing::switch::{
         SwitchConfig, SwitchDispatch, switch_combine, switch_dispatch,
     };
@@ -55,10 +91,10 @@ mod e2e_tests {
             input_dim: 32,
             noise_std: 0.0,
         };
-        let router = TopKRouter::new(cfg, &mut rng).unwrap();
+        let router = TopKRouter::new(cfg, &mut rng).expect("new should succeed");
         let n_tokens = 16;
         let x = vec![0.5_f32; n_tokens * 32];
-        let result = router.route(&x, n_tokens).unwrap();
+        let result = router.route(&x, n_tokens).expect("route should succeed");
         for tok in 0..n_tokens {
             let score_sum: f32 = result.scores[tok * 2..tok * 2 + 2].iter().sum();
             assert!(
@@ -79,10 +115,10 @@ mod e2e_tests {
             input_dim: 16,
             noise_std: 0.0,
         };
-        let router = TopKRouter::new(cfg, &mut rng).unwrap();
+        let router = TopKRouter::new(cfg, &mut rng).expect("new should succeed");
         let n_tokens = 32;
         let x = vec![0.3_f32; n_tokens * 16];
-        let result = router.route(&x, n_tokens).unwrap();
+        let result = router.route(&x, n_tokens).expect("route should succeed");
         for &idx in &result.indices {
             assert!(idx < n_experts, "index {idx} >= n_experts {n_experts}");
         }
@@ -102,7 +138,8 @@ mod e2e_tests {
         };
         // Round-robin assignment
         let gate_indices: Vec<usize> = (0..n_tokens).map(|t| t % n_experts).collect();
-        let dispatch = switch_dispatch(&gate_indices, n_tokens, &cfg).unwrap();
+        let dispatch =
+            switch_dispatch(&gate_indices, n_tokens, &cfg).expect("switch_dispatch should succeed");
         // Count tokens per expert
         let mut counts = vec![0_usize; n_experts];
         for &assignment in &dispatch.expert_assignments {
@@ -134,7 +171,8 @@ mod e2e_tests {
         };
         // All tokens to expert 0 → many overflows
         let gate_indices = vec![0_usize; n_tokens];
-        let dispatch = switch_dispatch(&gate_indices, n_tokens, &cfg).unwrap();
+        let dispatch =
+            switch_dispatch(&gate_indices, n_tokens, &cfg).expect("switch_dispatch should succeed");
         assert!(
             dispatch.n_overflows > 0,
             "expected overflows with tight capacity, got 0"
@@ -147,7 +185,7 @@ mod e2e_tests {
         let mut rng = LcgRng::new(0);
         let ffn = ExpertFfn::new(32, 128, ExpertActivation::Gelu, &mut rng);
         let x = vec![0.5_f32; 32];
-        let output = ffn.forward(&x).unwrap();
+        let output = ffn.forward(&x).expect("forward should succeed");
         assert!(
             output.iter().all(|v| v.is_finite()),
             "ExpertFfn output contains non-finite values"
@@ -161,7 +199,7 @@ mod e2e_tests {
         let mut rng = LcgRng::new(1);
         let ffn = ExpertFfn::new(input_dim, 256, ExpertActivation::Relu, &mut rng);
         let x = vec![1.0_f32; input_dim];
-        let output = ffn.forward(&x).unwrap();
+        let output = ffn.forward(&x).expect("forward should succeed");
         assert_eq!(
             output.len(),
             input_dim,
@@ -176,7 +214,7 @@ mod e2e_tests {
         let mut rng = LcgRng::new(2);
         let expert = SwiGluExpert::new(32, 128, &mut rng);
         let x = vec![0.7_f32; 32];
-        let output = expert.forward(&x).unwrap();
+        let output = expert.forward(&x).expect("forward should succeed");
         assert!(
             output.iter().all(|v| v.is_finite()),
             "SwiGluExpert output contains non-finite values"
@@ -193,7 +231,8 @@ mod e2e_tests {
         rng.fill_normal_scaled(&mut logits, 1.0);
         // Assignments: round-robin
         let assignments: Vec<usize> = (0..n_tokens).map(|t| t % n_experts).collect();
-        let loss = load_balance_loss(&logits, &assignments, n_tokens, n_experts).unwrap();
+        let loss = load_balance_loss(&logits, &assignments, n_tokens, n_experts)
+            .expect("load_balance_loss should succeed");
         assert!(
             loss >= 0.0,
             "load balance loss must be non-negative, got {loss}"
@@ -212,7 +251,8 @@ mod e2e_tests {
         let mut rng = LcgRng::new(4);
         let mut logits = vec![0.0_f32; n_tokens * n_experts];
         rng.fill_normal_scaled(&mut logits, 2.0);
-        let loss = router_z_loss(&logits, n_tokens, n_experts).unwrap();
+        let loss =
+            router_z_loss(&logits, n_tokens, n_experts).expect("router_z_loss should succeed");
         assert!(loss >= 0.0, "z-loss must be >= 0, got {loss}");
         assert!(loss.is_finite(), "z-loss must be finite, got {loss}");
     }
@@ -227,9 +267,11 @@ mod e2e_tests {
             input_dim: 16,
         };
         let n_tokens = 8;
-        let router = SoftMoeRouter::new(cfg.clone(), &mut rng).unwrap();
+        let router = SoftMoeRouter::new(cfg.clone(), &mut rng).expect("value should be present");
         let x = vec![0.5_f32; n_tokens * cfg.input_dim];
-        let dispatch = router.dispatch_weights(&x, n_tokens).unwrap();
+        let dispatch = router
+            .dispatch_weights(&x, n_tokens)
+            .expect("dispatch_weights should succeed");
         let n_slots = cfg.n_experts * cfg.n_slots_per_expert;
         for tok in 0..n_tokens {
             let row_sum: f32 = dispatch[tok * n_slots..(tok + 1) * n_slots].iter().sum();
@@ -256,9 +298,9 @@ mod e2e_tests {
             router_z_loss_coef: 0.001,
             activation: ExpertActivation::Gelu,
         };
-        let layer = MoeLayer::new(cfg, &mut rng).unwrap();
+        let layer = MoeLayer::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.3_f32; n_tokens * input_dim];
-        let output = layer.forward(&x, n_tokens).unwrap();
+        let output = layer.forward(&x, n_tokens).expect("forward should succeed");
         assert_eq!(
             output.hidden.len(),
             n_tokens * input_dim,

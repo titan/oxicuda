@@ -171,6 +171,61 @@ pub fn local_wiener_1d(signal: &[f64], block_size: usize, noise_var: f64) -> Vec
     out
 }
 
+/// Adaptive 1-D Wiener denoising filter (validated, fallible variant).
+///
+/// For each sample, the local mean `μ` and variance `σ²` are estimated over a
+/// centred window of `window` samples, and the pixel-adaptive Wiener gain is
+/// applied:
+///
+/// ```text
+/// w        = max(0, 1 − noise_var / σ²)
+/// out[n]   = μ + w · (x[n] − μ)
+/// ```
+///
+/// This is the classic Lee/`scipy.signal.wiener` estimator.  Where the local
+/// variance is at or below the noise level the output collapses to the local
+/// mean (maximal smoothing); where it greatly exceeds the noise level the input
+/// passes through almost unchanged (edge preservation).
+///
+/// `noise_var` is the (assumed constant) noise variance.  A `noise_var` of `0`
+/// reduces to a pass-through (no smoothing).
+///
+/// # Errors
+///
+/// Returns [`SignalError::InvalidParameter`] if `window == 0` or `noise_var` is
+/// negative / non-finite.
+pub fn wiener_filter(signal: &[f64], noise_var: f64, window: usize) -> SignalResult<Vec<f64>> {
+    if window == 0 {
+        return Err(SignalError::InvalidParameter(
+            "Wiener window must be >= 1".into(),
+        ));
+    }
+    if !noise_var.is_finite() || noise_var < 0.0 {
+        return Err(SignalError::InvalidParameter(format!(
+            "noise_var must be finite and >= 0, got {noise_var}"
+        )));
+    }
+
+    let n = signal.len();
+    let half = window / 2;
+    let mut out = vec![0.0_f64; n];
+    for i in 0..n {
+        let lo = i.saturating_sub(half);
+        let hi = (i + half + 1).min(n);
+        let block = &signal[lo..hi];
+        let len = block.len() as f64;
+        let mu: f64 = block.iter().sum::<f64>() / len;
+        let var: f64 = block.iter().map(|&v| (v - mu) * (v - mu)).sum::<f64>() / len;
+        let w = if var <= 0.0 {
+            0.0
+        } else {
+            (1.0 - noise_var / var).max(0.0)
+        };
+        out[i] = mu + w * (signal[i] - mu);
+    }
+    Ok(out)
+}
+
 // --------------------------------------------------------------------------- //
 //  Tests
 // --------------------------------------------------------------------------- //
@@ -283,5 +338,97 @@ mod tests {
             "y[2]={} vs mean={local_mean}",
             y[2]
         );
+    }
+
+    // ── wiener_filter (validated adaptive variant) ──────────────────────────
+
+    #[test]
+    fn wf_output_len() {
+        for len in [0usize, 1, 5, 64] {
+            let x = vec![0.5_f64; len];
+            let y = wiener_filter(&x, 0.1, 5).expect("ok");
+            assert_eq!(y.len(), len);
+        }
+    }
+
+    #[test]
+    fn wf_reduces_noise_variance() {
+        // Constant signal + alternating noise: filtering should reduce variance.
+        let clean = 5.0_f64;
+        let x: Vec<f64> = (0..200)
+            .map(|i| clean + if i % 2 == 0 { 0.5 } else { -0.5 })
+            .collect();
+        let noise_var = 0.25; // variance of ±0.5
+        let y = wiener_filter(&x, noise_var, 7).expect("ok");
+        let var_in = variance(&x);
+        let var_out = variance(&y);
+        assert!(var_out < var_in, "var_out={var_out} var_in={var_in}");
+    }
+
+    #[test]
+    fn wf_preserves_dc() {
+        let x = vec![3.0_f64; 100];
+        let y = wiener_filter(&x, 0.5, 9).expect("ok");
+        for v in &y {
+            assert!((v - 3.0).abs() < 1e-9, "DC not preserved: {v}");
+        }
+    }
+
+    #[test]
+    fn wf_noise_var_0_passthrough() {
+        // noise_var = 0 → w = 1 → output equals input.
+        let x: Vec<f64> = (0..50).map(|i| (i as f64 * 0.3).sin()).collect();
+        let y = wiener_filter(&x, 0.0, 5).expect("ok");
+        for (a, b) in x.iter().zip(&y) {
+            assert!((a - b).abs() < 1e-12, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn wf_window_1_ok() {
+        // Window of 1 → local mean is the sample itself, var = 0 → output = mean = x.
+        let x = vec![1.0, 2.0, 3.0, 4.0_f64];
+        let y = wiener_filter(&x, 0.1, 1).expect("ok");
+        for (a, b) in x.iter().zip(&y) {
+            assert!((a - b).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn wf_large_noise_smooths() {
+        // noise_var >> local variance everywhere → output ≈ local mean.
+        let x = vec![1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0_f64];
+        let y = wiener_filter(&x, 1000.0, 7).expect("ok");
+        let mean = x.iter().sum::<f64>() / x.len() as f64;
+        // Central samples should be pulled strongly toward the local mean.
+        assert!((y[3] - mean).abs() < 2.0, "y[3]={} mean={mean}", y[3]);
+    }
+
+    #[test]
+    fn wf_finite() {
+        let x: Vec<f64> = (0..128).map(|i| (i as f64 * 1.1).sin() * 3.0).collect();
+        let y = wiener_filter(&x, 0.3, 11).expect("ok");
+        for v in &y {
+            assert!(v.is_finite());
+        }
+    }
+
+    #[test]
+    fn wf_window_0_error() {
+        assert!(wiener_filter(&[1.0, 2.0, 3.0], 0.1, 0).is_err());
+    }
+
+    #[test]
+    fn wf_negative_noise_error() {
+        assert!(wiener_filter(&[1.0, 2.0], -0.5, 3).is_err());
+        assert!(wiener_filter(&[1.0, 2.0], f64::NAN, 3).is_err());
+    }
+
+    fn variance(x: &[f64]) -> f64 {
+        if x.is_empty() {
+            return 0.0;
+        }
+        let m = x.iter().sum::<f64>() / x.len() as f64;
+        x.iter().map(|&v| (v - m) * (v - m)).sum::<f64>() / x.len() as f64
     }
 }

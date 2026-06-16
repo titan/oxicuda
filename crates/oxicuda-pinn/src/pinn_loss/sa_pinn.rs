@@ -86,10 +86,10 @@ impl SaPinnConfig {
 /// use oxicuda_pinn::pinn_loss::sa_pinn::{SaPinn, SaPinnConfig};
 ///
 /// let config = SaPinnConfig::new(4);
-/// let mut sa = SaPinn::new(config).unwrap();
+/// let mut sa = SaPinn::new(config).expect("SaPinn construction with valid config should succeed");
 /// let residuals = vec![0.1_f32, 0.5, 0.3, 0.8];
-/// let loss = sa.weighted_loss(&residuals).unwrap();
-/// sa.update_lambdas(&residuals).unwrap();
+/// let loss = sa.weighted_loss(&residuals).expect("weighted_loss should succeed for valid residuals");
+/// sa.update_lambdas(&residuals).expect("update_lambdas should succeed for valid residuals");
 /// ```
 #[derive(Debug, Clone)]
 pub struct SaPinn {
@@ -323,7 +323,8 @@ mod tests {
     use super::*;
 
     fn make_sa(n: usize) -> SaPinn {
-        SaPinn::new(SaPinnConfig::new(n)).unwrap()
+        SaPinn::new(SaPinnConfig::new(n))
+            .expect("SaPinn construction with valid params should succeed")
     }
 
     // ── softplus / sigmoid helpers ────────────────────────────────────────────
@@ -359,7 +360,7 @@ mod tests {
             init_lambda: 2.0,
             normalize_weights: true,
         };
-        let sa = SaPinn::new(cfg).unwrap();
+        let sa = SaPinn::new(cfg).expect("SaPinn construction with valid params should succeed");
         assert!(
             sa.lambdas.iter().all(|&l| (l - 2.0_f32).abs() < 1e-7),
             "All lambdas should be init_lambda=2.0"
@@ -447,7 +448,8 @@ mod tests {
             init_lambda: 0.0,
             normalize_weights: false,
         };
-        let sa = SaPinn::new(cfg).unwrap();
+        let sa =
+            SaPinn::new(cfg).expect("SaPinn construction with unnormalized config should succeed");
         let w = sa.weights();
         // softplus(0) = ln(2) ≈ 0.693; sum of 4 such weights = 4*ln(2) ≈ 2.77 ≠ 1
         let total: f32 = w.iter().sum();
@@ -468,7 +470,8 @@ mod tests {
             init_lambda: 0.0,
             normalize_weights: true,
         };
-        let mut sa = SaPinn::new(cfg).unwrap();
+        let mut sa =
+            SaPinn::new(cfg).expect("SaPinn construction with valid params should succeed");
         sa.lambdas[1] = 1000.0; // hugely increased
         let w = sa.weights();
         // softplus(1000) ≈ 1000 >> softplus(0) ≈ 0.693
@@ -485,7 +488,9 @@ mod tests {
     fn sa_pinn_weighted_loss_zero_residuals() {
         let sa = make_sa(5);
         let r = vec![0.0_f32; 5];
-        let loss = sa.weighted_loss(&r).unwrap();
+        let loss = sa
+            .weighted_loss(&r)
+            .expect("SA-PINN loss computation should succeed for zero residuals");
         assert!(loss.abs() < 1e-8, "Zero residuals → loss = 0, got {loss}");
     }
 
@@ -493,7 +498,9 @@ mod tests {
     fn sa_pinn_weighted_loss_positive() {
         let sa = make_sa(4);
         let r = vec![0.5_f32, 1.0, 0.3, 0.7];
-        let loss = sa.weighted_loss(&r).unwrap();
+        let loss = sa
+            .weighted_loss(&r)
+            .expect("SA-PINN loss computation should succeed for valid input");
         assert!(loss > 0.0, "Non-zero residuals → loss > 0, got {loss}");
     }
 
@@ -517,7 +524,8 @@ mod tests {
         let mut sa = make_sa(3);
         let init = sa.lambdas[1];
         let r = vec![0.0_f32, 2.0, 0.0]; // only point 1 has residual
-        sa.update_lambdas(&r).unwrap();
+        sa.update_lambdas(&r)
+            .expect("self-adaptive weight update should succeed");
         assert!(
             sa.lambdas[1] > init,
             "High residual should increase lambda: {init} → {}",
@@ -530,7 +538,8 @@ mod tests {
         let mut sa = make_sa(3);
         let init = sa.lambdas[0];
         let r = vec![0.0_f32, 2.0, 2.0]; // point 0 has zero residual
-        sa.update_lambdas(&r).unwrap();
+        sa.update_lambdas(&r)
+            .expect("self-adaptive weight update should succeed for zero-residual point");
         assert!(
             (sa.lambdas[0] - init).abs() < 1e-10,
             "Zero residual → lambda unchanged: {init} → {}",
@@ -558,9 +567,11 @@ mod tests {
             init_lambda: 1.5,
             normalize_weights: true,
         };
-        let mut sa = SaPinn::new(cfg).unwrap();
+        let mut sa =
+            SaPinn::new(cfg).expect("SaPinn construction with valid params should succeed");
         let r = vec![3.0_f32; 4];
-        sa.update_lambdas(&r).unwrap();
+        sa.update_lambdas(&r)
+            .expect("self-adaptive weight update should succeed before reset");
         // lambdas are now > 1.5
         sa.reset();
         assert!(
@@ -576,7 +587,9 @@ mod tests {
         let n = 8_usize;
         let sa = make_sa(n);
         // Uniform weights → entropy = ln(n) → N_eff = n
-        let n_eff = sa.effective_n().unwrap();
+        let n_eff = sa
+            .effective_n()
+            .expect("effective N computation should succeed for uniform weights");
         assert!(
             (n_eff - n as f32).abs() < 1e-4,
             "Uniform weights: N_eff should be {n}, got {n_eff}"
@@ -592,10 +605,13 @@ mod tests {
             init_lambda: 0.0,
             normalize_weights: true,
         };
-        let mut sa = SaPinn::new(cfg).unwrap();
+        let mut sa =
+            SaPinn::new(cfg).expect("SaPinn construction with valid params should succeed");
         // Drive one lambda very high so that point dominates
         sa.lambdas[2] = 1000.0;
-        let n_eff = sa.effective_n().unwrap();
+        let n_eff = sa
+            .effective_n()
+            .expect("effective N computation should succeed for concentrated weights");
         assert!(
             n_eff < 2.0,
             "Concentrated weight: N_eff should approach 1, got {n_eff}"
@@ -612,7 +628,8 @@ mod tests {
             init_lambda: 0.0,
             normalize_weights: true,
         };
-        let mut sa = SaPinn::new(cfg).unwrap();
+        let mut sa =
+            SaPinn::new(cfg).expect("SaPinn construction with valid params should succeed");
         sa.lambdas[3] = 50.0; // highest lambda at index 3
         assert_eq!(sa.argmax_weight(), 3, "argmax_weight should return index 3");
     }
@@ -624,7 +641,9 @@ mod tests {
         let n = 5;
         let sa = make_sa(n);
         let r = vec![0.3_f32, 0.7, 0.1, 0.9, 0.5];
-        let grad = sa.lambda_gradient(&r).unwrap();
+        let grad = sa
+            .lambda_gradient(&r)
+            .expect("lambda gradient computation should succeed for valid input");
         assert_eq!(grad.len(), n, "Gradient length must equal n_points");
     }
 
@@ -636,7 +655,9 @@ mod tests {
         let sa = make_sa(n);
         // Point 2 has a much larger residual
         let r = vec![0.01_f32, 0.01, 10.0];
-        let grad = sa.lambda_gradient(&r).unwrap();
+        let grad = sa
+            .lambda_gradient(&r)
+            .expect("lambda gradient computation should succeed for valid input");
         assert!(
             grad[2] > 0.0,
             "High-residual point gradient should be positive, got {}",
@@ -648,7 +669,9 @@ mod tests {
     fn sa_pinn_lambda_gradient_all_finite() {
         let sa = make_sa(4);
         let r = vec![0.5_f32, 1.2, 0.8, 0.3];
-        let grad = sa.lambda_gradient(&r).unwrap();
+        let grad = sa
+            .lambda_gradient(&r)
+            .expect("lambda gradient computation should succeed for valid input");
         assert!(
             grad.iter().all(|&g| g.is_finite()),
             "All gradient elements must be finite: {grad:?}"
@@ -674,9 +697,12 @@ mod tests {
             init_lambda: 0.0,
             normalize_weights: false,
         };
-        let sa = SaPinn::new(cfg).unwrap();
+        let sa = SaPinn::new(cfg)
+            .expect("SaPinn construction with unnormalized weights config should succeed");
         let r = vec![0.5_f32, 1.0, 0.3, 0.7];
-        let grad = sa.lambda_gradient(&r).unwrap();
+        let grad = sa
+            .lambda_gradient(&r)
+            .expect("lambda gradient computation should succeed for unnormalized weights");
         for (i, &g) in grad.iter().enumerate() {
             assert!(
                 g >= 0.0,

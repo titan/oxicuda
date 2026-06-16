@@ -69,7 +69,7 @@ impl Default for Fourier2dConfig {
 }
 
 #[inline]
-fn is_power_of_two(n: usize) -> bool {
+pub(crate) fn is_power_of_two(n: usize) -> bool {
     n >= 1 && (n & (n - 1)) == 0
 }
 
@@ -117,7 +117,11 @@ fn validate_config(cfg: &Fourier2dConfig) -> PdeResult<()> {
 ///
 /// Returns `Err(PdeError::InvalidGrid)` if `n` is not a power of two or if
 /// `re` and `im` have mismatched length.
-fn fft_radix2(re: &mut [f64], im: &mut [f64], sign: f64) -> PdeResult<()> {
+///
+/// Exposed `pub(crate)` so the 3-D periodic Poisson solver
+/// ([`crate::spectral::fourier_3d`]) can reuse the same radix-2 kernel along
+/// each axis instead of duplicating it.
+pub(crate) fn fft_radix2(re: &mut [f64], im: &mut [f64], sign: f64) -> PdeResult<()> {
     let n = re.len();
     if im.len() != n {
         return Err(PdeError::DimensionMismatch {

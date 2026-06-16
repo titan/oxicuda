@@ -5,6 +5,8 @@
 //! - [`fn@spmv`] -- Sparse matrix-vector multiplication (y = alpha*A*x + beta*y)
 //! - [`fn@spmm`] -- Sparse matrix-dense matrix multiplication (C = alpha*A*B + beta*C)
 //! - [`spgemm`] -- Sparse matrix-sparse matrix multiplication (C = A*B)
+//! - [`mod@spgemm_symbolic`] -- Gustavson symbolic SpGEMM: the sparsity pattern
+//!   of `C = A*B` (host CSR, values not computed)
 //! - [`fn@sptrsv`] -- Sparse triangular solve (L*x = b or U*x = b)
 //! - [`fn@sddmm`] -- Sampled Dense-Dense Matrix Multiply
 //! - [`krylov`] -- Krylov subspace methods (Lanczos & Arnoldi iteration)
@@ -19,6 +21,7 @@ pub mod sddmm;
 pub mod spgemm;
 pub mod spgemm_estimate;
 pub mod spgemm_merge;
+pub mod spgemm_symbolic;
 pub mod spmm;
 pub mod spmv;
 pub mod spmv_bsr;
@@ -55,6 +58,7 @@ pub use spgemm_estimate::{
     estimate_nnz_upper_bound, estimate_spgemm_memory,
 };
 pub use spgemm_merge::spgemm_merge;
+pub use spgemm_symbolic::{SymbolicPattern, spgemm_symbolic_pattern};
 pub use spmm::spmm;
 pub use spmv::{SpMVAlgo, spmv};
 pub use spmv_bsr::spmv_bsr;

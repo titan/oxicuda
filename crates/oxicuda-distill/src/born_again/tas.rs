@@ -82,7 +82,7 @@ mod tests {
     fn tas_loss_finite() {
         let s = vec![1.0_f32, 2.0, 3.0];
         let a = vec![1.5_f32, 1.8, 2.7];
-        let loss = tas_loss(&s, &a, 2, 4.0).unwrap();
+        let loss = tas_loss(&s, &a, 2, 4.0).expect("tas_loss should succeed");
         assert!(loss.is_finite() && loss >= 0.0);
     }
 

@@ -516,8 +516,12 @@ mod tests {
         let d = coca.cfg.d_model;
         let img3 = vec![0.1_f32; 3 * d];
         let img7 = vec![0.1_f32; 7 * d];
-        let out3 = coca.pool_image(&img3, 3).unwrap();
-        let out7 = coca.pool_image(&img7, 7).unwrap();
+        let out3 = coca
+            .pool_image(&img3, 3)
+            .expect("pool_image should succeed");
+        let out7 = coca
+            .pool_image(&img7, 7)
+            .expect("pool_image should succeed");
         assert_eq!(out3.len(), d);
         assert_eq!(out7.len(), d);
     }
@@ -530,7 +534,9 @@ mod tests {
         let n = 4;
         let img: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.1).sin()).collect();
         let txt: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.13).cos()).collect();
-        let loss = coca.contrastive_loss(&img, &txt, n).unwrap();
+        let loss = coca
+            .contrastive_loss(&img, &txt, n)
+            .expect("contrastive_loss should succeed");
         assert!(loss.is_finite());
         assert!(loss >= -1e-5);
     }
@@ -558,7 +564,9 @@ mod tests {
         }
         // With identical embeddings and a low temperature, the diagonal sim
         // (=1/τ) dominates the off-diagonal sims (=0/τ), so CE → 0.
-        let loss = coca.contrastive_loss(&embs, &embs, n).unwrap();
+        let loss = coca
+            .contrastive_loss(&embs, &embs, n)
+            .expect("contrastive_loss should succeed");
         // τ = 0.07, log-sum-exp ≈ 1/0.07 + ln(1 + (n-1) e^{-1/0.07}).
         // The second term is ~e^{-14.28} ≈ 6e-7 per off-diag, so loss is
         // essentially zero.
@@ -576,8 +584,12 @@ mod tests {
         let n = 5;
         let a: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.07).sin()).collect();
         let b: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.11).cos()).collect();
-        let l1 = coca.contrastive_loss(&a, &b, n).unwrap();
-        let l2 = coca.contrastive_loss(&b, &a, n).unwrap();
+        let l1 = coca
+            .contrastive_loss(&a, &b, n)
+            .expect("contrastive_loss should succeed");
+        let l2 = coca
+            .contrastive_loss(&b, &a, n)
+            .expect("contrastive_loss should succeed");
         assert!((l1 - l2).abs() < 1e-4, "{l1} vs {l2}");
     }
 
@@ -590,7 +602,9 @@ mod tests {
         let n_img = 4;
         let text = vec![0.1_f32; n_text * d];
         let img = vec![0.2_f32; n_img * d];
-        let out = coca.captioning_logits(&text, n_text, &img, n_img).unwrap();
+        let out = coca
+            .captioning_logits(&text, n_text, &img, n_img)
+            .expect("captioning_logits should succeed");
         assert_eq!(out.len(), n_text * coca.cfg.vocab_size);
     }
 
@@ -601,7 +615,7 @@ mod tests {
         let c = 1.2_f32;
         let g = 3.4_f32;
         let lam = 0.3_f32;
-        let l = coca.coca_loss(c, g, lam).unwrap();
+        let l = coca.coca_loss(c, g, lam).expect("coca_loss should succeed");
         let expected = lam * c + (1.0 - lam) * g;
         assert!((l - expected).abs() < 1e-6, "{l} vs {expected}");
     }
@@ -610,7 +624,9 @@ mod tests {
     #[test]
     fn coca_loss_lambda_zero_is_captioning() {
         let coca = make_coca(7);
-        let l = coca.coca_loss(99.0, 7.0, 0.0).unwrap();
+        let l = coca
+            .coca_loss(99.0, 7.0, 0.0)
+            .expect("coca_loss should succeed");
         assert!((l - 7.0).abs() < 1e-6);
     }
 
@@ -618,7 +634,9 @@ mod tests {
     #[test]
     fn coca_loss_lambda_one_is_contrastive() {
         let coca = make_coca(8);
-        let l = coca.coca_loss(2.5, 99.0, 1.0).unwrap();
+        let l = coca
+            .coca_loss(2.5, 99.0, 1.0)
+            .expect("coca_loss should succeed");
         assert!((l - 2.5).abs() < 1e-6);
     }
 
@@ -629,8 +647,8 @@ mod tests {
         let b = make_coca(9);
         let d = a.cfg.d_model;
         let img = vec![0.3_f32; 4 * d];
-        let out_a = a.pool_image(&img, 4).unwrap();
-        let out_b = b.pool_image(&img, 4).unwrap();
+        let out_a = a.pool_image(&img, 4).expect("pool_image should succeed");
+        let out_b = b.pool_image(&img, 4).expect("pool_image should succeed");
         assert_eq!(out_a, out_b);
     }
 
@@ -692,7 +710,9 @@ mod tests {
         let d = coca.cfg.d_model;
         let text = vec![0.4_f32; d];
         let img = vec![0.2_f32; 3 * d];
-        let out = coca.captioning_logits(&text, 1, &img, 3).unwrap();
+        let out = coca
+            .captioning_logits(&text, 1, &img, 3)
+            .expect("captioning_logits should succeed");
         assert_eq!(out.len(), coca.cfg.vocab_size);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -706,7 +726,9 @@ mod tests {
         let d = coca.cfg.d_model;
         let a = vec![0.5_f32; d];
         let b = vec![0.3_f32; d];
-        let loss = coca.contrastive_loss(&a, &b, 1).unwrap();
+        let loss = coca
+            .contrastive_loss(&a, &b, 1)
+            .expect("contrastive_loss should succeed");
         assert!(loss.abs() < 1e-5, "batch=1 loss should be ~0, got {loss}");
     }
 
@@ -721,8 +743,12 @@ mod tests {
         for (i, v) in img_b.iter_mut().enumerate() {
             *v = 0.1 + (i as f32 * 0.05).sin();
         }
-        let out_a = coca.captioning_logits(&text, 3, &img_a, 4).unwrap();
-        let out_b = coca.captioning_logits(&text, 3, &img_b, 4).unwrap();
+        let out_a = coca
+            .captioning_logits(&text, 3, &img_a, 4)
+            .expect("captioning_logits should succeed");
+        let out_b = coca
+            .captioning_logits(&text, 3, &img_b, 4)
+            .expect("captioning_logits should succeed");
         let diff: f32 = out_a
             .iter()
             .zip(out_b.iter())
@@ -798,7 +824,7 @@ mod tests {
         let coca = make_coca(22);
         let d = coca.cfg.d_model;
         let img = vec![0.25_f32; 5 * d];
-        let out = coca.pool_image(&img, 5).unwrap();
+        let out = coca.pool_image(&img, 5).expect("pool_image should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -809,7 +835,9 @@ mod tests {
         let d = coca.cfg.d_model;
         let text = vec![0.1_f32; 4 * d];
         let img = vec![0.2_f32; 5 * d];
-        let out = coca.captioning_logits(&text, 4, &img, 5).unwrap();
+        let out = coca
+            .captioning_logits(&text, 4, &img, 5)
+            .expect("captioning_logits should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 }

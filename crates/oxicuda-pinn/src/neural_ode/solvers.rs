@@ -353,9 +353,12 @@ mod tests {
 
     #[test]
     fn integrate_fixed_exp_decay() {
-        let (times, states) = integrate_fixed(&exp_decay, 0.0, 1.0, &[1.0], 0.01).unwrap();
+        let (times, states) = integrate_fixed(&exp_decay, 0.0, 1.0, &[1.0], 0.01)
+            .expect("fixed-step integration of exp-decay ODE should succeed");
         assert!(!times.is_empty());
-        let y_final = states.last().unwrap()[0];
+        let y_final = states
+            .last()
+            .expect("states should be non-empty after fixed-step integration")[0];
         let expected = (-1.0_f32).exp();
         assert!(
             (y_final - expected).abs() < 1e-4,
@@ -367,9 +370,11 @@ mod tests {
 
     #[test]
     fn integrate_adaptive_exp_decay() {
-        let (_, states) =
-            integrate_adaptive(&exp_decay, 0.0, 1.0, &[1.0], 1e-6, 1e-4, 0.1).unwrap();
-        let y_final = states.last().unwrap()[0];
+        let (_, states) = integrate_adaptive(&exp_decay, 0.0, 1.0, &[1.0], 1e-6, 1e-4, 0.1)
+            .expect("adaptive integration of exp-decay ODE should succeed");
+        let y_final = states
+            .last()
+            .expect("adaptive integration states should be non-empty")[0];
         let expected = (-1.0_f32).exp();
         assert!(
             (y_final - expected).abs() < 1e-3,
@@ -392,10 +397,13 @@ mod tests {
         let y0 = vec![1.0_f32, 0.0_f32];
         let period = 2.0 * std::f32::consts::PI;
         let h = 0.001;
-        let (_, states) = integrate_fixed(&spring, 0.0, 10.0 * period, &y0, h).unwrap();
+        let (_, states) = integrate_fixed(&spring, 0.0, 10.0 * period, &y0, h)
+            .expect("fixed-step spring oscillator integration should succeed");
         let e0 = 1.0_f32; // initial energy = 1^2 + 0^2
         let e_final = {
-            let s = states.last().unwrap();
+            let s = states
+                .last()
+                .expect("spring oscillator states should be non-empty after integration");
             s[0] * s[0] + s[1] * s[1]
         };
         assert!(

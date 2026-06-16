@@ -273,7 +273,7 @@ mod tests {
     }
 
     fn make_vp() -> VPrediction {
-        VPrediction::new(default_cfg()).unwrap()
+        VPrediction::new(default_cfg()).expect("value should be present")
     }
 
     #[test]
@@ -307,7 +307,9 @@ mod tests {
         let vp = make_vp();
         let x0 = vec![1.0_f32, -2.0];
         let eps = vec![0.5_f32, 0.25];
-        let v = vp.compute_v(&x0, &eps, 0).unwrap();
+        let v = vp
+            .compute_v(&x0, &eps, 0)
+            .expect("compute_v should succeed");
         let a = vp.alpha_t[0];
         let s = vp.sigma_t[0];
         for i in 0..2 {
@@ -326,7 +328,9 @@ mod tests {
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let eps = vec![0.1_f32, -0.2, 0.3];
         let t = 50;
-        let z = vp.add_noise(&x0, &eps, t).unwrap();
+        let z = vp
+            .add_noise(&x0, &eps, t)
+            .expect("add_noise should succeed");
         let a = vp.alpha_t[t];
         let s = vp.sigma_t[t];
         for i in 0..3 {
@@ -345,9 +349,13 @@ mod tests {
         let x0 = vec![0.7_f32, -1.3, 2.1, 0.0];
         let eps = vec![0.2_f32, 0.9, -0.4, 1.1];
         for &t in &[0_usize, 10, 50, 99] {
-            let z = vp.add_noise(&x0, &eps, t).unwrap();
-            let v = vp.compute_v(&x0, &eps, t).unwrap();
-            let x0_hat = vp.predict_x0(&z, &v, t).unwrap();
+            let z = vp
+                .add_noise(&x0, &eps, t)
+                .expect("add_noise should succeed");
+            let v = vp
+                .compute_v(&x0, &eps, t)
+                .expect("compute_v should succeed");
+            let x0_hat = vp.predict_x0(&z, &v, t).expect("predict_x0 should succeed");
             for i in 0..x0.len() {
                 assert!(
                     (x0_hat[i] - x0[i]).abs() < EPS,
@@ -365,9 +373,15 @@ mod tests {
         let x0 = vec![0.7_f32, -1.3, 2.1, 0.0];
         let eps = vec![0.2_f32, 0.9, -0.4, 1.1];
         for &t in &[0_usize, 10, 50, 99] {
-            let z = vp.add_noise(&x0, &eps, t).unwrap();
-            let v = vp.compute_v(&x0, &eps, t).unwrap();
-            let eps_hat = vp.predict_eps(&z, &v, t).unwrap();
+            let z = vp
+                .add_noise(&x0, &eps, t)
+                .expect("add_noise should succeed");
+            let v = vp
+                .compute_v(&x0, &eps, t)
+                .expect("compute_v should succeed");
+            let eps_hat = vp
+                .predict_eps(&z, &v, t)
+                .expect("predict_eps should succeed");
             for i in 0..eps.len() {
                 assert!(
                     (eps_hat[i] - eps[i]).abs() < EPS,
@@ -384,7 +398,7 @@ mod tests {
         let vp = make_vp();
         let mut prev = f32::INFINITY;
         for t in 0..vp.cfg.n_timesteps {
-            let snr = vp.snr(t).unwrap();
+            let snr = vp.snr(t).expect("snr should succeed");
             assert!(
                 snr <= prev + TINY,
                 "SNR not decreasing at t={t}: {snr} > {prev}"
@@ -397,7 +411,7 @@ mod tests {
     fn snr_positive() {
         let vp = make_vp();
         for t in 0..vp.cfg.n_timesteps {
-            let snr = vp.snr(t).unwrap();
+            let snr = vp.snr(t).expect("snr should succeed");
             assert!(snr > 0.0, "SNR must be positive at t={t}: {snr}");
         }
     }
@@ -406,7 +420,7 @@ mod tests {
     fn snr_at_t0_large() {
         // Near-clean step => SNR should be large.
         let vp = make_vp();
-        let snr0 = vp.snr(0).unwrap();
+        let snr0 = vp.snr(0).expect("snr should succeed");
         assert!(snr0 > 100.0, "SNR at t=0 should be large, got {snr0}");
     }
 
@@ -414,7 +428,7 @@ mod tests {
     fn loss_weight_is_one() {
         let vp = make_vp();
         for t in 0..vp.cfg.n_timesteps {
-            let w = vp.loss_weight(t).unwrap();
+            let w = vp.loss_weight(t).expect("loss_weight should succeed");
             assert!((w - 1.0).abs() < TINY, "loss_weight should be 1.0, got {w}");
         }
     }
@@ -450,7 +464,7 @@ mod tests {
             beta_start: 1e-4,
             beta_end: 0.02,
         })
-        .unwrap();
+        .expect("value should be present");
         let n = vp.cfg.n_timesteps;
         assert!(
             vp.sigma_t[n - 1] > 0.99,
@@ -563,10 +577,16 @@ mod tests {
         let x0 = vec![1.5_f32];
         let eps = vec![-0.5_f32];
         let t = 25;
-        let z = vp.add_noise(&x0, &eps, t).unwrap();
-        let v = vp.compute_v(&x0, &eps, t).unwrap();
-        let x0_hat = vp.predict_x0(&z, &v, t).unwrap();
-        let eps_hat = vp.predict_eps(&z, &v, t).unwrap();
+        let z = vp
+            .add_noise(&x0, &eps, t)
+            .expect("add_noise should succeed");
+        let v = vp
+            .compute_v(&x0, &eps, t)
+            .expect("compute_v should succeed");
+        let x0_hat = vp.predict_x0(&z, &v, t).expect("predict_x0 should succeed");
+        let eps_hat = vp
+            .predict_eps(&z, &v, t)
+            .expect("predict_eps should succeed");
         assert_eq!(x0_hat.len(), 1);
         assert!((x0_hat[0] - x0[0]).abs() < EPS, "dim=1 x0: {}", x0_hat[0]);
         assert!(
@@ -595,7 +615,7 @@ mod tests {
             beta_start: 0.01,
             beta_end: 0.02,
         })
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(vp.alphas_cumprod.len(), 1);
         let expected_abar = 1.0 - 0.01_f32;
         assert!(

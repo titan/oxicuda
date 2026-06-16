@@ -74,7 +74,7 @@ fn main() -> oxicuda_geom2d::Geom2dResult<()> {
 
 ## Status
 
-**Alpha** -- 6,754 SLoC, 204 passing tests. API may evolve before v1.0.
+**Alpha** -- 10,028 SLoC, 282 passing tests. API may evolve before v1.0.
 
 ## License
 

@@ -249,7 +249,7 @@ mod tests {
     fn positive_loss_finite_log_prob() {
         // L_pos = -log_prob_pos
         let lp = -0.5_f32;
-        let loss = CringeLoss::positive_loss(lp).unwrap();
+        let loss = CringeLoss::positive_loss(lp).expect("positive_loss should succeed");
         assert!(
             (loss - 0.5_f32).abs() < 1e-6,
             "positive_loss({lp}) = {loss}, expected 0.5"
@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn positive_loss_negative_lp_gives_positive_loss() {
         let lp = -2.3_f32;
-        let loss = CringeLoss::positive_loss(lp).unwrap();
+        let loss = CringeLoss::positive_loss(lp).expect("positive_loss should succeed");
         assert!(
             (loss - 2.3_f32).abs() < 1e-6,
             "positive_loss({lp}) = {loss}, expected 2.3"
@@ -352,7 +352,8 @@ mod tests {
             },
         ]);
         let cfg = CringeConfig::default();
-        let (total, pos_mean, neg_mean) = CringeLoss::compute(&batch, &cfg).unwrap();
+        let (total, pos_mean, neg_mean) =
+            CringeLoss::compute(&batch, &cfg).expect("compute should succeed");
         assert!(
             neg_mean.abs() < 1e-6,
             "neg_mean should be 0 when no negatives, got {neg_mean}"
@@ -384,7 +385,8 @@ mod tests {
             },
         ]);
         let cfg = CringeConfig::default(); // margin=-1.0, alpha=0.5
-        let (total, pos_mean, neg_mean) = CringeLoss::compute(&batch, &cfg).unwrap();
+        let (total, pos_mean, neg_mean) =
+            CringeLoss::compute(&batch, &cfg).expect("compute should succeed");
 
         // pos_mean = mean(1.0, 2.0) = 1.5
         assert!((pos_mean - 1.5_f32).abs() < 1e-6, "pos_mean = {pos_mean}");
@@ -408,7 +410,8 @@ mod tests {
             margin: -1.0,
             positive_weight: 0.5,
         };
-        let (total, pos_mean, neg_mean) = CringeLoss::compute(&batch, &cfg).unwrap();
+        let (total, pos_mean, neg_mean) =
+            CringeLoss::compute(&batch, &cfg).expect("compute should succeed");
         let expected = 0.5 * pos_mean + 0.5 * neg_mean;
         assert!(
             (total - expected).abs() < 1e-6,
@@ -425,7 +428,7 @@ mod tests {
         let cfg = CringeConfig::default();
         let result = CringeLoss::compute(&batch, &cfg);
         assert!(result.is_ok(), "compute should succeed");
-        let (total, pos_mean, neg_mean) = result.unwrap();
+        let (total, pos_mean, neg_mean) = result.expect("result should be present");
         assert!(total.is_finite(), "total should be finite");
         assert!(pos_mean.is_finite(), "pos_mean should be finite");
         assert!(neg_mean.is_finite(), "neg_mean should be finite");
@@ -447,7 +450,7 @@ mod tests {
         let cfg = CringeConfig::default(); // margin=-1.0
         // neg for sample 1: hinge(-0.5, -1.0) = 0.5
         // neg for sample 2: hinge(-1.5, -1.0) = 0.0 (below margin)
-        let (_, _, neg_mean) = CringeLoss::compute(&batch, &cfg).unwrap();
+        let (_, _, neg_mean) = CringeLoss::compute(&batch, &cfg).expect("compute should succeed");
         let expected_neg_mean = (0.5_f32 + 0.0_f32) / 2.0;
         assert!(
             (neg_mean - expected_neg_mean).abs() < 1e-6,
@@ -460,7 +463,7 @@ mod tests {
     #[test]
     fn positive_only_matches_manual_mean() {
         let log_probs = [-1.0_f32, -2.0, -3.0];
-        let result = CringeLoss::positive_only(&log_probs).unwrap();
+        let result = CringeLoss::positive_only(&log_probs).expect("positive_only should succeed");
         let expected = (1.0_f32 + 2.0 + 3.0) / 3.0;
         assert!(
             (result - expected).abs() < 1e-6,
@@ -471,7 +474,7 @@ mod tests {
     #[test]
     fn positive_only_single_sample() {
         let log_probs = [-0.7_f32];
-        let result = CringeLoss::positive_only(&log_probs).unwrap();
+        let result = CringeLoss::positive_only(&log_probs).expect("positive_only should succeed");
         assert!(
             (result - 0.7_f32).abs() < 1e-6,
             "positive_only single = {result}"

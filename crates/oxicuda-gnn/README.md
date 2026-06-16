@@ -70,8 +70,8 @@ assert_eq!(pooled.len(), 4);
 
 | Item | Value |
 |------|-------|
-| Version | 0.1.5 |
-| Release date | 2026-05-03 |
+| Version | 0.2.0 |
+| Release date | 2026-06-16 |
 | Default features | Pure Rust (`thiserror` only) |
 | `unwrap()` | 0 in production code |
 

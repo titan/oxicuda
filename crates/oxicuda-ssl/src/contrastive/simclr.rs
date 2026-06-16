@@ -84,7 +84,7 @@ mod tests {
             z[i * d + i] = 1.0;
         }
         let cfg = SimClrConfig::default();
-        let (loss, acc) = simclr_loss(&z, &z, n, d, &cfg).unwrap();
+        let (loss, acc) = simclr_loss(&z, &z, n, d, &cfg).expect("simclr_loss should succeed");
         assert!(loss < 0.5);
         assert!((acc - 1.0).abs() < 1e-6);
     }
@@ -96,7 +96,7 @@ mod tests {
         let z_a: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.0123).sin()).collect();
         let z_b: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.0451).cos()).collect();
         let cfg = SimClrConfig::default();
-        let (loss, _) = simclr_loss(&z_a, &z_b, n, d, &cfg).unwrap();
+        let (loss, _) = simclr_loss(&z_a, &z_b, n, d, &cfg).expect("simclr_loss should succeed");
         assert!(loss.is_finite());
     }
 
@@ -108,8 +108,8 @@ mod tests {
         let z2: Vec<f32> = z.iter().map(|v| v + 0.1).collect();
         let high_t = SimClrConfig { temperature: 1.0 };
         let low_t = SimClrConfig { temperature: 0.05 };
-        let (l_high, _) = simclr_loss(&z, &z2, n, d, &high_t).unwrap();
-        let (l_low, _) = simclr_loss(&z, &z2, n, d, &low_t).unwrap();
+        let (l_high, _) = simclr_loss(&z, &z2, n, d, &high_t).expect("simclr_loss should succeed");
+        let (l_low, _) = simclr_loss(&z, &z2, n, d, &low_t).expect("simclr_loss should succeed");
         // Lower temperature sharpens softmax; well-aligned positives → lower loss.
         assert!(l_low <= l_high + 1e-3, "l_low={l_low}, l_high={l_high}");
     }

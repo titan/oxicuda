@@ -14,12 +14,16 @@
 //! into dependency levels, and all rows within a level are processed in
 //! parallel on the GPU.
 
+pub mod amg;
 pub mod graph_coloring;
 pub mod ic0;
+pub mod ick;
 pub mod ilu0;
 pub mod iluk;
 
+pub use amg::{AmgHierarchy, AmgLevel, AmgOptions, amg_setup, amg_solve, amg_v_cycle};
 pub use graph_coloring::GraphColoring;
 pub use ic0::ic0;
+pub use ick::{IncompleteCholeskyK, ic_k};
 pub use ilu0::ilu0;
 pub use iluk::{IlukConfig, IlukFactorization};

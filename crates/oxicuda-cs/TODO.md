@@ -8,9 +8,9 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.58).
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,127 (64 files, tokei measurement)
-- **Total lines (incl. comments+blanks):** 6,757
-- **Tests:** 108 passing
+- **Actual SLoC:** 10,537 (73 files, tokei measurement)
+- **Total lines (incl. comments+blanks):** 10,537
+- **Tests:** 253 passing
 - **Vol.58 scope:** Compressed sensing & sparse recovery primitives that complement
   oxicuda-blas / oxicuda-solver by providing L1/L0/nuclear-norm minimisation paths
   not covered by classical dense BLAS/LAPACK semantics.
@@ -133,6 +133,12 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.58).
 - [ ] Multi-GPU SVT / PCP for very large matrix completion (slab decomposition of P_Omega)
 - [ ] Persistent kernel path for OMP inner least-squares on repeated small supports
 - [ ] Block-OMP / simultaneous-OMP for multiple-measurement-vector (MMV) recovery
+- [x] `greedy/lista.rs` — LISTA (Gregor-LeCun 2010): unrolled T-layer ISTA with shared learned weights (W,S) trained by supervision on (y,x*) pairs; T=10 layers matches ISTA accuracy at T=1000; O(Tn) inference
+- [x] `robust_pca/rpca_gd.rs` — RPCA-GD (Yi 2016 non-convex GD): factor L=UVᵀ (r×n), projected GD under incoherence + RIP; O(r²n) per iter vs O(n²) PCP nuclear norm; provable exact recovery for r≤O(n^0.5)
+- [x] `lasso/slope.rs` — SLOPE (Bogdan 2015): Sorted L-One Penalised Estimation; λ₁≥λ₂≥…≥λₚ decreasing penalties + proximal operator via isotonic regression (PAVA); FDR control under Gaussian design
+- [x] `dictionary/coupled_dl.rs` — Coupled Dictionary Learning (Yang 2010): learn paired (Dₗ,Dₕ) dicts from low/high-res patch pairs; shared sparse code z; `argmin_{Dₗ,Dₕ,z} ‖Xₗ-Dₗz‖² + ‖Xₕ-Dₕz‖² + λ‖z‖₁`
+- [x] `measurement/coded_diffraction.rs` — Coded Diffraction Patterns (Candès 2015): measurements yₗ=|Fₗ·d·x|² (modulated DFT); phase retrieval as sparse recovery via Wirtinger Flow + L1; applications to ptychography
+- [x] `sbl/relevance_vector.rs` — Relevance Vector Machine (Tipping 2001): Bayesian linear regression with ARD prior αᵢ⁻¹ per weight; evidence maximisation to prune irrelevant features; sparse posterior with exact zeros vs SVM's support vectors
 
 ## Dependencies
 
@@ -150,7 +156,7 @@ routines are implemented privately under `linalg/`.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 108 passing (unit + 27 e2e cross-module)
+- Tests: 253 passing (unit + 27 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns
@@ -207,9 +213,9 @@ Future Enhancements P1.
 
 | Metric | Estimated (estimation.md Vol.58) | Actual |
 |--------|----------------------------------|--------|
-| SLoC | 60K-110K (median ~85K) | 6,127 |
-| Files | ~25-40 algorithm modules | 64 |
-| Tests | algorithm-grade coverage | 108 |
+| SLoC | 60K-110K (median ~85K) | 10,537 |
+| Files | ~25-40 algorithm modules | 73 |
+| Tests | algorithm-grade coverage | 253 |
 
 The gap to the median estimate reflects the estimation targeting full
 SPAMS-/TFOCS-grade production parity including streaming solvers, exhaustive path

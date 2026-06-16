@@ -228,19 +228,24 @@ mod tests {
             1.05, 1.95, 0.95, 2.05,
         ];
         let mut det = MahalanobisDetector::new();
-        det.fit(&data, 10, 2).unwrap();
+        det.fit(&data, 10, 2)
+            .expect("fit should succeed with valid 10-sample 2-feature data");
         // Mean point should have ~0 distance
-        let s_normal = det.score(&[1.0_f32, 2.0]).unwrap();
+        let s_normal = det
+            .score(&[1.0_f32, 2.0])
+            .expect("score should succeed for inlier at mean");
         assert!(s_normal < 1.0, "s_normal={s_normal}");
         // Far away point should have high distance
-        let s_outlier = det.score(&[100.0_f32, 200.0]).unwrap();
+        let s_outlier = det
+            .score(&[100.0_f32, 200.0])
+            .expect("score should succeed for outlier point");
         assert!(s_outlier > s_normal, "{s_outlier} > {s_normal}");
     }
 
     #[test]
     fn invert_identity() {
         let id = vec![1.0_f32, 0.0, 0.0, 1.0];
-        let inv = invert_matrix(&id, 2).unwrap();
+        let inv = invert_matrix(&id, 2).expect("2×2 identity matrix must be invertible");
         assert!((inv[0] - 1.0).abs() < 1e-5);
         assert!((inv[3] - 1.0).abs() < 1e-5);
         assert!(inv[1].abs() < 1e-5);

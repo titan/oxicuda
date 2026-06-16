@@ -7,12 +7,15 @@ pub mod cox_ph;
 pub mod cure_model;
 pub mod efron_ties;
 pub mod gradient_boost;
+pub mod influence_diagnostics;
 pub mod iptw;
+pub mod landmark;
 pub mod line_search;
 pub mod newton_raphson;
 pub mod penalised_cox;
 pub mod penalized_cox;
 pub mod predict;
+pub mod residuals_diagnostic;
 pub mod schoenfeld;
 pub mod stratified_cox;
 pub mod time_dep_cox;
@@ -30,10 +33,12 @@ pub use gradient_boost::{
     GbCoxConfig, GbCoxModel, GbCoxPred, GbCoxTree, GbNode, gb_cox_concordance, gb_cox_fit,
     gb_cox_predict,
 };
+pub use influence_diagnostics::{InfluenceDiagnostics, influence_diagnostics, score_residuals};
 pub use iptw::{
     AiptwConfig, AiptwResult, IptwConfig, IptwResult, PropensityResult, aiptw_fit,
     compute_iptw_weights, fit_propensity_score, iptw_cox, iptw_fit,
 };
+pub use landmark::{LandmarkConfig, LandmarkModel, LandmarkSlice, landmark_fit, landmark_predict};
 pub use line_search::{ArmijoConfig, WolfeConfig, armijo_backtrack, wolfe_line_search};
 pub use newton_raphson::newton_raphson_cox;
 pub use penalised_cox::{
@@ -41,6 +46,10 @@ pub use penalised_cox::{
     penalised_cox_path, penalised_cox_predict_risk,
 };
 pub use penalized_cox::{PenalizedCoxConfig, PenalizedCoxFit, PenaltyType, fit_penalized_cox};
+pub use residuals_diagnostic::{
+    CumulativeResidualProcess, cumulative_martingale_process, deviance_residuals,
+    martingale_residuals,
+};
 pub use schoenfeld::{schoenfeld_residuals, schoenfeld_test};
 pub use stratified_cox::{
     StratTieMethod, StratifiedCoxConfig, StratifiedCoxFit, stratified_cox_fit,

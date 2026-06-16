@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn ensemble_aggregate_two_member_mean() {
         let preds = vec![vec![0.0_f32, 1.0, 2.0], vec![2.0_f32, 1.0, 0.0]];
-        let e = DeepEnsemble::new(preds).unwrap();
+        let e = DeepEnsemble::new(preds).expect("new should succeed");
         let s = e.aggregate();
         assert_eq!(s.n_members, 2);
         assert!((s.mean[0] - 1.0).abs() < 1e-6);
@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn ensemble_aggregate_identical_members_zero_variance() {
         let p = vec![0.1_f32, 0.5, 0.4];
-        let e = DeepEnsemble::new(vec![p.clone(), p.clone(), p]).unwrap();
+        let e = DeepEnsemble::new(vec![p.clone(), p.clone(), p]).expect("value should be present");
         let s = e.aggregate();
         for v in &s.variance {
             assert!(v.abs() < 1e-6);
@@ -187,8 +187,10 @@ mod tests {
     fn ensemble_aggregate_probabilities_renormalises() {
         // Member 1 sums to 2.0; should be re-normalised
         let preds = vec![vec![0.4_f32, 0.6], vec![0.5_f32, 1.5]];
-        let e = DeepEnsemble::new(preds).unwrap();
-        let s = e.aggregate_probabilities().unwrap();
+        let e = DeepEnsemble::new(preds).expect("new should succeed");
+        let s = e
+            .aggregate_probabilities()
+            .expect("aggregate_probabilities should succeed");
         // First member normalises to (0.4, 0.6); second to (0.25, 0.75); mean (0.325, 0.675)
         assert!((s.mean[0] - 0.325).abs() < 1e-5);
         assert!((s.mean[1] - 0.675).abs() < 1e-5);
@@ -223,14 +225,18 @@ mod tests {
     #[test]
     fn ensemble_max_variance_finds_largest() {
         let preds = vec![vec![0.0_f32, 0.0, 0.0], vec![1.0_f32, 0.0, 5.0]];
-        let s = DeepEnsemble::new(preds).unwrap().aggregate();
+        let s = DeepEnsemble::new(preds)
+            .expect("new should succeed")
+            .aggregate();
         assert!((s.max_variance() - 12.5).abs() < 1e-5);
     }
 
     #[test]
     fn ensemble_aggregate_probabilities_rejects_zero_mass() {
         let preds = vec![vec![0.0_f32, 0.0], vec![0.5_f32, 0.5]];
-        let r = DeepEnsemble::new(preds).unwrap().aggregate_probabilities();
+        let r = DeepEnsemble::new(preds)
+            .expect("new should succeed")
+            .aggregate_probabilities();
         assert!(r.is_err());
     }
 }

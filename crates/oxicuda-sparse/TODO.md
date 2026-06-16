@@ -6,9 +6,9 @@ GPU-accelerated sparse matrix operations, serving as a pure Rust equivalent to N
 
 ## Implementation Status
 
-**Actual: 12,278 SLoC (36 files) -- Estimated: 58K-92K SLoC (estimation.md Vol.5 sparse portion)**
+**Actual: 15,955 SLoC (48 files) -- Estimated: 58K-92K SLoC (estimation.md Vol.5 sparse portion)**
 
-Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), format conversion, five core operations (SpMV, SpMM, SpGEMM, SpTRSV, SDDMM), and two preconditioners (ILU(0), IC(0)).
+Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), format conversion, five core operations (SpMV, SpMM, SpGEMM, SpTRSV, SDDMM), preconditioners (ILU(0), IC(0), IC(k), smoothed-aggregation AMG), and a LOBPCG eigensolver. The advanced solvers (IC(k), LOBPCG, AMG) run on a host-resident CSR (`host_csr::HostCsr`) so they are fully exercised CPU-only without a CUDA device.
 
 ### Completed
 
@@ -46,6 +46,13 @@ Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), for
 - [x] Sparse tensor operations -- GNN message passing, scatter-reduce, attention, symmetric normalization (ops/tensor.rs) (P2)
 - [x] Sparse matrix powers -- A^k via binary exponentiation, polynomial evaluation via Horner (ops/matrix_powers.rs) (P2)
 - [x] Sparse Krylov subspace methods (ops/krylov.rs) -- Lanczos and Arnoldi iteration building on SpMV for eigenvalue problems (P2)
+- [x] Host CSR + shared CPU kernels (host_csr.rs) -- CPU-resident CSR (HostCsr) with SpMV, transpose, Gustavson sparse-sparse product, and dense Gaussian-elimination solver; bridges GPU CsrMatrix via from_gpu/to_gpu for the host-driven advanced solvers (P2)
+- [x] IC(k) incomplete Cholesky (preconditioner/ick.rs) -- level-of-fill symbolic phase mirroring ILU(k) (symmetric graph, lower triangle), left-looking numeric Cholesky restricted to the pattern, fwd/back substitution apply; exact complete Cholesky for k >= n; SPD pivot guard (P2)
+- [x] LOBPCG eigensolver (eig/lobpcg.rs, eig/dense_sym.rs) -- smallest eigenpairs of sparse SPD A via locally-optimal block preconditioned CG; deterministic LCG init, modified Gram-Schmidt subspace orthonormalization with rank pruning, Rayleigh-Ritz with an inline cyclic-Jacobi dense symmetric eigensolver, optional diagonal/Jacobi preconditioner (P2)
+- [x] Algebraic multigrid (preconditioner/amg.rs) -- smoothed aggregation (Vanek-Mandel-Brezina): strength-of-connection, greedy 2-pass aggregation, tentative + Jacobi-smoothed prolongator with power-iteration spectral-radius estimate, Galerkin coarse operator P^T A P via host SpGEMM + CSR transpose; V-cycle (weighted-Jacobi smoothing + dense coarse solve) and standalone amg_solve; mesh-independent convergence on 1D/2D Poisson (P2)
+- [ ] cuSPARSE-compatible API shim (`compat/cusparse_compat.rs`) — compatibility layer mirroring cuSPARSE function signatures (cusparseSpMV, cusparseSpGEMM, cusparseSpSV) for drop-in replacement; `CusparseCompatHandle` (P1)
+- [ ] SpGEMM symbolic phase standalone (`ops/spgemm_symbolic.rs`) — Gustavson 1978 symbolic-only pass that computes the output sparsity pattern without numeric values; enables pre-allocation in iterative schemes; `SpgemmSymbolic` (P1)
+- [ ] Shift-invert eigensolver (`eig/shift_invert.rs`) — shift-invert power iteration: factor (A − σI) via sparse direct LU, apply inverse to concentrate iterations near target shift σ; `ShiftInvertEig` (P2)
 
 ## Dependencies
 
@@ -61,7 +68,7 @@ Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), for
 
 ## Quality Status
 
-- Tests: 322 passing
+- Tests: 406 passing
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
@@ -71,8 +78,8 @@ Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), for
 
 | Metric | Estimated (Vol.5 sparse) | Actual |
 |--------|-------------------------|--------|
-| SLoC | 58K-92K | 11,021 |
-| Files | ~15-20 | 36 |
+| SLoC | 58K-92K | 15,955 |
+| Files | ~15-20 | 48 |
 | Coverage | Full cuSPARSE parity | Core formats + ops |
 | Ratio | -- | ~4.3% of estimate |
 

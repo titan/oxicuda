@@ -115,7 +115,8 @@ mod tests {
         mat.data[2][2] = 0.88;
         // Random baseline for a 10-class problem: 0.1
         let baseline = vec![0.1_f32; 3];
-        let fwt = forward_transfer(&mat, &baseline).unwrap();
+        let fwt = forward_transfer(&mat, &baseline)
+            .expect("forward transfer should compute on valid matrix");
         // FWT = ((0.4 - 0.1) + (0.35 - 0.1)) / 2 = (0.3 + 0.25) / 2 = 0.275
         assert!(
             fwt > 0.0,
@@ -131,7 +132,8 @@ mod tests {
     fn forward_transfer_single_task_is_zero() {
         let mat = AccuracyMatrix::new(1);
         let baseline = vec![0.1_f32];
-        let fwt = forward_transfer(&mat, &baseline).unwrap();
+        let fwt = forward_transfer(&mat, &baseline)
+            .expect("forward transfer should compute on valid matrix");
         assert_eq!(fwt, 0.0);
     }
 
@@ -146,7 +148,7 @@ mod tests {
         mat.data[1][1] = 0.85;
         mat.data[2][1] = 0.4;
         mat.data[2][2] = 0.88;
-        let int_val = intransigence(&mat).unwrap();
+        let int_val = intransigence(&mat).expect("intransigence should compute on valid matrix");
         // For task 0: max=0.9 (at j=0), on-task=0.9 → 0
         // For task 1: max=0.85 (at j=1), on-task=0.85 → 0
         // For task 2: max=0.88 (at j=2), on-task=0.88 → 0
@@ -163,7 +165,7 @@ mod tests {
         mat.data[0][0] = 0.5;
         mat.data[1][0] = 0.8; // better later (positive transfer)
         mat.data[1][1] = 0.9;
-        let int_val = intransigence(&mat).unwrap();
+        let int_val = intransigence(&mat).expect("intransigence should compute on valid matrix");
         // Task 0: max=0.8, on-task=0.5 → intransigence = 0.3
         // Task 1: max=0.9, on-task=0.9 → 0
         // avg = 0.15
@@ -173,7 +175,8 @@ mod tests {
     #[test]
     fn per_task_intransigence_length_correct() {
         let mat = AccuracyMatrix::new(4);
-        let per_task = per_task_intransigence(&mat).unwrap();
+        let per_task = per_task_intransigence(&mat)
+            .expect("per-task intransigence should compute on valid matrix");
         assert_eq!(per_task.len(), 4);
     }
 

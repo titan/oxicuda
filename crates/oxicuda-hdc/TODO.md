@@ -6,7 +6,7 @@ Pure Rust Hyperdimensional Computing (HDC) / Vector Symbolic Architectures primi
 
 ## Implementation Status
 
-**Actual: 3,330 SLoC (29 files)**
+**Actual: 10,405 SLoC (52 files)**
 
 Current implementation covers the canonical HDC / VSA stack: three hypervector models (binary BSC / integer MAP / complex FHRR), binding / bundling / permutation operators, item memory and associative (Hopfield-style) memory, online error-corrective HD classifier, record / n-gram / spatial-pattern encoders, Hamming / cosine / Jaccard distance metrics, and capacity analyses (Hopfield capacity, bundle SNR, required-dimension birthday-paradox bound).
 
@@ -72,14 +72,14 @@ Current implementation covers the canonical HDC / VSA stack: three hypervector m
 - [x] Sparse block-codes (SBC) — block-structured sparse VSA (vector/sparse_block_codes.rs -- Laiho 2015 / Frady 2020 SBC; n_blocks one-hot blocks; block-wise modular bind/unbind; argmax-resparsify bundle)
 - [x] Holographic Reduced Representations (HRR) — circular convolution / correlation binding
 - [x] HRR with FFT-accelerated binding (replaces O(D²) circular convolution with O(D log D)) (vector/hrr_fft.rs -- Plate 1995 + FFT convolution theorem; radix-2 Cooley-Tukey iterative FFT; O(D log D) circular convolve/correlate; verified against naive O(D²))
-- [ ] FHRR phasor-only model with explicit unit-magnitude constraint
+- [x] FHRR phasor-only model with explicit unit-magnitude constraint
 - [x] Matrix Binding via Tensor Product Representation (ops/tensor_product.rs -- Smolensky 1990; role⊗filler outer-product bind, contract-unbind /‖role‖², bundle superposition, orthonormal-role recovery)
 - [x] VSA-based Resonator Networks (decompose superposition into role-filler structure)
 - [ ] Resonator Network with attention-based unbinding
 - [x] Vector Hetero-associative Memory (key ≠ value space) (memory/hetero_associative.rs -- correlation-matrix key→value memory, Hebbian outer-product + ridge pseudo-inverse exact recall + codebook cosine cleanup; distinct from auto-associative)
 - [ ] Cleanup memory with iterative refinement (multiple item-memory queries)
 - [ ] Hierarchical / tree-structured HD encoders
-- [ ] Continuous-value encoders (thermometer code, fractional binding)
+- [x] Continuous-value encoders (thermometer code, fractional binding)
 - [ ] Spatial encoding for 2-D images via tensor binding of (row, col) positions
 - [ ] Temporal encoding with continuous time (real-valued time embedding)
 
@@ -91,6 +91,10 @@ Current implementation covers the canonical HDC / VSA stack: three hypervector m
 - [ ] Confidence-calibrated cosine output (Platt scaling)
 
 #### P2 — Optimisations and Tooling
+- [x] Adaptive HD Learning (`learning/adaptive_hd.rs`) — Imani 2019: online retraining with per-class accumulated misclassification retraining for improved accuracy; `AdaptiveHdClassifier`
+- [x] Graph HD Encoding (`encoding/graph_hd.rs`) — Poduval 2022 DAC: graph-structure-aware HD representation via vertex-HV binding with role-filler permuted edge encoding and graph-level bundle; `GraphHdEncoder`
+- [ ] Sequence HD Encoding (`encoding/sequence_hd.rs`) — Kanerva 2009: n-gram-permutation sequence encoding with position-dependent circular shift permutation for variable-length sequences; `SequenceHdEncoder`
+- [x] HD Regression (`learning/hd_regression.rs`) — Hersche 2023 NeurIPS: least-squares regression in HD space via pseudoinverse of bundled prototype matrix; `HdRegressor`
 - [ ] Fused bind + bundle kernel (saves intermediate HV materialisation)
 - [ ] Fused bind + cosine kernel for one-shot similarity query
 - [ ] Persistent CTA scheduling for very large item-memory NN search
@@ -111,7 +115,7 @@ Current implementation covers the canonical HDC / VSA stack: three hypervector m
 
 ## Quality Status
 
-- Tests: 61 passing (unit + 22 e2e integration tests in `e2e_tests.rs`)
+- Tests: 407 passing (unit + 22 e2e integration tests in `e2e_tests.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches

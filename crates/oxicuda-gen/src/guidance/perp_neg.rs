@@ -163,11 +163,13 @@ mod tests {
 
     #[test]
     fn zero_neg_scale_equals_cfg() {
-        let guide = PerpNegGuidance::new(3.0, 0.0).unwrap();
+        let guide = PerpNegGuidance::new(3.0, 0.0).expect("new should succeed");
         let cond = vec![1.0_f32, 2.0, 3.0];
         let uncond = vec![0.0_f32; 3];
         let neg = vec![5.0_f32; 3];
-        let out = guide.apply(&cond, &uncond, &neg).unwrap();
+        let out = guide
+            .apply(&cond, &uncond, &neg)
+            .expect("apply should succeed");
         // neg_scale=0 → cond_perp = cond → out = uncond + scale*(cond - uncond) = scale*cond
         for (&o, &c) in out.iter().zip(&cond) {
             assert!((o - 3.0 * c).abs() < EPS, "{o} != 3*{c}");
@@ -176,11 +178,13 @@ mod tests {
 
     #[test]
     fn output_shape_matches_input() {
-        let guide = PerpNegGuidance::new(2.0, 1.0).unwrap();
+        let guide = PerpNegGuidance::new(2.0, 1.0).expect("new should succeed");
         let cond = vec![1.0_f32; 64];
         let uncond = vec![0.0_f32; 64];
         let neg = vec![0.5_f32; 64];
-        let out = guide.apply(&cond, &uncond, &neg).unwrap();
+        let out = guide
+            .apply(&cond, &uncond, &neg)
+            .expect("apply should succeed");
         assert_eq!(out.len(), 64);
     }
 
@@ -191,7 +195,7 @@ mod tests {
 
     #[test]
     fn dimension_mismatch_rejected() {
-        let guide = PerpNegGuidance::new(2.0, 1.0).unwrap();
+        let guide = PerpNegGuidance::new(2.0, 1.0).expect("new should succeed");
         let cond = vec![0.0_f32; 8];
         let uncond = vec![0.0_f32; 4];
         let neg = vec![0.0_f32; 8];
@@ -203,22 +207,26 @@ mod tests {
 
     #[test]
     fn output_is_finite() {
-        let guide = PerpNegGuidance::new(5.0, 2.0).unwrap();
+        let guide = PerpNegGuidance::new(5.0, 2.0).expect("new should succeed");
         let cond: Vec<f32> = (0..32).map(|i| (i as f32) / 32.0).collect();
         let uncond = vec![0.0_f32; 32];
         let neg: Vec<f32> = (0..32).map(|i| -(i as f32) / 32.0).collect();
-        let out = guide.apply(&cond, &uncond, &neg).unwrap();
+        let out = guide
+            .apply(&cond, &uncond, &neg)
+            .expect("apply should succeed");
         assert!(out.iter().all(|v| v.is_finite()), "non-finite output");
     }
 
     #[test]
     fn parallel_neg_reduces_amplitude() {
         // When neg is proportional to cond, the perpendicular component should reduce it
-        let guide = PerpNegGuidance::new(1.0, 1.0).unwrap();
+        let guide = PerpNegGuidance::new(1.0, 1.0).expect("new should succeed");
         let cond = vec![1.0_f32; 4];
         let uncond = vec![0.0_f32; 4];
         let neg = vec![1.0_f32; 4]; // parallel to cond
-        let out = guide.apply(&cond, &uncond, &neg).unwrap();
+        let out = guide
+            .apply(&cond, &uncond, &neg)
+            .expect("apply should succeed");
         // perp_cond = cond - 1.0 * (1/1)*cond = 0 → out = uncond + scale*0 = 0
         for &v in &out {
             assert!(v.abs() < EPS, "parallel neg should zero out cond: {v}");
@@ -228,11 +236,13 @@ mod tests {
     #[test]
     fn perp_neg_orthogonal_neg_unchanged() {
         // When neg is orthogonal to cond, the projection is 0, so cond is unchanged
-        let guide = PerpNegGuidance::new(1.0, 1.0).unwrap();
+        let guide = PerpNegGuidance::new(1.0, 1.0).expect("new should succeed");
         let cond = vec![1.0_f32, 0.0]; // along x-axis
         let uncond = vec![0.0_f32; 2];
         let neg = vec![0.0_f32, 1.0]; // along y-axis (orthogonal)
-        let out = guide.apply(&cond, &uncond, &neg).unwrap();
+        let out = guide
+            .apply(&cond, &uncond, &neg)
+            .expect("apply should succeed");
         // dot(neg, cond) = 0 → proj = 0 → cond_perp = cond
         // out = 0 + 1*(cond - 0) = cond
         for (&o, &c) in out.iter().zip(&cond) {
@@ -242,14 +252,18 @@ mod tests {
 
     #[test]
     fn chunked_equals_unchunked() {
-        let guide = PerpNegGuidance::new(2.0, 0.5).unwrap();
+        let guide = PerpNegGuidance::new(2.0, 0.5).expect("new should succeed");
         let cond: Vec<f32> = (0..8).map(|i| i as f32).collect();
         let uncond = vec![0.0_f32; 8];
         let neg: Vec<f32> = (0..8).map(|i| (i as f32) * 0.5).collect();
-        let unchunked = guide.apply(&cond, &uncond, &neg).unwrap();
+        let unchunked = guide
+            .apply(&cond, &uncond, &neg)
+            .expect("apply should succeed");
         // When chunked with chunk_size=full_len, result should be same
         // Actually chunked with n_chunks=1 is same as unchunked
-        let chunked = guide.apply_chunked(&cond, &uncond, &neg, 1).unwrap();
+        let chunked = guide
+            .apply_chunked(&cond, &uncond, &neg, 1)
+            .expect("apply_chunked should succeed");
         for (&u, &c) in unchunked.iter().zip(&chunked) {
             assert!((u - c).abs() < EPS, "chunked(1) should equal unchunked");
         }
@@ -257,7 +271,7 @@ mod tests {
 
     #[test]
     fn scale_accessor() {
-        let guide = PerpNegGuidance::new(3.5, 1.2).unwrap();
+        let guide = PerpNegGuidance::new(3.5, 1.2).expect("new should succeed");
         assert!((guide.scale() - 3.5).abs() < EPS);
         assert!((guide.neg_scale() - 1.2).abs() < EPS);
     }

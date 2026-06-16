@@ -6,7 +6,7 @@ CUB-equivalent parallel GPU primitives with zero CUDA SDK dependency. All kernel
 
 ## Implementation Status
 
-**Actual: 6,216 SLoC across 18 files** (4 sub-crates: `warp/`, `block/`, `device/`, `sort/` + shared `ptx_helpers.rs`, `handle.rs`, `error.rs`)
+**Actual: 4,502 SLoC across 18 files** (4 sub-crates: `warp/`, `block/`, `device/`, `sort/` + shared `ptx_helpers.rs`, `handle.rs`, `error.rs`)
 
 Coverage spans the full CUB hierarchy: warp-level reductions / scans built on `shfl.sync.*`, block-level reductions / scans built on shared memory + warp shuffles, device-wide reduce / scan / stream-compaction / histogram pipelines, and two sort algorithms (4-bit LSD radix sort, bitonic-block + co-rank merge sort). Every public template generates target-specific PTX for sm_75 through sm_120 via `oxicuda-ptx`.
 

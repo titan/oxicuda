@@ -1,15 +1,25 @@
+pub mod budget_monitor;
+pub mod cdp;
 pub mod ctd;
 pub mod fdp;
 pub mod pld;
 pub mod prv;
 pub mod prv_fft;
+pub mod rdp_gaussian;
+pub mod rdp_laplace;
 pub mod rdp_subsampling;
 pub mod shuffle_dp;
 pub mod tcdp;
 pub mod zcdp;
 
+pub use budget_monitor::{BudgetMonitor, CompositionMode};
+pub use cdp::{Mcdp, mcdp_from_zcdp};
 pub use ctd::{CtdAccountant, CtdConfig};
 pub use prv_fft::{compose_gaussian_prv_fft, compose_self_fft, convolve_pmfs_fft};
+pub use rdp_gaussian::RenyiDpAccountant;
+pub use rdp_laplace::{
+    RdpLaplaceConfig, optimal_epsilon, rdp_compose, rdp_curve, rdp_epsilon, rdp_to_epsilon_delta,
+};
 pub use rdp_subsampling::{
     RdpMechanism, RdpSubsampling, RdpSubsamplingConfig, RdpSubsamplingResult,
 };

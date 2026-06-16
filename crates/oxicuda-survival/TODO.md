@@ -9,8 +9,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.56).
 
 ## Implementation Status
 
-- **Actual SLoC:** 7,367 (65 files, including 6,252 code + 230 comments + 480 blanks; markdown 405)
-- **Tests:** 184 passing (lib + e2e_tests)
+- **Actual SLoC:** grown well beyond the original 7,367; see `wc -l src/**/*.rs` (includes Cox residual/influence diagnostics + Aalen-Johansen variance modules)
+- **Tests:** 785 passing (lib + e2e_tests) via `cargo nextest run -p oxicuda-survival --all-features`
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -45,6 +45,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.56).
 - [x] `cox/newton_raphson.rs` -- Newton-Raphson with line search
 - [x] `cox/schoenfeld.rs` -- Schoenfeld residuals `r_i = x_i - x_bar_R`
 - [x] `cox/baseline_hazard.rs` -- Breslow baseline `H_0(t) = sum d_i / sum exp(beta^T x_j)`
+- [x] `cox/residuals_diagnostic.rs` -- Martingale residuals `M_i = delta_i - H_0(t_i) exp(beta^T x_i)` (sum to 0), deviance residuals `d_i = sign(M_i) sqrt(-2[M_i + delta_i ln(delta_i - M_i)])`, Lin-Wei-Ying cumulative martingale process + sup statistic
+- [x] `cox/influence_diagnostics.rs` -- Efficient score residuals `L_i = integral (x_i - x_bar) dM_i`, DFBeta `= L_i I(beta)^-1`, standardised DFBetas, likelihood displacement `LD_i = DFBeta_i^T I DFBeta_i` (validated vs leave-one-out refit)
 
 #### Accelerated Failure Time
 - [x] `aft/exponential.rs` -- Closed-form MLE
@@ -113,6 +115,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.56).
 - [x] Discrete-time survival via complementary log-log / logistic link (`aft/discrete_time.rs`)
 - [x] Inverse-probability-of-treatment weighting for causal hazard estimation (`cox/iptw.rs`)
 - [x] Multi-state models (Markov + semi-Markov transitions) via Aalen-Johansen estimator (`nonparametric/multi_state.rs`)
+- [x] Aalen-Johansen variance & confidence bands: recursive Greenwood-type covariance of the product integral + log-transform pointwise CIs; competing-risks CIF with variance; exact reduction to KM Greenwood for the 2-state case (`nonparametric/multi_state_inference.rs`)
 - [x] Truncation (left, right, interval) support in `Dataset` (`data/truncation.rs`)
 - [x] Predictive performance: time-dependent ROC curves, calibration plots, decision curves (`calibration/time_roc.rs`)
 
@@ -126,6 +129,16 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.56).
 - [x] Power / sample-size calculations for survival trials (Schoenfeld formula) (`test/power_sample_size.rs`)
 - [x] Net survival / relative survival (cancer-registry methods) (`nonparametric/net_survival.rs`)
 
+#### P3 — v0.2.0 Extension Targets
+
+- [x] `cox/landmark.rs` — Landmarking (Van Houwelingen 2007): dynamic landmark supermodels; fit Cox at each landmark time s; predict conditional survival P(T>t*|T>s, Z(s)) pooled across landmark datasets; `LandmarkModel { s_seq, max_horizon }`
+- [x] `aft/restricted_spline.rs` — Restricted cubic spline baseline hazard (Royston-Parmar 2002 extended): natural cubic splines on log(-log(S(t))) with boundary + interior knots; smooth and monotone hazard without piecewise assumption; `RcsHazard`
+- [x] `nonparametric/npsurv_bayes.rs` — Nonparametric Bayesian survival (Ferguson 1973, Hjort 1990 Beta process): Dirichlet process prior on F; posterior draws via stick-breaking truncation + KM-compatible hazard atoms; `DpSurvivalPosterior`
+- [ ] `cox/causal_cox.rs` — Causal Cox model (Martinussen 2011): estimating causal hazard ratio under unmeasured confounding via instrumental variable; control-function residual approach; tie with `oxicuda-causal` IV framework
+- [x] `screening/cif_sis.rs` — CIF-SIS (Sure Independence Screening for cumulative incidence, Fu 2017): marginal subdistribution-hazard ranking for variable screening in competing-risks high-dimensional data; `CifSis { threshold: f32 }`
+- [x] `calibration/pseudo_r2.rs` — Royston-Sauerbrei pseudo-R² for survival models (Royston 2004): R²_D based on D statistic; separates explained randomness from baseline hazard; `PseudoR2Survival`
+- [x] `rmst/milestone_analysis.rs` — Milestone analysis (Royston-Parmar 2011): at-risk event rates + RMST differences at pre-specified time milestones; suitable for immunotherapy OS trials; `MilestoneAnalysis { milestones: Vec<f32> }`
+
 ## Dependencies
 
 | Dependency | Purpose | Pure Rust? |
@@ -137,8 +150,8 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 
 ## Quality Status
 
-- Warnings: 0 (clippy clean)
-- Tests: 184 passing
+- Warnings: 0 (clippy clean, `-D warnings` all-targets)
+- Tests: 785 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features

@@ -132,11 +132,16 @@ mod tests {
             Complex32::new(0.0, 0.0),
             Complex32::new(1.0, 0.0),
         ];
-        let ch = KrausChannel::new(vec![id_op], 2).unwrap();
+        let ch = KrausChannel::new(vec![id_op], 2)
+            .expect("the 2×2 identity operator satisfies Σ K†K = I exactly, so channel construction cannot fail");
         use crate::statevec::state::StateVector;
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let sv = StateVector::new_zero_state(1).expect(
+            "n_qubits=1 is always a valid qubit count, so zero-state construction cannot fail",
+        );
         let dm = DensityMatrix::from_pure_state(&sv);
-        let out = ch.apply(&dm).unwrap();
+        let out = ch
+            .apply(&dm)
+            .expect("the density matrix dim=2 matches the channel dim=2, so apply cannot fail");
         assert!((out.rho[0].re - 1.0).abs() < 1e-6);
     }
 }

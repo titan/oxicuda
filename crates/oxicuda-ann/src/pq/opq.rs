@@ -449,7 +449,7 @@ mod tests {
     fn opq_config_new_valid() {
         let cfg = OpqConfig::new(4, 16);
         assert!(cfg.is_ok(), "{:?}", cfg.err());
-        let cfg = cfg.unwrap();
+        let cfg = cfg.expect("config parameters are valid");
         assert_eq!(cfg.m, 4);
         assert_eq!(cfg.ksub, 16);
     }
@@ -480,12 +480,12 @@ mod tests {
         let n = 100;
         let dim = 8;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 8).unwrap();
+        let mut cfg = OpqConfig::new(2, 8).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 2;
         let model = OpqModel::train(&data, n, dim, cfg, &mut rng);
         assert!(model.is_ok(), "{:?}", model.err());
-        let model = model.unwrap();
+        let model = model.expect("training should succeed");
         assert_eq!(model.codebook.m, 2);
         assert_eq!(model.codebook.ksub, 8);
         assert_eq!(model.codebook.dsub, 4);
@@ -497,10 +497,10 @@ mod tests {
         let n = 64;
         let dim = 4;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 4).unwrap();
+        let mut cfg = OpqConfig::new(2, 4).expect("config parameters are valid");
         cfg.n_pq_epochs = 3;
         cfg.n_outer_iters = 1;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
         assert_eq!(model.rotation.len(), dim * dim);
     }
 
@@ -510,10 +510,10 @@ mod tests {
         let n = 100;
         let dim = 4;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 4).unwrap();
+        let mut cfg = OpqConfig::new(2, 4).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 3;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
         let r = &model.rotation;
         // Compute R^T @ R and check it is ≈ I
         let rt = transpose(r, dim, dim);
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn opq_train_n_zero_error() {
         let mut rng = make_rng(4);
-        let cfg = OpqConfig::new(2, 8).unwrap();
+        let cfg = OpqConfig::new(2, 8).expect("config parameters are valid");
         let res = OpqModel::train(&[], 0, 8, cfg, &mut rng);
         assert!(matches!(res, Err(AnnError::EmptyInput)));
     }
@@ -541,7 +541,7 @@ mod tests {
     #[test]
     fn opq_train_dim_mismatch_error() {
         let mut rng = make_rng(5);
-        let cfg = OpqConfig::new(2, 4).unwrap();
+        let cfg = OpqConfig::new(2, 4).expect("config parameters are valid");
         // data.len() != n * dim → DimensionMismatch
         let data = vec![1.0_f32; 10]; // only 10 floats, but n=5 dim=4 → expected 20
         let res = OpqModel::train(&data, 5, 4, cfg, &mut rng);
@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn opq_train_m_not_divide_dim_error() {
         let mut rng = make_rng(6);
-        let mut cfg = OpqConfig::new(3, 4).unwrap();
+        let mut cfg = OpqConfig::new(3, 4).expect("config parameters are valid");
         cfg.n_pq_epochs = 3;
         let data = vec![0.5_f32; 50 * 8]; // dim=8, m=3 → 8 not divisible by 3
         let res = OpqModel::train(&data, 50, 8, cfg, &mut rng);
@@ -566,11 +566,11 @@ mod tests {
         let n = 80;
         let dim = 8;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 8).unwrap();
+        let mut cfg = OpqConfig::new(2, 8).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 2;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
         assert_eq!(codes.len(), n * model.codebook.m);
     }
 
@@ -580,12 +580,12 @@ mod tests {
         let n = 80;
         let dim = 8;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 8).unwrap();
+        let mut cfg = OpqConfig::new(2, 8).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 2;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
-        let decoded = model.decode(&codes, n).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
+        let decoded = model.decode(&codes, n).expect("decode should succeed");
         assert_eq!(decoded.len(), n * dim);
     }
 
@@ -596,12 +596,12 @@ mod tests {
         let n = 128;
         let dim = 4;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 4).unwrap();
+        let mut cfg = OpqConfig::new(2, 4).expect("config parameters are valid");
         cfg.n_pq_epochs = 10;
         cfg.n_outer_iters = 3;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
-        let decoded = model.decode(&codes, n).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
+        let decoded = model.decode(&codes, n).expect("decode should succeed");
         // Average reconstruction MSE should be finite
         let mse: f32 = data
             .iter()
@@ -619,10 +619,10 @@ mod tests {
         let n = 64;
         let dim = 8;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 8).unwrap();
+        let mut cfg = OpqConfig::new(2, 8).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 1;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
         // Provide wrong data length
         let short = vec![0.0_f32; 3 * dim - 1];
         let res = model.encode(&short, 3);
@@ -637,14 +637,14 @@ mod tests {
         let n = 64;
         let dim = 4;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 4).unwrap();
+        let mut cfg = OpqConfig::new(2, 4).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 2;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
         for i in 0..n {
             let x = &data[i * dim..(i + 1) * dim];
-            let rotated = model.rotate(x).unwrap();
-            let recovered = model.unrotate(&rotated).unwrap();
+            let rotated = model.rotate(x).expect("rotate should succeed");
+            let recovered = model.unrotate(&rotated).expect("unrotate should succeed");
             for d in 0..dim {
                 assert!(
                     (recovered[d] - x[d]).abs() < 1e-5,
@@ -664,13 +664,15 @@ mod tests {
         let n = 64;
         let dim = 8;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 8).unwrap();
+        let mut cfg = OpqConfig::new(2, 8).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 2;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
         let query: Vec<f32> = (0..dim).map(|i| i as f32 * 0.1).collect();
-        let dists = model.adc_distances(&query, &codes, n).unwrap();
+        let dists = model
+            .adc_distances(&query, &codes, n)
+            .expect("adc distances should succeed");
         assert!(dists.iter().all(|&d| d >= 0.0), "some distances negative");
     }
 
@@ -680,13 +682,15 @@ mod tests {
         let n = 64;
         let dim = 8;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 8).unwrap();
+        let mut cfg = OpqConfig::new(2, 8).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 2;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
         let query = vec![0.0_f32; dim];
-        let dists = model.adc_distances(&query, &codes, n).unwrap();
+        let dists = model
+            .adc_distances(&query, &codes, n)
+            .expect("adc distances should succeed");
         assert_eq!(dists.len(), n);
     }
 
@@ -696,11 +700,11 @@ mod tests {
         let n = 64;
         let dim = 8;
         let data = normal_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 8).unwrap();
+        let mut cfg = OpqConfig::new(2, 8).expect("config parameters are valid");
         cfg.n_pq_epochs = 5;
         cfg.n_outer_iters = 1;
-        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
+        let model = OpqModel::train(&data, n, dim, cfg, &mut rng).expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
         let bad_query = vec![0.0_f32; dim + 1];
         let res = model.adc_distances(&bad_query, &codes, n);
         assert!(res.is_err(), "wrong query dimension should fail");
@@ -714,7 +718,7 @@ mod tests {
         let n = 64;
         let dim = 4;
         let data = rand_vecs(n, dim, &mut rng);
-        let mut cfg = OpqConfig::new(2, 4).unwrap();
+        let mut cfg = OpqConfig::new(2, 4).expect("config parameters are valid");
         cfg.n_outer_iters = 0;
         cfg.n_pq_epochs = 5;
         // n_outer_iters = 0 means the loop doesn't run and codebook is default (zeroed)
@@ -747,15 +751,17 @@ mod tests {
         let mut rng_a = make_rng(42);
         let mut rng_b = make_rng(42);
 
-        let mut cfg_a = OpqConfig::new(2, 4).unwrap();
+        let mut cfg_a = OpqConfig::new(2, 4).expect("config parameters are valid");
         cfg_a.n_pq_epochs = 5;
         cfg_a.n_outer_iters = 2;
         let mut cfg_b = cfg_a.clone();
         cfg_b.n_pq_epochs = 5;
         cfg_b.n_outer_iters = 2;
 
-        let model_a = OpqModel::train(&data, n, dim, cfg_a, &mut rng_a).unwrap();
-        let model_b = OpqModel::train(&data, n, dim, cfg_b, &mut rng_b).unwrap();
+        let model_a =
+            OpqModel::train(&data, n, dim, cfg_a, &mut rng_a).expect("training should succeed");
+        let model_b =
+            OpqModel::train(&data, n, dim, cfg_b, &mut rng_b).expect("training should succeed");
 
         // Same seed → same rotation
         assert_eq!(

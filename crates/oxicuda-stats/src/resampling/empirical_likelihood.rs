@@ -402,7 +402,7 @@ mod tests {
         // H0: mean = 5.5, data is 1..=10; true mean IS 5.5 → p large
         let data: Vec<f64> = (1..=10).map(|v| v as f64).collect();
         let cfg = ElConfig::default();
-        let r = el_mean_test(&data, 5.5, &cfg).unwrap();
+        let r = el_mean_test(&data, 5.5, &cfg).expect("el_mean_test should succeed");
         // Wilks should be near 0
         assert!(r.wilks < 5.0, "wilks={}", r.wilks);
         assert!(r.p_value > 0.05, "p={}", r.p_value);
@@ -413,7 +413,7 @@ mod tests {
         // H0: mean = 1.0, data is 1..=10; true mean is 5.5 → reject
         let data: Vec<f64> = (1..=10).map(|v| v as f64).collect();
         let cfg = ElConfig::default();
-        let r = el_mean_test(&data, 1.5, &cfg).unwrap();
+        let r = el_mean_test(&data, 1.5, &cfg).expect("el_mean_test should succeed");
         assert!(r.wilks > 3.0, "wilks={} should be large", r.wilks);
         assert!(r.p_value < 0.2, "p={}", r.p_value);
     }
@@ -422,7 +422,7 @@ mod tests {
     fn el_mean_test_probability_weights_sum_to_one() {
         let data: Vec<f64> = (1..=20).map(|v| v as f64).collect();
         let cfg = ElConfig::default();
-        let r = el_mean_test(&data, 10.5, &cfg).unwrap();
+        let r = el_mean_test(&data, 10.5, &cfg).expect("el_mean_test should succeed");
         let sum: f64 = r.p_weights.iter().sum();
         assert!((sum - 1.0).abs() < 1e-8, "sum={}", sum);
     }
@@ -431,7 +431,7 @@ mod tests {
     fn el_mean_test_weights_are_positive() {
         let data: Vec<f64> = (1..=10).map(|v| v as f64).collect();
         let cfg = ElConfig::default();
-        let r = el_mean_test(&data, 5.5, &cfg).unwrap();
+        let r = el_mean_test(&data, 5.5, &cfg).expect("el_mean_test should succeed");
         assert!(r.p_weights.iter().all(|&p| p > 0.0));
     }
 
@@ -461,9 +461,15 @@ mod tests {
         let data: Vec<f64> = (1..=20).map(|v| v as f64).collect();
         let cfg = ElConfig::default();
         let true_mean = 10.5;
-        let w_center = el_mean_test(&data, true_mean, &cfg).unwrap().wilks;
-        let w_near = el_mean_test(&data, true_mean + 1.0, &cfg).unwrap().wilks;
-        let w_far = el_mean_test(&data, true_mean + 4.0, &cfg).unwrap().wilks;
+        let w_center = el_mean_test(&data, true_mean, &cfg)
+            .expect("el_mean_test should succeed")
+            .wilks;
+        let w_near = el_mean_test(&data, true_mean + 1.0, &cfg)
+            .expect("el_mean_test should succeed")
+            .wilks;
+        let w_far = el_mean_test(&data, true_mean + 4.0, &cfg)
+            .expect("el_mean_test should succeed")
+            .wilks;
         assert!(w_center <= w_near, "center={w_center} near={w_near}");
         assert!(w_near <= w_far, "near={w_near} far={w_far}");
     }
@@ -475,7 +481,8 @@ mod tests {
         // Standard: EL 95 % CI should contain the sample mean (= MLE)
         let data: Vec<f64> = (1..=20).map(|v| v as f64).collect();
         let cfg = ElConfig::default();
-        let (lo, hi) = el_confidence_interval(&data, 0.05, &cfg).unwrap();
+        let (lo, hi) = el_confidence_interval(&data, 0.05, &cfg)
+            .expect("el_confidence_interval should succeed");
         let sample_mean = 10.5;
         assert!(lo < sample_mean && hi > sample_mean, "lo={lo}, hi={hi}");
     }
@@ -485,8 +492,10 @@ mod tests {
         // Larger alpha → narrower CI (higher confidence → wider)
         let data: Vec<f64> = (1..=20).map(|v| v as f64).collect();
         let cfg = ElConfig::default();
-        let (lo95, hi95) = el_confidence_interval(&data, 0.05, &cfg).unwrap();
-        let (lo90, hi90) = el_confidence_interval(&data, 0.10, &cfg).unwrap();
+        let (lo95, hi95) = el_confidence_interval(&data, 0.05, &cfg)
+            .expect("el_confidence_interval should succeed");
+        let (lo90, hi90) = el_confidence_interval(&data, 0.10, &cfg)
+            .expect("el_confidence_interval should succeed");
         let width_95 = hi95 - lo95;
         let width_90 = hi90 - lo90;
         assert!(
@@ -499,7 +508,8 @@ mod tests {
     fn el_ci_ordered() {
         let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         let cfg = ElConfig::default();
-        let (lo, hi) = el_confidence_interval(&data, 0.05, &cfg).unwrap();
+        let (lo, hi) = el_confidence_interval(&data, 0.05, &cfg)
+            .expect("el_confidence_interval should succeed");
         assert!(lo < hi, "lo={lo} should be < hi={hi}");
     }
 
@@ -511,7 +521,7 @@ mod tests {
         let y: Vec<f64> = (1..=10).map(|v| v as f64).collect();
         let x: Vec<f64> = y.iter().map(|&v| 2.0 * v).collect();
         let cfg = ElConfig::default();
-        let r = el_ratio_test(&x, &y, 10, 2.0, &cfg).unwrap();
+        let r = el_ratio_test(&x, &y, 10, 2.0, &cfg).expect("el_ratio_test should succeed");
         assert!(r.p_value > 0.05, "p={}", r.p_value);
     }
 
@@ -539,7 +549,7 @@ mod tests {
         let x: Vec<f64> = vec![5.0, 5.0, 5.0, 5.0, 1.0, 1.0, 1.0, 1.0];
         let y: Vec<f64> = vec![2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0];
         let cfg = ElConfig::default();
-        let r = el_ratio_test(&x, &y, 8, 2.0, &cfg).unwrap();
+        let r = el_ratio_test(&x, &y, 8, 2.0, &cfg).expect("el_ratio_test should succeed");
         // ratio0=2 is wrong (true ≈ 1.5); Wilks should be elevated
         assert!(r.wilks > 0.5, "wilks={}", r.wilks);
     }
@@ -549,7 +559,7 @@ mod tests {
         let y: Vec<f64> = (1..=8).map(|v| v as f64).collect();
         let x: Vec<f64> = y.iter().map(|&v| 3.0 * v).collect();
         let cfg = ElConfig::default();
-        let r = el_ratio_test(&x, &y, 8, 3.0, &cfg).unwrap();
+        let r = el_ratio_test(&x, &y, 8, 3.0, &cfg).expect("el_ratio_test should succeed");
         let sum: f64 = r.p_weights.iter().sum();
         assert!((sum - 1.0).abs() < 1e-8, "sum={}", sum);
     }

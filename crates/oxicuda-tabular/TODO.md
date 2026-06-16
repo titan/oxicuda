@@ -6,7 +6,7 @@ Tabular deep-learning primitives for OxiCUDA (sparsemax / entmax-1.5, TabNet, SA
 
 ## Implementation Status
 
-**Actual: 3,797 SLoC (17 source files + 1 benches file) -- Coverage: sparse-attention probability transforms + 4 canonical tabular DL models + preprocessing + metrics**
+**Actual: 15,823 SLoC (49 source files + 1 benches file) -- Coverage: sparse-attention probability transforms + 4 canonical tabular DL models + preprocessing + metrics**
 
 Current implementation covers the canonical tabular deep-learning toolkit: sparsemax (Martins & Astudillo 2016 sort-descending k* algorithm, O(d log d)) and entmax-1.5 (alpha = 1.5 via 64-iteration bisection); TabNet (Arik & Pfister 2021) with GLU gates, BatchNorm1d, step-wise sparsemax attention, prior scales `P_i = product(gamma - M_j)` and shared + step-specific FC-BN-GLU blocks; SAINT (Somepalli et al. 2021) with row-wise multi-head self-attention plus inter-sample attention, Pre-LayerNorm FFN, and CLS mean-pool head; FT-Transformer (Gorishniy et al. 2021) with continuous feature tokenisation `x_j * w_j + b_j` per embedding dimension, categorical lookup tables, Pre-LN MHSA blocks, CLS token and linear head; NODE (Popov et al. 2019) soft oblivious decision trees with entmax-1.5 feature selection and sigmoid-smoothed splits, plus `NodeEnsemble` mean-over-trees; quantile / standard / min-max normalisers; classification metrics including AUC-ROC trapezoidal integration.
 
@@ -54,7 +54,7 @@ Current implementation covers the canonical tabular deep-learning toolkit: spars
 - [ ] Trainable backward passes (currently inference / forward only); explicit gradients for TabNet / SAINT / FT-Transformer / NODE
 - [ ] Joint categorical + continuous tabular pipeline with mixed-type encoders end-to-end
 - [ ] Self-supervised pretraining objectives for tabular data (denoising / contrastive)
-- [ ] CutMix / Mixup augmentation primitives for tabular learning
+- [x] CutMix / Mixup augmentation primitives for tabular learning
 
 #### P1 -- Important Features
 - [x] AutoInt (Song et al. 2019) -- multi-head self-attentive feature interactions
@@ -69,12 +69,18 @@ Current implementation covers the canonical tabular deep-learning toolkit: spars
 #### P2 -- Advanced / Research
 - [ ] FT-Transformer with attention-bias / RoPE
 - [ ] NODE with TabRecord / VarOblivious variants
-- [ ] Diffusion models for tabular generation (TabDDPM)
+- [x] Diffusion models for tabular generation (TabDDPM)
 - [ ] GANs for tabular data (CTGAN / TVAE) generators
 - [x] Conformal prediction wrappers for distribution-free uncertainty (`conformal/split_conformal.rs` -- Vovk 2005 / Lei et al. 2018 split conformal, Romano et al. 2019 CQR, Romano et al. 2020 APS + Sadinle et al. 2019 LAC; finite-sample `(n+1)` empirical quantile)
 - [ ] Federated tabular learning primitives (split / vertical / horizontal)
-- [ ] Concept-drift detection for streaming tabular features
+- [x] Concept-drift detection for streaming tabular features
 - [ ] Differentiable feature selection / importance attribution
+- [ ] `transformer/node.rs` — NODE (Neural Oblivious Decision Ensembles, Popov 2019): differentiable oblivious trees with entmax-split threshold learning + ensemble averaging; `NodeTree { depth, n_trees, choice_fn: EntmaxBisect }`
+- [x] `diffusion/tabddpm.rs` — TabDDPM (Kotelnikov 2023): Gaussian DDPM for continuous + multinomial diffusion for categorical features; denoising UNet with timestep embedding; generation + anomaly scoring via ELBO
+- [ ] `gan/ctgan.rs` — CTGAN (Xu 2019): conditional GAN with mode-specific normalisation for imbalanced categoricals; PacGAN discriminator packing; training-by-sampling from conditional distributions; `CtGan { pac: usize }`
+- [x] `preprocess/target_encode.rs` — Target encoding with regularisation (Micci-Barreca 2001): replace categorical level c with E[y|x=c] smoothed by global prior; smoothing factor k; leave-one-out for train/test; `TargetEncoder { k: f32, min_count: usize }`
+- [x] `preprocess/quantile_feat.rs` — Quantile feature transformation (scikit-learn QuantileTransformer): map each feature to empirical quantile → Gaussian or uniform output; `QuantileTransformer { n_quantiles: usize, output_dist: QuantileDist }`
+- [x] `conformal/aps_conformal.rs` — APS (Adaptive Prediction Set, Romano 2020): conformity score for multi-class: include classes in decreasing probability order until cumulative mass ≥ α; `ApsConformal { alpha: f32 }` — complement to existing split conformal
 
 ## Dependencies
 
@@ -86,11 +92,11 @@ Current implementation covers the canonical tabular deep-learning toolkit: spars
 
 ## Quality Status
 
-- Tests: 51 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 466 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
-- Files: 17 source `.rs` files, all under 2000 lines
+- Files: 49 source `.rs` files, all under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS compiles but returns `UnsupportedPlatform` at runtime
 
@@ -114,9 +120,9 @@ Target: forward latency comparable to PyTorch + pytorch-tabular reference for FT
 
 | Metric | Description | Actual |
 |--------|-------------|--------|
-| Files | source `.rs` files under `src/` | 17 |
-| SLoC | code lines (tokei) | ~3,797 |
-| Tests | e2e + unit | 51 |
+| Files | source `.rs` files under `src/` | 49 |
+| SLoC | code lines (tokei) | ~15,823 |
+| Tests | e2e + unit | 466 |
 | Coverage | tabular DL models | 4 (TabNet, SAINT, FT-Transformer, NODE) |
 | Coverage | normalizers | 3 (Quantile, Standard, MinMax) |
 

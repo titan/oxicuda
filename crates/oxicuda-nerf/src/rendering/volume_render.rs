@@ -170,7 +170,7 @@ mod tests {
         let sigma = vec![0.0_f32; 8];
         let color = vec![1.0_f32; 24]; // white
         let t = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
-        let res = volume_render(&sigma, &color, &t).unwrap();
+        let res = volume_render(&sigma, &color, &t).expect("volume_render should succeed");
         assert!(res.opacity < 1e-6, "zero density → zero opacity");
     }
 
@@ -182,7 +182,7 @@ mod tests {
         // First sample is red
         color[0] = 1.0;
         let t = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
-        let res = volume_render(&sigma, &color, &t).unwrap();
+        let res = volume_render(&sigma, &color, &t).expect("volume_render should succeed");
         assert!(
             res.rgb[0] > 0.99,
             "red first sample dominant, got {}",
@@ -198,8 +198,8 @@ mod tests {
         let sigma = vec![0.1_f32; n_rays * n_samp];
         let color = vec![0.5_f32; n_rays * n_samp * 3];
         let t: Vec<f32> = (0..n_rays * n_samp).map(|i| i as f32 * 0.1 + 0.1).collect();
-        let (rgb, depth, opacity) =
-            volume_render_batch(&sigma, &color, &t, n_rays, n_samp).unwrap();
+        let (rgb, depth, opacity) = volume_render_batch(&sigma, &color, &t, n_rays, n_samp)
+            .expect("volume_render_batch should succeed");
         assert_eq!(rgb.len(), n_rays * 3);
         assert_eq!(depth.len(), n_rays);
         assert_eq!(opacity.len(), n_rays);

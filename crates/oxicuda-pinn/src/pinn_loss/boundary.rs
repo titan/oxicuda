@@ -62,7 +62,8 @@ mod tests {
     fn dirichlet_zero_targets_mse() {
         let preds = vec![0.0_f32; 5];
         let targets = vec![0.0_f32; 5];
-        let loss = bc_loss(&preds, &targets, BcType::Dirichlet).unwrap();
+        let loss = bc_loss(&preds, &targets, BcType::Dirichlet)
+            .expect("Dirichlet bc_loss with zero predictions and targets should succeed");
         assert_eq!(loss, 0.0);
     }
 
@@ -70,7 +71,8 @@ mod tests {
     fn dirichlet_constant_error() {
         let preds = vec![1.0_f32; 4];
         let targets = vec![0.0_f32; 4];
-        let loss = bc_loss(&preds, &targets, BcType::Dirichlet).unwrap();
+        let loss = bc_loss(&preds, &targets, BcType::Dirichlet)
+            .expect("Dirichlet bc_loss with constant unit error should succeed");
         assert!((loss - 1.0).abs() < 1e-6);
     }
 
@@ -78,7 +80,8 @@ mod tests {
     fn neumann_x_loss_formula() {
         let preds = vec![2.0_f32, 1.0];
         let targets = vec![0.0_f32, 0.0];
-        let loss = bc_loss(&preds, &targets, BcType::NeumannX).unwrap();
+        let loss = bc_loss(&preds, &targets, BcType::NeumannX)
+            .expect("NeumannX bc_loss computation should succeed for valid inputs");
         assert!((loss - 2.5).abs() < 1e-6, "Expected 2.5, got {loss}");
     }
 
@@ -86,7 +89,8 @@ mod tests {
     fn neumann_y_loss_finite() {
         let preds = vec![0.5_f32; 3];
         let targets = vec![1.0_f32; 3];
-        let loss = bc_loss(&preds, &targets, BcType::NeumannY).unwrap();
+        let loss = bc_loss(&preds, &targets, BcType::NeumannY)
+            .expect("NeumannY bc_loss computation should succeed for valid inputs");
         assert!(loss.is_finite());
     }
 
@@ -94,7 +98,7 @@ mod tests {
     fn bc_loss_non_negative() {
         let preds = vec![-1.0_f32, 2.0, -3.0];
         let targets = vec![0.5_f32; 3];
-        let loss = bc_loss(&preds, &targets, BcType::Dirichlet).unwrap();
+        let loss = bc_loss(&preds, &targets, BcType::Dirichlet).expect("Dirichlet bc_loss computation should succeed for mixed positive and negative predictions");
         assert!(loss >= 0.0);
     }
 
@@ -113,7 +117,9 @@ mod tests {
     #[test]
     fn bc_loss_zero_helper() {
         let preds = vec![0.5_f32, -0.5];
-        let loss = bc_loss_zero(&preds).unwrap();
+        let loss = bc_loss_zero(&preds).expect(
+            "bc_loss_zero helper computation should succeed for valid non-empty predictions",
+        );
         assert!((loss - 0.25).abs() < 1e-6);
     }
 }

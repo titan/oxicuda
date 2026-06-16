@@ -823,7 +823,8 @@ mod tests {
 
     fn make_state() -> VaeReplayState {
         let cfg = default_cfg();
-        vae_replay_new(&cfg, cfg.seed).unwrap()
+        vae_replay_new(&cfg, cfg.seed)
+            .expect("VAE replay state should initialize with valid config")
     }
 
     fn make_rng() -> LcgRng {
@@ -835,7 +836,8 @@ mod tests {
     #[test]
     fn new_layer_dims_correct() {
         let cfg = default_cfg();
-        let state = vae_replay_new(&cfg, cfg.seed).unwrap();
+        let state = vae_replay_new(&cfg, cfg.seed)
+            .expect("VAE replay state should initialize with valid config");
         assert_eq!(state.layer_dims, vec![8, 16, 4, 3]);
         assert_eq!(state.n_tasks, 0);
     }
@@ -845,7 +847,8 @@ mod tests {
     #[test]
     fn weight_shapes_correct() {
         let cfg = default_cfg();
-        let state = vae_replay_new(&cfg, cfg.seed).unwrap();
+        let state = vae_replay_new(&cfg, cfg.seed)
+            .expect("VAE replay state should initialize with valid config");
         assert_eq!(state.encoder_w1.len(), 16 * 8);
         assert_eq!(state.encoder_b1.len(), 16);
         assert_eq!(state.encoder_mu_w.len(), 4 * 16);
@@ -902,7 +905,8 @@ mod tests {
         let id = 8;
         let x: Vec<f64> = (0..n * id).map(|i| (i % 8) as f64 / 8.0).collect();
         let y: Vec<usize> = (0..n).map(|i| i % 3).collect();
-        let loss = vae_replay_fit_task(&mut state, &x, &y, n, &mut rng).unwrap();
+        let loss = vae_replay_fit_task(&mut state, &x, &y, n, &mut rng)
+            .expect("VAE replay task fitting should succeed");
         assert!(loss.is_finite(), "fit_task loss must be finite, got {loss}");
     }
 
@@ -917,9 +921,11 @@ mod tests {
         let id = 8;
         let x = vec![0.5; n * id];
         let y: Vec<usize> = vec![0, 1, 2, 0, 1];
-        vae_replay_fit_task(&mut state, &x, &y, n, &mut rng).unwrap();
+        vae_replay_fit_task(&mut state, &x, &y, n, &mut rng)
+            .expect("VAE replay task fitting should succeed");
         assert_eq!(state.n_tasks, 1);
-        vae_replay_fit_task(&mut state, &x, &y, n, &mut rng).unwrap();
+        vae_replay_fit_task(&mut state, &x, &y, n, &mut rng)
+            .expect("VAE replay task fitting should succeed");
         assert_eq!(state.n_tasks, 2);
     }
 
@@ -933,10 +939,12 @@ mod tests {
         let id = 8;
         let x_train: Vec<f64> = (0..n * id).map(|i| (i % 8) as f64 / 8.0).collect();
         let y_train: Vec<usize> = (0..n).map(|i| i % 3).collect();
-        vae_replay_fit_task(&mut state, &x_train, &y_train, n, &mut rng).unwrap();
+        vae_replay_fit_task(&mut state, &x_train, &y_train, n, &mut rng)
+            .expect("VAE replay task fitting should succeed");
 
         let x_test = vec![0.5f64; id];
-        let label = vae_replay_predict(&state, &x_test).unwrap();
+        let label = vae_replay_predict(&state, &x_test)
+            .expect("VAE replay prediction should succeed on valid input");
         assert!(label < 3, "predicted label {label} out of range");
     }
 
@@ -1008,11 +1016,13 @@ mod tests {
         let y: Vec<usize> = (0..n).map(|i| i % 3).collect();
 
         // Task 1: no replay
-        let loss1 = vae_replay_fit_task(&mut state, &x, &y, n, &mut rng).unwrap();
+        let loss1 = vae_replay_fit_task(&mut state, &x, &y, n, &mut rng)
+            .expect("VAE replay task fitting should succeed");
         assert!(loss1.is_finite());
 
         // Task 2: replay activated (n_tasks was 1 when entering)
-        let loss2 = vae_replay_fit_task(&mut state, &x, &y, n, &mut rng).unwrap();
+        let loss2 = vae_replay_fit_task(&mut state, &x, &y, n, &mut rng)
+            .expect("VAE replay task fitting should succeed");
         assert!(loss2.is_finite());
     }
 
@@ -1031,12 +1041,14 @@ mod tests {
             replay_ratio: 0.2,
             seed: 7,
         };
-        let mut state = vae_replay_new(&cfg, cfg.seed).unwrap();
+        let mut state = vae_replay_new(&cfg, cfg.seed)
+            .expect("VAE replay state should initialize with valid config");
         let mut rng = LcgRng::new(cfg.seed);
         let n = 8;
         let x: Vec<f64> = (0..n * 6).map(|i| (i % 6) as f64 / 6.0).collect();
         let y: Vec<usize> = (0..n).map(|i| i % 2).collect();
-        let loss = vae_replay_fit_task_with_cfg(&mut state, &x, &y, n, &mut rng, &cfg).unwrap();
+        let loss = vae_replay_fit_task_with_cfg(&mut state, &x, &y, n, &mut rng, &cfg)
+            .expect("VAE replay task fitting with cfg should succeed");
         assert!(loss.is_finite());
     }
 

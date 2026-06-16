@@ -421,20 +421,24 @@ mod tests {
     #[test]
     fn tab_transformer_forward_output_shape() {
         let cfg = make_cfg(3, 2, 8, 2, 1, 4);
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(1);
         let w = model.init_weights(&mut rng);
-        let logits = model.forward(&[0, 1, 2], &[0.5, -0.3], &w).unwrap();
+        let logits = model
+            .forward(&[0, 1, 2], &[0.5, -0.3], &w)
+            .expect("forward should succeed");
         assert_eq!(logits.len(), 4);
     }
 
     #[test]
     fn tab_transformer_forward_finite() {
         let cfg = make_cfg(3, 2, 8, 2, 1, 2);
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(2);
         let w = model.init_weights(&mut rng);
-        let logits = model.forward(&[0, 0, 0], &[1.0, 2.0], &w).unwrap();
+        let logits = model
+            .forward(&[0, 0, 0], &[1.0, 2.0], &w)
+            .expect("forward should succeed");
         assert!(logits.iter().all(|v| v.is_finite()));
     }
 
@@ -465,10 +469,11 @@ mod tests {
         let n_cat = 3;
         let mut rng = LcgRng::new(10);
         let cfg = make_cfg(n_cat, 0, d, 2, 1, 2);
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let w = model.init_weights(&mut rng);
         let x: Vec<f32> = (0..n_cat * d).map(|_| rng.next_f32()).collect();
-        let out = TabTransformer::transformer_block(&x, n_cat, d, 2, &w.blocks[0]).unwrap();
+        let out = TabTransformer::transformer_block(&x, n_cat, d, 2, &w.blocks[0])
+            .expect("transformer_block should succeed");
         assert_eq!(out.len(), n_cat * d);
     }
 
@@ -478,10 +483,11 @@ mod tests {
         let n_cat = 4;
         let mut rng = LcgRng::new(11);
         let cfg = make_cfg(n_cat, 0, d, 2, 1, 2);
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let w = model.init_weights(&mut rng);
         let x: Vec<f32> = (0..n_cat * d).map(|_| rng.next_f32() - 0.5).collect();
-        let out = TabTransformer::transformer_block(&x, n_cat, d, 2, &w.blocks[0]).unwrap();
+        let out = TabTransformer::transformer_block(&x, n_cat, d, 2, &w.blocks[0])
+            .expect("transformer_block should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -562,10 +568,12 @@ mod tests {
             n_classes: 2,
             dropout_rate: 0.0,
         };
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(99);
         let w = model.init_weights(&mut rng);
-        let logits = model.forward(&[1], &[0.7], &w).unwrap();
+        let logits = model
+            .forward(&[1], &[0.7], &w)
+            .expect("forward should succeed");
         assert_eq!(logits.len(), 2);
         assert!(logits.iter().all(|v| v.is_finite()));
     }
@@ -573,17 +581,19 @@ mod tests {
     #[test]
     fn tab_transformer_multi_class_output() {
         let cfg = make_cfg(2, 2, 8, 2, 1, 5);
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(42);
         let w = model.init_weights(&mut rng);
-        let logits = model.forward(&[0, 1], &[1.0, -1.0], &w).unwrap();
+        let logits = model
+            .forward(&[0, 1], &[1.0, -1.0], &w)
+            .expect("forward should succeed");
         assert_eq!(logits.len(), 5);
     }
 
     #[test]
     fn tab_transformer_cat_id_bounds() {
         let cfg = make_cfg(2, 1, 8, 2, 1, 2);
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(7);
         let w = model.init_weights(&mut rng);
         // cat_n_categories = [4, 4], so index 4 is out of bounds
@@ -594,7 +604,7 @@ mod tests {
     #[test]
     fn init_weights_correct_shapes() {
         let cfg = make_cfg(3, 2, 8, 2, 2, 4);
-        let model = TabTransformer::new(cfg.clone()).unwrap();
+        let model = TabTransformer::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(55);
         let w = model.init_weights(&mut rng);
 
@@ -634,10 +644,12 @@ mod tests {
     #[test]
     fn tab_transformer_two_layers() {
         let cfg = make_cfg(2, 2, 8, 2, 2, 2);
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(77);
         let w = model.init_weights(&mut rng);
-        let logits = model.forward(&[1, 2], &[0.0, 1.0], &w).unwrap();
+        let logits = model
+            .forward(&[1, 2], &[0.0, 1.0], &w)
+            .expect("forward should succeed");
         assert_eq!(logits.len(), 2);
         assert!(logits.iter().all(|v| v.is_finite()));
     }
@@ -656,10 +668,12 @@ mod tests {
             n_classes: 2,
             dropout_rate: 0.0,
         };
-        let model = TabTransformer::new(cfg).unwrap();
+        let model = TabTransformer::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(88);
         let w = model.init_weights(&mut rng);
-        let logits = model.forward(&[0, 1, 2], &[], &w).unwrap();
+        let logits = model
+            .forward(&[0, 1, 2], &[], &w)
+            .expect("forward should succeed");
         assert_eq!(logits.len(), 2);
         assert!(logits.iter().all(|v| v.is_finite()));
     }

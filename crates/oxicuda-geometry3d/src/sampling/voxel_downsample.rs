@@ -99,7 +99,8 @@ mod tests {
     fn voxel_downsample_single_voxel() {
         // All points within same voxel cell
         let pts = vec![0.1_f32, 0.0, 0.0, 0.2_f32, 0.0, 0.0, 0.3_f32, 0.0, 0.0];
-        let (centroids, first_idx) = voxel_downsample(&pts, 3, 1.0).unwrap();
+        let (centroids, first_idx) =
+            voxel_downsample(&pts, 3, 1.0).expect("voxel_downsample should succeed");
         assert_eq!(centroids.len(), 3); // one voxel => 1 centroid => 3 floats
         assert_eq!(first_idx.len(), 1);
         assert_eq!(first_idx[0], 0);
@@ -114,7 +115,8 @@ mod tests {
             1.5_f32, 0.0, 0.0, // voxel (1,0,0)
             2.5_f32, 0.0, 0.0, // voxel (2,0,0)
         ];
-        let (centroids, first_idx) = voxel_downsample(&pts, 3, 1.0).unwrap();
+        let (centroids, first_idx) =
+            voxel_downsample(&pts, 3, 1.0).expect("voxel_downsample should succeed");
         assert_eq!(centroids.len(), 9);
         assert_eq!(first_idx.len(), 3);
     }
@@ -126,7 +128,8 @@ mod tests {
             0.5_f32, 0.0, 0.0, // voxel (0,0,0), first_idx=1
             1.5_f32, 0.0, 0.0, // voxel (1,0,0), first_idx=2
         ];
-        let (_, first_idx) = voxel_downsample(&pts, 3, 1.0).unwrap();
+        let (_, first_idx) =
+            voxel_downsample(&pts, 3, 1.0).expect("voxel_downsample should succeed");
         assert_eq!(first_idx, vec![0, 1, 2], "Must be sorted by first_idx");
     }
 }

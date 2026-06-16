@@ -697,7 +697,8 @@ mod tests {
         let s = make_logits(b, k, 0.013);
         let t = make_logits(b, k, 0.027);
         let centers = default_centers(k);
-        let loss = ibot_cls_loss(&s, &t, &centers, b, k, &cfg).unwrap();
+        let loss =
+            ibot_cls_loss(&s, &t, &centers, b, k, &cfg).expect("ibot_cls_loss should succeed");
         assert!(loss.is_finite(), "CLS loss should be finite, got {loss}");
         assert!(loss >= 0.0, "CLS loss should be non-negative, got {loss}");
     }
@@ -712,7 +713,7 @@ mod tests {
         let cfg = default_config();
         let s = make_logits(b * m, k, 0.013);
         let t = make_logits(b * m, k, 0.029);
-        let loss = ibot_mim_loss(&s, &t, b, m, k, &cfg).unwrap();
+        let loss = ibot_mim_loss(&s, &t, b, m, k, &cfg).expect("ibot_mim_loss should succeed");
         assert!(loss.is_finite(), "MIM loss should be finite, got {loss}");
         assert!(loss >= 0.0, "MIM loss should be non-negative, got {loss}");
     }
@@ -744,7 +745,7 @@ mod tests {
             k,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
         let expected = cfg.lambda_cls * result.cls_loss + cfg.lambda_patch * result.mim_loss;
         assert!(
             (result.total_loss - expected).abs() < 1e-4,
@@ -779,7 +780,7 @@ mod tests {
             k,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
         let expected = cfg.lambda_cls * result.cls_loss;
         assert!(
             (result.total_loss - expected).abs() < 1e-5,
@@ -814,7 +815,7 @@ mod tests {
             k,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(
             result.mim_loss, 0.0,
             "MIM loss must be 0 when n_masked == 0"
@@ -837,7 +838,8 @@ mod tests {
         // Constant teacher CLS logits = 5.0 everywhere → batch mean = 5.0
         let t_cls = vec![5.0_f32; b * k];
         let t_patch: Vec<f32> = vec![];
-        ibot_update_centers(&mut centers, &t_cls, &t_patch, b, m, k, momentum).unwrap();
+        ibot_update_centers(&mut centers, &t_cls, &t_patch, b, m, k, momentum)
+            .expect("ibot_update_centers should succeed");
         // expected: 0.9 * 1.0 + 0.1 * 5.0 = 0.9 + 0.5 = 1.4
         for &v in &centers.cls_center {
             assert!(
@@ -854,7 +856,8 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let n = 196;
         let ratio = 0.75;
-        let mask = ibot_random_patch_mask(n, ratio, &mut rng).unwrap();
+        let mask = ibot_random_patch_mask(n, ratio, &mut rng)
+            .expect("ibot_random_patch_mask should succeed");
         let expected_masked = (n as f32 * ratio) as usize; // 147
         let actual_masked = mask.iter().filter(|&&v| v).count();
         assert_eq!(
@@ -919,7 +922,7 @@ mod tests {
             k,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
         assert!(result.total_loss.is_finite());
         assert!(result.cls_loss.is_finite());
         assert!(result.mim_loss.is_finite());
@@ -964,7 +967,7 @@ mod tests {
             k,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
         let max_entropy = (k as f32).ln();
         assert!(
             result.mean_teacher_entropy >= 0.0,
@@ -991,7 +994,8 @@ mod tests {
         cfg.tau_teacher = 0.04;
         let logits: Vec<f32> = (0..b * k).map(|i| (i as f32) * 0.1).collect();
         let centers = default_centers(k);
-        let loss = ibot_cls_loss(&logits, &logits, &centers, b, k, &cfg).unwrap();
+        let loss = ibot_cls_loss(&logits, &logits, &centers, b, k, &cfg)
+            .expect("ibot_cls_loss should succeed");
         // CE(p, p) = H(p) >= 0. For non-uniform p, H is a positive finite value.
         assert!(loss.is_finite());
         assert!(loss >= 0.0);
@@ -1026,7 +1030,7 @@ mod tests {
             k,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(
             result.n_masked_patches,
             b * m,
@@ -1041,7 +1045,8 @@ mod tests {
     #[test]
     fn mask_ratio_zero_produces_no_masked_patches() {
         let mut rng = LcgRng::new(7);
-        let mask = ibot_random_patch_mask(100, 0.0, &mut rng).unwrap();
+        let mask = ibot_random_patch_mask(100, 0.0, &mut rng)
+            .expect("ibot_random_patch_mask should succeed");
         assert!(
             mask.iter().all(|&v| !v),
             "ratio=0 should produce no masked patches"

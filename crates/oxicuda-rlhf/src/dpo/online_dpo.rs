@@ -308,7 +308,8 @@ mod tests {
         let refs = vec![-1.5, -2.5, -3.5];
         let rewards = vec![0.2, 0.9, 0.1];
         let cfg = cfg_bw(0.1, 3);
-        let pair = build_preference_pair(&logps, &refs, &rewards, &cfg).unwrap();
+        let pair = build_preference_pair(&logps, &refs, &rewards, &cfg)
+            .expect("build_preference_pair should succeed");
         // best reward at index 1, worst at index 2
         assert!(
             (pair.chosen_logp - (-2.0)).abs() < 1e-6,
@@ -329,9 +330,10 @@ mod tests {
         let refs = vec![-1.0, -1.0, -1.0, -1.0];
         let rewards = vec![0.3, 0.5, 0.1, 0.4];
         let cfg = cfg_bw(0.2, 4);
-        let chosen = argmax_low_index(&rewards).unwrap();
-        let rejected = argmin_low_index(&rewards).unwrap();
-        let _ = build_preference_pair(&logps, &refs, &rewards, &cfg).unwrap();
+        let chosen = argmax_low_index(&rewards).expect("argmax_low_index should succeed");
+        let rejected = argmin_low_index(&rewards).expect("argmin_low_index should succeed");
+        let _ = build_preference_pair(&logps, &refs, &rewards, &cfg)
+            .expect("build_preference_pair should succeed");
         assert!(rewards[chosen] >= rewards[rejected]);
         assert_eq!(chosen, 1);
         assert_eq!(rejected, 2);
@@ -341,8 +343,14 @@ mod tests {
     #[test]
     fn tied_rewards_low_index_rule() {
         let rewards = vec![0.5, 0.5, 0.5];
-        assert_eq!(argmax_low_index(&rewards).unwrap(), 0);
-        assert_eq!(argmin_low_index(&rewards).unwrap(), 0);
+        assert_eq!(
+            argmax_low_index(&rewards).expect("argmax_low_index should succeed"),
+            0
+        );
+        assert_eq!(
+            argmin_low_index(&rewards).expect("argmin_low_index should succeed"),
+            0
+        );
     }
 
     // 4. Tied rewards under Threshold → NoValidPair (gap 0 < margin).
@@ -369,7 +377,8 @@ mod tests {
         let refs = vec![-1.0, -1.0];
         let rewards = vec![0.9, 0.1];
         let cfg = cfg_bw(0.5, 2);
-        let (_, loss) = online_dpo_step(&logps, &refs, &rewards, &cfg).unwrap();
+        let (_, loss) =
+            online_dpo_step(&logps, &refs, &rewards, &cfg).expect("online_dpo_step should succeed");
         assert!(loss.is_finite(), "loss must be finite, got {loss}");
         assert!(loss >= 0.0, "DPO loss = -log σ ≥ 0, got {loss}");
     }
@@ -385,7 +394,8 @@ mod tests {
             n_candidates: 4,
             pairing: PairingMode::BestVsRest,
         };
-        let pairs = online_dpo_pairs(&logps, &refs, &rewards, &cfg).unwrap();
+        let pairs = online_dpo_pairs(&logps, &refs, &rewards, &cfg)
+            .expect("online_dpo_pairs should succeed");
         assert_eq!(pairs.len(), 3, "BestVsRest → n-1 pairs");
         // Every pair's chosen is the best (index 1, logp -2.0).
         for p in &pairs {
@@ -399,13 +409,14 @@ mod tests {
         let logps = vec![-1.0, -2.0, -3.0];
         let refs = vec![-1.0, -1.0, -1.0];
         let rewards = vec![0.4, 0.9, 0.7];
-        let best = argmax_low_index(&rewards).unwrap();
+        let best = argmax_low_index(&rewards).expect("argmax_low_index should succeed");
         let cfg = OnlineDpoConfig {
             beta: 0.1,
             n_candidates: 3,
             pairing: PairingMode::BestVsRest,
         };
-        let pairs = online_dpo_pairs(&logps, &refs, &rewards, &cfg).unwrap();
+        let pairs = online_dpo_pairs(&logps, &refs, &rewards, &cfg)
+            .expect("online_dpo_pairs should succeed");
         // best index = 1; rejected indices are 0 and 2.
         assert_eq!(best, 1);
         assert_eq!(pairs.len(), 2);
@@ -422,7 +433,8 @@ mod tests {
             n_candidates: 2,
             pairing: PairingMode::Threshold(0.5),
         };
-        let pair = build_preference_pair(&logps, &refs, &rewards, &cfg).unwrap();
+        let pair = build_preference_pair(&logps, &refs, &rewards, &cfg)
+            .expect("build_preference_pair should succeed");
         assert!((pair.chosen_logp - (-0.5)).abs() < 1e-6);
     }
 
@@ -505,8 +517,10 @@ mod tests {
         let refs = vec![-1.1, -2.1, -3.1];
         let rewards = vec![0.3, 0.9, 0.1];
         let cfg = cfg_bw(0.2, 3);
-        let p1 = build_preference_pair(&logps, &refs, &rewards, &cfg).unwrap();
-        let p2 = build_preference_pair(&logps, &refs, &rewards, &cfg).unwrap();
+        let p1 = build_preference_pair(&logps, &refs, &rewards, &cfg)
+            .expect("build_preference_pair should succeed");
+        let p2 = build_preference_pair(&logps, &refs, &rewards, &cfg)
+            .expect("build_preference_pair should succeed");
         assert!((p1.chosen_logp - p2.chosen_logp).abs() < 1e-12);
         assert!((p1.rejected_logp - p2.rejected_logp).abs() < 1e-12);
         assert!((p1.ref_chosen_logp - p2.ref_chosen_logp).abs() < 1e-12);
@@ -578,12 +592,14 @@ mod tests {
         let refs_a = vec![-1.0, -1.0];
         let rewards = vec![0.9, 0.1];
         let cfg = cfg_bw(0.5, 2);
-        let (_, loss_a) = online_dpo_step(&logps_a, &refs_a, &rewards, &cfg).unwrap();
+        let (_, loss_a) = online_dpo_step(&logps_a, &refs_a, &rewards, &cfg)
+            .expect("online_dpo_step should succeed");
 
         // Misaligned: chosen has lower policy logp than reference.
         let logps_m = vec![-3.0, -0.2];
         let refs_m = vec![-1.0, -1.0];
-        let (_, loss_m) = online_dpo_step(&logps_m, &refs_m, &rewards, &cfg).unwrap();
+        let (_, loss_m) = online_dpo_step(&logps_m, &refs_m, &rewards, &cfg)
+            .expect("online_dpo_step should succeed");
         assert!(
             loss_a < loss_m,
             "aligned loss {loss_a} should be < misaligned {loss_m}"

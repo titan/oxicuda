@@ -68,7 +68,9 @@ mod tests {
 
     #[test]
     fn identity_2q_preserves_state() {
-        let mut sv = StateVector::new_zero_state(2).unwrap();
+        let mut sv = StateVector::new_zero_state(2).expect(
+            "n_qubits=2 is always a valid qubit count, so zero-state construction cannot fail",
+        );
         let c1 = Complex32::new(1.0, 0.0);
         let c0 = Complex32::new(0.0, 0.0);
         let gate = [
@@ -78,7 +80,8 @@ mod tests {
             [c0, c0, c0, c1],
         ];
         let orig = sv.amps.clone();
-        apply_2q_inplace(&mut sv, 0, 1, &gate).unwrap();
+        apply_2q_inplace(&mut sv, 0, 1, &gate)
+            .expect("q0=0 and q1=1 are distinct valid qubit indices within a 2-qubit state vector, so gate application cannot fail");
         for (a, b) in sv.amps.iter().zip(orig.iter()) {
             assert!((a - b).norm() < 1e-6);
         }

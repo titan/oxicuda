@@ -27,10 +27,12 @@ pub mod error;
 pub mod handle;
 pub mod ia3;
 pub mod lora;
+pub mod memory;
 pub mod merge;
 pub mod metrics;
 pub mod prefix;
 pub mod ptx_kernels;
+pub mod quant;
 
 #[cfg(test)]
 mod e2e_tests {

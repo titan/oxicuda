@@ -364,7 +364,8 @@ mod tests {
     fn ball_mapper_all_points_strategy() {
         let pts = line_points();
         let cfg = default_cfg(1.1);
-        let result = BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).expect("value should be present");
         assert_eq!(result.nodes.len(), 5);
     }
 
@@ -373,7 +374,8 @@ mod tests {
     fn ball_mapper_output_nodes_nonempty() {
         let pts = line_points();
         let cfg = default_cfg(0.5);
-        let result = BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).expect("value should be present");
         assert!(!result.nodes.is_empty());
     }
 
@@ -382,7 +384,8 @@ mod tests {
     fn ball_mapper_edges_undirected() {
         let pts = line_points();
         let cfg = default_cfg(1.5);
-        let result = BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).expect("value should be present");
         for &(i, j) in &result.edges {
             assert!(i < j, "edge ({i},{j}) violates i < j");
         }
@@ -394,7 +397,8 @@ mod tests {
         let pts = line_points();
         // radius = 0.01: only the landmark itself is in each ball
         let cfg = default_cfg(0.01);
-        let result = BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).expect("value should be present");
         assert!(
             result.edges.is_empty(),
             "expected no edges, got {:?}",
@@ -407,7 +411,8 @@ mod tests {
     fn ball_mapper_large_radius_complete_graph() {
         let pts = line_points();
         let cfg = default_cfg(1000.0);
-        let result = BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).expect("value should be present");
         let n = result.nodes.len();
         // Complete graph has n*(n-1)/2 edges
         assert_eq!(result.edges.len(), n * (n - 1) / 2);
@@ -418,7 +423,8 @@ mod tests {
     fn ball_mapper_coverage_in_range() {
         let pts = line_points();
         let cfg = default_cfg(0.5);
-        let result = BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).expect("value should be present");
         let memberships: Vec<Vec<usize>> = result
             .nodes
             .iter()
@@ -433,7 +439,8 @@ mod tests {
     fn ball_mapper_coverage_full_for_all_points() {
         let pts = line_points();
         let cfg = default_cfg(0.5); // each point is at least in its own ball
-        let result = BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).expect("value should be present");
         let memberships: Vec<Vec<usize>> = result
             .nodes
             .iter()
@@ -516,7 +523,8 @@ mod tests {
             landmark_strategy: LandmarkStrategy::Random(3),
             min_points: 1,
         };
-        let result = BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 5, 2, &cfg, &mut make_rng()).expect("value should be present");
         // With radius=0.5 and 5 collinear points 1 apart, each point only covers itself
         assert_eq!(result.nodes.len(), 3);
     }
@@ -551,7 +559,8 @@ mod tests {
             landmark_strategy: LandmarkStrategy::AllPoints,
             min_points: 2,
         };
-        let result = BallMapper::run(&pts, 3, 2, &cfg, &mut make_rng()).unwrap();
+        let result =
+            BallMapper::run(&pts, 3, 2, &cfg, &mut make_rng()).expect("value should be present");
         assert!(
             result.nodes.is_empty(),
             "expected no nodes, got {}",

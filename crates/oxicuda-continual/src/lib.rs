@@ -128,7 +128,8 @@ mod e2e_tests {
             lambda: 2.0,
             n_tasks: 5,
         };
-        let loss = ewc_loss(&params, &reg, &cfg).unwrap();
+        let loss =
+            ewc_loss(&params, &reg, &cfg).expect("EWC loss should compute with valid params");
         assert!(
             loss.abs() < 1e-5,
             "E2E: EWC loss must be 0 at anchor, got {loss}"
@@ -147,8 +148,10 @@ mod e2e_tests {
         };
         let small_disp = vec![0.1_f32; 8];
         let large_disp = vec![1.0_f32; 8];
-        let pen_small = si_penalty(&small_disp, &anchor, &omega, &cfg).unwrap();
-        let pen_large = si_penalty(&large_disp, &anchor, &omega, &cfg).unwrap();
+        let pen_small = si_penalty(&small_disp, &anchor, &omega, &cfg)
+            .expect("SI penalty should compute with valid inputs");
+        let pen_large = si_penalty(&large_disp, &anchor, &omega, &cfg)
+            .expect("SI penalty should compute with valid inputs");
         assert!(
             pen_large > pen_small,
             "E2E: SI penalty must grow with displacement ({pen_small} < {pen_large})"
@@ -161,7 +164,8 @@ mod e2e_tests {
     fn e2e_mas_importance_tracks_gradient() {
         let mut omega = vec![0.0_f32; 4];
         let gradient = vec![3.0_f32, -2.0, 1.5, -0.5];
-        mas_importance_update(&mut omega, &gradient, 0.0).unwrap();
+        mas_importance_update(&mut omega, &gradient, 0.0)
+            .expect("MAS importance update should succeed with valid inputs");
         // With momentum=0: omega = |gradient|
         assert!((omega[0] - 3.0).abs() < 1e-5);
         assert!((omega[1] - 2.0).abs() < 1e-5);
@@ -175,7 +179,8 @@ mod e2e_tests {
     fn e2e_packnet_sparsity_respected() {
         let weights: Vec<f32> = (1..=20).map(|i| i as f32).collect();
         let sparsity = 0.5;
-        let mask = prune_weights_l1(&weights, sparsity, 0).unwrap();
+        let mask = prune_weights_l1(&weights, sparsity, 0)
+            .expect("L1 pruning should succeed with valid sparsity");
         let n_active = mask.n_active();
         let expected_keep = (20.0 * (1.0 - sparsity)).floor() as usize;
         assert_eq!(
@@ -190,7 +195,8 @@ mod e2e_tests {
     fn e2e_piggyback_binarization() {
         let real_mask = vec![-0.5_f32, 0.5, -0.1, 0.1, 0.0, 1.0];
         let threshold = 0.0;
-        let bin = binarize_mask(&real_mask, threshold).unwrap();
+        let bin = binarize_mask(&real_mask, threshold)
+            .expect("binarize mask should succeed with valid inputs");
         assert_eq!(bin, vec![0, 1, 0, 1, 0, 1]);
     }
 
@@ -200,11 +206,11 @@ mod e2e_tests {
     fn e2e_progressive_multi_column_shape() {
         let mut rng = LcgRng::new(2024);
         let mut net = ProgNnNetwork::new();
-        add_column(&mut net, 8, 2, &mut rng).unwrap();
-        add_column(&mut net, 8, 2, &mut rng).unwrap();
+        add_column(&mut net, 8, 2, &mut rng).expect("column addition should succeed");
+        add_column(&mut net, 8, 2, &mut rng).expect("column addition should succeed");
         let input = vec![0.3_f32; 8];
-        let out0 = prog_forward(&net, &input, 0).unwrap();
-        let out1 = prog_forward(&net, &input, 1).unwrap();
+        let out0 = prog_forward(&net, &input, 0).expect("progressive forward should succeed");
+        let out1 = prog_forward(&net, &input, 1).expect("progressive forward should succeed");
         assert_eq!(out0.len(), 8, "E2E: Column 0 output shape should be 8");
         assert_eq!(out1.len(), 8, "E2E: Column 1 output shape should be 8");
         assert!(out0.iter().all(|v| v.is_finite()));
@@ -216,7 +222,7 @@ mod e2e_tests {
     #[test]
     fn e2e_er_reservoir_bounded() {
         let mut rng = LcgRng::new(314);
-        let mut buf = er_buffer_new(16).unwrap();
+        let mut buf = er_buffer_new(16).expect("ER buffer should initialize with valid capacity");
         for i in 0..200_usize {
             er_add(&mut buf, vec![i as f32; 4], (i % 5) as u32, &mut rng);
         }
@@ -239,7 +245,8 @@ mod e2e_tests {
             vec![0.0_f32, 0.0, 1.0, 0.0],
         ];
         let margin = 0.0;
-        let g_proj = gem_project_gradient(&g, &mem_grads, margin).unwrap();
+        let g_proj = gem_project_gradient(&g, &mem_grads, margin)
+            .expect("GEM gradient projection should succeed");
         for mg in &mem_grads {
             let d: f32 = g_proj.iter().zip(mg.iter()).map(|(&a, &b)| a * b).sum();
             assert!(
@@ -256,7 +263,7 @@ mod e2e_tests {
         let g = vec![1.0_f32, 1.0, 1.0, 1.0];
         let g_ref = vec![0.5_f32, 0.5, 0.5, 0.5]; // same direction
         let margin = 0.0;
-        let g_proj = a_gem_project(&g, &g_ref, margin).unwrap();
+        let g_proj = a_gem_project(&g, &g_ref, margin).expect("A-GEM projection should succeed");
         // g · g_ref = 2.0 > 0 = -margin → no projection
         for (a, b) in g.iter().zip(g_proj.iter()) {
             assert!(
@@ -278,7 +285,8 @@ mod e2e_tests {
             alpha: 0.2,
             beta: 0.8,
         };
-        let loss = der_loss(&current_logits, &stored_logits, label, n_classes, &cfg).unwrap();
+        let loss = der_loss(&current_logits, &stored_logits, label, n_classes, &cfg)
+            .expect("DER loss should compute with valid logits");
         assert!(
             loss.is_finite(),
             "E2E: DER++ loss must be finite, got {loss}"
@@ -298,12 +306,14 @@ mod e2e_tests {
                 mat.data[t][k] = 0.95;
             }
         }
-        let af = average_forgetting(&mat).unwrap();
+        let af =
+            average_forgetting(&mat).expect("average forgetting should compute on valid matrix");
         assert!(
             af.abs() < 1e-5,
             "E2E: Average forgetting must be 0 for perfect retention, got {af}"
         );
-        let bwt = backward_transfer(&mat).unwrap();
+        let bwt =
+            backward_transfer(&mat).expect("backward transfer should compute on valid matrix");
         assert!(
             bwt.abs() < 1e-5,
             "E2E: BWT must be 0 for perfect retention, got {bwt}"

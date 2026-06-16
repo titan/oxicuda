@@ -252,7 +252,9 @@ mod tests {
         let mut rng = LcgRng::new(1);
         let model = LatentOde::new(make_config(), &mut rng);
         let obs = vec![0.0_f32; 5 * 3]; // T=5, d_obs=3
-        let (mu, log_sigma) = model.encode(&obs, 5).unwrap();
+        let (mu, log_sigma) = model
+            .encode(&obs, 5)
+            .expect("encode should succeed with valid observation sequence");
         assert_eq!(mu.len(), 4);
         assert_eq!(log_sigma.len(), 4);
     }
@@ -272,7 +274,9 @@ mod tests {
         let mut rng = LcgRng::new(3);
         let model = LatentOde::new(make_config(), &mut rng);
         let traj = vec![0.0_f32; 5 * 4]; // T=5, d_latent=4
-        let obs = model.decode(&traj, 5).unwrap();
+        let obs = model
+            .decode(&traj, 5)
+            .expect("decode with valid latent trajectory of 5 steps should succeed");
         assert_eq!(obs.len(), 5 * 3);
     }
 
@@ -305,7 +309,9 @@ mod tests {
         let mut rng = LcgRng::new(7);
         let model = LatentOde::new(make_config(), &mut rng);
         let traj = vec![0.3_f32; 10 * 4];
-        let obs = model.decode(&traj, 10).unwrap();
+        let obs = model
+            .decode(&traj, 10)
+            .expect("decode with valid latent trajectory of 10 steps should succeed");
         assert!(
             obs.iter().all(|v| v.is_finite()),
             "Decoded outputs not finite"

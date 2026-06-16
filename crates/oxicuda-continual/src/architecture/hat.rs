@@ -472,7 +472,7 @@ mod tests {
             n_tasks: 5,
             ..Default::default()
         };
-        hat_new(&cfg, 42).unwrap()
+        hat_new(&cfg, 42).expect("HAT state should initialize with valid config")
     }
 
     fn add_embed(state: &mut HatState, task_id: usize) {
@@ -493,7 +493,8 @@ mod tests {
         let mut state = make_hat();
         add_embed(&mut state, 0);
         let x = vec![1.0_f64; 8];
-        let out = hat_forward(&state, &x, 0, 1.0).unwrap();
+        let out = hat_forward(&state, &x, 0, 1.0)
+            .expect("HAT forward pass should succeed on valid input");
         assert_eq!(out.len(), 4, "Output should have n_units[1]=4 elements");
     }
 
@@ -524,7 +525,8 @@ mod tests {
         let x: Vec<f64> = (0..n * 8).map(|_| rng2.next_f32() as f64).collect();
         let y: Vec<f64> = (0..n).map(|i| (i % 4) as f64).collect();
         let sum_before: f64 = state.cumulative_mask.iter().flat_map(|m| m.iter()).sum();
-        hat_fit_task(&mut state, &x, &y, n, 0, &mut rng).unwrap();
+        hat_fit_task(&mut state, &x, &y, n, 0, &mut rng)
+            .expect("HAT task fitting should succeed with valid data");
         let sum_after: f64 = state.cumulative_mask.iter().flat_map(|m| m.iter()).sum();
         assert!(
             sum_after >= sum_before,
@@ -540,7 +542,8 @@ mod tests {
         let n = 4_usize;
         let x: Vec<f64> = (0..n * 8).map(|_| rng.next_f32() as f64).collect();
         let y: Vec<f64> = vec![0.0, 1.0, 2.0, 3.0];
-        hat_fit_task(&mut state, &x, &y, n, 0, &mut rng).unwrap();
+        hat_fit_task(&mut state, &x, &y, n, 0, &mut rng)
+            .expect("HAT task fitting should succeed with valid data");
         let capacity = hat_task_capacity(&state);
         for (l, &c) in capacity.iter().enumerate() {
             assert!(
@@ -576,7 +579,8 @@ mod tests {
             }
         }
         let x = vec![0.1_f64; 8];
-        let out = hat_forward(&state, &x, 0, 1000.0).unwrap();
+        let out = hat_forward(&state, &x, 0, 1000.0)
+            .expect("HAT forward pass should succeed on valid input");
         // With large embedding, gates should be close to 1.0.
         // We verify forward doesn't panic and output is finite.
         assert!(out.iter().all(|v| v.is_finite()), "Output must be finite");
@@ -590,9 +594,11 @@ mod tests {
         let n = 4_usize;
         let x_fit: Vec<f64> = (0..n * 8).map(|_| rng.next_f32() as f64).collect();
         let y: Vec<f64> = vec![0.0, 1.0, 2.0, 3.0];
-        hat_fit_task(&mut state, &x_fit, &y, n, 0, &mut rng).unwrap();
+        hat_fit_task(&mut state, &x_fit, &y, n, 0, &mut rng)
+            .expect("HAT task fitting should succeed with valid data");
         let x_query = vec![0.0_f64; 8];
-        let pred = hat_classify(&state, &x_query, 0).unwrap();
+        let pred = hat_classify(&state, &x_query, 0)
+            .expect("HAT classification should succeed on valid input");
         assert!(pred < 4, "Prediction {pred} should be < n_units[1]=4");
     }
 
@@ -624,11 +630,13 @@ mod tests {
         let x: Vec<f64> = (0..n * 8).map(|_| rng.next_f32() as f64).collect();
         let y: Vec<f64> = vec![0.0, 1.0, 2.0, 3.0];
         assert_eq!(state.n_tasks_seen, 0);
-        hat_fit_task(&mut state, &x, &y, n, 0, &mut rng).unwrap();
+        hat_fit_task(&mut state, &x, &y, n, 0, &mut rng)
+            .expect("HAT task fitting should succeed with valid data");
         assert_eq!(state.n_tasks_seen, 1);
         let x2: Vec<f64> = (0..n * 8).map(|_| rng.next_f32() as f64).collect();
         let y2 = y.clone();
-        hat_fit_task(&mut state, &x2, &y2, n, 1, &mut rng).unwrap();
+        hat_fit_task(&mut state, &x2, &y2, n, 1, &mut rng)
+            .expect("HAT task fitting should succeed with valid data");
         assert_eq!(state.n_tasks_seen, 2);
     }
 
@@ -650,7 +658,8 @@ mod tests {
         let n = 8_usize;
         let x: Vec<f64> = (0..n * 8).map(|_| rng.next_f32() as f64).collect();
         let y: Vec<f64> = (0..n).map(|i| (i % 4) as f64).collect();
-        hat_fit_task(&mut state, &x, &y, n, 0, &mut rng).unwrap();
+        hat_fit_task(&mut state, &x, &y, n, 0, &mut rng)
+            .expect("HAT task fitting should succeed with valid data");
         let capacity = hat_task_capacity(&state);
         // After one task, at least one layer should have < 1.0 capacity.
         let any_reduced = capacity.iter().any(|&c| c < 1.0 - 1e-9);

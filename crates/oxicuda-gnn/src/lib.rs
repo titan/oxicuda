@@ -19,19 +19,23 @@
 
 // ─── Module declarations ─────────────────────────────────────────────────────
 
+pub mod conv;
 pub mod error;
 pub mod graph;
 pub mod handle;
 pub mod layers;
 pub mod message_passing;
+pub mod ops;
 pub mod pooling;
 pub mod ptx_kernels;
 pub mod readout;
+pub mod sampling;
 
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 /// Convenience re-exports for common GNN types.
 pub mod prelude {
+    pub use crate::conv::gcnii::{Gcnii, GcniiConfig, gcnii_beta};
     pub use crate::error::{GnnError, GnnResult};
     pub use crate::graph::coo::CooGraph;
     pub use crate::graph::csr::CsrGraph;
@@ -39,17 +43,26 @@ pub mod prelude {
     pub use crate::graph::sampling::{NeighborhoodSampler, SampledGraph, biased_walk, random_walk};
     pub use crate::handle::{GnnHandle, LcgRng, SmVersion};
     pub use crate::layers::appnp::{AppnpConfig, AppnpLayer};
+    pub use crate::layers::chebnet::{ChebNetConfig, ChebNetLayer};
     pub use crate::layers::gat::{GatConfig, GatLayer};
     pub use crate::layers::gat_v2::{GatV2Config, GatV2Layer};
     pub use crate::layers::gcn::{GcnConfig, GcnLayer};
     pub use crate::layers::gin::{GinConfig, GinLayer};
+    pub use crate::layers::grand::{GrandConfig, GrandLayer};
     pub use crate::layers::graph_transformer::{
         GraphTransformerConfig, GraphTransformerLayer, GraphTransformerWeights,
     };
     pub use crate::layers::jk_net::{JkMode, JkNet, JkNetConfig};
+    pub use crate::layers::k_wl_gnn::{
+        KWlConfig, KWlGnn, PairOp, apply_pair_op, graph_readout_sum,
+    };
+    pub use crate::layers::mixhop::{MixHopConfig, MixHopLayer};
+    pub use crate::layers::norm::{GraphNorm, PairNorm, PairNormMode};
     pub use crate::layers::rgcn::{RgcnConfig, RgcnLayer};
+    pub use crate::layers::rwse::{RwseConfig, RwseEncoder, random_walk_se};
     pub use crate::layers::sage::{SageAggregator, SageConfig, SageLayer};
     pub use crate::layers::sgc::{sgc_forward, sgc_linear, sgc_propagate};
+    pub use crate::layers::sign::{SignConfig, SignConv, sign_precompute};
     pub use crate::message_passing::aggregate::{
         AggregationType, aggregate, aggregate_degree_norm, aggregate_max, aggregate_mean,
         aggregate_softmax, aggregate_sum,
@@ -65,6 +78,7 @@ pub mod prelude {
         GlobalPoolType, batched_global_pool, global_attention_pool, global_max_pool,
         global_mean_pool, global_sum_pool,
     };
+    pub use crate::pooling::sag_pool::{SagPool, SagPoolResult};
     pub use crate::pooling::topk_pool::{TopKPool, TopKPoolResult};
     pub use crate::ptx_kernels::{
         aggregate_mean_ptx, csr_spmv_ptx, f32_hex, gat_attention_ptx, gin_combine_ptx,
@@ -72,6 +86,9 @@ pub mod prelude {
     };
     pub use crate::readout::dgi::{Dgi, DgiConfig, DgiLoss, DgiWeights};
     pub use crate::readout::set2set::Set2Set;
+    pub use crate::readout::sort_pool::{SortPool, SortPoolConfig};
+    pub use crate::sampling::cluster_gcn::{BatchSubgraph, ClusterGcn, Partition};
+    pub use crate::sampling::graphsaint::{GraphSaint, SaintNorm, SaintSampler, SaintSubgraph};
 }
 
 // ─── Integration tests ───────────────────────────────────────────────────────

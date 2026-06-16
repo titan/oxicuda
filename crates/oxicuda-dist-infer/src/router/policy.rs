@@ -280,10 +280,17 @@ mod tests {
 
     #[test]
     fn round_robin_cycles() {
-        let mut rp = RoutingPolicy::new(3, PolicyMode::RoundRobin, loads(3, 10), 4).unwrap();
-        let r0 = rp.route(&req(1, vec![1, 2])).unwrap();
-        let r1 = rp.route(&req(2, vec![1, 2])).unwrap();
-        let r2 = rp.route(&req(3, vec![1, 2])).unwrap();
+        let mut rp = RoutingPolicy::new(3, PolicyMode::RoundRobin, loads(3, 10), 4)
+            .expect("value should be present");
+        let r0 = rp
+            .route(&req(1, vec![1, 2]))
+            .expect("value should be present");
+        let r1 = rp
+            .route(&req(2, vec![1, 2]))
+            .expect("value should be present");
+        let r2 = rp
+            .route(&req(3, vec![1, 2]))
+            .expect("value should be present");
         assert_eq!(r0.rank, 0);
         assert_eq!(r1.rank, 1);
         assert_eq!(r2.rank, 2);
@@ -309,18 +316,21 @@ mod tests {
                 in_flight: 0,
             },
         ];
-        let mut rp = RoutingPolicy::new(3, PolicyMode::LeastLoaded, ls, 4).unwrap();
-        let dec = rp.route(&req(1, vec![1])).unwrap();
+        let mut rp =
+            RoutingPolicy::new(3, PolicyMode::LeastLoaded, ls, 4).expect("new should succeed");
+        let dec = rp.route(&req(1, vec![1])).expect("value should be present");
         assert_eq!(dec.rank, 1, "rank 1 has most free blocks");
     }
 
     #[test]
     fn prefix_affinity_hits_registered_rank() {
-        let mut rp = RoutingPolicy::new(4, PolicyMode::PrefixAffinity, loads(4, 10), 3).unwrap();
+        let mut rp = RoutingPolicy::new(4, PolicyMode::PrefixAffinity, loads(4, 10), 3)
+            .expect("value should be present");
         let r = req(1, vec![10, 20, 30, 40]);
         let hash = r.prefix_hash(3);
-        rp.register_prefix(hash, 2).unwrap();
-        let dec = rp.route(&r).unwrap();
+        rp.register_prefix(hash, 2)
+            .expect("register_prefix should succeed");
+        let dec = rp.route(&r).expect("route should succeed");
         assert_eq!(dec.rank, 2);
         assert!(dec.prefix_hit);
         assert_eq!(dec.policy_used, DispatchPolicy::PrefixAffinity);
@@ -341,8 +351,11 @@ mod tests {
                 in_flight: 0,
             },
         ];
-        let mut rp = RoutingPolicy::new(2, PolicyMode::PrefixAffinity, ls, 3).unwrap();
-        let dec = rp.route(&req(1, vec![99, 98, 97])).unwrap();
+        let mut rp =
+            RoutingPolicy::new(2, PolicyMode::PrefixAffinity, ls, 3).expect("new should succeed");
+        let dec = rp
+            .route(&req(1, vec![99, 98, 97]))
+            .expect("value should be present");
         // No prefix map entry → falls back to least-loaded → rank 1
         assert_eq!(dec.rank, 1);
         assert!(!dec.prefix_hit);
@@ -363,7 +376,8 @@ mod tests {
                 in_flight: 0,
             },
         ];
-        let mut rp = RoutingPolicy::new(2, PolicyMode::LeastLoaded, ls, 4).unwrap();
+        let mut rp =
+            RoutingPolicy::new(2, PolicyMode::LeastLoaded, ls, 4).expect("new should succeed");
         let err = rp.route(&req(1, vec![1])).unwrap_err();
         assert!(matches!(
             err,
@@ -373,7 +387,8 @@ mod tests {
 
     #[test]
     fn empty_token_sequence_errors() {
-        let mut rp = RoutingPolicy::new(2, PolicyMode::RoundRobin, loads(2, 10), 4).unwrap();
+        let mut rp = RoutingPolicy::new(2, PolicyMode::RoundRobin, loads(2, 10), 4)
+            .expect("value should be present");
         let err = rp.route(&req(1, vec![])).unwrap_err();
         assert!(matches!(err, DistInferError::EmptyTokenSequence));
     }
@@ -381,7 +396,8 @@ mod tests {
     #[test]
     fn update_load_changes_routing() {
         let ls = loads(2, 5);
-        let mut rp = RoutingPolicy::new(2, PolicyMode::LeastLoaded, ls, 4).unwrap();
+        let mut rp =
+            RoutingPolicy::new(2, PolicyMode::LeastLoaded, ls, 4).expect("new should succeed");
         // Update rank 0 to have 10 free blocks
         rp.update_load(
             0,
@@ -391,16 +407,18 @@ mod tests {
                 in_flight: 0,
             },
         )
-        .unwrap();
-        let dec = rp.route(&req(1, vec![1])).unwrap();
+        .expect("value should be present");
+        let dec = rp.route(&req(1, vec![1])).expect("value should be present");
         assert_eq!(dec.rank, 0);
     }
 
     #[test]
     fn metrics_accumulate() {
-        let mut rp = RoutingPolicy::new(2, PolicyMode::RoundRobin, loads(2, 10), 4).unwrap();
+        let mut rp = RoutingPolicy::new(2, PolicyMode::RoundRobin, loads(2, 10), 4)
+            .expect("value should be present");
         for i in 0..6 {
-            rp.route(&req(i, vec![i as u32 + 1])).unwrap();
+            rp.route(&req(i, vec![i as u32 + 1]))
+                .expect("value should be present");
         }
         assert_eq!(rp.metrics().total_routed, 6);
         assert_eq!(rp.metrics().round_robin_count, 6);

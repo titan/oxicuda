@@ -1124,7 +1124,7 @@ mod tests {
             "d=2 case should succeed: {:?}",
             result.err()
         );
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert_eq!(r.a_shape[1], 2, "physical dimension should be 2");
     }
 

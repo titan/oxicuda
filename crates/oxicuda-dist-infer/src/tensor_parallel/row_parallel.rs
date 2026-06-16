@@ -237,7 +237,7 @@ mod tests {
             rank,
             ParallelismConfig { tp, sp: 1, ep: 1 },
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     #[test]
@@ -261,12 +261,15 @@ mod tests {
         let partials: Vec<Vec<f32>> = (0..tp)
             .map(|rank| {
                 let h = make_handle(tp, rank);
-                let layer = RowLinear::from_full_weight(h, out, total_in, &weight, None).unwrap();
-                layer.local_forward(&input, 1).unwrap()
+                let layer = RowLinear::from_full_weight(h, out, total_in, &weight, None)
+                    .expect("from_full_weight should succeed");
+                layer
+                    .local_forward(&input, 1)
+                    .expect("local_forward should succeed")
             })
             .collect();
 
-        let result = RowLinear::all_reduce(&partials).unwrap();
+        let result = RowLinear::all_reduce(&partials).expect("all_reduce should succeed");
         // Identity × [1,2,3,4] = [1,2,3,4]
         assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0]);
     }
@@ -284,14 +287,16 @@ mod tests {
         let partials: Vec<Vec<f32>> = (0..tp)
             .map(|rank| {
                 let h = make_handle(tp, rank);
-                let layer =
-                    RowLinear::from_full_weight(h, out, total_in, &weight, Some(&bias)).unwrap();
-                layer.local_forward(&input, 1).unwrap()
+                let layer = RowLinear::from_full_weight(h, out, total_in, &weight, Some(&bias))
+                    .expect("value should be present");
+                layer
+                    .local_forward(&input, 1)
+                    .expect("local_forward should succeed")
             })
             .collect();
 
         // rank 0 adds bias [5,7]; rank 1 does not. Sum = [5,7]
-        let result = RowLinear::all_reduce(&partials).unwrap();
+        let result = RowLinear::all_reduce(&partials).expect("all_reduce should succeed");
         assert_eq!(result, vec![5.0, 7.0]);
     }
 
@@ -308,12 +313,15 @@ mod tests {
         let partials: Vec<Vec<f32>> = (0..tp)
             .map(|rank| {
                 let h = make_handle(tp, rank);
-                let layer = RowLinear::from_full_weight(h, out, total_in, &weight, None).unwrap();
-                layer.local_forward(&input, 2).unwrap()
+                let layer = RowLinear::from_full_weight(h, out, total_in, &weight, None)
+                    .expect("from_full_weight should succeed");
+                layer
+                    .local_forward(&input, 2)
+                    .expect("local_forward should succeed")
             })
             .collect();
 
-        let result = RowLinear::all_reduce(&partials).unwrap();
+        let result = RowLinear::all_reduce(&partials).expect("all_reduce should succeed");
         // Each output = sum of total_in ones = 4.0, 2 tokens, 3 outputs
         assert_eq!(result, vec![4.0; 2 * out]);
     }
@@ -338,12 +346,18 @@ mod tests {
         let h0 = make_handle(tp, 0);
         let h1 = make_handle(tp, 1);
         let w = vec![0.0_f32; 4 * 4];
-        let l0 = RowLinear::from_full_weight(h0, 4, 4, &w, None).unwrap();
-        let l1 = RowLinear::from_full_weight(h1, 4, 4, &w, None).unwrap();
+        let l0 = RowLinear::from_full_weight(h0, 4, 4, &w, None)
+            .expect("from_full_weight should succeed");
+        let l1 = RowLinear::from_full_weight(h1, 4, 4, &w, None)
+            .expect("from_full_weight should succeed");
         // input: batch=1, [10, 20, 30, 40]
         let full = vec![10.0_f32, 20.0, 30.0, 40.0];
-        let s0 = l0.slice_input(&full, 1).unwrap();
-        let s1 = l1.slice_input(&full, 1).unwrap();
+        let s0 = l0
+            .slice_input(&full, 1)
+            .expect("slice_input should succeed");
+        let s1 = l1
+            .slice_input(&full, 1)
+            .expect("slice_input should succeed");
         assert_eq!(s0, vec![10.0, 20.0]);
         assert_eq!(s1, vec![30.0, 40.0]);
     }

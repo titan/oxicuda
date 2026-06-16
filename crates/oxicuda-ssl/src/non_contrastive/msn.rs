@@ -539,7 +539,8 @@ mod tests {
         let protos = msn_prototype_init(cfg.n_prototypes, d, &mut rng);
         let anchor = make_features_normalised(b, d, 0.0);
         let target = make_features_normalised(b, d, 1.0);
-        let result = msn_loss(&anchor, &target, &protos, b, d, &cfg).unwrap();
+        let result =
+            msn_loss(&anchor, &target, &protos, b, d, &cfg).expect("msn_loss should succeed");
         assert!(result.loss.is_finite(), "loss not finite: {}", result.loss);
         // CE component must be non-negative.
         assert!(
@@ -571,7 +572,8 @@ mod tests {
         let protos = msn_prototype_init(k, d, &mut rng);
         let anchor = make_features_normalised(b, d, 0.0);
         // target == anchor, tau_anchor == tau_target → CE = H(q) ≤ ln(K).
-        let result = msn_loss(&anchor, &anchor, &protos, b, d, &cfg).unwrap();
+        let result =
+            msn_loss(&anchor, &anchor, &protos, b, d, &cfg).expect("msn_loss should succeed");
         let max_ce = (k as f32).ln(); // ln(16) ≈ 2.77
         assert!(
             result.ce_loss <= max_ce + 1e-4,
@@ -615,7 +617,8 @@ mod tests {
         let uniform_val = 1.0_f32 / (d as f32).sqrt();
         let anchor: Vec<f32> = vec![uniform_val; b * d];
         let target: Vec<f32> = vec![uniform_val; b * d];
-        let result = msn_loss(&anchor, &target, &protos, b, d, &cfg).unwrap();
+        let result =
+            msn_loss(&anchor, &target, &protos, b, d, &cfg).expect("msn_loss should succeed");
         // ME-Max entropy with uniform marginal ≈ ln(K).
         let expected_h = (k as f32).ln();
         assert!(
@@ -637,7 +640,8 @@ mod tests {
         let protos = msn_prototype_init(cfg.n_prototypes, d, &mut rng);
         let anchor = make_features_normalised(b, d, 2.5);
         let target = make_features_normalised(b, d, 3.7);
-        let result = msn_loss(&anchor, &target, &protos, b, d, &cfg).unwrap();
+        let result =
+            msn_loss(&anchor, &target, &protos, b, d, &cfg).expect("msn_loss should succeed");
         assert!(
             result.ce_loss >= 0.0,
             "CE must be non-negative, got {}",
@@ -695,7 +699,8 @@ mod tests {
         // Simulate masked features as near-zero (all tokens masked — tiny values).
         let anchor = make_features_normalised(b, d, 0.0);
         let target: Vec<f32> = vec![1.0_f32 / (d as f32).sqrt(); b * d]; // degenerate target
-        let result = msn_loss(&anchor, &target, &protos, b, d, &cfg).unwrap();
+        let result =
+            msn_loss(&anchor, &target, &protos, b, d, &cfg).expect("msn_loss should succeed");
         assert!(result.loss.is_finite(), "Expected finite loss, got NaN");
     }
 
@@ -712,7 +717,8 @@ mod tests {
         let protos = msn_prototype_init(cfg.n_prototypes, d, &mut rng);
         let anchor = make_features_normalised(b, d, 0.0);
         let target = make_features_normalised(b, d, 1.0);
-        let result = msn_loss(&anchor, &target, &protos, b, d, &cfg).unwrap();
+        let result =
+            msn_loss(&anchor, &target, &protos, b, d, &cfg).expect("msn_loss should succeed");
         assert!(result.loss.is_finite(), "Single-sample loss not finite");
     }
 
@@ -726,7 +732,8 @@ mod tests {
         let protos = msn_prototype_init(cfg.n_prototypes, d, &mut rng);
         let anchor = make_features_normalised(b, d, 0.0);
         let target = make_features_normalised(b, d, 1.0);
-        let result = msn_loss(&anchor, &target, &protos, b, d, &cfg).unwrap();
+        let result =
+            msn_loss(&anchor, &target, &protos, b, d, &cfg).expect("msn_loss should succeed");
         assert!(
             (0.0..=1.0).contains(&result.mean_prototype_util),
             "util out of [0,1]: {}",
@@ -757,7 +764,8 @@ mod tests {
         let mut rng = LcgRng::new(31);
         let n_tokens = 196;
         let mask_ratio = 0.75_f32;
-        let mask = msn_random_mask(n_tokens, mask_ratio, &mut rng).unwrap();
+        let mask = msn_random_mask(n_tokens, mask_ratio, &mut rng)
+            .expect("msn_random_mask should succeed");
         assert_eq!(mask.len(), n_tokens);
         let n_masked = mask.iter().filter(|&&v| v).count();
         let expected = (n_tokens as f32 * mask_ratio) as usize; // 147
@@ -779,7 +787,8 @@ mod tests {
         };
         let mut protos = msn_prototype_init(cfg.n_prototypes, d, &mut rng);
         let anchor = make_features_normalised(b, d, 0.0);
-        msn_update_prototypes(&mut protos, &anchor, b, d, 0.01, &cfg).unwrap();
+        msn_update_prototypes(&mut protos, &anchor, b, d, 0.01, &cfg)
+            .expect("msn_update_prototypes should succeed");
         for ki in 0..cfg.n_prototypes {
             let row = protos.row(ki);
             let norm: f32 = row.iter().map(|&v| v * v).sum::<f32>().sqrt();
@@ -825,7 +834,8 @@ mod tests {
         let protos = msn_prototype_init(cfg.n_prototypes, d, &mut rng);
         let anchor = make_features_normalised(b, d, 0.0);
         let target = make_features_normalised(b, d, 1.0);
-        let result = msn_loss(&anchor, &target, &protos, b, d, &cfg).unwrap();
+        let result =
+            msn_loss(&anchor, &target, &protos, b, d, &cfg).expect("msn_loss should succeed");
         assert_eq!(
             result.me_max_loss, result.mean_entropy,
             "me_max_loss and mean_entropy must be identical diagnostic values"

@@ -48,3 +48,10 @@ pub use screened::{
     ScreenedConfig, ScreenedFit, screened_marginal_violation, screened_sinkhorn, screened_sparsity,
     screened_transport_cost, screened_transport_cost_with_reg,
 };
+
+/// Numerically stabilised Sinkhorn with periodic potential absorption (Schmitzer 2019).
+pub mod stabilised_sinkhorn;
+pub use stabilised_sinkhorn::{
+    StabilisedSinkhornConfig, StabilisedSinkhornResult, marginal_violation_row, sq_euclidean_cost,
+    stabilised_sinkhorn,
+};

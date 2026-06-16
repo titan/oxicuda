@@ -430,7 +430,7 @@ mod tests {
             ref_rejected_step_logps: vec![-1.0],
         };
         let cfg = StepDpoConfig::default();
-        let out = step_dpo_loss(&pair, &cfg).unwrap();
+        let out = step_dpo_loss(&pair, &cfg).expect("step_dpo_loss should succeed");
         assert!(out.loss.is_finite(), "single-step loss should be finite");
         // Verify it equals -log_sigmoid(beta * (chosen_delta - rejected_delta))
         let delta = 0.1 * ((-0.5 - (-1.0)) - (-2.0 - (-1.0)));
@@ -457,7 +457,7 @@ mod tests {
             reduce: StepReduceMode::WeightedMean,
             ..Default::default()
         };
-        let out = step_dpo_loss(&pair, &cfg).unwrap();
+        let out = step_dpo_loss(&pair, &cfg).expect("step_dpo_loss should succeed");
         let expected_mean = out.per_step_losses.iter().sum::<f32>() / 3.0;
         assert!(
             (out.loss - expected_mean).abs() < 1e-5,
@@ -479,7 +479,7 @@ mod tests {
             reduce: StepReduceMode::WeightedSum,
             ..Default::default()
         };
-        let out = step_dpo_loss(&pair, &cfg).unwrap();
+        let out = step_dpo_loss(&pair, &cfg).expect("step_dpo_loss should succeed");
         // All steps identical, so check weights
         let expected_weights: Vec<f32> = (0..n).map(|k| gamma.powi(k as i32)).collect();
         for (k, (&w, &ew)) in out
@@ -502,7 +502,7 @@ mod tests {
             weight_scheme: StepWeightScheme::InversePosition,
             ..Default::default()
         };
-        let out = step_dpo_loss(&pair, &cfg).unwrap();
+        let out = step_dpo_loss(&pair, &cfg).expect("step_dpo_loss should succeed");
         assert!((out.per_step_weights[0] - 1.0).abs() < 1e-5, "w[0]=1.0");
         assert!((out.per_step_weights[1] - 0.5).abs() < 1e-5, "w[1]=0.5");
         assert!(
@@ -525,7 +525,7 @@ mod tests {
             reduce: StepReduceMode::LastStep,
             ..Default::default()
         };
-        let out = step_dpo_loss(&pair, &cfg).unwrap();
+        let out = step_dpo_loss(&pair, &cfg).expect("step_dpo_loss should succeed");
         let n = out.per_step_losses.len();
         assert!(
             (out.loss - out.per_step_losses[n - 1]).abs() < 1e-6,
@@ -552,7 +552,7 @@ mod tests {
             reduce: StepReduceMode::WeightedSum,
             ..Default::default()
         };
-        let out = step_dpo_loss(&pair, &cfg).unwrap();
+        let out = step_dpo_loss(&pair, &cfg).expect("step_dpo_loss should succeed");
         let expected = 2.0 * out.per_step_losses[0] + 3.0 * out.per_step_losses[1];
         assert!(
             (out.loss - expected).abs() < 1e-5,
@@ -594,9 +594,14 @@ mod tests {
         let cfg = StepDpoConfig::default();
         let pair_a = make_pair(2, -0.5, -2.0);
         let pair_b = make_pair(2, -1.0, -3.0);
-        let loss_a = step_dpo_loss(&pair_a, &cfg).unwrap().loss;
-        let loss_b = step_dpo_loss(&pair_b, &cfg).unwrap().loss;
-        let batch_loss = step_dpo_loss_batch(&[pair_a, pair_b], &cfg).unwrap();
+        let loss_a = step_dpo_loss(&pair_a, &cfg)
+            .expect("step_dpo_loss should succeed")
+            .loss;
+        let loss_b = step_dpo_loss(&pair_b, &cfg)
+            .expect("step_dpo_loss should succeed")
+            .loss;
+        let batch_loss = step_dpo_loss_batch(&[pair_a, pair_b], &cfg)
+            .expect("step_dpo_loss_batch should succeed");
         let expected = (loss_a + loss_b) / 2.0;
         assert!(
             (batch_loss - expected).abs() < 1e-5,
@@ -616,7 +621,7 @@ mod tests {
             ref_rejected_step_logps: vec![-1.0],
         };
         let cfg = StepDpoConfig::default();
-        let out = step_dpo_loss(&pair, &cfg).unwrap();
+        let out = step_dpo_loss(&pair, &cfg).expect("step_dpo_loss should succeed");
         assert!(out.mean_margin > 0.0, "chosen better → positive margin");
         // Loss should be less than ln 2 (the maximum at margin=0)
         assert!(
@@ -634,7 +639,7 @@ mod tests {
             ref_rejected_step_logps: vec![-1.0],
         };
         let cfg = StepDpoConfig::default();
-        let out = step_dpo_loss(&pair, &cfg).unwrap();
+        let out = step_dpo_loss(&pair, &cfg).expect("step_dpo_loss should succeed");
         assert!(out.mean_margin < 0.0, "rejected better → negative margin");
         assert!(
             out.loss > 2.0_f32.ln(),

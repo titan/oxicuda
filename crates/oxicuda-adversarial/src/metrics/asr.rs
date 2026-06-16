@@ -40,21 +40,32 @@ mod tests {
     fn perfect_attack_is_one() {
         let pred = vec![1_usize, 2, 0];
         let truth = vec![0_usize, 0, 1];
-        assert!((attack_success_rate(&pred, &truth).unwrap() - 1.0).abs() < 1e-6);
+        assert!(
+            (attack_success_rate(&pred, &truth).expect("attack_success_rate should succeed") - 1.0)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]
     fn no_success_is_zero() {
         let pred = vec![0_usize, 1, 2];
         let truth = pred.clone();
-        assert!((attack_success_rate(&pred, &truth).unwrap()).abs() < 1e-6);
+        assert!(
+            (attack_success_rate(&pred, &truth).expect("attack_success_rate should succeed")).abs()
+                < 1e-6
+        );
     }
 
     #[test]
     fn half_correct() {
         let pred = vec![0_usize, 1, 0, 1];
         let truth = vec![0_usize, 1, 1, 0];
-        assert!((attack_success_rate(&pred, &truth).unwrap() - 0.5).abs() < 1e-6);
+        assert!(
+            (attack_success_rate(&pred, &truth).expect("attack_success_rate should succeed") - 0.5)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]

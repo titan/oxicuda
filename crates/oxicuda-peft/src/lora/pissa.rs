@@ -575,8 +575,11 @@ mod tests {
     fn rank_equals_full_gives_near_zero_residual() {
         let w = deterministic_matrix(4, 4);
         let cfg = default_cfg(4, 4, 4);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
-        let rn = ad.init_residual_norm(&w).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with valid config");
+        let rn = ad
+            .init_residual_norm(&w)
+            .expect("init_residual_norm should succeed with matching dimensions");
         assert!(rn < 1e-9, "residual should vanish at full rank, got {rn}");
     }
 
@@ -584,7 +587,8 @@ mod tests {
     fn merge_roundtrip_at_full_rank() {
         let w = deterministic_matrix(4, 5);
         let cfg = default_cfg(4, 5, 4);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with valid config");
         let merged = ad.merge();
         assert_eq!(merged.len(), w.len());
         let mut err = 0.0_f64;
@@ -599,10 +603,13 @@ mod tests {
     fn rank_one_smoke() {
         let w = deterministic_matrix(3, 4);
         let cfg = default_cfg(3, 4, 1);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with valid config");
         assert_eq!(ad.a.len(), 4);
         assert_eq!(ad.b.len(), 3);
-        let rn = ad.init_residual_norm(&w).unwrap();
+        let rn = ad
+            .init_residual_norm(&w)
+            .expect("init_residual_norm should succeed with matching dimensions");
         assert!(rn > 0.0 && rn < 1.0);
     }
 
@@ -611,7 +618,8 @@ mod tests {
         // W = [[3, 0], [0, 4]] → singular values {4, 3}; rank-2 reconstruction exact.
         let w = vec![3.0, 0.0, 0.0, 4.0];
         let cfg = default_cfg(2, 2, 2);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with valid 2x2 config");
         let merged = ad.merge();
         for (a, b) in merged.iter().zip(w.iter()) {
             assert!((a - b).abs() < 1e-10, "expected {b}, got {a}");
@@ -627,8 +635,11 @@ mod tests {
         let mut prev = f64::INFINITY;
         for r in 1..=5 {
             let cfg = default_cfg(5, 5, r);
-            let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
-            let rn = ad.init_residual_norm(&w).unwrap();
+            let ad = PissaAdapter::from_weight(&w, cfg)
+                .expect("PissaAdapter::from_weight should succeed with valid config");
+            let rn = ad
+                .init_residual_norm(&w)
+                .expect("init_residual_norm should succeed with matching dimensions");
             assert!(
                 rn <= prev + 1e-12,
                 "residual must be non-increasing: r={r} rn={rn} prev={prev}"
@@ -641,9 +652,12 @@ mod tests {
     fn forward_output_dim_correct() {
         let w = deterministic_matrix(5, 7);
         let cfg = default_cfg(5, 7, 3);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with valid config");
         let x: Vec<f64> = (0..7).map(|i| 0.1 * i as f64).collect();
-        let y = ad.forward(&x).unwrap();
+        let y = ad
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         assert_eq!(y.len(), 5);
     }
 
@@ -651,7 +665,8 @@ mod tests {
     fn zero_w0_gives_zero_components() {
         let w = vec![0.0_f64; 16];
         let cfg = default_cfg(4, 4, 2);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with zero weight matrix");
         for v in ad.a.iter().chain(ad.b.iter()).chain(ad.residual_w.iter()) {
             assert!(v.abs() < 1e-14);
         }
@@ -661,8 +676,10 @@ mod tests {
     fn deterministic() {
         let w = deterministic_matrix(4, 6);
         let cfg = default_cfg(4, 6, 3);
-        let ad1 = PissaAdapter::from_weight(&w, cfg.clone()).unwrap();
-        let ad2 = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad1 = PissaAdapter::from_weight(&w, cfg.clone())
+            .expect("PissaAdapter::from_weight should succeed with valid config");
+        let ad2 = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with same config");
         assert_eq!(ad1.a, ad2.a);
         assert_eq!(ad1.b, ad2.b);
         assert_eq!(ad1.residual_w, ad2.residual_w);
@@ -675,9 +692,12 @@ mod tests {
             alpha: 0.0,
             ..default_cfg(4, 4, 2)
         };
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with alpha=0 config");
         let x = vec![0.3_f64, -0.6, 0.9, 0.2];
-        let y = ad.forward(&x).unwrap();
+        let y = ad
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         // y should equal residual_w · x
         let mut expected = [0.0_f64; 4];
         for (i, ei) in expected.iter_mut().enumerate() {
@@ -702,7 +722,8 @@ mod tests {
             }
         }
         let cfg = default_cfg(3, 2, 1);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with rank-1 config");
         // After rank-1 PiSSA, residual should be ~0 since rank(W)=1.
         let rn = frob_norm(&ad.residual_w) / frob_norm(&w);
         assert!(rn < 1e-10, "rank-1 weight: residual rn={rn}");
@@ -717,7 +738,8 @@ mod tests {
     fn forward_dim_mismatch() {
         let w = deterministic_matrix(4, 5);
         let cfg = default_cfg(4, 5, 2);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with valid config");
         let bad_x = vec![1.0, 2.0]; // wrong length
         assert!(matches!(
             ad.forward(&bad_x),
@@ -729,7 +751,8 @@ mod tests {
     fn init_residual_norm_input_check() {
         let w = deterministic_matrix(3, 3);
         let cfg = default_cfg(3, 3, 2);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with valid config");
         let bad = vec![1.0, 2.0]; // wrong length
         assert!(matches!(
             ad.init_residual_norm(&bad),
@@ -742,7 +765,8 @@ mod tests {
         // out_dim < in_dim triggers the transposed Jacobi branch.
         let w = deterministic_matrix(3, 7);
         let cfg = default_cfg(3, 7, 2);
-        let ad = PissaAdapter::from_weight(&w, cfg).unwrap();
+        let ad = PissaAdapter::from_weight(&w, cfg)
+            .expect("PissaAdapter::from_weight should succeed with wide matrix config");
         // Sanity: merge of trained-init equals (residual + principal) ≤ ‖W‖
         let merged = ad.merge();
         let err: f64 = merged
@@ -756,7 +780,8 @@ mod tests {
         assert!(!err.is_nan());
         // And full-rank reconstruction must match exactly.
         let cfg_full = default_cfg(3, 7, 3);
-        let ad_full = PissaAdapter::from_weight(&w, cfg_full).unwrap();
+        let ad_full = PissaAdapter::from_weight(&w, cfg_full)
+            .expect("PissaAdapter::from_weight should succeed with full-rank config");
         let merged_full = ad_full.merge();
         let err_full: f64 = merged_full
             .iter()

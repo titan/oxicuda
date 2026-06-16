@@ -572,22 +572,26 @@ mod tests {
 
     #[test]
     fn self_attention_output_shape() {
-        let attn = SelfAttentionBlock::new(16, 4).unwrap();
+        let attn = SelfAttentionBlock::new(16, 4).expect("new should succeed");
         let x = vec![0.1_f32; 8 * 16]; // seq=8, embed=16
         let qkv = vec![0.0_f32; 3 * 16 * 16];
         let out_w = vec![0.0_f32; 16 * 16];
-        let out = attn.forward(&x, &qkv, &out_w, 8).unwrap();
+        let out = attn
+            .forward(&x, &qkv, &out_w, 8)
+            .expect("forward should succeed");
         assert_eq!(out.len(), 8 * 16);
     }
 
     #[test]
     fn self_attention_residual() {
         // With zero weights, out = 0 + x (residual), so output = x
-        let attn = SelfAttentionBlock::new(8, 2).unwrap();
+        let attn = SelfAttentionBlock::new(8, 2).expect("new should succeed");
         let x = vec![1.0_f32; 4 * 8]; // seq=4
         let qkv = vec![0.0_f32; 3 * 8 * 8];
         let out_w = vec![0.0_f32; 8 * 8];
-        let out = attn.forward(&x, &qkv, &out_w, 4).unwrap();
+        let out = attn
+            .forward(&x, &qkv, &out_w, 4)
+            .expect("forward should succeed");
         for (&o, &xi) in out.iter().zip(&x) {
             assert!((o - xi).abs() < EPS, "residual: {o} vs {xi}");
         }
@@ -613,25 +617,29 @@ mod tests {
 
     #[test]
     fn cross_attention_output_shape() {
-        let attn = CrossAttentionBlock::new(16, 32, 4).unwrap();
+        let attn = CrossAttentionBlock::new(16, 32, 4).expect("new should succeed");
         let x = vec![0.1_f32; 4 * 16]; // seq=4, embed=16
         let ctx = vec![0.1_f32; 8 * 32]; // ctx=8, ctx_dim=32
         let q_w = vec![0.0_f32; 16 * 16];
         let kv_w = vec![0.0_f32; 2 * 16 * 32];
         let out_w = vec![0.0_f32; 16 * 16];
-        let out = attn.forward(&x, &ctx, 4, 8, &q_w, &kv_w, &out_w).unwrap();
+        let out = attn
+            .forward(&x, &ctx, 4, 8, &q_w, &kv_w, &out_w)
+            .expect("forward should succeed");
         assert_eq!(out.len(), 4 * 16);
     }
 
     #[test]
     fn cross_attention_residual() {
-        let attn = CrossAttentionBlock::new(8, 16, 2).unwrap();
+        let attn = CrossAttentionBlock::new(8, 16, 2).expect("new should succeed");
         let x = vec![1.5_f32; 3 * 8];
         let ctx = vec![0.0_f32; 5 * 16];
         let q_w = vec![0.0_f32; 8 * 8];
         let kv_w = vec![0.0_f32; 2 * 8 * 16];
         let out_w = vec![0.0_f32; 8 * 8];
-        let out = attn.forward(&x, &ctx, 3, 5, &q_w, &kv_w, &out_w).unwrap();
+        let out = attn
+            .forward(&x, &ctx, 3, 5, &q_w, &kv_w, &out_w)
+            .expect("forward should succeed");
         // With zero weights, projected is 0, residual = x
         for (&o, &xi) in out.iter().zip(&x) {
             assert!((o - xi).abs() < EPS, "residual mismatch: {o} vs {xi}");
@@ -646,7 +654,9 @@ mod tests {
         let w1 = vec![0.0_f32; 16 * 8];
         let w2 = vec![0.0_f32; 16 * 16];
         let wt = vec![0.0_f32; 2 * 16 * 32];
-        let out = block.forward(&x, &time_emb, &w1, &w2, &wt).unwrap();
+        let out = block
+            .forward(&x, &time_emb, &w1, &w2, &wt)
+            .expect("forward should succeed");
         assert_eq!(out.len(), 2 * 16);
     }
 
@@ -659,7 +669,9 @@ mod tests {
         let w1 = vec![0.0_f32; 8 * 8];
         let w2 = vec![0.0_f32; 8 * 8];
         let wt = vec![0.0_f32; 2 * 8 * 16];
-        let out = block.forward(&x, &time_emb, &w1, &w2, &wt).unwrap();
+        let out = block
+            .forward(&x, &time_emb, &w1, &w2, &wt)
+            .expect("forward should succeed");
         for (&o, &xi) in out.iter().zip(&x) {
             assert!((o - xi).abs() < EPS, "skip mismatch: {o} vs {xi}");
         }

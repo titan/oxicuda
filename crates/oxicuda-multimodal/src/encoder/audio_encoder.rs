@@ -363,7 +363,8 @@ mod tests {
         let weights = AudioEncoderWeights::zeros(&cfg);
         let n_frames = 20;
         let mel = vec![0.5_f32; n_frames * cfg.n_mels];
-        let out = AudioEncoder::forward(&mel, n_frames, &cfg, &weights).unwrap();
+        let out =
+            AudioEncoder::forward(&mel, n_frames, &cfg, &weights).expect("forward should succeed");
         assert_eq!(out.len(), 2 * cfg.d_model);
     }
 
@@ -379,7 +380,8 @@ mod tests {
         let mel: Vec<f32> = (0..n_frames * cfg.n_mels)
             .map(|i| (i as f32 * 0.1).sin())
             .collect();
-        let out = AudioEncoder::forward(&mel, n_frames, &cfg, &weights).unwrap();
+        let out =
+            AudioEncoder::forward(&mel, n_frames, &cfg, &weights).expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()), "output must be finite");
     }
 
@@ -389,7 +391,8 @@ mod tests {
         let weights = AudioEncoderWeights::zeros(&cfg);
         let n_frames = 8;
         let mel = vec![1.0_f32; n_frames * cfg.n_mels];
-        let out = AudioEncoder::forward(&mel, n_frames, &cfg, &weights).unwrap();
+        let out =
+            AudioEncoder::forward(&mel, n_frames, &cfg, &weights).expect("forward should succeed");
         // First half = mean, second half = std
         assert_eq!(out.len(), 2 * cfg.d_model);
         // std of constant signal = 0

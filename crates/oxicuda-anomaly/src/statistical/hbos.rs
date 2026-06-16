@@ -259,8 +259,11 @@ mod tests {
     fn fit_and_score_finite() {
         let data = simple_1d();
         let mut hbos = Hbos::default();
-        hbos.fit(&data, 20, 1).unwrap();
-        let s = hbos.score(&[0.9_f32]).unwrap();
+        hbos.fit(&data, 20, 1)
+            .expect("fit should succeed on valid 1-D data");
+        let s = hbos
+            .score(&[0.9_f32])
+            .expect("score should succeed after fit");
         assert!(s.is_finite(), "score should be finite, got {s}");
     }
 
@@ -284,10 +287,13 @@ mod tests {
         // Fit on cluster-only data (exclude the outlier for training)
         let train = &data[..50];
         let mut hbos = Hbos::new(HbosConfig { n_bins: 10 });
-        hbos.fit(train, 50, 1).unwrap();
+        hbos.fit(train, 50, 1)
+            .expect("fit should succeed on cluster training data");
 
-        let inlier_score = hbos.score(&[0.5_f32]).unwrap();
-        let outlier_score = hbos.score(&[10.0_f32]).unwrap();
+        let inlier_score = hbos.score(&[0.5_f32]).expect("inlier score should succeed");
+        let outlier_score = hbos
+            .score(&[10.0_f32])
+            .expect("outlier score should succeed");
 
         assert!(
             outlier_score > inlier_score,
@@ -321,10 +327,13 @@ mod tests {
     fn score_batch_returns_correct_length() {
         let data = simple_1d();
         let mut hbos = Hbos::default();
-        hbos.fit(&data, 20, 1).unwrap();
+        hbos.fit(&data, 20, 1)
+            .expect("fit should succeed on valid 1-D data");
 
         let queries: Vec<f32> = (0..5).map(|i| i as f32 * 0.3).collect();
-        let scores = hbos.score_batch(&queries, 5).unwrap();
+        let scores = hbos
+            .score_batch(&queries, 5)
+            .expect("batch score should succeed");
         assert_eq!(scores.len(), 5, "batch output should have 5 scores");
         assert!(
             scores.iter().all(|s| s.is_finite()),
@@ -339,9 +348,12 @@ mod tests {
         let data = vec![CONSTANT_VALUE; 30];
         let mut hbos = Hbos::default();
         // Should not panic or return Err.
-        hbos.fit(&data, 30, 1).unwrap();
+        hbos.fit(&data, 30, 1)
+            .expect("fit should succeed on constant-feature data");
         // Scoring the constant value itself must return a finite result.
-        let s = hbos.score(&[CONSTANT_VALUE]).unwrap();
+        let s = hbos
+            .score(&[CONSTANT_VALUE])
+            .expect("score on constant feature should succeed");
         assert!(
             s.is_finite(),
             "score on constant feature must be finite, got {s}"
@@ -353,11 +365,18 @@ mod tests {
         // With n_bins=1 every point lands in the single bin → all get the same score.
         let data: Vec<f32> = (0..20).map(|i| i as f32).collect();
         let mut hbos = Hbos::new(HbosConfig { n_bins: 1 });
-        hbos.fit(&data, 20, 1).unwrap();
+        hbos.fit(&data, 20, 1)
+            .expect("fit should succeed with n_bins=1");
 
-        let s0 = hbos.score(&[0.0_f32]).unwrap();
-        let s1 = hbos.score(&[10.0_f32]).unwrap();
-        let s2 = hbos.score(&[19.0_f32]).unwrap();
+        let s0 = hbos
+            .score(&[0.0_f32])
+            .expect("score at range start should succeed");
+        let s1 = hbos
+            .score(&[10.0_f32])
+            .expect("score at mid-range should succeed");
+        let s2 = hbos
+            .score(&[19.0_f32])
+            .expect("score at range end should succeed");
 
         assert!(
             (s0 - s1).abs() < 1e-5 && (s0 - s2).abs() < 1e-5,
@@ -380,7 +399,8 @@ mod tests {
     fn feature_count_mismatch_on_score() {
         let data = simple_1d();
         let mut hbos = Hbos::default();
-        hbos.fit(&data, 20, 1).unwrap();
+        hbos.fit(&data, 20, 1)
+            .expect("fit should succeed on valid 1-D data");
 
         // Provide 2 features when model expects 1.
         let err = hbos.score(&[0.5_f32, 0.5_f32]).unwrap_err();
@@ -408,12 +428,17 @@ mod tests {
             .collect();
 
         let mut hbos = Hbos::new(HbosConfig { n_bins: 5 });
-        hbos.fit(&data, 30, 2).unwrap();
+        hbos.fit(&data, 30, 2)
+            .expect("fit should succeed on 2-D data");
 
         // Point well within both feature ranges.
-        let s_in = hbos.score(&[0.5_f32, 10.5_f32]).unwrap();
+        let s_in = hbos
+            .score(&[0.5_f32, 10.5_f32])
+            .expect("inlier score on 2-D data should succeed");
         // Point outside both feature ranges.
-        let s_out = hbos.score(&[5.0_f32, 0.0_f32]).unwrap();
+        let s_out = hbos
+            .score(&[5.0_f32, 0.0_f32])
+            .expect("outlier score on 2-D data should succeed");
 
         assert!(s_in.is_finite(), "inlier score must be finite");
         assert!(s_out.is_finite(), "outlier score must be finite");

@@ -7,7 +7,7 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 
 ## Implementation Status
 
-- **Actual SLoC:** ~5,346 across 13 files
+- **Actual SLoC:** 4,395 across 13 files
 - **Tests:** 152 passing
 - **Status:** Full memory + compute backend with MSL, MPS interop, ANE hints, GPU FFT
 - **Targets:** Apple Silicon (M1/M2/M3/M4 series) and Intel Mac (discrete + integrated)
@@ -68,6 +68,8 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 - [ ] Indirect command buffers (`MTLIndirectCommandBuffer`) for low-overhead GPU-driven dispatch
 
 #### P2 -- Nice-to-Have
+- [ ] `fft/mps_fft.rs` — MPS FFT integration via `MPSMatrixFourierTransform` (Apple 2021): 1D/2D power-of-2 FFT through Metal Performance Shaders for tuned Apple GPU paths; `MpsFftPlan`
+- [ ] `device/device_family.rs` — Metal GPU family and feature gating (Apple 2022): query `MTLGPUFamily` (Apple5/6/7/8, Mac2) to gate `simdgroup_matrix`, dynamic caching, and mesh shaders per chip generation at runtime; `MetalDeviceFamily`
 - [ ] Mac Pro multi-GPU peer copy via `MTLDevice::peerGroupID` (Intel Mac Pro era; legacy support)
 - [ ] Tile shaders for compute-in-rasterization hybrid workloads (M-series tile memory)
 - [ ] Hardware mesh shader support for graphics-compute fusion (M3+)

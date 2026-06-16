@@ -7,7 +7,7 @@ and dispatch framework. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda)
 
 ## Implementation Status
 
-- **Actual SLoC:** ~8,249 across 10 files
+- **Actual SLoC:** 6,216 across 10 files
 - **Tests:** 103 passing
 - **Status:** Full memory + compute, OpenCL SPIR-V generators, XMX cooperative-matrix, sub-group ops, multi-tile dispatcher
 - **Targets:** Intel Xe-LP (Gen12), Xe-HPG (Arc Alchemist/Battlemage), Xe-HPC (Ponte Vecchio / Data Center GPU Max)
@@ -70,6 +70,9 @@ and dispatch framework. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda)
 - [ ] `zeFenceQueryStatus` polling for non-blocking completion detection
 
 #### P2 -- Nice-to-Have
+- [ ] `command/command_list_reuse.rs` — command-list reset + reuse API (L0 spec §3.5.6): reset a completed `ze_command_list_handle_t` with `zeCommandListReset` and re-record kernel dispatches for repeated launches without re-allocation; `ReusableCommandList`
+- [ ] `device/eu_occupancy.rs` — EU occupancy hints via sysman (`zes_device_handle_t`): query active EU utilisation fraction via `zesDeviceProcessesGetState` and feed back into tile-size selection heuristic; `EuOccupancyAdvisor`
+- [ ] `spirv/dpas_gemm.rs` — Intel Arc DPAS (Dot-Product Accumulate Systolic) GEMM (Intel 2022): emit `OpIMad` / `OpDPAS` intrinsics via `SPV_INTEL_subgroups` extension for systolic-array-accelerated INT8/BF16 GEMM on Xe-HPG; `DpasGemm`
 - [ ] oneCCL collectives integration (`libccl.so`) -- AllReduce/AllGather across multi-GPU
 - [ ] oneMKL GEMM interop (runtime-loaded `libonemkl.so`) for tuned Xe-HPC paths
 - [ ] oneDNN primitive cache integration for fused conv+bias+relu

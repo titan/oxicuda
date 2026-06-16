@@ -6,12 +6,17 @@
 //! - **`ctc`**: CTC forward algorithm and prefix beam-search decoder.
 //! - **`encoder`**: Wav2Vec2 CNN feature encoder + Conformer block/encoder.
 //! - **`error`**: Error and result types for audio operations.
-//! - **`features`**: Log-mel adapter, CMVN, delta/delta-delta.
+//! - **`features`**: Log-mel adapter, CMVN, delta/delta-delta, MFCC, chroma,
+//!   spectral descriptors, LPC + formant estimation, μ-law/A-law companding,
+//!   pre-/de-emphasis, spectral-flux onset detection + tempo estimation.
 //! - **`handle`**: Session handle with SM version and LCG RNG.
+//! - **`pitch`**: Fundamental-frequency estimation (YIN).
 //! - **`ptx_kernels`**: 7 GPU PTX kernel string generators (SM 7.5–12.0).
 //! - **`rescoring`**: Shallow-fusion LM lattice / n-best rescoring (distinct from CTC beam search).
+//! - **`rhythm`**: Dynamic-programming beat tracking (Ellis 2007 / Böck 2011).
 //! - **`separation`**: Conv-TasNet time-domain source separation.
 //! - **`speaker`**: Speaker embedding (x-vector TDNN, stats pool, attentive pool).
+//! - **`timescale`**: Phase-vocoder time-stretch and pitch-shift (Laroche-Dolson).
 //! - **`vad`**: Voice-activity detection (energy + spectral-flatness, onset/hangover hysteresis).
 //! - **`vocoder`**: WaveNet + HiFi-GAN neural vocoders.
 
@@ -22,10 +27,13 @@ pub mod encoder;
 pub mod error;
 pub mod features;
 pub mod handle;
+pub mod pitch;
 pub mod ptx_kernels;
 pub mod rescoring;
+pub mod rhythm;
 pub mod separation;
 pub mod speaker;
+pub mod timescale;
 pub mod vad;
 pub mod vocoder;
 
@@ -37,27 +45,47 @@ pub use handle::{AudioHandle, LcgRng, SmVersion};
 pub mod prelude {
     pub use crate::attention::{RelPosAttention, RelPosEncoding};
     pub use crate::augment::{SpecAugOp, SpecAugPipeline, freq_mask, time_mask, time_warp};
-    pub use crate::ctc::{BeamHypothesis, ctc_beam_search, ctc_forward_log};
+    pub use crate::ctc::{
+        BeamHypothesis, JointCtcAttention, TransducerGreedyDecoder, ctc_beam_search,
+        ctc_forward_log,
+    };
     pub use crate::encoder::{
         ConformerConfig, ConformerEncoder, Wav2VecCnnConfig, Wav2VecCnnEncoder, WhisperEncoder,
         WhisperEncoderConfig,
     };
     pub use crate::error::{AudioError, AudioResult};
     pub use crate::features::{
-        CmvnConfig, LogMelInput, MelFilterbank, MelFilterbankConfig, apply_cmvn, compute_cmvn,
-        compute_delta, compute_delta_delta, stack_delta_features,
+        A_LAW_A, ChromaConfig, ChromaNorm, CmvnConfig, Formant, LogMelInput, LpcResult, MU_LAW_MU,
+        MelFilterbank, MelFilterbankConfig, MfccConfig, OnsetConfig, PeakPickConfig,
+        SpectralConfig, TempoEstimate, a_law_decode, a_law_encode, apply_cmvn, autocorrelation,
+        chroma, compute_cmvn, compute_delta, compute_delta_delta, de_emphasis, detect_onsets,
+        estimate_tempo, formants, formants_from_lpc, levinson_durbin, log_mel_spectrogram, lpc,
+        mel_spectrogram, mfcc, mu_law_decode, mu_law_dequantize, mu_law_encode, mu_law_quantize,
+        onset_strength, onset_times, pick_peaks, pre_emphasis, rms_energy, spectral_bandwidth,
+        spectral_centroid, spectral_flatness, spectral_rolloff, stack_delta_features,
+        tempo_from_envelope, zero_crossing_rate,
     };
     pub use crate::handle::{AudioHandle, LcgRng, SmVersion};
+    pub use crate::pitch::{YinConfig, YinEstimate, yin_pitch};
     pub use crate::ptx_kernels::{
         ctc_alpha_ptx, depthwise_conv1d_ptx, dilated_conv1d_ptx, rel_pos_bias_ptx,
         spec_augment_mask_ptx, stats_pool_ptx, stride_conv1d_ptx,
     };
     pub use crate::rescoring::{Hypothesis, LatticeRescorer, RescoreConfig, ScoredHypothesis};
-    pub use crate::separation::{ConvTasNet, ConvTasNetConfig, SeparationResult};
+    pub use crate::rhythm::{BeatTracker, BeatTrackerConfig, beat_times};
+    pub use crate::separation::{
+        ConvTasNet, ConvTasNetConfig, HpssConfig, HpssMask, HpssResult, SeparationResult, hpss,
+        hpss_masks, median_filter_1d,
+    };
     pub use crate::speaker::{AttentivePool, XVectorConfig, XVectorTdnn, stats_pool};
+    pub use crate::timescale::{
+        PhaseVocoderConfig, instantaneous_frequency, phase_vocoder_stretch, pitch_shift,
+        resample_linear,
+    };
     pub use crate::vad::{Vad, VadConfig, VadResult};
     pub use crate::vocoder::{
-        HifiGanConfig, HifiGanGenerator, WaveNetBlock, WaveNetConfig, WaveNetStack,
+        GriffinLimConfig, HifiGanConfig, HifiGanGenerator, WaveNetBlock, WaveNetConfig,
+        WaveNetStack, griffin_lim, istft_hann, magnitude_from_signal, stft_hann,
     };
 }
 
@@ -284,9 +312,25 @@ mod e2e_tests {
         let f = 16usize;
         let mut mel = vec![1.0f32; t * f];
         let mut rng = LcgRng::new(21);
-        crate::augment::time_mask(&mut mel, t, f, 5, 2, &mut rng).expect("mask ok");
-        // At least some values were zeroed
+        // Each individual mask samples a width in [0, max_t]; a width of 0 is a
+        // legal no-op outcome, so a *small* number of masks may leave the tensor
+        // untouched.  Using max_t == t with many masks makes full coverage
+        // overwhelmingly certain (P(all widths == 0) = (1/(t+1))^n_masks ≈ 0),
+        // so at least one time band is guaranteed to be zeroed here.
+        crate::augment::time_mask(&mut mel, t, f, t, 64, &mut rng).expect("mask ok");
+        // At least some values were zeroed by the time-masking policy.
         assert!(mel.contains(&0.0_f32), "expected zeros after time masking");
+        // Structural invariant: time masking zeros *entire* frequency rows, so
+        // every frame is either fully zeroed or fully untouched — never partial.
+        for frame in 0..t {
+            let row = &mel[frame * f..(frame + 1) * f];
+            let all_zero = row.iter().all(|v| *v == 0.0);
+            let none_zero = row.iter().all(|v| *v == 1.0);
+            assert!(
+                all_zero || none_zero,
+                "frame {frame} is partially masked: {row:?}"
+            );
+        }
         assert!(mel.iter().all(|v| v.is_finite()));
     }
 

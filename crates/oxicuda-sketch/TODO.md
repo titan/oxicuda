@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.55).
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,071 (56 files, including 4,832 code + 142 comments + 554 blanks; markdown 543)
-- **Tests:** 176 passing (lib + e2e_tests)
+- **Actual SLoC:** 11,692 (78 files, including 4,832 code + 142 comments + 554 blanks; markdown 543)
+- **Tests:** 456 passing (lib + e2e_tests)
 - **Pure Rust:** Zero external dependencies beyond `thiserror`
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -90,7 +90,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.55).
 ### Future Enhancements
 
 #### P0 -- Critical
-- [ ] Mergeable sketch unions (HLL union for distributed cardinality; KLL merge; CM column-wise sum)
+- [ ] Mergeable sketch unions (HLL union for distributed cardinality [x]; KLL merge [x] -- `quantile/kll.rs::merge` / `merged`; CM column-wise sum [ ])
 - [x] Streaming KMV (Bottom-K MinHash) for distinct count + similarity in one structure
 - [ ] Apache DataSketches FI (frequent-items) byte-serialisation compatibility
 
@@ -98,21 +98,23 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.55).
 - [x] Theta sketches (Apache DataSketches) for set operations (intersection, A \ B) on cardinalities
 - [x] Quotient filter (alternative to Bloom with locality + delete)
 - [x] HeavyKeeper (top-k with bias-correction superior to Space-Saving)
-- [ ] Misra-Gries on weighted streams (per-item value contribution)
+- [x] Misra-Gries on weighted streams (per-item value contribution) -- `topk/weighted_misra_gries.rs` (Berinde-Cormode-Indyk-Strauss 2010)
 - [x] Streaming PCA via Frequent Directions (Liberty 2013)
 - [x] Streaming SVD (low-rank approximation under bounded memory)
 - [x] Reservoir sampling without replacement (Algorithm L for uniform sampling)
-- [ ] Tug-of-war / second-moment sketch with bounded error bounds
+- [x] Tug-of-war / second-moment sketch with bounded error bounds -- `moment/ams_f2.rs` (AMS 1996) + 4-wise independent sign family `hash/fourwise.rs`
 
 #### P2 -- Nice-to-Have
-- [ ] Bloomier filter (function-valued Bloom)
+- [x] Bloomier filter (function-valued Bloom)
 - [ ] Cuckoo filter with 4-byte fingerprints for very low FP rates
 - [ ] Compressed sensing sketches (covered separately in `oxicuda-cs`)
 - [x] Online change-point detection via PageHinkley / CUSUM (`src/stream/changepoint.rs`; Page 1954, Hinkley 1971)
 - [x] Sliding-window HyperLogLog (Heule extensions) (`src/cardinality/sliding_window_hll.rs`; Chabchoub-Heroum 2010 / Heule 2013)
 - [ ] Streaming graph sketches (graph sparsification via spectral sketch)
-- [ ] Differential privacy noise on top of CM and HLL queries
+- [x] Differential privacy noise on top of CM and HLL queries
 - [ ] Bloom-1 (Putze-Sanders-Singler) for very large filters
+- [x] `moment/lp_stable.rs` — Lp-stable random projection (Indyk 2006): sketch each update (i, Δ) by S[j]+=Δ·g_ij where gᵢⱼ∼Stable(p); estimate ‖x‖_p from median of |S[j]|; `LpStableSketch { p: f32, width, depth }`
+- [x] `frequency/ada_sketch.rs` — Ada-Sketch (Huang 2021): adaptive Count-Min that allocates extra counters to heavy hitters detected online; ε error guarantee with 2× fewer cells than vanilla CM for skewed distributions
 
 ## Dependencies
 
@@ -126,7 +128,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 176 passing
+- Tests: 456 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features
@@ -192,7 +194,7 @@ All six SM versions produce non-empty PTX strings and pass content-substring che
 - [ ] HLL distributed-merge semantic test: GPU streams produce same cardinality as CPU after union
 
 ### Algorithmic Deepening
-- [ ] Hierarchical HLL (HLL-TailCut) for very low cardinalities
+- [x] Hierarchical HLL (HLL-TailCut) for very low cardinalities
 - [ ] Sliding-window variants of CM / HLL / Bloom with time-decaying buckets
 - [ ] Combined frequency + cardinality sketch (e.g., AMS over distinct elements)
 - [ ] Locality-sensitive hashing for general Lp metrics (p-stable distributions)

@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn l2_normalise_unit_norm() {
         let feats = vec![3.0_f32, 4.0, 0.0, 0.0]; // batch=2, dim=2
-        let n = l2_normalise(&feats, 2, 2).unwrap();
+        let n = l2_normalise(&feats, 2, 2).expect("l2_normalise should succeed");
         // Row 0: (3,4)/5 = (0.6, 0.8)
         let norm0 = (n[0] * n[0] + n[1] * n[1]).sqrt();
         assert!((norm0 - 1.0).abs() < 1e-5, "norm0={norm0}");
@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn l2_normalise_zero_row_stays_unit() {
         let feats = vec![0.0_f32, 0.0];
-        let n = l2_normalise(&feats, 1, 2).unwrap();
+        let n = l2_normalise(&feats, 1, 2).expect("l2_normalise should succeed");
         // Zero vector: keep as-is (div by 1.0 with inv_norm clamp)
         assert!(n.iter().all(|v| v.is_finite()));
     }
@@ -183,7 +183,7 @@ mod tests {
         for i in 0..n {
             feats[i * dim + i % dim] = 1.0;
         }
-        let loss = clip_loss(&feats, &feats, n, dim, 0.07).unwrap();
+        let loss = clip_loss(&feats, &feats, n, dim, 0.07).expect("clip_loss should succeed");
         assert!(loss.is_finite(), "loss should be finite");
         assert!(loss >= 0.0, "loss should be non-negative");
     }
@@ -193,7 +193,7 @@ mod tests {
         let n = 8;
         let dim = 16;
         let feats: Vec<f32> = (0..n * dim).map(|i| (i as f32 * 0.1).sin()).collect();
-        let loss = clip_loss(&feats, &feats, n, dim, 0.07).unwrap();
+        let loss = clip_loss(&feats, &feats, n, dim, 0.07).expect("clip_loss should succeed");
         assert!(loss.is_finite());
     }
 
@@ -235,8 +235,10 @@ mod tests {
         shuffled[2 * dim + 3] = 1.0;
         shuffled[3 * dim] = 1.0;
 
-        let loss_aligned = clip_loss(&aligned, &aligned, n, dim, 0.07).unwrap();
-        let loss_shuffled = clip_loss(&shuffled, &aligned, n, dim, 0.07).unwrap();
+        let loss_aligned =
+            clip_loss(&aligned, &aligned, n, dim, 0.07).expect("clip_loss should succeed");
+        let loss_shuffled =
+            clip_loss(&shuffled, &aligned, n, dim, 0.07).expect("clip_loss should succeed");
         // Shuffled (mismatched) should have higher loss
         assert!(
             loss_shuffled > loss_aligned,
@@ -251,7 +253,7 @@ mod tests {
         let a: Vec<f32> = (0..n * dim).map(|i| (i as f32 * 0.1).sin()).collect();
         let b: Vec<f32> = (0..n * dim).map(|i| (i as f32 * 0.13).cos()).collect();
         let c: Vec<f32> = (0..n * dim).map(|i| (i as f32 * 0.07).sin()).collect();
-        let loss = imagebind_loss(&a, &b, &c, n, dim, 0.07).unwrap();
+        let loss = imagebind_loss(&a, &b, &c, n, dim, 0.07).expect("imagebind_loss should succeed");
         assert!(loss.is_finite());
         assert!(loss >= 0.0);
     }

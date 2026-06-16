@@ -23,6 +23,7 @@
 
 pub mod autodiff;
 pub mod error;
+pub mod features;
 pub mod handle;
 pub mod network;
 pub mod neural_ode;
@@ -31,6 +32,7 @@ pub mod pde;
 pub mod pinn_loss;
 pub mod ptx_kernels;
 pub mod sampling;
+pub mod variants;
 
 /// Convenience re-exports for common PINN types.
 pub mod prelude {
@@ -56,10 +58,23 @@ pub mod prelude {
     pub use crate::pinn_loss::causal::{CausalPinnConfig, CausalPinnLoss};
     pub use crate::pinn_loss::conservative::{ConservativeConfig, ConservativeLoss, SubdomainBox};
     pub use crate::pinn_loss::deep_ritz::{DeepRitz, DeepRitzConfig, DeepRitzEnergy, DeepRitzNet};
+    pub use crate::pinn_loss::hp_variational::{
+        HpVariationalConfig, HpVariationalPinn, gauss_legendre, legendre_basis,
+    };
     pub use crate::pinn_loss::initial::ic_loss;
+    pub use crate::pinn_loss::periodic::{
+        PeriodicEmbedding, periodic_bc_loss, periodic_bc_loss_value,
+    };
+    pub use crate::pinn_loss::relobralo::{ReloBraLo, ReloBraLoConfig};
     pub use crate::pinn_loss::residual::{compute_residuals, pde_residual_loss};
     pub use crate::pinn_loss::sa_pinn::{SaPinn, SaPinnConfig};
     pub use crate::pinn_loss::weighting::AdaptiveWeights;
+
+    // Feature embeddings
+    pub use crate::features::fourier_features::{FourierFeatureEmbeddingConfig, FourierFeatures};
+
+    // PINN variants
+    pub use crate::variants::gpinn::{GPinnConfig, GPinnLoss, GPinnLossTerms};
 
     // Neural ODE
     pub use crate::neural_ode::adjoint::{node_adjoint_grad, node_forward};
@@ -75,6 +90,10 @@ pub mod prelude {
         OdeRhsFn, dopri45_step, euler_step, heun_step, integrate_adaptive, integrate_fixed,
         rk4_step,
     };
+    pub use crate::neural_ode::symplectic::{
+        ForceFn, SymplecticMethod, hamiltonian_energy, integrate_symplectic, leapfrog_step,
+        stormer_verlet_step, symplectic_euler_step, velocity_verlet_step,
+    };
 
     // Neural operators
     pub use crate::neural_op::deeponet::{DeepONet, DeepONetConfig};
@@ -82,6 +101,7 @@ pub mod prelude {
     pub use crate::neural_op::fno_3d::{Fno3d, Fno3dConfig};
     pub use crate::neural_op::gno::{Gno, GnoConfig};
     pub use crate::neural_op::mwt::{Mwt, MwtConfig};
+    pub use crate::neural_op::pi_deeponet::{PiDeepONet, PiDeepONetConfig};
     pub use crate::neural_op::wno::{Wno, WnoConfig};
 
     // PDE templates
@@ -96,6 +116,10 @@ pub mod prelude {
     pub use crate::network::fbpinn::{Fbpinn, FbpinnConfig, Subdomain};
     pub use crate::network::hard_bc::{BoundaryDomain, HardBc, HardBcConfig};
     pub use crate::network::mlp::{Activation, Mlp, MlpConfig};
+    pub use crate::network::rbf_features::{
+        RbfFeatureConfig, RbfFeatureNetwork, RbfFeatures, RbfKind,
+    };
+    pub use crate::network::reservoir_computing::{EchoStateNetwork, EsnConfig, spectral_radius};
 
     // Sampling
     pub use crate::sampling::latin_hypercube::latin_hypercube_sample;
@@ -116,7 +140,8 @@ mod e2e_tests {
             activation: Activation::Tanh,
             omega_0: 1.0,
         };
-        let mlp = Mlp::new(cfg, &mut rng).unwrap();
+        let mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
         let pts: Vec<f32> = (0..16)
             .flat_map(|i| {
                 let x = (i % 4) as f32 * 0.25;
@@ -130,7 +155,8 @@ mod e2e_tests {
                 out[0]
             })
             .collect();
-        let loss = pde_residual_loss(&residuals).unwrap();
+        let loss =
+            pde_residual_loss(&residuals).expect("PDE residual loss computation should succeed");
         assert!(loss.is_finite(), "Heat PINN loss should be finite: {loss}");
         assert!(loss >= 0.0, "Heat PINN loss should be >= 0: {loss}");
     }
@@ -141,7 +167,8 @@ mod e2e_tests {
         let nu = 0.1_f32;
         let x = 0.5_f32;
         let t = 0.3_f32;
-        let ok = crate::pde::burgers::burgers_residual_check(x, t, nu, 0.5).unwrap();
+        let ok = crate::pde::burgers::burgers_residual_check(x, t, nu, 0.5)
+            .expect("Burgers residual check on traveling wave analytic solution should succeed");
         assert!(ok, "Burgers residual on analytic solution should be small");
     }
 
@@ -169,10 +196,13 @@ mod e2e_tests {
         fn exp_decay(_t: f32, y: &[f32], dy: &mut [f32]) {
             dy[0] = -y[0];
         }
-        let (_, traj) = node_forward(&exp_decay, 0.0, 0.5, &[1.0], 0.05).unwrap();
+        let (_, traj) = node_forward(&exp_decay, 0.0, 0.5, &[1.0], 0.05).expect(
+            "Neural ODE forward integration of exponential decay from t=0 to t=0.5 should succeed",
+        );
         let dfdy = |_t: f32, _y: &[f32]| vec![-1.0_f32];
         let dfdth = |_t: f32, _y: &[f32]| vec![1.0_f32];
-        let dl_dth = node_adjoint_grad(&exp_decay, &dfdy, &dfdth, &traj, &[1.0], 0.05).unwrap();
+        let dl_dth = node_adjoint_grad(&exp_decay, &dfdy, &dfdth, &traj, &[1.0], 0.05)
+            .expect("Adjoint gradient computation for exponential decay Neural ODE should succeed");
         assert!(
             dl_dth.iter().all(|v| v.is_finite()),
             "Adjoint grads not finite: {:?}",
@@ -192,7 +222,9 @@ mod e2e_tests {
         };
         let fno = Fno1d::new(cfg, &mut rng);
         let input = vec![0.5_f32; 16];
-        let output = fno.forward(&input, 16).unwrap();
+        let output = fno
+            .forward(&input, 16)
+            .expect("FNO1d forward pass on 16-point uniform input should succeed");
         assert_eq!(output.len(), 16);
         assert!(
             output.iter().all(|v| v.is_finite()),
@@ -212,7 +244,9 @@ mod e2e_tests {
         };
         let fno = Fno2d::new(cfg, &mut rng);
         let input = vec![0.3_f32; 8 * 8];
-        let output = fno.forward(&input, 8, 8).unwrap();
+        let output = fno
+            .forward(&input, 8, 8)
+            .expect("FNO2d forward pass on 8×8 uniform grid input should succeed");
         assert_eq!(output.len(), 64);
         assert!(output.iter().all(|v| v.is_finite()));
     }
@@ -231,7 +265,9 @@ mod e2e_tests {
         let model = DeepONet::new(cfg, &mut rng);
         let fs = vec![0.5_f32; 8];
         let q = vec![0.3_f32];
-        let out = model.forward(&fs, &q).unwrap();
+        let out = model.forward(&fs, &q).expect(
+            "DeepONet forward pass with 8 sensor values and scalar query point should succeed",
+        );
         assert!(out.is_finite(), "DeepONet output not finite: {out}");
     }
 
@@ -243,7 +279,8 @@ mod e2e_tests {
             }
         }
         let z0 = vec![1.0_f32, 0.5];
-        let (z1, dlp) = cnf_forward(&scale_flow, &z0, 0.0, 0.5, 0.05).unwrap();
+        let (z1, dlp) = cnf_forward(&scale_flow, &z0, 0.0, 0.5, 0.05)
+            .expect("CNF forward pass with linear scale flow from t=0 to t=0.5 should succeed");
         assert!(z1.iter().all(|v| v.is_finite()));
         assert!(dlp.is_finite(), "log-det not finite: {dlp}");
     }
@@ -253,7 +290,9 @@ mod e2e_tests {
         let mut tape = Tape::new();
         let x = tape.variable(3.0);
         let f = tape.sq(x);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape.gradient(f).expect(
+            "Reverse-mode gradient of x² on the tape should succeed for scalar variable x=3",
+        );
         assert!(
             (grads[x.idx] - 6.0).abs() < 1e-6,
             "grad x² at 3 = 6, got {}",

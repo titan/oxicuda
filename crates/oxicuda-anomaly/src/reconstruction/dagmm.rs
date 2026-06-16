@@ -1040,8 +1040,8 @@ mod tests {
         let n = 40;
         let x = make_normal_data(n, d, 2);
         let cfg = default_cfg(d);
-        let fit = dagmm_fit(&x, n, &cfg, 42).unwrap();
-        let scores = dagmm_score(&fit, &x, n).unwrap();
+        let fit = dagmm_fit(&x, n, &cfg, 42).expect("DAGMM fit should succeed");
+        let scores = dagmm_score(&fit, &x, n).expect("DAGMM score should succeed");
         assert_eq!(scores.len(), n);
         for (i, s) in scores.iter().enumerate() {
             assert!(s.is_finite(), "score[{i}] = {s} is not finite");
@@ -1056,8 +1056,8 @@ mod tests {
         let n = 40;
         let x = make_normal_data(n, d, 3);
         let cfg = default_cfg(d);
-        let fit = dagmm_fit(&x, n, &cfg, 10).unwrap();
-        let scores = dagmm_score(&fit, &x, n).unwrap();
+        let fit = dagmm_fit(&x, n, &cfg, 10).expect("DAGMM fit should succeed");
+        let scores = dagmm_score(&fit, &x, n).expect("DAGMM score should succeed");
         // Energy (negative log-likelihood) can be large; we just check it's
         // finite and not NaN. Very negative would signal a bug.
         for (i, &s) in scores.iter().enumerate() {
@@ -1074,15 +1074,15 @@ mod tests {
         // Normal data: values around 0.5
         let x_train = make_normal_data(n, d, 4);
         let cfg = default_cfg(d);
-        let fit = dagmm_fit(&x_train, n, &cfg, 7).unwrap();
+        let fit = dagmm_fit(&x_train, n, &cfg, 7).expect("DAGMM fit should succeed");
 
         // Inlier: similar to training distribution
         let inlier: Vec<f64> = vec![0.5; d];
         // Outlier: far from training distribution
         let outlier: Vec<f64> = vec![50.0; d];
 
-        let s_in = dagmm_score(&fit, &inlier, 1).unwrap()[0];
-        let s_out = dagmm_score(&fit, &outlier, 1).unwrap()[0];
+        let s_in = dagmm_score(&fit, &inlier, 1).expect("DAGMM inlier score should succeed")[0];
+        let s_out = dagmm_score(&fit, &outlier, 1).expect("DAGMM outlier score should succeed")[0];
 
         assert!(
             s_out > s_in,
@@ -1098,12 +1098,12 @@ mod tests {
         let n = 30;
         let x = make_normal_data(n, d, 5);
         let cfg = default_cfg(d);
-        let fit = dagmm_fit(&x, n, &cfg, 42).unwrap();
+        let fit = dagmm_fit(&x, n, &cfg, 42).expect("DAGMM fit should succeed");
 
-        let scores = dagmm_score(&fit, &x, n).unwrap();
+        let scores = dagmm_score(&fit, &x, n).expect("DAGMM score should succeed");
         let threshold = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + 1.0;
 
-        let preds = dagmm_predict(&fit, &x, n, threshold).unwrap();
+        let preds = dagmm_predict(&fit, &x, n, threshold).expect("DAGMM predict should succeed");
         assert_eq!(preds.len(), n);
         // With threshold above max, nothing should be flagged
         assert!(preds.iter().all(|&p| !p));
@@ -1124,15 +1124,16 @@ mod tests {
             batch_size: 20,
             ..Default::default()
         };
-        let fit = dagmm_fit(&x_train, n, &cfg, 42).unwrap();
+        let fit = dagmm_fit(&x_train, n, &cfg, 42).expect("DAGMM fit should succeed");
 
         // Get scores on training data to set a threshold
-        let train_scores = dagmm_score(&fit, &x_train, n).unwrap();
+        let train_scores = dagmm_score(&fit, &x_train, n).expect("DAGMM score should succeed");
         let mean_score: f64 = train_scores.iter().sum::<f64>() / n as f64;
 
         // Outlier: far from training data
         let outlier: Vec<f64> = vec![100.0; d];
-        let out_score = dagmm_score(&fit, &outlier, 1).unwrap()[0];
+        let out_score =
+            dagmm_score(&fit, &outlier, 1).expect("DAGMM outlier score should succeed")[0];
 
         // Outlier energy should exceed mean training energy
         assert!(
@@ -1158,7 +1159,7 @@ mod tests {
         let n = 20;
         let x = make_normal_data(n, d, 8);
         let cfg = default_cfg(d);
-        let fit = dagmm_fit(&x, n, &cfg, 42).unwrap();
+        let fit = dagmm_fit(&x, n, &cfg, 42).expect("DAGMM fit should succeed");
 
         // Wrong number of elements
         let bad = vec![0.5_f64; 7]; // not a multiple of input_dim=8
@@ -1184,8 +1185,8 @@ mod tests {
             batch_size: 10,
             ..Default::default()
         };
-        let fit = dagmm_fit(&x, n, &cfg, 42).unwrap();
-        let scores = dagmm_score(&fit, &x, n).unwrap();
+        let fit = dagmm_fit(&x, n, &cfg, 42).expect("DAGMM fit should succeed");
+        let scores = dagmm_score(&fit, &x, n).expect("DAGMM score should succeed");
         assert_eq!(scores.len(), n);
         assert!(scores.iter().all(|s| s.is_finite()));
     }
@@ -1198,13 +1199,13 @@ mod tests {
         let n = 20;
         let x = make_normal_data(n, d, 10);
         let cfg = default_cfg(d);
-        let fit = dagmm_fit(&x, n, &cfg, 42).unwrap();
+        let fit = dagmm_fit(&x, n, &cfg, 42).expect("DAGMM fit should succeed");
 
-        let scores = dagmm_score(&fit, &x, n).unwrap();
+        let scores = dagmm_score(&fit, &x, n).expect("DAGMM score should succeed");
         let max_s = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
         // Threshold above max → no anomalies
-        let preds = dagmm_predict(&fit, &x, n, max_s + 1.0).unwrap();
+        let preds = dagmm_predict(&fit, &x, n, max_s + 1.0).expect("DAGMM predict should succeed");
         assert!(preds.iter().all(|&p| !p), "expected all false");
     }
 
@@ -1223,10 +1224,10 @@ mod tests {
             batch_size: 10,
             ..Default::default()
         };
-        let fit1 = dagmm_fit(&x, n, &cfg, 77).unwrap();
-        let fit2 = dagmm_fit(&x, n, &cfg, 77).unwrap();
-        let s1 = dagmm_score(&fit1, &x, n).unwrap();
-        let s2 = dagmm_score(&fit2, &x, n).unwrap();
+        let fit1 = dagmm_fit(&x, n, &cfg, 77).expect("DAGMM fit should succeed");
+        let fit2 = dagmm_fit(&x, n, &cfg, 77).expect("DAGMM fit should succeed");
+        let s1 = dagmm_score(&fit1, &x, n).expect("DAGMM deterministic score should succeed");
+        let s2 = dagmm_score(&fit2, &x, n).expect("DAGMM deterministic score should succeed");
         for (a, b) in s1.iter().zip(s2.iter()) {
             assert!((a - b).abs() < 1e-10, "scores differ: {a} vs {b}");
         }
@@ -1247,8 +1248,8 @@ mod tests {
             batch_size: 16,
             ..Default::default()
         };
-        let fit = dagmm_fit(&x, n, &cfg, 42).unwrap();
-        let scores = dagmm_score(&fit, &x, n).unwrap();
+        let fit = dagmm_fit(&x, n, &cfg, 42).expect("DAGMM many-component fit should succeed");
+        let scores = dagmm_score(&fit, &x, n).expect("DAGMM many-component score should succeed");
         assert_eq!(scores.len(), n);
         assert!(scores.iter().all(|s| s.is_finite()));
     }
@@ -1261,7 +1262,7 @@ mod tests {
         let n = 20;
         let x = make_normal_data(n, d, 13);
         let cfg = default_cfg(d);
-        let fit = dagmm_fit(&x, n, &cfg, 42).unwrap();
+        let fit = dagmm_fit(&x, n, &cfg, 42).expect("DAGMM fit should succeed");
         let result = dagmm_score(&fit, &[], 0);
         assert!(matches!(result, Err(AnomalyError::EmptyInput)));
     }

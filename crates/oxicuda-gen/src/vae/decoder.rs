@@ -311,13 +311,14 @@ mod tests {
     use super::*;
 
     fn make_config() -> DecoderConfig {
-        DecoderConfig::new(16, 8, vec![1, 2], 1, 4).unwrap()
+        DecoderConfig::new(16, 8, vec![1, 2], 1, 4)
+            .expect("valid decoder config with sensible dimensions should construct without error")
     }
 
     #[test]
     fn decoder_new_valid() {
         let config = make_config();
-        let dec = Decoder::new(config).unwrap();
+        let dec = Decoder::new(config).expect("new should succeed");
         assert!(dec.num_blocks() > 0);
     }
 
@@ -325,10 +326,10 @@ mod tests {
     fn decoder_forward_output_shape() {
         let config = make_config();
         let weights = DecoderWeights::zeros(&config);
-        let dec = Decoder::new(config.clone()).unwrap();
+        let dec = Decoder::new(config.clone()).expect("value should be present");
         let batch = 3;
         let z = vec![0.5_f32; batch * config.latent_dim];
-        let out = dec.decode(&z, &weights).unwrap();
+        let out = dec.decode(&z, &weights).expect("decode should succeed");
         assert_eq!(out.len(), batch * config.out_channels);
     }
 
@@ -337,9 +338,9 @@ mod tests {
         // With zero weights, output should be zero
         let config = make_config();
         let weights = DecoderWeights::zeros(&config);
-        let dec = Decoder::new(config.clone()).unwrap();
+        let dec = Decoder::new(config.clone()).expect("value should be present");
         let z = vec![1.0_f32; config.latent_dim];
-        let out = dec.decode(&z, &weights).unwrap();
+        let out = dec.decode(&z, &weights).expect("decode should succeed");
         for &v in &out {
             assert!(v.abs() < 1e-5, "expected zero with zero weights: {v}");
         }
@@ -349,7 +350,7 @@ mod tests {
     fn decoder_empty_input_rejected() {
         let config = make_config();
         let weights = DecoderWeights::zeros(&config);
-        let dec = Decoder::new(config).unwrap();
+        let dec = Decoder::new(config).expect("new should succeed");
         assert!(matches!(
             dec.decode(&[], &weights),
             Err(GenError::EmptyInput(_))
@@ -360,9 +361,9 @@ mod tests {
     fn decoder_output_finite() {
         let config = make_config();
         let weights = DecoderWeights::zeros(&config);
-        let dec = Decoder::new(config.clone()).unwrap();
+        let dec = Decoder::new(config.clone()).expect("value should be present");
         let z: Vec<f32> = (0..config.latent_dim).map(|i| i as f32 * 0.01).collect();
-        let out = dec.decode(&z, &weights).unwrap();
+        let out = dec.decode(&z, &weights).expect("decode should succeed");
         assert!(
             out.iter().all(|v| v.is_finite()),
             "output contains non-finite values"

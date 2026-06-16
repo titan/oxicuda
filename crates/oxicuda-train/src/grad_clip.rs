@@ -16,10 +16,10 @@
 //! use oxicuda_train::gpu_optimizer::ParamTensor;
 //!
 //! let mut p = ParamTensor::new(vec![1.0, 2.0], "w");
-//! p.set_grad(vec![100.0, 100.0]).unwrap();
+//! p.set_grad(vec![100.0, 100.0]).expect("set_grad should succeed");
 //!
 //! let clipper = GlobalNormClip::new(1.0);
-//! let norm = clipper.clip(&mut [p]).unwrap();
+//! let norm = clipper.clip(&mut [p]).expect("clip should succeed");
 //! assert!(norm > 1.0, "norm before clip was > max_norm");
 //! ```
 

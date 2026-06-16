@@ -395,7 +395,7 @@ mod tests {
 
     fn make_feat(cfg: FeatConfig) -> Feat {
         let mut rng = LcgRng::new(42);
-        Feat::new(cfg, &mut rng).unwrap()
+        Feat::new(cfg, &mut rng).expect("new should succeed")
     }
 
     // ── Construction validation ─────────────────────────────────────────────
@@ -469,7 +469,9 @@ mod tests {
         let cfg = default_config();
         let feat = make_feat(cfg.clone());
         let support = vec![0.5_f32; cfg.n_way * cfg.k_shot * cfg.feat_dim];
-        let protos = feat.compute_prototypes(&support).unwrap();
+        let protos = feat
+            .compute_prototypes(&support)
+            .expect("compute_prototypes should succeed");
         assert_eq!(protos.len(), cfg.n_way * cfg.feat_dim);
     }
 
@@ -486,7 +488,9 @@ mod tests {
         };
         let feat = make_feat(cfg);
         let support = vec![1.0, 1.0, 3.0, 3.0, 0.0, 4.0, 2.0, 6.0];
-        let protos = feat.compute_prototypes(&support).unwrap();
+        let protos = feat
+            .compute_prototypes(&support)
+            .expect("compute_prototypes should succeed");
         assert!((protos[0] - 2.0).abs() < 1e-6);
         assert!((protos[1] - 2.0).abs() < 1e-6);
         assert!((protos[2] - 1.0).abs() < 1e-6);
@@ -510,7 +514,9 @@ mod tests {
         let cfg = default_config();
         let feat = make_feat(cfg.clone());
         let protos = vec![0.3_f32; cfg.n_way * cfg.feat_dim];
-        let adapted = feat.adapt_prototypes(&protos).unwrap();
+        let adapted = feat
+            .adapt_prototypes(&protos)
+            .expect("adapt_prototypes should succeed");
         assert_eq!(adapted.len(), cfg.n_way * cfg.feat_dim);
     }
 
@@ -536,7 +542,9 @@ mod tests {
         };
         let feat = make_feat(cfg.clone());
         let protos = vec![0.2_f32, 0.4, 0.6, 0.8];
-        let adapted = feat.adapt_prototypes(&protos).unwrap();
+        let adapted = feat
+            .adapt_prototypes(&protos)
+            .expect("adapt_prototypes should succeed");
         assert_eq!(adapted.len(), cfg.feat_dim);
         assert!(adapted.iter().all(|v| v.is_finite()));
     }
@@ -552,8 +560,12 @@ mod tests {
         };
         let feat = make_feat(cfg.clone());
         let support = vec![0.25_f32; cfg.n_way * cfg.k_shot * cfg.feat_dim];
-        let protos = feat.compute_prototypes(&support).unwrap();
-        let adapted = feat.adapt_prototypes(&protos).unwrap();
+        let protos = feat
+            .compute_prototypes(&support)
+            .expect("compute_prototypes should succeed");
+        let adapted = feat
+            .adapt_prototypes(&protos)
+            .expect("adapt_prototypes should succeed");
         assert_eq!(adapted.len(), cfg.n_way * cfg.feat_dim);
     }
 
@@ -568,7 +580,9 @@ mod tests {
         let protos: Vec<f32> = (0..cfg.n_way * cfg.feat_dim)
             .map(|_| rng.next_f32())
             .collect();
-        let probs = feat.classify(&query, &protos).unwrap();
+        let probs = feat
+            .classify(&query, &protos)
+            .expect("classify should succeed");
         let sum: f32 = probs.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5, "softmax must sum to 1, got {sum}");
     }
@@ -579,7 +593,9 @@ mod tests {
         let feat = make_feat(cfg.clone());
         let query = vec![0.1_f32; cfg.feat_dim];
         let protos = vec![0.2_f32; cfg.n_way * cfg.feat_dim];
-        let probs = feat.classify(&query, &protos).unwrap();
+        let probs = feat
+            .classify(&query, &protos)
+            .expect("classify should succeed");
         assert_eq!(probs.len(), cfg.n_way);
     }
 
@@ -611,13 +627,15 @@ mod tests {
             0.0, 1.0, 0.0, // class 1
             0.0, 0.0, 1.0, // class 2
         ];
-        let probs = feat.classify(&query, &protos).unwrap();
+        let probs = feat
+            .classify(&query, &protos)
+            .expect("classify should succeed");
         let best = probs
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).expect("partial_cmp should succeed"))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(best, 0);
     }
 
@@ -635,7 +653,9 @@ mod tests {
         let query: Vec<f32> = (0..n_query * cfg.feat_dim)
             .map(|_| rng.next_f32())
             .collect();
-        let preds = feat.predict_episode(&support, &query, n_query).unwrap();
+        let preds = feat
+            .predict_episode(&support, &query, n_query)
+            .expect("predict_episode should succeed");
         assert_eq!(preds.len(), n_query);
         assert!(preds.iter().all(|&p| p < cfg.n_way));
     }
@@ -667,7 +687,7 @@ mod tests {
         let labels: Vec<usize> = (0..n_query).map(|i| i % cfg.n_way).collect();
         let acc = feat
             .episode_accuracy(&support, &query, &labels, n_query)
-            .unwrap();
+            .expect("value should be present");
         assert!((0.0..=1.0).contains(&acc));
     }
 
@@ -702,14 +722,18 @@ mod tests {
         for c in 0..cfg.n_way {
             support[c * cfg.feat_dim + c] = 1.0;
         }
-        let protos = feat.compute_prototypes(&support).unwrap();
-        let adapted = feat.adapt_prototypes(&protos).unwrap();
+        let protos = feat
+            .compute_prototypes(&support)
+            .expect("compute_prototypes should succeed");
+        let adapted = feat
+            .adapt_prototypes(&protos)
+            .expect("adapt_prototypes should succeed");
         // Queries == adapted prototypes.
         let query = adapted.clone();
         let labels: Vec<usize> = (0..cfg.n_way).collect();
         let acc = feat
             .episode_accuracy(&support, &query, &labels, cfg.n_way)
-            .unwrap();
+            .expect("value should be present");
         assert!((acc - 1.0).abs() < 1e-6, "expected accuracy 1.0, got {acc}");
     }
 
@@ -718,11 +742,15 @@ mod tests {
         let cfg = default_config();
         let mut rng_a = LcgRng::new(123);
         let mut rng_b = LcgRng::new(123);
-        let feat_a = Feat::new(cfg.clone(), &mut rng_a).unwrap();
-        let feat_b = Feat::new(cfg.clone(), &mut rng_b).unwrap();
+        let feat_a = Feat::new(cfg.clone(), &mut rng_a).expect("value should be present");
+        let feat_b = Feat::new(cfg.clone(), &mut rng_b).expect("value should be present");
         let protos = vec![0.37_f32; cfg.n_way * cfg.feat_dim];
-        let a = feat_a.adapt_prototypes(&protos).unwrap();
-        let b = feat_b.adapt_prototypes(&protos).unwrap();
+        let a = feat_a
+            .adapt_prototypes(&protos)
+            .expect("adapt_prototypes should succeed");
+        let b = feat_b
+            .adapt_prototypes(&protos)
+            .expect("adapt_prototypes should succeed");
         assert_eq!(a, b, "same seed must give identical adaptation");
     }
 
@@ -741,8 +769,12 @@ mod tests {
         let support_a = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
         // Support B: swap so class 1 is near the query.
         let support_b = vec![0.0_f32, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0];
-        let pred_a = feat.predict_episode(&support_a, &query, 1).unwrap();
-        let pred_b = feat.predict_episode(&support_b, &query, 1).unwrap();
+        let pred_a = feat
+            .predict_episode(&support_a, &query, 1)
+            .expect("predict_episode should succeed");
+        let pred_b = feat
+            .predict_episode(&support_b, &query, 1)
+            .expect("predict_episode should succeed");
         assert_ne!(
             pred_a, pred_b,
             "swapping which class is near the query must change the prediction"

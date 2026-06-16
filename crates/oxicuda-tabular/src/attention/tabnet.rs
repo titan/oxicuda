@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn glu_halves_dim() {
         let x = vec![1.0_f32; 8];
-        let out = glu(&x).unwrap();
+        let out = glu(&x).expect("glu should succeed");
         assert_eq!(out.len(), 4);
     }
 
@@ -418,9 +418,9 @@ mod tests {
             gamma: 1.5,
             n_classes: 2,
         };
-        let layer = TabNetLayer::new(cfg, &mut rng).unwrap();
+        let layer = TabNetLayer::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32; 8];
-        let (logits, masks) = layer.forward(&x).unwrap();
+        let (logits, masks) = layer.forward(&x).expect("forward should succeed");
         assert_eq!(logits.len(), 2);
         assert_eq!(masks.len(), 3 * 8);
     }
@@ -436,9 +436,9 @@ mod tests {
             gamma: 1.5,
             n_classes: 2,
         };
-        let layer = TabNetLayer::new(cfg, &mut rng).unwrap();
+        let layer = TabNetLayer::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.1_f32; 6];
-        let (_, masks) = layer.forward(&x).unwrap();
+        let (_, masks) = layer.forward(&x).expect("forward should succeed");
         assert!(masks.iter().all(|&v| v >= 0.0));
     }
 }

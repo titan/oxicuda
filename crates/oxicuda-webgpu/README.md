@@ -29,7 +29,7 @@ WebGpuBackend  (implements ComputeBackend)
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-oxicuda-webgpu = "0.1.5"
+oxicuda-webgpu = "0.2.0"
 ```
 
 ```rust
@@ -46,8 +46,8 @@ backend.free(ptr).expect("free failed");
 
 ## Status
 
-- **Version**: 0.1.5 (2026-05-01)
-- **Tests**: 91 passing
+- **Version**: 0.2.0 (2026-06-16)
+- **Tests**: 129 passing
 
 ## License
 

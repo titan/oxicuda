@@ -23,3 +23,9 @@ pub use entropic_gw_fast::{
     EntropicGwFastConfig, EntropicGwFastFit, entropic_gw_fast, gw_cost_matrix, gw_distance,
 };
 pub use gw_graph_matching::{GwGraphConfig, GwGraphResult, gw_frobenius_cost, gw_graph_matching};
+
+/// Bregman-projected Gromov-Wasserstein via mirror descent (Xu et al. 2019).
+pub mod bregman_gw;
+pub use bregman_gw::{
+    BregmanGwConfig, BregmanGwResult, bregman_gw, bregman_gw_distance, gw_linear_cost, gw_objective,
+};

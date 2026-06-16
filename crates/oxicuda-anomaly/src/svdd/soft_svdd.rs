@@ -488,7 +488,8 @@ mod tests {
     fn soft_svdd_fit_returns_finite_radius() {
         let cfg = make_config(4);
         let x: Vec<f64> = (0..20).map(|i| i as f64 * 0.05).collect();
-        let fit = soft_svdd_fit(&x, 5, &cfg, 42).unwrap();
+        let fit = soft_svdd_fit(&x, 5, &cfg, 42)
+            .expect("fit with valid config and seed 42 should succeed");
         assert!(
             fit.radius.is_finite() && fit.radius >= 0.0,
             "radius={}",
@@ -500,9 +501,11 @@ mod tests {
     fn soft_svdd_scores_are_finite() {
         let cfg = make_config(4);
         let x_train: Vec<f64> = (0..40).map(|i| i as f64 * 0.02).collect();
-        let fit = soft_svdd_fit(&x_train, 10, &cfg, 7).unwrap();
+        let fit = soft_svdd_fit(&x_train, 10, &cfg, 7)
+            .expect("fit with valid config and seed 7 should succeed");
         let x_test: Vec<f64> = vec![0.5, 0.5, 0.5, 0.5, 100.0, 100.0, 100.0, 100.0];
-        let scores = soft_svdd_score(&fit, &x_test, 2).unwrap();
+        let scores =
+            soft_svdd_score(&fit, &x_test, 2).expect("score on 2 test samples should succeed");
         assert_eq!(scores.len(), 2);
         assert!(scores.iter().all(|s| s.is_finite()), "scores={scores:?}");
     }
@@ -511,13 +514,16 @@ mod tests {
     fn soft_svdd_outlier_has_higher_score() {
         let cfg = make_config(4);
         let x_train: Vec<f64> = (0..40).map(|i| (i as f64) * 0.01).collect();
-        let fit = soft_svdd_fit(&x_train, 10, &cfg, 13).unwrap();
+        let fit = soft_svdd_fit(&x_train, 10, &cfg, 13)
+            .expect("fit with valid config and seed 13 should succeed");
 
         let inlier = vec![0.05, 0.05, 0.05, 0.05];
         let outlier = vec![999.0, 999.0, 999.0, 999.0];
 
-        let s_in = soft_svdd_score(&fit, &inlier, 1).unwrap()[0];
-        let s_out = soft_svdd_score(&fit, &outlier, 1).unwrap()[0];
+        let s_in =
+            soft_svdd_score(&fit, &inlier, 1).expect("score on inlier sample should succeed")[0];
+        let s_out =
+            soft_svdd_score(&fit, &outlier, 1).expect("score on outlier sample should succeed")[0];
         assert!(s_out > s_in, "s_out={s_out} s_in={s_in}");
     }
 
@@ -535,9 +541,11 @@ mod tests {
         let x_train: Vec<f64> = (0..20)
             .flat_map(|i| vec![i as f64 * 0.05, i as f64 * 0.05])
             .collect();
-        let fit = soft_svdd_fit(&x_train, 20, &cfg, 99).unwrap();
+        let fit = soft_svdd_fit(&x_train, 20, &cfg, 99)
+            .expect("fit on 20-sample training set should succeed");
         let x_test = vec![0.0, 0.0, 1000.0, 1000.0];
-        let preds = soft_svdd_predict(&fit, &x_test, 2).unwrap();
+        let preds =
+            soft_svdd_predict(&fit, &x_test, 2).expect("predict on 2 test samples should succeed");
         // The extreme outlier should be detected
         assert!(preds[1], "extreme outlier should be anomaly");
     }
@@ -546,7 +554,8 @@ mod tests {
     fn soft_svdd_radius_fn() {
         let cfg = make_config(3);
         let x: Vec<f64> = (0..15).map(|i| i as f64 * 0.1).collect();
-        let fit = soft_svdd_fit(&x, 5, &cfg, 17).unwrap();
+        let fit = soft_svdd_fit(&x, 5, &cfg, 17)
+            .expect("fit with valid config and seed 17 should succeed");
         assert_eq!(soft_svdd_radius(&fit), fit.radius);
     }
 

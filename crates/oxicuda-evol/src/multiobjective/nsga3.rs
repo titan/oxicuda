@@ -779,7 +779,7 @@ mod tests {
             mutation_eta: 20.0,
             seed: 42,
         };
-        let result = nsga3_run(zdt1, 5, &bounds, &cfg).unwrap();
+        let result = nsga3_run(zdt1, 5, &bounds, &cfg).expect("nsga3_run should succeed");
         // Should return some Pareto front members
         assert!(!result.is_empty());
         // Each result has correct dimensions
@@ -801,7 +801,7 @@ mod tests {
             mutation_eta: 15.0,
             seed: 123,
         };
-        let result = nsga3_run(zdt2, 4, &bounds, &cfg).unwrap();
+        let result = nsga3_run(zdt2, 4, &bounds, &cfg).expect("nsga3_run should succeed");
         assert!(!result.is_empty());
         for (dec, obj) in &result {
             assert_eq!(dec.len(), 4);
@@ -820,7 +820,7 @@ mod tests {
             mutation_eta: 20.0,
             seed: 7,
         };
-        let result = nsga3_run(dtlz1_2obj, 3, &bounds, &cfg).unwrap();
+        let result = nsga3_run(dtlz1_2obj, 3, &bounds, &cfg).expect("nsga3_run should succeed");
         assert!(!result.is_empty());
     }
 
@@ -864,7 +864,7 @@ mod tests {
             mutation_eta: 20.0,
             seed: 99,
         };
-        let result = nsga3_run(zdt1, 3, &bounds, &cfg).unwrap();
+        let result = nsga3_run(zdt1, 3, &bounds, &cfg).expect("nsga3_run should succeed");
         // Verify none of the returned individuals dominates another
         for i in 0..result.len() {
             for j in 0..result.len() {

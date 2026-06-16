@@ -518,7 +518,7 @@ mod tests {
 
     fn make_net() -> ProposalNetwork {
         let mut rng = LcgRng::new(42);
-        ProposalNetwork::new(test_cfg(), &mut rng).unwrap()
+        ProposalNetwork::new(test_cfg(), &mut rng).expect("value should be present")
     }
 
     // --- density prediction ---
@@ -527,7 +527,9 @@ mod tests {
     fn predict_density_positive() {
         let net = make_net();
         let enc = vec![0.0_f32; 15];
-        let sigma = net.predict_density(&enc).unwrap();
+        let sigma = net
+            .predict_density(&enc)
+            .expect("predict_density should succeed");
         assert!(sigma > 0.0, "softplus output must be positive, got {sigma}");
     }
 
@@ -537,7 +539,9 @@ mod tests {
         // We just test that it runs and is finite.
         let net = make_net();
         let enc = vec![0.1_f32; 15];
-        let sigma = net.predict_density(&enc).unwrap();
+        let sigma = net
+            .predict_density(&enc)
+            .expect("predict_density should succeed");
         assert!(sigma.is_finite());
     }
 
@@ -550,7 +554,9 @@ mod tests {
         let t_vals: Vec<f32> = (0..=n).map(|i| i as f32 * 0.1).collect();
         let origin = [0.0_f32, 0.0, 0.0];
         let dir = [0.0_f32, 0.0, 1.0];
-        let hist = net.ray_weights(&t_vals, &origin, &dir).unwrap();
+        let hist = net
+            .ray_weights(&t_vals, &origin, &dir)
+            .expect("ray_weights should succeed");
         let total: f32 = hist.weights.iter().sum();
         assert!(total <= 1.0 + 1e-5, "total weight {total} > 1");
     }
@@ -562,7 +568,9 @@ mod tests {
         let t_vals: Vec<f32> = (0..=n).map(|i| i as f32 * 0.1).collect();
         let origin = [0.0_f32, 0.0, 0.0];
         let dir = [1.0_f32, 0.0, 0.0];
-        let hist = net.ray_weights(&t_vals, &origin, &dir).unwrap();
+        let hist = net
+            .ray_weights(&t_vals, &origin, &dir)
+            .expect("ray_weights should succeed");
         for &w in &hist.weights {
             assert!(w >= 0.0, "negative weight {w}");
         }
@@ -575,7 +583,9 @@ mod tests {
         let t_vals: Vec<f32> = (0..=n).map(|i| i as f32 * 0.1).collect();
         let origin = [0.0_f32, 0.0, 0.0];
         let dir = [0.0_f32, 1.0, 0.0];
-        let hist = net.ray_weights(&t_vals, &origin, &dir).unwrap();
+        let hist = net
+            .ray_weights(&t_vals, &origin, &dir)
+            .expect("ray_weights should succeed");
         assert_eq!(hist.weights.len(), n);
         assert_eq!(hist.bins.len(), n + 1);
     }
@@ -589,13 +599,15 @@ mod tests {
         let t_vals: Vec<f32> = (0..=n).map(|i| i as f32 * 0.1).collect();
         let origin = [0.0_f32, 0.0, 0.0];
         let dir = [0.0_f32, 0.0, 1.0];
-        let hist = net.ray_weights(&t_vals, &origin, &dir).unwrap();
-        let t_near = *t_vals.first().unwrap();
-        let t_far = *t_vals.last().unwrap();
+        let hist = net
+            .ray_weights(&t_vals, &origin, &dir)
+            .expect("ray_weights should succeed");
+        let t_near = *t_vals.first().expect("first should succeed");
+        let t_far = *t_vals.last().expect("last should succeed");
 
         let mut rng = LcgRng::new(7);
-        let samples =
-            ProposalNetwork::importance_sample_from_histogram(&hist, 16, &mut rng).unwrap();
+        let samples = ProposalNetwork::importance_sample_from_histogram(&hist, 16, &mut rng)
+            .expect("importance_sample_from_histogram should succeed");
         for &t in &samples {
             assert!(
                 t >= t_near - 1e-6 && t <= t_far + 1e-6,
@@ -611,10 +623,12 @@ mod tests {
         let t_vals: Vec<f32> = (0..=n).map(|i| i as f32 * 0.1).collect();
         let origin = [0.0_f32, 0.0, 0.0];
         let dir = [0.0_f32, 0.0, 1.0];
-        let hist = net.ray_weights(&t_vals, &origin, &dir).unwrap();
+        let hist = net
+            .ray_weights(&t_vals, &origin, &dir)
+            .expect("ray_weights should succeed");
         let mut rng = LcgRng::new(13);
-        let samples =
-            ProposalNetwork::importance_sample_from_histogram(&hist, 12, &mut rng).unwrap();
+        let samples = ProposalNetwork::importance_sample_from_histogram(&hist, 12, &mut rng)
+            .expect("importance_sample_from_histogram should succeed");
         assert!(
             samples.windows(2).all(|w| w[0] <= w[1]),
             "samples not sorted"
@@ -628,11 +642,13 @@ mod tests {
         let t_vals: Vec<f32> = (0..=n).map(|i| i as f32 * 0.2).collect();
         let origin = [0.0_f32, 0.0, 0.0];
         let dir = [0.0_f32, 0.0, 1.0];
-        let hist = net.ray_weights(&t_vals, &origin, &dir).unwrap();
+        let hist = net
+            .ray_weights(&t_vals, &origin, &dir)
+            .expect("ray_weights should succeed");
         let mut rng = LcgRng::new(99);
         let n_fine = 32;
-        let samples =
-            ProposalNetwork::importance_sample_from_histogram(&hist, n_fine, &mut rng).unwrap();
+        let samples = ProposalNetwork::importance_sample_from_histogram(&hist, n_fine, &mut rng)
+            .expect("importance_sample_from_histogram should succeed");
         assert_eq!(samples.len(), n_fine);
     }
 
@@ -645,7 +661,8 @@ mod tests {
             weights: vec![0.1, 0.5, 0.3, 0.1],
         };
         let nerf_weights = vec![0.2, 0.4, 0.3, 0.1];
-        let loss = ProposalNetwork::proposal_loss(&hist, &nerf_weights).unwrap();
+        let loss = ProposalNetwork::proposal_loss(&hist, &nerf_weights)
+            .expect("proposal_loss should succeed");
         assert!(loss >= 0.0, "loss should be non-negative, got {loss}");
     }
 
@@ -656,7 +673,8 @@ mod tests {
             weights: vec![0.3, 0.5, 0.4, 0.2],
         };
         let nerf_weights = vec![0.2, 0.4, 0.3, 0.1];
-        let loss = ProposalNetwork::proposal_loss(&hist, &nerf_weights).unwrap();
+        let loss = ProposalNetwork::proposal_loss(&hist, &nerf_weights)
+            .expect("proposal_loss should succeed");
         assert!(
             loss.abs() < 1e-7,
             "loss should be 0 when proposal >= nerf everywhere, got {loss}"
@@ -669,14 +687,15 @@ mod tests {
     fn encode_position_output_len() {
         let n_freqs = 4;
         let x = [0.1_f32, 0.2, 0.3];
-        let enc = ProposalNetwork::encode_position(&x, n_freqs).unwrap();
+        let enc =
+            ProposalNetwork::encode_position(&x, n_freqs).expect("encode_position should succeed");
         assert_eq!(enc.len(), 3 + 6 * n_freqs);
     }
 
     #[test]
     fn encode_position_contains_identity() {
         let x = [0.5_f32, -0.3, 0.1];
-        let enc = ProposalNetwork::encode_position(&x, 2).unwrap();
+        let enc = ProposalNetwork::encode_position(&x, 2).expect("encode_position should succeed");
         assert!((enc[0] - x[0]).abs() < 1e-7);
         assert!((enc[1] - x[1]).abs() < 1e-7);
         assert!((enc[2] - x[2]).abs() < 1e-7);
@@ -695,7 +714,7 @@ mod tests {
             pos_encoding_dim: 15, // 3 + 6*2
         };
         let mut rng = LcgRng::new(1);
-        let net = ProposalNetwork::new(cfg, &mut rng).unwrap();
+        let net = ProposalNetwork::new(cfg, &mut rng).expect("new should succeed");
         let in_dim = 15usize;
         let h = 16usize;
         let expected = (in_dim * h + h) + (h * h + h) + (h + 1);
@@ -711,7 +730,7 @@ mod tests {
             pos_encoding_dim: 27, // 3 + 6*4
         };
         let mut rng = LcgRng::new(5);
-        let net = ProposalNetwork::new(cfg, &mut rng).unwrap();
+        let net = ProposalNetwork::new(cfg, &mut rng).expect("new should succeed");
         // n_layers hidden + 1 output = n_layers + 1 total
         assert_eq!(net.weights.layers.len(), cfg.n_layers + 1);
     }

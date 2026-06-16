@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn byol_loss_identical_inputs_zero() {
         let z: Vec<f32> = (0..16).map(|i| (i as f32) * 0.1 + 1.0).collect();
-        let l = byol_loss(&z, &z, 4, 4).unwrap();
+        let l = byol_loss(&z, &z, 4, 4).expect("byol_loss should succeed");
         assert!(l.abs() < 1e-4, "l = {l}");
     }
 
@@ -99,7 +99,7 @@ mod tests {
         // (1, 0) vs (0, 1) → cos = 0 → loss = 2
         let p = vec![1.0_f32, 0.0];
         let z = vec![0.0_f32, 1.0];
-        let l = byol_loss(&p, &z, 1, 2).unwrap();
+        let l = byol_loss(&p, &z, 1, 2).expect("byol_loss should succeed");
         assert!((l - 2.0).abs() < 1e-5, "l = {l}");
     }
 
@@ -108,7 +108,7 @@ mod tests {
         // (1, 0) vs (-1, 0) → cos = -1 → loss = 4
         let p = vec![1.0_f32, 0.0];
         let z = vec![-1.0_f32, 0.0];
-        let l = byol_loss(&p, &z, 1, 2).unwrap();
+        let l = byol_loss(&p, &z, 1, 2).expect("byol_loss should succeed");
         assert!((l - 4.0).abs() < 1e-5, "l = {l}");
     }
 
@@ -116,10 +116,10 @@ mod tests {
     fn byol_loss_invariant_to_scale() {
         let p = vec![1.0_f32, 0.0, 0.0];
         let z = vec![1.0_f32, 0.0, 0.0];
-        let l1 = byol_loss(&p, &z, 1, 3).unwrap();
+        let l1 = byol_loss(&p, &z, 1, 3).expect("byol_loss should succeed");
         let p2 = vec![10.0_f32, 0.0, 0.0];
         let z2 = vec![100.0_f32, 0.0, 0.0];
-        let l2 = byol_loss(&p2, &z2, 1, 3).unwrap();
+        let l2 = byol_loss(&p2, &z2, 1, 3).expect("byol_loss should succeed");
         assert!((l1 - l2).abs() < 1e-5);
     }
 
@@ -127,7 +127,7 @@ mod tests {
     fn byol_loss_zero_input_safe() {
         let p = vec![0.0_f32, 0.0];
         let z = vec![1.0_f32, 0.0];
-        let l = byol_loss(&p, &z, 1, 2).unwrap();
+        let l = byol_loss(&p, &z, 1, 2).expect("byol_loss should succeed");
         assert!(l.is_finite());
     }
 
@@ -147,10 +147,10 @@ mod tests {
     #[test]
     fn byol_predictor_round_trip_shape() {
         let mut rng = LcgRng::new(0);
-        let pred = PredictorHead::new(8, 4, 8, &mut rng).unwrap();
+        let pred = PredictorHead::new(8, 4, 8, &mut rng).expect("new should succeed");
         let online = ByolPredictor::new(pred);
         let z = vec![0.1_f32; 8];
-        let p = online.forward(&z).unwrap();
+        let p = online.forward(&z).expect("forward should succeed");
         assert_eq!(p.len(), 8);
     }
 }

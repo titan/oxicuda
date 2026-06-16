@@ -10,7 +10,7 @@ Part of the [OxiCUDA](https://github.com/cool-japan/oxicuda) ecosystem — Pure 
 
 | Version | Tests | Date |
 |---------|-------|------|
-| 0.1.5 | 80 passing | 2026-05-01 |
+| 0.2.0 | 133 passing | 2026-06-16 |
 | 0.1.4 | 80 passing | 2026-04-18 |
 
 ## Features
@@ -29,7 +29,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxicuda-dist-infer = "0.1.5"
+oxicuda-dist-infer = "0.2.0"
 ```
 
 ```rust

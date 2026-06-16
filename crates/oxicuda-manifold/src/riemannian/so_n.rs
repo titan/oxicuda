@@ -701,7 +701,7 @@ mod tests {
         let n = 3;
         let q = rot3_z(0.7);
         let g: Vec<f64> = (0..n * n).map(|i| i as f64 * 0.1).collect();
-        let v = so_n_project_tangent(&q, &g, n).unwrap();
+        let v = so_n_project_tangent(&q, &g, n).expect("so_n_project_tangent should succeed");
         // Q^T · v should be skew-symmetric
         let qt = mat_transpose(&q, n);
         let s = mat_mul(&qt, &v, n);
@@ -721,7 +721,7 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let q = so_n_random(n, &mut rng);
         let g: Vec<f64> = (0..n * n).map(|_| rng.next_normal()).collect();
-        let v = so_n_project_tangent(&q, &g, n).unwrap();
+        let v = so_n_project_tangent(&q, &g, n).expect("so_n_project_tangent should succeed");
         // tangent condition: Q^T·V + V^T·Q = 0  ⟺  Ω + Ω^T = 0
         let qt = mat_transpose(&q, n);
         let omega = mat_mul(&qt, &v, n);
@@ -740,9 +740,9 @@ mod tests {
         let mut rng = LcgRng::new(7);
         let q = so_n_random(n, &mut rng);
         let g: Vec<f64> = (0..n * n).map(|_| rng.next_normal()).collect();
-        let v = so_n_project_tangent(&q, &g, n).unwrap();
+        let v = so_n_project_tangent(&q, &g, n).expect("so_n_project_tangent should succeed");
         let v_small = mat_scale(&v, 0.05, n);
-        let q_new = so_n_retract_qr(&q, &v_small, n).unwrap();
+        let q_new = so_n_retract_qr(&q, &v_small, n).expect("so_n_retract_qr should succeed");
         assert_so_n(&q_new, n);
     }
 
@@ -754,7 +754,7 @@ mod tests {
         let mut rng = LcgRng::new(12);
         let q = so_n_random(n, &mut rng);
         let v = vec![0.0f64; n * n];
-        let q_new = so_n_retract_qr(&q, &v, n).unwrap();
+        let q_new = so_n_retract_qr(&q, &v, n).expect("so_n_retract_qr should succeed");
         assert!(
             frob_dist(&q, &q_new) < 1e-10,
             "retract_qr(Q, 0) ≠ Q: dist = {}",
@@ -770,9 +770,10 @@ mod tests {
         let mut rng = LcgRng::new(17);
         let q = so_n_random(n, &mut rng);
         let g: Vec<f64> = (0..n * n).map(|_| rng.next_normal()).collect();
-        let v = so_n_project_tangent(&q, &g, n).unwrap();
+        let v = so_n_project_tangent(&q, &g, n).expect("so_n_project_tangent should succeed");
         let v_small = mat_scale(&v, 0.1, n);
-        let q_new = so_n_retract_cayley(&q, &v_small, n).unwrap();
+        let q_new =
+            so_n_retract_cayley(&q, &v_small, n).expect("so_n_retract_cayley should succeed");
         assert_so_n(&q_new, n);
     }
 
@@ -784,9 +785,9 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let q = so_n_random(n, &mut rng);
         let g: Vec<f64> = (0..n * n).map(|_| rng.next_normal()).collect();
-        let v = so_n_project_tangent(&q, &g, n).unwrap();
+        let v = so_n_project_tangent(&q, &g, n).expect("so_n_project_tangent should succeed");
         let v_small = mat_scale(&v, 0.1, n);
-        let q_new = so_n_retract_expm(&q, &v_small, n).unwrap();
+        let q_new = so_n_retract_expm(&q, &v_small, n).expect("so_n_retract_expm should succeed");
         assert_so_n(&q_new, n);
     }
 
@@ -808,7 +809,7 @@ mod tests {
         let mut rng = LcgRng::new(55);
         for n in 1..=4 {
             let q = so_n_random(n, &mut rng);
-            let d = so_n_distance(&q, &q, n).unwrap();
+            let d = so_n_distance(&q, &q, n).expect("so_n_distance should succeed");
             assert!(d < 1e-10, "d(Q,Q) = {d} for n={n}");
         }
     }
@@ -821,8 +822,8 @@ mod tests {
         let theta2 = 0.8f64;
         let q1 = rot2(theta1);
         let q2 = rot2(theta2);
-        let d12 = so_n_distance(&q1, &q2, 2).unwrap();
-        let d21 = so_n_distance(&q2, &q1, 2).unwrap();
+        let d12 = so_n_distance(&q1, &q2, 2).expect("so_n_distance should succeed");
+        let d21 = so_n_distance(&q2, &q1, 2).expect("so_n_distance should succeed");
         assert!((d12 - d21).abs() < 1e-12, "d12={d12}, d21={d21}");
     }
 
@@ -836,7 +837,7 @@ mod tests {
         let id = so_n_identity(2);
         for &theta in &[0.1f64, 0.5, 1.0, 1.5] {
             let r = rot2(theta);
-            let d = so_n_distance(&id, &r, 2).unwrap();
+            let d = so_n_distance(&id, &r, 2).expect("so_n_distance should succeed");
             assert!(
                 (d - theta).abs() < 1e-10,
                 "d(I, R({theta})) = {d}, expected {theta}"
@@ -852,8 +853,8 @@ mod tests {
         let mut rng = LcgRng::new(101);
         let q = so_n_random(n, &mut rng);
         let g: Vec<f64> = (0..n * n).map(|_| rng.next_normal()).collect();
-        let v = so_n_project_tangent(&q, &g, n).unwrap();
-        let gamma0 = so_n_geodesic(&q, &v, 0.0, n).unwrap();
+        let v = so_n_project_tangent(&q, &g, n).expect("so_n_project_tangent should succeed");
+        let gamma0 = so_n_geodesic(&q, &v, 0.0, n).expect("so_n_geodesic should succeed");
         assert!(
             frob_dist(&q, &gamma0) < TOL,
             "geodesic(t=0) ≠ Q: dist = {}",
@@ -869,10 +870,10 @@ mod tests {
         let mut rng = LcgRng::new(303);
         let q = so_n_random(n, &mut rng);
         let g: Vec<f64> = (0..n * n).map(|_| rng.next_normal()).collect();
-        let v = so_n_project_tangent(&q, &g, n).unwrap();
+        let v = so_n_project_tangent(&q, &g, n).expect("so_n_project_tangent should succeed");
         let v_small = mat_scale(&v, 0.1, n);
-        let gamma1 = so_n_geodesic(&q, &v_small, 1.0, n).unwrap();
-        let ret = so_n_retract_expm(&q, &v_small, n).unwrap();
+        let gamma1 = so_n_geodesic(&q, &v_small, 1.0, n).expect("so_n_geodesic should succeed");
+        let ret = so_n_retract_expm(&q, &v_small, n).expect("so_n_retract_expm should succeed");
         let dist = frob_dist(&gamma1, &ret);
         assert!(dist < 1e-10, "geodesic(t=1) ≠ retract_expm: dist = {dist}");
     }
@@ -885,13 +886,13 @@ mod tests {
         let mut rng = LcgRng::new(777);
         let q = so_n_random(n, &mut rng);
         let g: Vec<f64> = (0..n * n).map(|_| rng.next_normal()).collect();
-        let v = so_n_project_tangent(&q, &g, n).unwrap();
+        let v = so_n_project_tangent(&q, &g, n).expect("so_n_project_tangent should succeed");
         // Scale to a small tangent vector
         let v_small = mat_scale(&v, 0.2, n);
         // Retract: Q₂ = Q · expm(Q^T V)
-        let q2 = so_n_retract_expm(&q, &v_small, n).unwrap();
+        let q2 = so_n_retract_expm(&q, &v_small, n).expect("so_n_retract_expm should succeed");
         // Log: recover V from Q, Q₂
-        let v_rec = so_n_log(&q, &q2, n).unwrap();
+        let v_rec = so_n_log(&q, &q2, n).expect("so_n_log should succeed");
         let dist = frob_dist(&v_small, &v_rec);
         assert!(dist < 1e-8, "log(exp(V)) ≠ V: Frobenius dist = {dist}");
     }

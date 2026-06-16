@@ -6,7 +6,7 @@ GPU-accelerated training engine providing fused optimizer update kernels, gradie
 
 ## Implementation Status
 
-**Actual: 8,432 SLoC across 20 files (includes Markdown doc-comments) / 5,984 pure Rust SLoC**
+**Actual: 8,106 SLoC across 32 files (includes Markdown doc-comments) / 5,984 pure Rust SLoC**
 
 Production-grade GPU-accelerated training utilities implementing the v1.2 roadmap items:
 fused optimizer kernels, gradient checkpointing, mixed-precision optimizer states, EMA,
@@ -94,6 +94,12 @@ and large-scale ZeRO-style distributed training.
 - [x] RAdam variance rectification -- `gpu_optimizer/radam.rs`
 - [x] 11-variant LR scheduler family (including ReduceLROnPlateau, OneCycleLR, CyclicLR) -- `lr_scheduler.rs`
 - [ ] (P2) Multi-rank ZeRO collective integration -- requires `oxicuda-driver` NCCL-equivalent bring-up on Linux+NVIDIA hardware (currently single-rank verified only)
+- [x] `optimizer/adopt.rs` — ADOPT (Taniguchi 2024): convergence without bounded second-moment assumption; adaptive gradient with corrected denominators dₜ=|∇ₜ|/(1-β₁ᵗ), stable at high β₁ and sparse grads
+- [x] `optimizer/muon.rs` — Muon (Kosson 2024): momentum + Nesterov + orthogonalisation via Newton-Schulz iteration; updates W←W-η·orth(M) where M is Nesterov momentum; empirically faster than Adam on LLMs
+- [x] `scheduler/wsd.rs` — WSD (Warmup-Stable-Decay, Hu 2024): three-phase schedule; stable LR plateau for extended training + fast cooldown; recommended for continued training of Llama-style models
+- [ ] `regularization/sophia.rs` — Sophia (Liu 2023): second-order optimizer via Hutchinson estimator of Hessian diagonal hₜ = ∇f·v where v∼N(0,I); update = η·g/(max(ρ·h,ε)); 2× fewer steps vs Adam on GPT-2
+- [x] `optimizer/lamb.rs` — LAMB (You 2019): Layer-wise Adaptive Moments with trust-ratio r = ||w|| / ||g + λw||; scaled Adam update η · r · (m / (√v + ε)); converges large-batch BERT training; `GpuLamb { beta1, beta2, eps, weight_decay }`
+- [x] `grad_clip/grad_clip.rs` / `GradClip` — gradient clipping abstraction covering `GlobalNormClip`, `PerLayerClip`, `ValueClip`; unified `GradClip` trait with `apply()` and `last_scale()` inspector; gradient_clipping policy enforced across all optimisers
 
 ## Dependencies
 
@@ -110,7 +116,7 @@ and large-scale ZeRO-style distributed training.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![warn(missing_docs)]`)
-- Tests: 105 passing (root TODO.md count)
+- Tests: 250 passing (root TODO.md count)
 - unwrap() calls: 0 (production code; test code documented with `.expect()` messages)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime

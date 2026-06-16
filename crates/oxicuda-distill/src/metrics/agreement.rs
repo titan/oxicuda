@@ -104,13 +104,17 @@ mod tests {
     #[test]
     fn top_k_agreement_perfect() {
         let logits = vec![vec![3.0_f32, 1.0, 2.0], vec![1.0, 3.0, 2.0]];
-        let agree = top_k_agreement(&logits, &logits, 1).unwrap();
+        let agree = top_k_agreement(&logits, &logits, 1).expect("top_k_agreement should succeed");
         assert!((agree - 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn prediction_overlap_all_same() {
         let preds = vec![0_usize, 1, 2, 1, 0];
-        assert!((prediction_overlap(&preds, &preds).unwrap() - 1.0).abs() < 1e-5);
+        assert!(
+            (prediction_overlap(&preds, &preds).expect("prediction_overlap should succeed") - 1.0)
+                .abs()
+                < 1e-5
+        );
     }
 }

@@ -121,7 +121,7 @@ mod tests {
         let mut rng = LcgRng::new(77);
         let net = TinyNerf::new(10, 32, &mut rng);
         let x = vec![0.1_f32; 10];
-        let (sigma, rgb) = net.forward(&x).unwrap();
+        let (sigma, rgb) = net.forward(&x).expect("forward should succeed");
         assert!(sigma >= 0.0);
         assert!(rgb.iter().all(|&v| (0.0..=1.0).contains(&v)));
     }

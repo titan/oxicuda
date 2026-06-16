@@ -453,7 +453,7 @@ mod tests {
     fn empirical_quantile_finite_sample_rank() {
         // n = 9, level = 1 - 0.1 = 0.9 ⇒ rank = ceil(10 * 0.9) = 9 ⇒ the max.
         let scores: Vec<f32> = (1..=9).map(|x| x as f32).collect();
-        let q = empirical_quantile(&scores, 0.9).unwrap();
+        let q = empirical_quantile(&scores, 0.9).expect("empirical_quantile should succeed");
         assert!((q - 9.0).abs() < 1e-6, "q={q}");
     }
 
@@ -461,7 +461,7 @@ mod tests {
     fn empirical_quantile_rank_clamped_to_n() {
         // level = 1.0 ⇒ raw rank = n + 1, clamped to n ⇒ the max score.
         let scores = vec![3.0_f32, 1.0, 2.0, 5.0, 4.0];
-        let q = empirical_quantile(&scores, 1.0).unwrap();
+        let q = empirical_quantile(&scores, 1.0).expect("empirical_quantile should succeed");
         assert!((q - 5.0).abs() < 1e-6, "q={q}");
     }
 
@@ -471,7 +471,7 @@ mod tests {
         let levels = [0.1_f32, 0.25, 0.5, 0.75, 0.9, 1.0];
         let mut prev = f32::NEG_INFINITY;
         for &lvl in &levels {
-            let q = empirical_quantile(&scores, lvl).unwrap();
+            let q = empirical_quantile(&scores, lvl).expect("empirical_quantile should succeed");
             assert!(q >= prev - 1e-6, "quantile not monotone: {q} < {prev}");
             prev = q;
         }
@@ -504,8 +504,9 @@ mod tests {
         rng.fill_normal_scaled(&mut cal_target, sigma);
         let cal_pred = vec![0.0_f32; n_cal]; // model predicts the mean (0)
 
-        let cfg = ConformalConfig::new(alpha).unwrap();
-        let reg = SplitConformalRegressor::calibrate(cfg, &cal_pred, &cal_target).unwrap();
+        let cfg = ConformalConfig::new(alpha).expect("new should succeed");
+        let reg = SplitConformalRegressor::calibrate(cfg, &cal_pred, &cal_target)
+            .expect("calibrate should succeed");
 
         let mut covered = 0usize;
         for _ in 0..n_test {
@@ -527,10 +528,11 @@ mod tests {
 
     #[test]
     fn regression_interval_symmetric() {
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         let pred = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0];
         let target = vec![1.5_f32, 1.5, 3.5, 3.5, 5.5];
-        let reg = SplitConformalRegressor::calibrate(cfg, &pred, &target).unwrap();
+        let reg = SplitConformalRegressor::calibrate(cfg, &pred, &target)
+            .expect("calibrate should succeed");
         let center = 7.0_f32;
         let (lo, hi) = reg.predict_interval(center);
         assert!(
@@ -551,8 +553,9 @@ mod tests {
         let mut prev_width = -1.0_f32;
         // Smaller alpha ⇒ higher coverage ⇒ wider interval.
         for &alpha in &[0.5_f32, 0.2, 0.1, 0.05] {
-            let cfg = ConformalConfig::new(alpha).unwrap();
-            let reg = SplitConformalRegressor::calibrate(cfg, &pred, &target).unwrap();
+            let cfg = ConformalConfig::new(alpha).expect("new should succeed");
+            let reg = SplitConformalRegressor::calibrate(cfg, &pred, &target)
+                .expect("calibrate should succeed");
             let width = 2.0 * reg.q_hat();
             assert!(
                 width >= prev_width - 1e-6,
@@ -567,14 +570,15 @@ mod tests {
         let pred = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         // Targets essentially equal to predictions.
         let target: Vec<f32> = pred.iter().map(|&p| p + 1e-4).collect();
-        let cfg = ConformalConfig::new(0.1).unwrap();
-        let reg = SplitConformalRegressor::calibrate(cfg, &pred, &target).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
+        let reg = SplitConformalRegressor::calibrate(cfg, &pred, &target)
+            .expect("calibrate should succeed");
         assert!(reg.q_hat() < 1e-3, "q_hat={}", reg.q_hat());
     }
 
     #[test]
     fn regression_errs_on_bad_input() {
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         assert!(SplitConformalRegressor::calibrate(cfg, &[1.0], &[1.0, 2.0]).is_err());
         assert!(SplitConformalRegressor::calibrate(cfg, &[], &[]).is_err());
         assert!(ConformalConfig::new(0.0).is_err());
@@ -589,9 +593,9 @@ mod tests {
         let q_hi = vec![2.0_f32, 3.0, 4.0, 5.0, 6.0];
         // Targets inside bands ⇒ E_i negative (over-coverage).
         let target = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0];
-        let cfg = ConformalConfig::new(0.2).unwrap();
-        let cqr =
-            ConformalizedQuantileRegressor::calibrate_cqr(cfg, &q_lo, &q_hi, &target).unwrap();
+        let cfg = ConformalConfig::new(0.2).expect("new should succeed");
+        let cqr = ConformalizedQuantileRegressor::calibrate_cqr(cfg, &q_lo, &q_hi, &target)
+            .expect("calibrate_cqr should succeed");
         let q = cqr.q_hat();
         let (lo, hi) = cqr.predict_interval_cqr(10.0, 12.0);
         assert!((lo - (10.0 - q)).abs() < 1e-6, "lo={lo}, q={q}");
@@ -615,10 +619,10 @@ mod tests {
         let q_lo_cal = vec![-band; n_cal];
         let q_hi_cal = vec![band; n_cal];
 
-        let cfg = ConformalConfig::new(alpha).unwrap();
+        let cfg = ConformalConfig::new(alpha).expect("new should succeed");
         let cqr =
             ConformalizedQuantileRegressor::calibrate_cqr(cfg, &q_lo_cal, &q_hi_cal, &cal_target)
-                .unwrap();
+                .expect("value should be present");
 
         let mut covered = 0usize;
         for _ in 0..n_test {
@@ -638,7 +642,7 @@ mod tests {
 
     #[test]
     fn cqr_errs_on_bad_input() {
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         assert!(
             ConformalizedQuantileRegressor::calibrate_cqr(cfg, &[0.0, 1.0], &[1.0], &[0.5, 0.5])
                 .is_err()
@@ -679,15 +683,15 @@ mod tests {
             probs.extend_from_slice(&row);
             labels.push(y);
         }
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         let clf =
             SplitConformalClassifier::calibrate(cfg, &probs, &labels, k, ClassifierScore::Aps)
-                .unwrap();
+                .expect("value should be present");
 
         for _ in 0..200 {
             let y = rng.next_usize(k);
             let row = synthetic_probs(&mut rng, k, y, 2.0);
-            let set = clf.predict_set(&row).unwrap();
+            let set = clf.predict_set(&row).expect("predict_set should succeed");
             assert!(!set.is_empty(), "APS set must be non-empty");
         }
     }
@@ -695,7 +699,7 @@ mod tests {
     #[test]
     fn aps_contains_argmax_when_qhat_above_top() {
         // Construct a classifier with q_hat >= top prob; argmax must be in set.
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         // All calibration rows have the true class as a low-probability class so
         // that scores (and hence q_hat) are large.
         let k = 3;
@@ -709,10 +713,10 @@ mod tests {
         let labels = vec![2usize, 2, 2, 1];
         let clf =
             SplitConformalClassifier::calibrate(cfg, &probs, &labels, k, ClassifierScore::Aps)
-                .unwrap();
+                .expect("value should be present");
         let row = vec![0.7_f32, 0.2, 0.1];
         let argmax = 0usize;
-        let set = clf.predict_set(&row).unwrap();
+        let set = clf.predict_set(&row).expect("predict_set should succeed");
         assert!(set.contains(&argmax), "set {set:?} should contain argmax");
     }
 
@@ -739,10 +743,10 @@ mod tests {
         }
 
         let avg_size = |alpha: f32| -> f32 {
-            let cfg = ConformalConfig::new(alpha).unwrap();
+            let cfg = ConformalConfig::new(alpha).expect("new should succeed");
             let clf =
                 SplitConformalClassifier::calibrate(cfg, &probs, &labels, k, ClassifierScore::Aps)
-                    .unwrap();
+                    .expect("value should be present");
             let total: usize = eval_rows
                 .iter()
                 .map(|r| clf.predict_set(r).map(|s| s.len()).unwrap_or(0))
@@ -774,16 +778,16 @@ mod tests {
             probs.extend_from_slice(&row);
             labels.push(y);
         }
-        let cfg = ConformalConfig::new(alpha).unwrap();
+        let cfg = ConformalConfig::new(alpha).expect("new should succeed");
         let clf =
             SplitConformalClassifier::calibrate(cfg, &probs, &labels, k, ClassifierScore::Aps)
-                .unwrap();
+                .expect("value should be present");
 
         let mut covered = 0usize;
         for _ in 0..n_test {
             let y = rng.next_usize(k);
             let row = synthetic_probs(&mut rng, k, y, 1.5);
-            let set = clf.predict_set(&row).unwrap();
+            let set = clf.predict_set(&row).expect("predict_set should succeed");
             if set.contains(&y) {
                 covered += 1;
             }
@@ -802,7 +806,7 @@ mod tests {
         // With LAC, calibration score = 1 - p_true; verify via reconstructing
         // q_hat from a tiny hand-checkable example.
         // n = 9 scores, alpha = 0.1 ⇒ rank 9 ⇒ max score = 1 - min p_true.
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         let k = 2;
         // p_true values: 0.9, 0.8, ..., 0.1 for 9 samples (true label = class 0).
         let mut probs = Vec::new();
@@ -815,7 +819,7 @@ mod tests {
         }
         let clf =
             SplitConformalClassifier::calibrate(cfg, &probs, &labels, k, ClassifierScore::Lac)
-                .unwrap();
+                .expect("value should be present");
         // Max (1 - p_true) over scores = 1 - 0.1 (approx) = 0.9.
         assert!(
             (clf.q_hat() - 0.9).abs() < 1e-5,
@@ -826,7 +830,7 @@ mod tests {
 
     #[test]
     fn lac_predict_set_threshold() {
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         let k = 3;
         // Sharp calibration: true class always ~0.95 ⇒ small q_hat.
         let n = 20usize;
@@ -837,18 +841,22 @@ mod tests {
         let labels = vec![0usize; n];
         let clf =
             SplitConformalClassifier::calibrate(cfg, &probs, &labels, k, ClassifierScore::Lac)
-                .unwrap();
+                .expect("value should be present");
         // q_hat ~ 0.05, threshold ~ 0.95; only very confident classes survive.
-        let confident = clf.predict_set(&[0.96_f32, 0.02, 0.02]).unwrap();
+        let confident = clf
+            .predict_set(&[0.96_f32, 0.02, 0.02])
+            .expect("predict_set should succeed");
         assert_eq!(confident, vec![0usize]);
         // Non-empty fallback even when nothing clears the threshold.
-        let ambiguous = clf.predict_set(&[0.4_f32, 0.35, 0.25]).unwrap();
+        let ambiguous = clf
+            .predict_set(&[0.4_f32, 0.35, 0.25])
+            .expect("predict_set should succeed");
         assert!(!ambiguous.is_empty());
     }
 
     #[test]
     fn classifier_errs_on_bad_input() {
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         // n_classes mismatch in calibration shape.
         assert!(
             SplitConformalClassifier::calibrate(
@@ -881,7 +889,7 @@ mod tests {
             2,
             ClassifierScore::Aps,
         )
-        .unwrap();
+        .expect("value should be present");
         assert!(clf.predict_set(&[0.5, 0.3, 0.2]).is_err());
     }
 
@@ -899,12 +907,12 @@ mod tests {
             probs.extend_from_slice(&row);
             labels.push(y);
         }
-        let cfg = ConformalConfig::new(0.1).unwrap();
+        let cfg = ConformalConfig::new(0.1).expect("new should succeed");
         let clf =
             SplitConformalClassifier::calibrate(cfg, &probs, &labels, k, ClassifierScore::Aps)
-                .unwrap();
+                .expect("value should be present");
         let row = vec![0.97_f32, 0.01, 0.01, 0.01];
-        let set = clf.predict_set(&row).unwrap();
+        let set = clf.predict_set(&row).expect("predict_set should succeed");
         assert!(set.contains(&0usize));
     }
 }

@@ -2,6 +2,7 @@
 //! mirror descent, trust-region Newton with Steihaug-Toint CG, SVRG, SAGA, coordinate descent).
 
 pub mod accelerated_gd;
+pub mod averaged_subgradient;
 pub mod block_coord_descent;
 pub mod coord_descent;
 pub mod dual_newton;
@@ -9,12 +10,16 @@ pub mod frank_wolfe;
 pub mod lbfgs;
 pub mod mirror_descent;
 pub mod momentum_gd;
+pub mod polyak;
 pub mod projected_gradient;
 pub mod spg;
 pub mod svrg_saga;
 pub mod trust_region;
 
 pub use accelerated_gd::nesterov_accelerated;
+pub use averaged_subgradient::{
+    AveragedSubgradConfig, AveragedSubgradResult, SubgradStep, averaged_subgradient,
+};
 pub use block_coord_descent::{
     BcdConfig, BcdState, BcdSweep, InnerSolver, block_coord_descent, block_coord_descent_quadratic,
 };
@@ -27,6 +32,7 @@ pub use mirror_descent::{
     p_norm_dual_map, project_simplex, safe_log_vec, softmax,
 };
 pub use momentum_gd::heavy_ball;
+pub use polyak::{PolyakConfig, PolyakResult, PolyakTarget, polyak_subgradient};
 pub use projected_gradient::projected_gradient;
 pub use spg::{Spg, SpgConfig, SpgResult};
 pub use svrg_saga::{

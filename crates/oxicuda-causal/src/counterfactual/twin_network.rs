@@ -147,7 +147,9 @@ mod tests {
         let mut rng = LcgRng::new(55);
         let net = TwinNetwork::new(4, 8, 2, &mut rng);
         let x = vec![0.1_f32, 0.2, 0.3, 0.4];
-        let ite = net.ite(&x).unwrap();
+        let ite = net
+            .ite(&x)
+            .expect("TwinNetwork::ite should succeed for valid input");
         assert!(ite.is_finite());
     }
 }

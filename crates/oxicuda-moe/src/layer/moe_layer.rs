@@ -211,9 +211,9 @@ mod tests {
             router_z_loss_coef: 0.001,
             activation: ExpertActivation::Gelu,
         };
-        let layer = MoeLayer::new(cfg, &mut rng).unwrap();
+        let layer = MoeLayer::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32; 8 * 16];
-        let output = layer.forward(&x, 8).unwrap();
+        let output = layer.forward(&x, 8).expect("forward should succeed");
         assert_eq!(output.hidden.len(), 8 * 16);
         assert!(output.aux_loss.is_finite());
     }
@@ -222,7 +222,7 @@ mod tests {
     fn moe_layer_param_count_reasonable() {
         let mut rng = LcgRng::new(0);
         let cfg = MoeLayerConfig::default();
-        let layer = MoeLayer::new(cfg.clone(), &mut rng).unwrap();
+        let layer = MoeLayer::new(cfg.clone(), &mut rng).expect("value should be present");
         let params = layer.param_count();
         // Router: E * d; each expert: 2 * d * d_ffn + d_ffn + d
         let expected_min = cfg.n_experts * cfg.input_dim + cfg.n_experts * cfg.input_dim;

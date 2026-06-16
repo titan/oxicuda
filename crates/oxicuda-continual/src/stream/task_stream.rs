@@ -125,11 +125,19 @@ mod tests {
     #[test]
     fn stream_advances_correctly() {
         let tasks = vec![make_task(0, 10), make_task(1, 10), make_task(2, 10)];
-        let mut stream = task_stream_new(tasks).unwrap();
-        assert_eq!(current_task(&stream).unwrap().id, 0);
-        let t1 = next_task(&mut stream).unwrap();
+        let mut stream =
+            task_stream_new(tasks).expect("task stream should initialize with valid tasks");
+        assert_eq!(
+            current_task(&stream)
+                .expect("current task should be available in non-empty stream")
+                .id,
+            0
+        );
+        let t1 = next_task(&mut stream)
+            .expect("next task should be available in stream with remaining tasks");
         assert_eq!(t1.id, 1);
-        let t2 = next_task(&mut stream).unwrap();
+        let t2 = next_task(&mut stream)
+            .expect("next task should be available in stream with remaining tasks");
         assert_eq!(t2.id, 2);
         // At end: next_task returns None
         assert!(next_task(&mut stream).is_none());
@@ -139,7 +147,7 @@ mod tests {
     fn task_batch_size_respected() {
         let mut rng = LcgRng::new(42);
         let task = make_task(0, 20);
-        let batch = task_batch(&task, 8, &mut rng).unwrap();
+        let batch = task_batch(&task, 8, &mut rng).expect("task batch sampling should succeed");
         assert_eq!(batch.len(), 8, "Batch size should be respected");
     }
 
@@ -147,7 +155,7 @@ mod tests {
     fn task_batch_clamped_to_task_size() {
         let mut rng = LcgRng::new(7);
         let task = make_task(0, 5);
-        let batch = task_batch(&task, 100, &mut rng).unwrap();
+        let batch = task_batch(&task, 100, &mut rng).expect("task batch sampling should succeed");
         assert_eq!(batch.len(), 5, "Batch should be clamped to task size");
     }
 
@@ -155,7 +163,7 @@ mod tests {
     fn task_batch_labels_valid() {
         let mut rng = LcgRng::new(13);
         let task = make_task(0, 20);
-        let batch = task_batch(&task, 10, &mut rng).unwrap();
+        let batch = task_batch(&task, 10, &mut rng).expect("task batch sampling should succeed");
         for (_, label) in &batch {
             assert!(
                 (*label as usize) < task.n_classes,
@@ -190,7 +198,13 @@ mod tests {
     #[test]
     fn current_task_returns_first() {
         let tasks = vec![make_task(0, 5), make_task(1, 5)];
-        let stream = task_stream_new(tasks).unwrap();
-        assert_eq!(current_task(&stream).unwrap().id, 0);
+        let stream =
+            task_stream_new(tasks).expect("task stream should initialize with valid tasks");
+        assert_eq!(
+            current_task(&stream)
+                .expect("current task should be available in non-empty stream")
+                .id,
+            0
+        );
     }
 }

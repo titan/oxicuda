@@ -11,6 +11,10 @@
 //! | [`speculative`] | Chen et al. 2023 speculative decoding with rejection sampling |
 //! | [`medusa`] | Cai et al. 2024 multi-head verified-tree speculative decoding |
 //! | [`json_constrained`] | Char-level pushdown JSON validator + logit masking |
+//! | [`logits_processor`] | Temperature, top-k, top-p, repetition and presence penalties |
+//! | [`mirostat`] | Basu et al. 2021 perplexity-controlled sampling (Mirostat v2) |
+//! | [`typical`] | Meister et al. 2022 locally typical sampling by entropy deviation |
+//! | [`epsilon`] | Hewitt et al. 2022 absolute-probability truncation sampling |
 //!
 //! # Shared RNG
 //!
@@ -18,20 +22,32 @@
 //! The RNG is a 64-bit LCG with Knuth's constants.
 
 pub mod beam_search;
+pub mod contrastive_search;
+pub mod epsilon;
 pub mod greedy;
 pub mod json_constrained;
+pub mod logits_processor;
 pub mod medusa;
+pub mod mirostat;
 pub mod speculative;
 pub mod top_k;
 pub mod top_p;
+pub mod typical;
+pub mod watermark;
 
 pub use beam_search::{BeamHypothesis, BeamSearchConfig, BeamSearchState};
+pub use contrastive_search::{ContrastiveSearchConfig, contrastive_search_select};
+pub use epsilon::{epsilon_filter, epsilon_sample};
 pub use greedy::{greedy_sample, greedy_sample_batch};
 pub use json_constrained::{JsonConstraint, JsonToken};
+pub use logits_processor::{LogitsProcessor, LogitsProcessorConfig};
 pub use medusa::{MedusaConfig, MedusaDecoder};
+pub use mirostat::{Mirostat, MirostatConfig};
 pub use speculative::speculative_verify;
 pub use top_k::{top_k_filter, top_k_sample};
 pub use top_p::{top_p_filter, top_p_sample};
+pub use typical::{typical_filter, typical_sample};
+pub use watermark::{WatermarkDetection, Watermarker};
 
 // ─── Rng ─────────────────────────────────────────────────────────────────────
 

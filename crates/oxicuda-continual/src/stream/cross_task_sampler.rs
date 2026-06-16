@@ -237,17 +237,17 @@ impl CrossTaskSampler {
     /// Draw `n_draw` task indices according to the normalised `weights`.
     ///
     /// Uses integer-arithmetic CDF inversion.  The weights are converted to a
-    /// u64 CDF scaled by 2^31 (matching the 31-bit output of `next_u32()` which
-    /// returns the high 31 bits of the LCG state).  Each draw is a u32 from the
-    /// LCG compared against this CDF.  This avoids the implicit [0, 0.5) range
-    /// of `next_f32()` (a consequence of the 31-bit high-bit extraction).
+    /// u64 CDF scaled by 2^32 (the full range of `next_u32()`, which returns a
+    /// value in `[0, 2^32)`).  Each draw is a u32 from the LCG compared against
+    /// this CDF.  Integer arithmetic avoids the floating-point rounding gaps a
+    /// `next_f32()`-based comparison would introduce.
     fn categorical_draw(&mut self, n_draw: usize) -> Vec<usize> {
         let n_tasks = self.weights.len();
         let mut result = Vec::with_capacity(n_draw);
 
-        // Scale = 2^31: the max value returned by next_u32() is 2^31 - 1
-        // (because state >> 33 gives 31 bits cast to u32).
-        let scale: u64 = 1u64 << 31;
+        // Scale = 2^32: next_u32() returns a value in [0, 2^32 - 1], so the CDF
+        // must span the same range for an unbiased categorical draw.
+        let scale: u64 = 1u64 << 32;
 
         // Build integer CDF in [0, scale].
         // cdf_int[k] = floor(CDF[k] * scale), with last bucket forced to scale
@@ -266,7 +266,7 @@ impl CrossTaskSampler {
         }
 
         for _ in 0..n_draw {
-            // next_u32() returns a value in [0, 2^31 - 1].
+            // next_u32() returns a value in [0, 2^32 - 1].
             let u = self.rng.next_u32() as u64;
             // Find the first bucket whose cumulative weight exceeds u.
             let mut idx = n_tasks - 1; // default: last bucket
@@ -342,7 +342,8 @@ mod tests {
     #[test]
     fn weight_sum_is_one() {
         let sizes = &[10usize, 20, 30, 40];
-        let sampler = CrossTaskSampler::new(sizes, &cfg(16, SamplingStrategy::Uniform, 1)).unwrap();
+        let sampler = CrossTaskSampler::new(sizes, &cfg(16, SamplingStrategy::Uniform, 1))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
         let sum: f64 = sampler.weights().iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-10,
@@ -354,7 +355,8 @@ mod tests {
     #[test]
     fn uniform_weights_are_equal() {
         let sizes = &[5usize, 50, 500];
-        let sampler = CrossTaskSampler::new(sizes, &cfg(32, SamplingStrategy::Uniform, 2)).unwrap();
+        let sampler = CrossTaskSampler::new(sizes, &cfg(32, SamplingStrategy::Uniform, 2))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
         let expected = 1.0 / 3.0;
         for &w in sampler.weights() {
             assert!(
@@ -368,8 +370,8 @@ mod tests {
     #[test]
     fn proportional_larger_task_higher_weight() {
         let sizes = &[10usize, 100];
-        let sampler =
-            CrossTaskSampler::new(sizes, &cfg(64, SamplingStrategy::Proportional, 3)).unwrap();
+        let sampler = CrossTaskSampler::new(sizes, &cfg(64, SamplingStrategy::Proportional, 3))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
         let w = sampler.weights();
         assert!(
             w[1] > w[0],
@@ -387,13 +389,13 @@ mod tests {
     #[test]
     fn temperature_1_equals_proportional() {
         let sizes = &[7usize, 43, 120];
-        let prop =
-            CrossTaskSampler::new(sizes, &cfg(32, SamplingStrategy::Proportional, 4)).unwrap();
+        let prop = CrossTaskSampler::new(sizes, &cfg(32, SamplingStrategy::Proportional, 4))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
         let temp = CrossTaskSampler::new(
             sizes,
             &cfg(32, SamplingStrategy::Temperature { temperature: 1.0 }, 4),
         )
-        .unwrap();
+        .expect("CrossTaskSampler should construct with valid sizes and config");
         for (wp, wt) in prop.weights().iter().zip(temp.weights().iter()) {
             assert!(
                 (wp - wt).abs() < 1e-10,
@@ -410,7 +412,7 @@ mod tests {
             sizes,
             &cfg(32, SamplingStrategy::Temperature { temperature: 1e10 }, 5),
         )
-        .unwrap();
+        .expect("CrossTaskSampler should construct with valid sizes and config");
         let w = sampler.weights();
         let expected = 1.0 / 3.0;
         for &wi in w {
@@ -425,9 +427,11 @@ mod tests {
     #[test]
     fn sample_batch_total_size_correct() {
         let sizes = &[20usize, 30, 50];
-        let mut sampler =
-            CrossTaskSampler::new(sizes, &cfg(32, SamplingStrategy::Uniform, 6)).unwrap();
-        let batch = sampler.sample_batch().unwrap();
+        let mut sampler = CrossTaskSampler::new(sizes, &cfg(32, SamplingStrategy::Uniform, 6))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
+        let batch = sampler
+            .sample_batch()
+            .expect("batch sampling should succeed with valid sampler state");
         let total: usize = batch.iter().map(|ts| ts.sample_indices.len()).sum();
         assert_eq!(total, 32, "total samples must equal batch_size");
     }
@@ -436,9 +440,10 @@ mod tests {
     #[test]
     fn add_task_updates_state() {
         let mut sampler =
-            CrossTaskSampler::new(&[10usize, 20], &cfg(16, SamplingStrategy::Uniform, 7)).unwrap();
+            CrossTaskSampler::new(&[10usize, 20], &cfg(16, SamplingStrategy::Uniform, 7))
+                .expect("CrossTaskSampler should construct with valid sizes and config");
         assert_eq!(sampler.n_tasks(), 2);
-        sampler.add_task(30).unwrap();
+        sampler.add_task(30).expect("adding a task should succeed");
         assert_eq!(sampler.n_tasks(), 3);
         let sum: f64 = sampler.weights().iter().sum();
         assert!((sum - 1.0).abs() < 1e-10, "weights must still sum to 1");
@@ -448,10 +453,12 @@ mod tests {
     #[test]
     fn sample_fixed_allocation_exact_counts() {
         let sizes = &[100usize, 200, 300];
-        let mut sampler =
-            CrossTaskSampler::new(sizes, &cfg(32, SamplingStrategy::Uniform, 8)).unwrap();
+        let mut sampler = CrossTaskSampler::new(sizes, &cfg(32, SamplingStrategy::Uniform, 8))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
         let alloc = &[5usize, 10, 15];
-        let batch = sampler.sample_fixed_allocation(alloc).unwrap();
+        let batch = sampler
+            .sample_fixed_allocation(alloc)
+            .expect("fixed allocation sampling should succeed");
         // Collect per-task counts from result.
         let mut counts = vec![0usize; 3];
         for ts in &batch {
@@ -464,10 +471,12 @@ mod tests {
     #[test]
     fn sample_indices_within_task_size() {
         let sizes = &[10usize, 25, 50];
-        let mut sampler =
-            CrossTaskSampler::new(sizes, &cfg(64, SamplingStrategy::Proportional, 9)).unwrap();
+        let mut sampler = CrossTaskSampler::new(sizes, &cfg(64, SamplingStrategy::Proportional, 9))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
         for _ in 0..10 {
-            let batch = sampler.sample_batch().unwrap();
+            let batch = sampler
+                .sample_batch()
+                .expect("batch sampling should succeed with valid sampler state");
             for ts in &batch {
                 let sz = sizes[ts.task_id];
                 for &idx in &ts.sample_indices {
@@ -486,11 +495,17 @@ mod tests {
     fn reproducibility_same_seed() {
         let sizes = &[15usize, 35, 50];
         let strategy = SamplingStrategy::Proportional;
-        let mut s1 = CrossTaskSampler::new(sizes, &cfg(16, strategy.clone(), 99)).unwrap();
-        let mut s2 = CrossTaskSampler::new(sizes, &cfg(16, strategy, 99)).unwrap();
+        let mut s1 = CrossTaskSampler::new(sizes, &cfg(16, strategy.clone(), 99))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
+        let mut s2 = CrossTaskSampler::new(sizes, &cfg(16, strategy, 99))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
         for _ in 0..5 {
-            let b1 = s1.sample_batch().unwrap();
-            let b2 = s2.sample_batch().unwrap();
+            let b1 = s1
+                .sample_batch()
+                .expect("batch sampling should succeed with valid sampler state");
+            let b2 = s2
+                .sample_batch()
+                .expect("batch sampling should succeed with valid sampler state");
             assert_eq!(b1.len(), b2.len());
             for (t1, t2) in b1.iter().zip(b2.iter()) {
                 assert_eq!(t1.task_id, t2.task_id);
@@ -503,8 +518,11 @@ mod tests {
     #[test]
     fn single_task_one_sample_per_batch() {
         let mut sampler =
-            CrossTaskSampler::new(&[100usize], &cfg(32, SamplingStrategy::Uniform, 11)).unwrap();
-        let batch = sampler.sample_batch().unwrap();
+            CrossTaskSampler::new(&[100usize], &cfg(32, SamplingStrategy::Uniform, 11))
+                .expect("CrossTaskSampler should construct with valid sizes and config");
+        let batch = sampler
+            .sample_batch()
+            .expect("batch sampling should succeed with valid sampler state");
         assert_eq!(batch.len(), 1, "single task → exactly one TaskSample");
         assert_eq!(batch[0].task_id, 0);
         assert_eq!(batch[0].sample_indices.len(), 32);
@@ -543,13 +561,15 @@ mod tests {
     #[test]
     fn uniform_distributes_evenly_statistically() {
         let sizes = &[100usize, 100, 100];
-        let mut sampler =
-            CrossTaskSampler::new(sizes, &cfg(300, SamplingStrategy::Uniform, 15)).unwrap();
+        let mut sampler = CrossTaskSampler::new(sizes, &cfg(300, SamplingStrategy::Uniform, 15))
+            .expect("CrossTaskSampler should construct with valid sizes and config");
 
         let mut task_counts = [0usize; 3];
         let n_batches = 100;
         for _ in 0..n_batches {
-            let batch = sampler.sample_batch().unwrap();
+            let batch = sampler
+                .sample_batch()
+                .expect("batch sampling should succeed with valid sampler state");
             for ts in &batch {
                 task_counts[ts.task_id] += ts.sample_indices.len();
             }
@@ -569,7 +589,8 @@ mod tests {
     #[test]
     fn fixed_allocation_dim_mismatch_error() {
         let mut sampler =
-            CrossTaskSampler::new(&[10usize, 20], &cfg(16, SamplingStrategy::Uniform, 16)).unwrap();
+            CrossTaskSampler::new(&[10usize, 20], &cfg(16, SamplingStrategy::Uniform, 16))
+                .expect("CrossTaskSampler should construct with valid sizes and config");
         // Provide 3 allocations for 2 tasks.
         let result = sampler.sample_fixed_allocation(&[5, 5, 5]);
         assert!(result.is_err(), "dim mismatch should be an error");

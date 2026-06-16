@@ -342,19 +342,24 @@ mod tests {
     #[test]
     fn n_subdomains_product() {
         let mut rng = LcgRng::new(1);
-        let fb = Fbpinn::new(&cfg_2d(2, 3), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_2d(2, 3), &mut rng)
+            .expect("2D FBPINN construction with valid 2x3 config should succeed");
         assert_eq!(fb.n_subdomains(), 6);
-        let fb1 = Fbpinn::new(&cfg_1d(4), &mut rng).unwrap();
+        let fb1 = Fbpinn::new(&cfg_1d(4), &mut rng)
+            .expect("1D FBPINN construction with valid 4-subdomain config should succeed");
         assert_eq!(fb1.n_subdomains(), 4);
     }
 
     #[test]
     fn window_at_center_is_one() {
         let mut rng = LcgRng::new(2);
-        let fb = Fbpinn::new(&cfg_1d(3), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_1d(3), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         for j in 0..fb.n_subdomains() {
             let c = fb.subdomains[j].center.clone();
-            let w = fb.window(j, &c).unwrap();
+            let w = fb
+                .window(j, &c)
+                .expect("window evaluation should succeed for valid input");
             assert!((w - 1.0).abs() < 1e-5, "window at center should be 1: {w}");
         }
     }
@@ -362,19 +367,25 @@ mod tests {
     #[test]
     fn window_zero_outside_support() {
         let mut rng = LcgRng::new(3);
-        let fb = Fbpinn::new(&cfg_1d(3), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_1d(3), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         // A point far outside the domain is outside every support.
-        let w = fb.window(0, &[10.0]).unwrap();
+        let w = fb
+            .window(0, &[10.0])
+            .expect("window evaluation should succeed for valid input");
         assert_eq!(w, 0.0);
     }
 
     #[test]
     fn partition_of_unity_sums_to_one_1d() {
         let mut rng = LcgRng::new(4);
-        let fb = Fbpinn::new(&cfg_1d(3), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_1d(3), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         for i in 1..10 {
             let x = i as f32 / 10.0;
-            let p = fb.partition_of_unity(&[x]).unwrap();
+            let p = fb
+                .partition_of_unity(&[x])
+                .expect("partition of unity computation should succeed for valid input");
             let s: f32 = p.iter().sum();
             assert!((s - 1.0).abs() < 1e-5, "PoU sum at x={x} = {s}");
         }
@@ -383,11 +394,14 @@ mod tests {
     #[test]
     fn partition_of_unity_sums_to_one_2d() {
         let mut rng = LcgRng::new(5);
-        let fb = Fbpinn::new(&cfg_2d(2, 2), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_2d(2, 2), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         for ix in 1..5 {
             for iy in 1..5 {
                 let x = [ix as f32 / 5.0, iy as f32 / 5.0];
-                let p = fb.partition_of_unity(&x).unwrap();
+                let p = fb
+                    .partition_of_unity(&x)
+                    .expect("partition of unity computation should succeed for valid input");
                 let s: f32 = p.iter().sum();
                 assert!((s - 1.0).abs() < 1e-5, "2D PoU sum at {x:?} = {s}");
             }
@@ -397,10 +411,13 @@ mod tests {
     #[test]
     fn partition_of_unity_nonneg() {
         let mut rng = LcgRng::new(6);
-        let fb = Fbpinn::new(&cfg_1d(4), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_1d(4), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         for i in 0..=10 {
             let x = i as f32 / 10.0;
-            let p = fb.partition_of_unity(&[x]).unwrap();
+            let p = fb
+                .partition_of_unity(&[x])
+                .expect("partition of unity computation should succeed for valid input");
             assert!(p.iter().all(|&w| w >= 0.0), "PoU has a negative weight");
         }
     }
@@ -408,29 +425,39 @@ mod tests {
     #[test]
     fn normalize_local_center_and_edge() {
         let mut rng = LcgRng::new(7);
-        let fb = Fbpinn::new(&cfg_1d(3), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_1d(3), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         let j = 1;
         let c = fb.subdomains[j].center.clone();
         let hw = fb.subdomains[j].half_width.clone();
-        let at_center = fb.normalize_local(j, &c).unwrap();
+        let at_center = fb
+            .normalize_local(j, &c)
+            .expect("normalize_local should succeed for valid input");
         assert!(at_center[0].abs() < 1e-6);
         // Far beyond the edge → clamped to ±1.
         let beyond = [c[0] + 5.0 * hw[0]];
-        let nl = fb.normalize_local(j, &beyond).unwrap();
+        let nl = fb
+            .normalize_local(j, &beyond)
+            .expect("normalize_local should succeed for valid input");
         assert!((nl[0] - 1.0).abs() < 1e-6);
         let below = [c[0] - 5.0 * hw[0]];
-        let nl2 = fb.normalize_local(j, &below).unwrap();
+        let nl2 = fb
+            .normalize_local(j, &below)
+            .expect("normalize_local should succeed for valid input");
         assert!((nl2[0] + 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn single_subdomain_pou_one() {
         let mut rng = LcgRng::new(8);
-        let fb = Fbpinn::new(&cfg_1d(1), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_1d(1), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         assert_eq!(fb.n_subdomains(), 1);
         for i in 1..10 {
             let x = i as f32 / 10.0;
-            let p = fb.partition_of_unity(&[x]).unwrap();
+            let p = fb
+                .partition_of_unity(&[x])
+                .expect("partition of unity computation should succeed for valid input");
             assert!(
                 (p[0] - 1.0).abs() < 1e-5,
                 "single-subdomain PoU at x={x}={}",
@@ -442,10 +469,13 @@ mod tests {
     #[test]
     fn forward_finite_1d() {
         let mut rng = LcgRng::new(9);
-        let fb = Fbpinn::new(&cfg_1d(3), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_1d(3), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         for i in 0..=10 {
             let x = i as f32 / 10.0;
-            let u = fb.forward(&[x]).unwrap();
+            let u = fb
+                .forward(&[x])
+                .expect("forward pass should succeed for valid input");
             assert!(u.is_finite(), "forward not finite at x={x}");
         }
     }
@@ -454,24 +484,32 @@ mod tests {
     fn forward_deterministic_given_seed() {
         let mut rng_a = LcgRng::new(321);
         let mut rng_b = LcgRng::new(321);
-        let fb_a = Fbpinn::new(&cfg_2d(2, 2), &mut rng_a).unwrap();
-        let fb_b = Fbpinn::new(&cfg_2d(2, 2), &mut rng_b).unwrap();
-        let ua = fb_a.forward(&[0.4, 0.6]).unwrap();
-        let ub = fb_b.forward(&[0.4, 0.6]).unwrap();
+        let fb_a = Fbpinn::new(&cfg_2d(2, 2), &mut rng_a)
+            .expect("FBPINN construction with valid config should succeed");
+        let fb_b = Fbpinn::new(&cfg_2d(2, 2), &mut rng_b)
+            .expect("FBPINN construction with valid config should succeed");
+        let ua = fb_a
+            .forward(&[0.4, 0.6])
+            .expect("forward pass should succeed for valid input");
+        let ub = fb_b
+            .forward(&[0.4, 0.6])
+            .expect("forward pass should succeed for valid input");
         assert!((ua - ub).abs() < 1e-9);
     }
 
     #[test]
     fn networks_len_matches_subdomains() {
         let mut rng = LcgRng::new(10);
-        let fb = Fbpinn::new(&cfg_2d(3, 2), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_2d(3, 2), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         assert_eq!(fb.networks.len(), fb.n_subdomains());
     }
 
     #[test]
     fn centers_within_domain() {
         let mut rng = LcgRng::new(11);
-        let fb = Fbpinn::new(&cfg_2d(2, 3), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_2d(2, 3), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         for sub in &fb.subdomains {
             assert!(sub.center[0] >= 0.0 && sub.center[0] <= 1.0);
             assert!(sub.center[1] >= 0.0 && sub.center[1] <= 1.0);
@@ -481,15 +519,19 @@ mod tests {
     #[test]
     fn forward_2d_runs() {
         let mut rng = LcgRng::new(12);
-        let fb = Fbpinn::new(&cfg_2d(2, 2), &mut rng).unwrap();
-        let u = fb.forward(&[0.5, 0.5]).unwrap();
+        let fb = Fbpinn::new(&cfg_2d(2, 2), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
+        let u = fb
+            .forward(&[0.5, 0.5])
+            .expect("forward pass should succeed for valid input");
         assert!(u.is_finite());
     }
 
     #[test]
     fn err_dim_mismatch_in_x() {
         let mut rng = LcgRng::new(13);
-        let fb = Fbpinn::new(&cfg_2d(2, 2), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_2d(2, 2), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         assert!(matches!(
             fb.forward(&[0.5]),
             Err(PinnError::DimensionMismatch { .. })
@@ -575,7 +617,8 @@ mod tests {
     #[test]
     fn err_j_out_of_range() {
         let mut rng = LcgRng::new(18);
-        let fb = Fbpinn::new(&cfg_1d(2), &mut rng).unwrap();
+        let fb = Fbpinn::new(&cfg_1d(2), &mut rng)
+            .expect("FBPINN construction with valid config should succeed");
         assert!(matches!(
             fb.window(99, &[0.5]),
             Err(PinnError::InvalidGridResolution { .. })

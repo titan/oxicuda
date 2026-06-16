@@ -79,7 +79,7 @@ impl SavedTensor {
 /// ```rust
 /// use oxicuda::tensor_backend::{GpuTensor, TensorDtype};
 ///
-/// let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0).unwrap();
+/// let t = GpuTensor::zeros(&[2, 3], TensorDtype::Float32, 0).expect("zeros should succeed");
 /// assert_eq!(t.shape(), &[2, 3]);
 /// assert_eq!(t.numel(), 6);
 /// ```

@@ -51,23 +51,23 @@ mod e2e_tests {
     #[test]
     fn dag_add_remove_edge() {
         let mut dag = Dag::new(5);
-        dag.add_edge(0, 1).unwrap();
-        dag.add_edge(1, 2).unwrap();
-        dag.add_edge(2, 3).unwrap();
+        dag.add_edge(0, 1).expect("add edge 0->1");
+        dag.add_edge(1, 2).expect("add edge 1->2");
+        dag.add_edge(2, 3).expect("add edge 2->3");
         assert!(dag.has_edge(0, 1));
         assert!(!dag.has_edge(1, 0));
         dag.remove_edge(1, 2);
         assert!(!dag.has_edge(1, 2));
-        let order = dag.topo_sort().unwrap();
+        let order = dag.topo_sort().expect("topo_sort on acyclic dag");
         assert_eq!(order.len(), 5);
     }
 
     #[test]
     fn dag_cycle_detected() {
         let mut dag = Dag::new(4);
-        dag.add_edge(0, 1).unwrap();
-        dag.add_edge(1, 2).unwrap();
-        dag.add_edge(2, 3).unwrap();
+        dag.add_edge(0, 1).expect("add edge 0->1 in cycle test");
+        dag.add_edge(1, 2).expect("add edge 1->2 in cycle test");
+        dag.add_edge(2, 3).expect("add edge 2->3 in cycle test");
         let result = dag.add_edge(3, 0);
         assert!(result.is_err());
     }
@@ -76,8 +76,8 @@ mod e2e_tests {
     fn d_separation_chain() {
         // X -> Z -> Y: X d-sep Y given {Z}
         let mut dag = Dag::new(3);
-        dag.add_edge(0, 2).unwrap();
-        dag.add_edge(2, 1).unwrap();
+        dag.add_edge(0, 2).expect("add edge 0->2");
+        dag.add_edge(2, 1).expect("add edge 2->1");
         assert!(d_separated(&dag, 0, 1, &[2]));
         assert!(!d_separated(&dag, 0, 1, &[]));
     }
@@ -112,7 +112,7 @@ mod e2e_tests {
         }
         let result = PcAlgorithm::run(&data, n, d, 0.05);
         assert!(result.is_ok());
-        let pc = result.unwrap();
+        let pc = result.expect("PC algorithm should succeed on valid input");
         assert!(pc.skeleton.len() <= d * (d - 1) / 2);
     }
 
@@ -127,8 +127,12 @@ mod e2e_tests {
         }
         let t: Vec<f32> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 0.0 }).collect();
         let mut model = PropensityModel::new(d, &mut rng);
-        model.fit(&x, &t, n, 0.01, 100).unwrap();
-        let preds = model.predict(&x, n).unwrap();
+        model
+            .fit(&x, &t, n, 0.01, 100)
+            .expect("propensity model fit should succeed");
+        let preds = model
+            .predict(&x, n)
+            .expect("propensity model predict should succeed");
         assert_eq!(preds.len(), n);
         for &p in &preds {
             assert!((0.0..=1.0).contains(&p), "propensity={p} out of [0,1]");
@@ -144,7 +148,7 @@ mod e2e_tests {
             .into_iter()
             .chain(vec![0.4_f32; n / 2])
             .collect();
-        let ate = ipw_ate(&y, &t, &pi).unwrap();
+        let ate = ipw_ate(&y, &t, &pi).expect("IPW ATE estimation should succeed");
         assert!(ate.is_finite());
     }
 
@@ -161,7 +165,7 @@ mod e2e_tests {
         let y: Vec<f32> = (0..n)
             .map(|i| x[i * d] * 0.5 + t[i] * 2.0 + rng.next_normal() * 0.1)
             .collect();
-        let result = DoubleML::fit(&y, &t, &x, n, d, 3).unwrap();
+        let result = DoubleML::fit(&y, &t, &x, n, d, 3).expect("DoubleML fit should succeed");
         assert!(result.ate.is_finite());
         assert!(result.std_error >= 0.0);
     }
@@ -171,7 +175,9 @@ mod e2e_tests {
         let mut rng = LcgRng::new(33);
         let net = DragonNet::new(5, 16, 2, &mut rng);
         let x: Vec<f32> = (0..5).map(|i| i as f32 * 0.1 + 0.05).collect();
-        let (mu0, mu1, pi) = net.forward(&x).unwrap();
+        let (mu0, mu1, pi) = net
+            .forward(&x)
+            .expect("DragonNet forward pass should succeed");
         assert!(mu0.is_finite());
         assert!(mu1.is_finite());
         assert!(pi.is_finite());
@@ -190,8 +196,12 @@ mod e2e_tests {
         let t: Vec<f32> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 0.0 }).collect();
         let y: Vec<f32> = (0..n).map(|i| x[i * d] + t[i] * 1.5).collect();
         let mut forest = CausalForest::new(5, d, 3, &mut rng);
-        forest.fit(&x, &t, &y, n).unwrap();
-        let preds = forest.predict(&x, n).unwrap();
+        forest
+            .fit(&x, &t, &y, n)
+            .expect("causal forest fit should succeed");
+        let preds = forest
+            .predict(&x, n)
+            .expect("causal forest predict should succeed");
         assert_eq!(preds.len(), n);
         for &p in &preds {
             assert!(p.is_finite());
@@ -201,8 +211,8 @@ mod e2e_tests {
     #[test]
     fn backdoor_admissible_chain() {
         let mut dag = Dag::new(3);
-        dag.add_edge(0, 1).unwrap();
-        dag.add_edge(0, 2).unwrap();
+        dag.add_edge(0, 1).expect("add_edge should succeed");
+        dag.add_edge(0, 2).expect("add_edge should succeed");
         assert!(backdoor_admissible(&dag, 0, 1, &[]));
     }
 

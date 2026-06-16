@@ -287,15 +287,15 @@ mod tests {
     #[test]
     fn e4m3_zero_encodes_to_zero() {
         let c = Fp8Codec::e4m3();
-        assert_eq!(c.encode_f32(0.0).unwrap(), 0x00);
-        assert_eq!(c.encode_f32(-0.0).unwrap(), 0x80);
+        assert_eq!(c.encode_f32(0.0).expect("encode_f32 should succeed"), 0x00);
+        assert_eq!(c.encode_f32(-0.0).expect("encode_f32 should succeed"), 0x80);
     }
 
     #[test]
     fn e4m3_round_trip_basic() {
         let c = Fp8Codec::e4m3();
         for &v in &[1.0_f32, -1.0, 2.0, 0.5, 0.25, -0.25] {
-            let enc = c.encode_f32(v).unwrap();
+            let enc = c.encode_f32(v).expect("encode_f32 should succeed");
             let dec = c.decode_f32(enc);
             let rel_err = (v - dec).abs() / v.abs().max(1e-6);
             assert!(rel_err < 0.15, "v={v}, dec={dec}, rel_err={rel_err}");
@@ -306,7 +306,7 @@ mod tests {
     fn e5m2_round_trip_basic() {
         let c = Fp8Codec::e5m2();
         for &v in &[1.0_f32, -1.0, 4.0, 16.0, -8.0] {
-            let enc = c.encode_f32(v).unwrap();
+            let enc = c.encode_f32(v).expect("encode_f32 should succeed");
             let dec = c.decode_f32(enc);
             let rel_err = (v - dec).abs() / v.abs().max(1e-6);
             assert!(rel_err < 0.25, "v={v}, dec={dec}, rel_err={rel_err}");
@@ -316,7 +316,7 @@ mod tests {
     #[test]
     fn e4m3_saturates_large_values() {
         let c = Fp8Codec::e4m3();
-        let enc = c.encode_f32(1000.0).unwrap();
+        let enc = c.encode_f32(1000.0).expect("encode_f32 should succeed");
         let dec = c.decode_f32(enc);
         // Should saturate at max_val (448)
         assert!(dec <= 448.0 + 1.0, "should saturate, got {dec}");
@@ -343,7 +343,9 @@ mod tests {
     fn mse_within_tolerance() {
         let c = Fp8Codec::e4m3();
         let data: Vec<f32> = (0..256).map(|i| (i as f32 / 128.0) - 1.0).collect();
-        let mse = c.quantization_mse(&data).unwrap();
+        let mse = c
+            .quantization_mse(&data)
+            .expect("quantization_mse should succeed");
         assert!(mse < 0.01, "E4M3 MSE unexpectedly large: {mse}");
     }
 
@@ -351,7 +353,7 @@ mod tests {
     fn batch_encode_decode() {
         let c = Fp8Codec::e4m3();
         let data = vec![0.0_f32, 1.0, -1.0, 0.5, 2.0, -2.0];
-        let enc = c.encode(&data).unwrap();
+        let enc = c.encode(&data).expect("encode should succeed");
         assert_eq!(enc.len(), data.len());
         let dec = c.decode(&enc);
         assert_eq!(dec.len(), data.len());

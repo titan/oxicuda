@@ -181,7 +181,7 @@ mod tests {
             drop_tokens: true,
         };
         let indices = vec![0_usize, 1, 2, 3, 0, 1, 2, 3];
-        let dispatch = switch_dispatch(&indices, 8, &cfg).unwrap();
+        let dispatch = switch_dispatch(&indices, 8, &cfg).expect("switch_dispatch should succeed");
         assert_eq!(dispatch.capacity, 3); // ceil(8/4 * 1.25) = ceil(2.5) = 3
         assert_eq!(dispatch.n_overflows, 0);
     }
@@ -197,7 +197,7 @@ mod tests {
         };
         // All tokens go to expert 0 → 3 should overflow (capacity = ceil(4/2*1)=2)
         let indices = vec![0_usize, 0, 0, 0];
-        let dispatch = switch_dispatch(&indices, 4, &cfg).unwrap();
+        let dispatch = switch_dispatch(&indices, 4, &cfg).expect("switch_dispatch should succeed");
         assert_eq!(dispatch.capacity, 2);
         assert_eq!(dispatch.n_overflows, 2);
     }

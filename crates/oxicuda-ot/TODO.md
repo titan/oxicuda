@@ -6,7 +6,7 @@ Pure Rust Optimal Transport primitives covering entropic, exact, Wasserstein, Gr
 
 ## Implementation Status
 
-**Actual: 7,762 SLoC (37 files)**
+**Actual: 24,969 SLoC (74 files)**
 
 Current implementation covers the canonical OT algorithm spectrum: entropic OT (Sinkhorn-Knopp), exact OT (network simplex / EMD-1D), Wasserstein-1/2 and Sliced / Max-Sliced approximations, Gromov-Wasserstein and Fused-GW for unaligned domains, KL-relaxed Unbalanced OT, Wasserstein barycenters (free and fixed support), JKO gradient flow, Schrödinger Bridge (IPF), multi-marginal OT, Wasserstein k-means, and OT-based domain adaptation, plus diagnostic metrics.
 
@@ -90,6 +90,11 @@ Current implementation covers the canonical OT algorithm spectrum: entropic OT (
 - [x] Anchor-based partial OT (Chapel et al. 2020) (`sinkhorn/anchor_partial.rs`)
 - [x] Knothe-Rosenblatt rearrangement transport (`wasserstein/knothe_rosenblatt.rs`)
 - [x] OT-based mini-batch loss for deep generative models (Sinkhorn-GAN, WGAN-OT) (`wasserstein/minibatch_ot.rs`)
+- [x] `wasserstein/neural_ot.rs` — Neural OT map (Makkuva 2020, Korotin 2021): input-convex neural network (ICNN) parameterisation of W2 Kantorovich potentials f,g; ∇f = optimal transport map T*; alternating min-max training
+- [x] `bridge/flow_matching.rs` — Conditional Flow Matching (Lipman 2022, Liu 2023): simulation-free generative model; velocity field trained to CFM target u_t|x₀,x₁=x₁-x₀; continuous normalising flow T from x₀ to x₁
+- [x] `domain/dro_wasserstein.rs` — Distributionally Robust Optimisation (Esfahani-Kuhn 2018): uncertainty set = Wasserstein ball B_ε(P̂); dual reformulation as regularised empirical risk + Lagrangian constraint; DRO-ERM-ε solver
+- [x] `sinkhorn/stabilised_sinkhorn.rs` — Numerically stabilised Sinkhorn (Schmitzer 2019): log-domain LSE formulation with absorption of potentials into kernel; avoids NaN at small ε; O(n²) per iteration, identical convergence
+- [x] `gromov/bregman_gw.rs` — Bregman-projected GW (Xu 2019): mirror descent on coupling Γ under entropic GW objective; Bregman proj. onto transport polytope; convergence guarantee for λ-strongly convex regulariser
 
 #### P2 — Optimisations and Tooling
 - [ ] Fused cost-matrix + Sinkhorn-step kernel (saves global-memory round trip)
@@ -98,6 +103,9 @@ Current implementation covers the canonical OT algorithm spectrum: entropic OT (
 - [ ] CUDA-graph capture for multi-iteration Sinkhorn outer loop
 - [ ] Tensor-Core (mma.sync) path for cost matrix evaluation
 - [ ] On-device random direction generation for SlicedW
+- [x] `wasserstein/w2_interpolation.rs` — Displacement interpolation (McCann 1997): geodesic (1-t)ρ₀ + t ρ₁ in Wasserstein space via McCann interpolant; (push-forward of ρ₀ under (1-t)Id + t T*); barycentric projection formula
+- [x] `domain/entropic_da.rs` — Entropic domain adaptation (Courty 2017): regularised joint OT plan with group lasso source-label prior; `sinkhorn_lpl1_mm` alternating MM optimisation; transport + classifier training
+- [x] `exact/auction_alg.rs` — Auction algorithm for assignment (Bertsekas 1988): ε-scaling price iterations; O(n³/ε) convergence; complementary-slackness termination; alternative to network simplex for dense small-n problems
 
 ## Dependencies
 
@@ -111,7 +119,7 @@ Current implementation covers the canonical OT algorithm spectrum: entropic OT (
 
 ## Quality Status
 
-- Tests: 155 passing (unit + 18 e2e integration tests in `e2e_tests.rs`)
+- Tests: 628 passing (unit + 18 e2e integration tests in `e2e_tests.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches

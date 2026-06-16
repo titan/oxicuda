@@ -153,14 +153,16 @@ mod tests {
     #[test]
     fn stratified_count() {
         let mut rng = LcgRng::new(42);
-        let t = stratified_sample(0.0, 1.0, 64, &mut rng).unwrap();
+        let t =
+            stratified_sample(0.0, 1.0, 64, &mut rng).expect("stratified_sample should succeed");
         assert_eq!(t.len(), 64);
     }
 
     #[test]
     fn stratified_in_bounds() {
         let mut rng = LcgRng::new(7);
-        let t = stratified_sample(0.1, 5.0, 32, &mut rng).unwrap();
+        let t =
+            stratified_sample(0.1, 5.0, 32, &mut rng).expect("stratified_sample should succeed");
         for &v in &t {
             assert!((0.1..=5.0).contains(&v), "t={v} out of bounds");
         }
@@ -171,7 +173,8 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let coarse_t = vec![0.1, 0.2, 0.3, 0.4];
         let weights = vec![0.1, 0.5, 0.3, 0.1];
-        let fine = importance_sample(&coarse_t, &weights, 8, &mut rng).unwrap();
+        let fine = importance_sample(&coarse_t, &weights, 8, &mut rng)
+            .expect("importance_sample should succeed");
         assert_eq!(fine.len(), 8);
     }
 

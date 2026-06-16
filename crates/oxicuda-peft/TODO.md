@@ -9,7 +9,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
 
 ## Implementation Status
 
-- **Actual SLoC:** 3,140 total lines (2,443 code, 30 files)
+- **Actual SLoC:** 19,975 (82 files)
 - **Coverage:** LoRA (low-rank adaptation with configurable r / α,
   Kaiming-uniform A, zero B); QLoRA (NF4 dequantization with 16-bucket lookup
   table, double-quantization absmax); AdaLoRA (SVD-parameterized ΔW = P · diag(Λ) · Q
@@ -95,7 +95,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
   input, BitFit trainable-param count, PTX non-empty × all SM versions)
 - [x] Benchmarks (`benches/peft_ops.rs`) — PTX bench group (`lora_matmul`,
   `nf4_dequant` × 4 SM) + LoRA forward algorithm bench
-- **Tests:** 17 passing
+- **Tests:** 643 passing
 
 ### Future Enhancements
 
@@ -120,7 +120,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
 - [x] HQQ (Half-Quadratic Quantization) — quantization-aware finetuning (`lora/hqq.rs` -- Badri-Shaji 2023; half-quadratic splitting with Lₚ proximal `z`-update, closed-form 2×2 `(scale, zero)` solve, β-annealed outer loop)
 - [x] GPTQ-style activation-aware quantization (`lora/gptq.rs` + `lora/gptq_tests.rs` -- Frantar-Ashkboos-Hoefler-Alistarh 2023 ICLR; OBS-style sequential per-column quantization with Cholesky-of-inverse-Hessian error compensation, block-wise update, optional activation ordering, per-group scale/zero affine code with permutation tracking for act_order roundtrip)
 - [x] AWQ (Activation-aware Weight Quantization) integration (`lora/awq.rs` + `lora/awq_tests.rs` -- Lin et al. 2024 MLSys; per-input-channel salience scale `s_i = (mean|x_i| + 1e-8)^α` normalised to unit geometric mean, grid search α ∈ {0/N, …, N/N} minimising activation-weighted MSE, per-group affine quantization along the output-channel axis, dequant rebuilds via `(scale·q + zero) / awq_scale[i]`, deterministic with no RNG)
-- [ ] FP4 / NF3 / NF2 lower-bit storage with double-quant absmax
+- [x] FP4 / NF3 / NF2 lower-bit storage with double-quant absmax
 - [x] QA-LoRA quantization-aware LoRA — lora/qa_lora.rs (group-wise NF4 quant + rank-split LoRA adapters per group)
 
 #### P1 — Adapter Extensions
@@ -144,11 +144,15 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
 - [x] Dare-TIES combined pruning + sign consensus pipeline (`merge/dare_ties.rs` -- Yu et al. 2024 ICML; sequential DARE per-task Bernoulli prune at `density` with 1/density rescale (LcgRng seeded with `seed + i`), TIES top-`trim_density` magnitude trim, sign-consensus across tasks zeroing minority-sign coords, disjoint-contributor mean output)
 
 #### P2 — Training & Tooling
-- [ ] Gradient checkpointing for memory-efficient adapter training
+- [x] Gradient checkpointing for memory-efficient adapter training
 - [ ] Quantized-optimizer state storage (bnb-style 8-bit Adam)
 - [ ] Adapter-save / adapter-load oxicode serialization (no zip / bincode)
 - [ ] LoRA hub / registry conventions for shared adapters
 - [ ] Compression-ratio / effective-rank dashboards
+- [ ] `peft/vera.rs` — VeRA (Kopiczko 2023): Very few trainable parameters; share random frozen A,B matrices across all layers; learn per-layer diagonal scaling vectors d,b; <1M trainable parameters for 7B model
+- [x] `peft/flora.rs` — Flora (Han 2024): random projection of full gradient into low-rank update; maintain low-rank optimizer state; unbiased gradient estimator; theoretically equivalent to full Adam convergence
+- [ ] `peft/lorafa.rs` — LoRA-FA (Zhang 2023): fix A random (frozen), only train B; halves LoRA memory; equivalent gradient direction as full LoRA when A∼N(0,1); drop-in replacement
+- [ ] `peft/mosa.rs` — MoSA (Zeng 2024): Mixture of Sparse Adapters; sparse update mask per adapter; top-k weight selection + shared sparse structure; combine gating from MoE
 
 ## Dependencies
 
@@ -164,7 +168,7 @@ layer.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 17 passing (LoRA zero-B, scale, merge / unmerge, NF4 dequant,
+- Tests: 643 passing (LoRA zero-B, scale, merge / unmerge, NF4 dequant,
   AdaLoRA importance + prune, IA³ identity, prefix shape, soft-prompt length,
   Houlsby residual-init, BitFit param count, PTX × 6 SM)
 - unwrap() calls: 0 in production code

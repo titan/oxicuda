@@ -33,6 +33,7 @@ pub mod metrics;
 pub mod momentum;
 pub mod non_contrastive;
 pub mod ptx_kernels;
+pub mod ssl;
 
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ pub mod prelude {
         deep_cluster, deep_cluster_loss, deeper_cluster, pca_whiten,
     };
     pub use crate::clustering::dino::{DinoConfig, dino_loss};
+    pub use crate::clustering::dino_v2::{DinoV2, DinoV2Config};
     pub use crate::clustering::ibot::{
         IBotCenters, IBotConfig, IBotResult, ibot_centers_init, ibot_cls_loss, ibot_loss,
         ibot_mim_loss, ibot_random_patch_mask, ibot_update_centers,
@@ -80,6 +82,7 @@ pub mod prelude {
         Data2VecConfig, Data2VecResult, Data2VecState, data2vec_batch_loss, data2vec_loss,
         data2vec_mask, huber_loss, normalize_teacher_targets,
     };
+    pub use crate::masked::i_jepa::{IJepa, IJepaConfig};
     pub use crate::masked::mae::{MaeConfig, mae_reconstruction_loss, random_patch_mask};
     pub use crate::masked::simmim::{
         SimMimConfig, simmim_block_mask, simmim_l1_loss, simmim_l2_loss, simmim_random_mask,
@@ -108,6 +111,9 @@ pub mod prelude {
         barlow_cross_corr_ptx, byol_cosine_loss_ptx, cosine_similarity_ptx, f32_hex,
         gather_features_ptx, momentum_update_ptx, nt_xent_softmax_ptx, random_mask_ptx,
     };
+    pub use crate::ssl::data2vec_v2::{Data2VecModel, Data2VecModelConfig};
+    pub use crate::ssl::jem::{Jem, JemConfig};
+    pub use crate::ssl::sim_siam::{SimSiam, SimSiamConfig as SimSiamStructConfig};
 }
 
 // ─── End-to-end integration tests ────────────────────────────────────────────
@@ -132,31 +138,31 @@ mod e2e_tests {
         let d = 16;
         let z = aligned_projections(n, d);
         let cfg = SimClrConfig::default();
-        let (loss, acc) = simclr_loss(&z, &z, n, d, &cfg).unwrap();
+        let (loss, acc) = simclr_loss(&z, &z, n, d, &cfg).expect("simclr_loss should succeed");
         assert!(loss.is_finite() && loss < 1.0, "loss = {loss}");
         assert!((acc - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn e2e_moco_queue_lifecycle_fifo() {
-        let mut q = MocoQueue::new(8, 4).unwrap();
+        let mut q = MocoQueue::new(8, 4).expect("new should succeed");
         for batch_id in 0..6 {
             let mut batch = vec![0.0_f32; 4];
             batch[batch_id % 4] = 1.0;
-            q.enqueue(&batch).unwrap();
+            q.enqueue(&batch).expect("enqueue should succeed");
         }
         assert_eq!(q.len(), 6);
         // Run MoCo loss with a meaningful query/key pair.
         let q_vec = vec![1.0_f32, 0.0, 0.0, 0.0];
         let k_vec = q_vec.clone();
-        let l = moco_loss(&q_vec, &k_vec, 1, 4, &q, 0.1).unwrap();
+        let l = moco_loss(&q_vec, &k_vec, 1, 4, &q, 0.1).expect("moco_loss should succeed");
         assert!(l.is_finite());
     }
 
     #[test]
     fn e2e_byol_loss_zero_for_identical_inputs() {
         let z = vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0];
-        let l = byol_loss(&z, &z, 2, 3).unwrap();
+        let l = byol_loss(&z, &z, 2, 3).expect("byol_loss should succeed");
         assert!(l.abs() < 1e-4);
     }
 
@@ -173,7 +179,7 @@ mod e2e_tests {
             }
         }
         let cfg = BarlowTwinsConfig::default();
-        let l = barlow_twins_loss(&z, &z, n, d, &cfg).unwrap();
+        let l = barlow_twins_loss(&z, &z, n, d, &cfg).expect("barlow_twins_loss should succeed");
         assert!(l.is_finite());
     }
 
@@ -186,20 +192,21 @@ mod e2e_tests {
             .map(|i| (i as f32 * 0.013).sin() + 0.01)
             .collect();
         let cfg = VicRegConfig::default();
-        let l = vicreg_loss(&z_a, &z_b, n, d, &cfg).unwrap();
+        let l = vicreg_loss(&z_a, &z_b, n, d, &cfg).expect("vicreg_loss should succeed");
         assert!(l.is_finite() && l > 0.0);
     }
 
     #[test]
     fn e2e_mae_mask_ratio_respected() {
         let mut handle = SslHandle::default_handle();
-        let mask = random_patch_mask(196, 0.75, handle.rng_mut()).unwrap();
+        let mask = random_patch_mask(196, 0.75, handle.rng_mut()).expect("value should be present");
         let n_masked = mask.iter().filter(|&&v| v == 0.0).count();
         assert_eq!(n_masked, 147); // floor(196 * 0.75)
         // Reconstruction MSE on a perfect predictor is zero.
         let target = vec![1.5_f32; 196 * 4];
         let pred = target.clone();
-        let l = mae_reconstruction_loss(&target, &pred, &mask, 196, 4).unwrap();
+        let l = mae_reconstruction_loss(&target, &pred, &mask, 196, 4)
+            .expect("mae_reconstruction_loss should succeed");
         assert!(l.abs() < 1e-7);
     }
 
@@ -208,7 +215,7 @@ mod e2e_tests {
         let n = 8;
         let k = 4;
         let mut q = vec![1.0_f32; n * k];
-        sinkhorn_knopp(&mut q, n, k, 5).unwrap();
+        sinkhorn_knopp(&mut q, n, k, 5).expect("sinkhorn_knopp should succeed");
         // After Sinkhorn, each row sums to 1 and is uniform.
         for i in 0..n {
             let s: f32 = q[i * k..(i + 1) * k].iter().sum();
@@ -227,7 +234,7 @@ mod e2e_tests {
         handle.rng_mut().fill_normal(&mut t);
         let centre = vec![0.0_f32; k];
         let cfg = DinoConfig::default();
-        let l = dino_loss(&s, &t, &centre, n, k, &cfg).unwrap();
+        let l = dino_loss(&s, &t, &centre, n, k, &cfg).expect("dino_loss should succeed");
         assert!(l.is_finite() && l > 0.0);
     }
 
@@ -236,33 +243,36 @@ mod e2e_tests {
         let mut updater = EmaUpdater::new();
         let mut target = vec![5.0_f32; 8];
         let online = vec![10.0_f32; 8];
-        updater.update(&mut target, &online, 0.0).unwrap();
+        updater
+            .update(&mut target, &online, 0.0)
+            .expect("update should succeed");
         for &v in &target {
             assert!((v - 10.0).abs() < 1e-6);
         }
         // cosine_momentum is monotone increasing.
-        let m1 = cosine_momentum(0, 100, 0.5, 1.0).unwrap();
-        let m2 = cosine_momentum(100, 100, 0.5, 1.0).unwrap();
+        let m1 = cosine_momentum(0, 100, 0.5, 1.0).expect("cosine_momentum should succeed");
+        let m2 = cosine_momentum(100, 100, 0.5, 1.0).expect("cosine_momentum should succeed");
         assert!(m1 < m2);
     }
 
     #[test]
     fn e2e_mlp_projector_forward_correct_shape() {
         let mut handle = SslHandle::default_handle();
-        let p = MlpProjector::new(64, 32, 16, handle.rng_mut()).unwrap();
+        let p = MlpProjector::new(64, 32, 16, handle.rng_mut()).expect("value should be present");
         let x = vec![0.1_f32; 64];
-        let y = p.forward(&x).unwrap();
+        let y = p.forward(&x).expect("forward should succeed");
         assert_eq!(y.len(), 16);
         // Predictor head similar interface
-        let pred = PredictorHead::new(16, 32, 16, handle.rng_mut()).unwrap();
-        let y2 = pred.forward(&y).unwrap();
+        let pred =
+            PredictorHead::new(16, 32, 16, handle.rng_mut()).expect("value should be present");
+        let y2 = pred.forward(&y).expect("forward should succeed");
         assert_eq!(y2.len(), 16);
     }
 
     #[test]
     fn e2e_multi_crop_returns_n_crops() {
         let cfg = MultiCropConfig::default();
-        let crops = multi_crop(&cfg).unwrap();
+        let crops = multi_crop(&cfg).expect("multi_crop should succeed");
         assert_eq!(crops.len(), cfg.n_crops());
         // First two are global.
         assert!(crops[0].is_global);
@@ -272,8 +282,9 @@ mod e2e_tests {
         let h = 8;
         let w = 8;
         let mut img = vec![0.5_f32; 3 * h * w];
-        color_jitter(&mut img, h, w, 0.5, handle.rng_mut()).unwrap();
-        let _converted = random_grayscale_chw(&mut img, h, w, 0.5, handle.rng_mut()).unwrap();
+        color_jitter(&mut img, h, w, 0.5, handle.rng_mut()).expect("value should be present");
+        let _converted = random_grayscale_chw(&mut img, h, w, 0.5, handle.rng_mut())
+            .expect("value should be present");
         for v in &img {
             assert!((0.0..=1.0).contains(v));
         }

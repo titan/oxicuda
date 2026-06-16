@@ -6,7 +6,7 @@ Pure Rust Differential Privacy primitives covering mechanisms (exponential / rep
 
 ## Implementation Status
 
-**Actual: 4,941 SLoC (32 files)**
+**Actual: 16,590 SLoC (74 files)**
 
 Current implementation provides DP primitives that complement `oxicuda-federated::privacy` (which owns `GaussianMechanism`, `LaplacianMechanism`, `MomentsAccountant`, `PateConfig`, and the RDP accountant). This crate focuses on selection mechanisms, advanced accountants, local DP, private optimisers, and sensitivity analyses.
 
@@ -95,13 +95,17 @@ Current implementation provides DP primitives that complement `oxicuda-federated
 
 #### P2 — Optimiser Coverage
 - [x] DP-SGD with microbatching (`optimizer/dp_sgd_microbatch.rs` -- Abadi et al. 2016 CCS + McMahan et al. 2018; per-microbatch averaging + L2 clip + Gaussian noise `N(0, σ²·C²·I)` + optional momentum, partial-microbatch handled with ceil division for divisor)
-- [ ] DP-SGD-MA (Moments-Accountant variant) end-to-end
+- [x] DP-SGD-MA (Moments-Accountant variant) end-to-end
 - [x] DP-AdaGrad + DP-AdaDelta (`optimizer/dp_adagrad.rs` -- Duchi-Hazan-Singer 2011 + Abadi et al. 2016 CCS; per-sample L2 clip + Gaussian noise + coordinate-wise accumulator, adaptive step `θ[j] -= lr·g_priv[j]/(√accumulator[j] + ε)`) + (`optimizer/dp_adadelta.rs` -- Zeiler 2012 arXiv:1212.5701 + Abadi et al. 2016; per-sample L2 clip + Gaussian noise + EMA-tracked `E[g²]_t = ρ·E[g²]_{t-1} + (1−ρ)·g²`, `Δθ = -√(E[Δθ²]+ε)/√(E[g²]+ε)·g_priv`, `E[Δθ²]_t = ρ·E[Δθ²]_{t-1} + (1−ρ)·Δθ²`)
 - [x] DP-LAMB for large-batch DP training (`optimizer/dp_lamb.rs` -- You-Li-Reddi-Hseu-Kumar-Bhojanapalli-Song-Demmel-Keutzer-Hsieh 2020 ICLR + Abadi et al. 2016 CCS; per-sample L2 clip C, Gaussian noise N(0,σ²C²/batch·I), Adam moments β₁/β₂ with bias correction, decoupled weight decay, LAMB trust ratio φ/ψ=‖θ‖/‖r‖ clamped to [min,max])
 - [ ] DP-MASR (Adaptive sensitivity refinement)
 - [ ] Tree-DP-FTRL with adaptive tree depth
 
 #### P2 — Optimisations and Tooling
+- [x] PATE private aggregation of teacher ensembles (`mechanism/pate.rs`) — Papernot 2017 ICLR: noisy argmax aggregation of teacher ensemble votes with Gaussian noise for student label privacy; `PateAggregator`
+- [ ] Rényi DP accounting (`accountant/renyi_dp.rs`) — Mironov 2017 CSF: tight closed-form Rényi divergence composition for the Gaussian mechanism; `RenyiDpAccountant`
+- [x] Sampled Gaussian mechanism (`mechanism/sampled_gaussian.rs`) — Balle 2020 NeurIPS: amplification-by-subsampling bound for Rényi DP of Poisson-subsampled Gaussian; `SampledGaussianMechanism`
+- [x] Data sanitisation via local suppression (`sanitisation/suppression.rs`) — Sweeney 2002: k-anonymity-compliant quasi-identifier suppression + generalisation with bottom-up lattice traversal; `KAnonymiseSuppressor`
 - [ ] Fused gradient-clip + Gaussian-noise kernel (saves one global-memory pass)
 - [ ] Persistent CTA scheduling for repeated DP-Adam steps
 - [ ] CUDA-graph capture for DP-SGD training loop
@@ -121,7 +125,7 @@ Current implementation provides DP primitives that complement `oxicuda-federated
 
 ## Quality Status
 
-- Tests: 97 passing (unit + 18 e2e integration tests in `e2e_tests.rs`)
+- Tests: 696 passing (unit + 18 e2e integration tests in `e2e_tests.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches
@@ -194,8 +198,8 @@ DP kernels are dominated by RNG cost (noise generation) and reduction (clipping,
 - [ ] DP-FTRL with momentum and bias correction
 
 ### Coverage Gaps vs Literature
-- [ ] Concentrated DP (CDP) original definition by Dwork-Rothblum (2016)
-- [ ] Privacy amplification by iteration (Feldman-Mironov-Talwar 2018)
+- [x] Concentrated DP (CDP) original definition by Dwork-Rothblum (2016)
+- [x] Privacy amplification by iteration (Feldman-Mironov-Talwar 2018)
 - [ ] Local DP under intermittent communication
 - [ ] Histogram release with stability-based threshold release
 - [ ] Private synthetic data generation (PATE-GAN, DP-GAN with our DP-Adam)

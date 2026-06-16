@@ -878,9 +878,9 @@ mod tests {
     fn anogan_score_length() {
         let cfg = default_cfg();
         let data = make_normal_data(20, cfg.input_dim, 2);
-        let fit = anogan_fit(&data, 20, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 20, &cfg, 42).expect("anogan_fit should succeed");
         let test = make_normal_data(5, cfg.input_dim, 99);
-        let scores = anogan_score(&fit, &test, 5).unwrap();
+        let scores = anogan_score(&fit, &test, 5).expect("anogan_score should succeed");
         assert_eq!(scores.len(), 5);
     }
 
@@ -890,9 +890,9 @@ mod tests {
     fn anogan_scores_finite() {
         let cfg = default_cfg();
         let data = make_normal_data(20, cfg.input_dim, 3);
-        let fit = anogan_fit(&data, 20, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 20, &cfg, 42).expect("anogan_fit should succeed");
         let test = make_normal_data(10, cfg.input_dim, 77);
-        let scores = anogan_score(&fit, &test, 10).unwrap();
+        let scores = anogan_score(&fit, &test, 10).expect("anogan_score should succeed");
         for (i, &s) in scores.iter().enumerate() {
             assert!(s.is_finite(), "score[{i}] = {s} not finite");
             assert!(s >= 0.0, "score[{i}] = {s} negative");
@@ -905,9 +905,9 @@ mod tests {
     fn anogan_predict_len() {
         let cfg = default_cfg();
         let data = make_normal_data(20, cfg.input_dim, 4);
-        let fit = anogan_fit(&data, 20, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 20, &cfg, 42).expect("anogan_fit should succeed");
         let test = make_normal_data(7, cfg.input_dim, 55);
-        let preds = anogan_predict(&fit, &test, 7, 1.0).unwrap();
+        let preds = anogan_predict(&fit, &test, 7, 1.0).expect("anogan_predict should succeed");
         assert_eq!(preds.len(), 7);
     }
 
@@ -917,7 +917,7 @@ mod tests {
     fn anogan_generate_shape() {
         let cfg = default_cfg();
         let data = make_normal_data(20, cfg.input_dim, 5);
-        let fit = anogan_fit(&data, 20, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 20, &cfg, 42).expect("anogan_fit should succeed");
         let mut rng = LcgRng::new(7);
         let samples = anogan_generate(&fit, 6, &mut rng);
         assert_eq!(samples.len(), 6 * cfg.input_dim);
@@ -929,7 +929,7 @@ mod tests {
     fn anogan_generate_finite() {
         let cfg = default_cfg();
         let data = make_normal_data(20, cfg.input_dim, 6);
-        let fit = anogan_fit(&data, 20, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 20, &cfg, 42).expect("anogan_fit should succeed");
         let mut rng = LcgRng::new(8);
         let samples = anogan_generate(&fit, 10, &mut rng);
         assert!(samples.iter().all(|v| v.is_finite()));
@@ -941,7 +941,7 @@ mod tests {
     fn anogan_generate_tanh_bounded() {
         let cfg = default_cfg();
         let data = make_normal_data(20, cfg.input_dim, 7);
-        let fit = anogan_fit(&data, 20, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 20, &cfg, 42).expect("anogan_fit should succeed");
         let mut rng = LcgRng::new(9);
         let samples = anogan_generate(&fit, 20, &mut rng);
         for &v in &samples {
@@ -958,7 +958,7 @@ mod tests {
     fn anogan_discriminator_finite() {
         let cfg = default_cfg();
         let data = make_normal_data(20, cfg.input_dim, 8);
-        let fit = anogan_fit(&data, 20, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 20, &cfg, 42).expect("anogan_fit should succeed");
         let x = &data[..cfg.input_dim];
         let (prob, feats) = discriminator_forward(
             x,
@@ -980,7 +980,7 @@ mod tests {
     fn anogan_dim_mismatch() {
         let cfg = default_cfg();
         let data = make_normal_data(20, cfg.input_dim, 9);
-        let fit = anogan_fit(&data, 20, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 20, &cfg, 42).expect("anogan_fit should succeed");
         // Pass wrong length
         let bad = vec![0.0_f64; 3]; // input_dim=4 expected
         let result = anogan_score(&fit, &bad, 1);
@@ -1002,8 +1002,8 @@ mod tests {
     fn anogan_deterministic() {
         let cfg = default_cfg();
         let data = make_normal_data(10, cfg.input_dim, 11);
-        let fit1 = anogan_fit(&data, 10, &cfg, 1234).unwrap();
-        let fit2 = anogan_fit(&data, 10, &cfg, 1234).unwrap();
+        let fit1 = anogan_fit(&data, 10, &cfg, 1234).expect("anogan_fit should succeed");
+        let fit2 = anogan_fit(&data, 10, &cfg, 1234).expect("anogan_fit should succeed");
         // Generator weights should match
         for (a, b) in fit1.gen_w1.iter().zip(fit2.gen_w1.iter()) {
             assert_eq!(a, b);
@@ -1016,11 +1016,13 @@ mod tests {
     fn anogan_predict_threshold_monotone() {
         let cfg = default_cfg();
         let data = make_normal_data(30, cfg.input_dim, 12);
-        let fit = anogan_fit(&data, 30, &cfg, 42).unwrap();
+        let fit = anogan_fit(&data, 30, &cfg, 42).expect("anogan_fit should succeed");
         let test = make_normal_data(20, cfg.input_dim, 88);
 
-        let preds_low = anogan_predict(&fit, &test, 20, 0.0).unwrap();
-        let preds_high = anogan_predict(&fit, &test, 20, 1e9).unwrap();
+        let preds_low =
+            anogan_predict(&fit, &test, 20, 0.0).expect("anogan_predict should succeed");
+        let preds_high =
+            anogan_predict(&fit, &test, 20, 1e9).expect("anogan_predict should succeed");
 
         let n_low: usize = preds_low.iter().filter(|&&b| b).count();
         let n_high: usize = preds_high.iter().filter(|&&b| b).count();
@@ -1046,7 +1048,7 @@ mod tests {
             n_encoder_iters: 1,
         };
         let data = make_normal_data(5, cfg.input_dim, 13);
-        let fit = anogan_fit(&data, 5, &cfg, 99).unwrap();
+        let fit = anogan_fit(&data, 5, &cfg, 99).expect("anogan_fit should succeed");
         assert_eq!(fit.config.input_dim, 6);
         assert_eq!(fit.config.latent_dim, 3);
         assert!((fit.config.lambda - 0.2).abs() < 1e-12);
@@ -1068,13 +1070,13 @@ mod tests {
         };
         // Normal data: all ones
         let normal_data: Vec<f64> = vec![0.5_f64; 30 * 4];
-        let fit = anogan_fit(&normal_data, 30, &cfg, 42).unwrap();
+        let fit = anogan_fit(&normal_data, 30, &cfg, 42).expect("anogan_fit should succeed");
 
         let inlier = [0.5_f64; 4];
         let outlier = [100.0_f64; 4];
         let both: Vec<f64> = inlier.iter().chain(outlier.iter()).cloned().collect();
 
-        let scores = anogan_score(&fit, &both, 2).unwrap();
+        let scores = anogan_score(&fit, &both, 2).expect("anogan_score should succeed");
         // After enough training, outlier should generally score higher
         // (weak assertion since training is short)
         assert!(scores[0].is_finite());

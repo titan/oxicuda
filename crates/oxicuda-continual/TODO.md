@@ -11,7 +11,7 @@ task-incremental / class-incremental data streams. Part of
 
 ## Implementation Status
 
-**Actual: 4,824 SLoC (23 files)** -- 165 unit tests + 12 E2E integration tests
+**Actual: 14,929 SLoC (46 files)** -- 489 unit tests + 12 E2E integration tests
 
 The crate spans the three canonical continual-learning families plus
 metrics and data streams. All algorithms run pure-Rust on CPU for unit testing
@@ -146,7 +146,7 @@ and emit PTX strings for GPU acceleration on NVIDIA SM 7.5 through SM 12.0.
       additive sum (avoids unbounded penalty growth) (`regularization/online_ewc.rs`)
 - [x] Vectorised GEM projection -- batch all memory constraints into single
       QP solve via projected coordinate descent on the dual (`replay/vectorised_gem.rs`)
-- [ ] Fused DER++ loss kernel -- combine logit distillation + label CE in a
+- [x] Fused DER++ loss kernel -- combine logit distillation + label CE in a
       single epilogue pass
 - [ ] Tensor-Core path for `prog_forward` lateral connections on SM 8.0+
 
@@ -172,6 +172,10 @@ and emit PTX strings for GPU acceleration on NVIDIA SM 7.5 through SM 12.0.
 - [x] Domain-incremental scenario (`architecture/domain_incremental.rs`)
 - [x] Memory-efficient replay via gradient compression -- GEM-style projection (`regularization/gradient_compression.rs`)
 - [ ] Multi-GPU sharded replay buffer
+- [x] `continual/l2p.rs` — Learning to Prompt (Wang 2022): prepend task-specific prompt tokens retrieved from prompt pool; key-query cosine matching; no EWC/replay needed; `L2pConfig { pool_size, prompt_len }`
+- [x] `continual/dualprompt.rs` — DualPrompt (Wang 2022): G-Prompt (task-invariant) + E-Prompt (task-specific); orthogonal regularisation to separate general/specific knowledge; `DualPromptConfig { g_length, e_length }`
+- [x] `continual/clser.rs` — CLSER (Arani 2022): complementary learning systems ER; slow + fast learners inspired by hippocampus/neocortex; EMA slow learner as stable knowledge base; `ClserConfig { alpha_ema: f32 }`
+- [x] `continual/memo.rs` — MEMO (Zhou 2022): deep model expansion; new backbone layers per task with shared generalised layers; task-specific + generalised layer composition; `MemoConfig { expansion_rate: f32 }`
 
 ## Dependencies
 
@@ -185,7 +189,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 165 unit + 12 E2E = 177 passing
+- Tests: 489 unit + 12 E2E = 501 passing
 - unwrap() calls: 0 (production code)
 - All public APIs return `ContinualResult<T>` or `Result<T, ContinualError>`
 

@@ -10,7 +10,7 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 
 ## Implementation Status
 
-- **Actual SLoC:** 4,921 (26 files)
+- **Actual SLoC:** 8,543 (43 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
@@ -65,11 +65,13 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 #### P0 -- Critical (NAS Algorithm Coverage Gaps)
 - [x] PC-DARTS partial-channel sampling -- mitigates DARTS memory blowup; sample a fraction of channels per edge each step (Xu 2020) (darts/pc_darts.rs -- Xu 2020; partial-channel mask 1/K through ops + edge normalization softmax β per destination node)
 - [x] DARTS+ early-stopping criterion -- detect skip-connection collapse and freeze architecture parameters (Liang 2019) (darts/darts_plus.rs -- Liang 2019; detect skip-connection collapse via argmax-over-α skip-count; freeze architecture parameters after `patience` consecutive epochs above threshold; reset on sub-threshold epoch)
-- [ ] ProxylessNAS gradient estimator -- binary gates with hard-gated activations for memory-efficient direct hardware-aware search (Cai 2019)
+- [x] ProxylessNAS gradient estimator -- binary gates with hard-gated activations for memory-efficient direct hardware-aware search (Cai 2019)
 - [x] ENAS RL controller -- LSTM policy with REINFORCE for the supernet sampling distribution (Pham 2018) (controller/enas.rs -- LSTM controller autoregressive sampling + REINFORCE EMA-baseline BPTT update)
 
 #### P1 -- Important (Search-Space & Search-Strategy Depth)
-- [ ] MobileNet-V2 / V3 search space -- inverted-residual blocks with SE modules as an alternative to the DARTS primitives
+- [x] MobileNet-V2 / V3 search space -- inverted-residual blocks with SE modules as an alternative to the DARTS primitives
+- [x] `darts/darts_ops.rs` / `DartsMixedOp` — extended DARTS operation set with `DartsMixedOp` supporting runtime op-weight blending, Gumbel-softmax temperature annealing, and gradient-free hard-gate derivation; `darts_ops` registry for custom primitive registration
+- [x] `predictor/latency_predictor.rs` / `LatencyPredictor` — unified `LatencyPredictor` trait abstracting `LatencyLut` and `LatencyMlp`; auto-calibration from hardware measurements; per-device profile serialisation; `LatencyPredictor::predict_arch()` over `ArchFeatures`
 - [ ] Transformer NAS primitives (AutoFormer / V-MoE) -- multi-head attention / FFN-width / num-layers as searchable axes
 - [ ] Once-for-All supernet (Cai 2020) -- elastic depth + width + kernel size in one supernet
 - [x] BigNAS uniform sampling + sandwich rule -- improves supernet ranking correlation (supernet/bignas.rs -- Yu 2020 ECCV; uniform sub-net sampling + sandwich rule (max + min + sandwich_samples random subnets) per training step for supernet ranking correlation; flops_proxy ordering)
@@ -77,6 +79,8 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 - [ ] Multi-trial NAS-Bench-style reproducibility hooks -- deterministic search seeds and per-arch result caches
 
 #### P2 -- Nice-to-Have (Predictor & Evaluation Extensions)
+- [ ] HAT hardware-aware transformer NAS (`search/hat.rs`) — Wang 2020 ACL: multi-objective search in a weight-shared transformer supernet using Pareto-front evolution with latency LUT for each target device; `HatSearcher`
+- [ ] Local search NAS (`search/local_search.rs`) — White 2021 ICLR: hill-climbing on architecture space with single-op perturbations + zero-cost proxy ranking to avoid supernet training; `LocalSearchNas`
 - [ ] Graph Neural Network architecture predictor -- replace MLP / RBF / k-NN predictors with a GNN over the DAG (`NPENAS`, `BANANAS`)
 - [ ] Bayesian-optimisation accuracy predictor -- Gaussian Process with uncertainty for sample-efficient search
 - [ ] Multi-fidelity NAS -- early-stopping based on partial training (`Hyperband`, `BOHB`-style)

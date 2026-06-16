@@ -179,10 +179,13 @@ mod tests {
     #[test]
     fn zero_up_forward_is_identity() {
         let mut h = handle(3);
-        let adapter = QuaternionAdapter::new(cfg(8, 4), &mut h).unwrap();
+        let adapter = QuaternionAdapter::new(cfg(8, 4), &mut h)
+            .expect("QuaternionAdapter construction should succeed with valid config");
         // up is zero-initialized; output must equal input
         let x: Vec<f32> = (0..16).map(|i| i as f32 * 0.1).collect();
-        let out = adapter.forward(&x, 2).unwrap();
+        let out = adapter
+            .forward(&x, 2)
+            .expect("forward should succeed with valid input dimensions");
         for (o, xi) in out.iter().zip(x.iter()) {
             assert!(
                 (o - xi).abs() < 1e-5,
@@ -197,7 +200,8 @@ mod tests {
         let mut h = handle(4);
         let in_dim = 16;
         let bottleneck = 8;
-        let adapter = QuaternionAdapter::new(cfg(in_dim, bottleneck), &mut h).unwrap();
+        let adapter = QuaternionAdapter::new(cfg(in_dim, bottleneck), &mut h)
+            .expect("QuaternionAdapter construction should succeed with valid config");
         let expected = in_dim * bottleneck / 2;
         assert_eq!(adapter.total_params(), expected);
     }
@@ -232,9 +236,12 @@ mod tests {
         let mut h = handle(7);
         let in_dim = 16;
         let seq_len = 5;
-        let adapter = QuaternionAdapter::new(cfg(in_dim, 8), &mut h).unwrap();
+        let adapter = QuaternionAdapter::new(cfg(in_dim, 8), &mut h)
+            .expect("QuaternionAdapter construction should succeed with valid config");
         let x = vec![0.5_f32; seq_len * in_dim];
-        let out = adapter.forward(&x, seq_len).unwrap();
+        let out = adapter
+            .forward(&x, seq_len)
+            .expect("forward should succeed with valid input dimensions");
         assert_eq!(out.len(), seq_len * in_dim);
     }
 
@@ -242,7 +249,8 @@ mod tests {
     #[test]
     fn forward_dimension_mismatch_errors() {
         let mut h = handle(8);
-        let adapter = QuaternionAdapter::new(cfg(8, 4), &mut h).unwrap();
+        let adapter = QuaternionAdapter::new(cfg(8, 4), &mut h)
+            .expect("QuaternionAdapter construction should succeed with valid config");
         let bad_x = vec![1.0_f32; 5]; // should be seq_len * in_dim
         let res = adapter.forward(&bad_x, 2);
         assert!(
@@ -271,10 +279,16 @@ mod tests {
         let x: Vec<f32> = (0..16).map(|i| i as f32 * 0.05).collect();
         let mut h1 = handle(42);
         let mut h2 = handle(42);
-        let a1 = QuaternionAdapter::new(cfg(16, 8), &mut h1).unwrap();
-        let a2 = QuaternionAdapter::new(cfg(16, 8), &mut h2).unwrap();
-        let out1 = a1.forward(&x, 1).unwrap();
-        let out2 = a2.forward(&x, 1).unwrap();
+        let a1 = QuaternionAdapter::new(cfg(16, 8), &mut h1)
+            .expect("QuaternionAdapter construction should succeed with valid config");
+        let a2 = QuaternionAdapter::new(cfg(16, 8), &mut h2)
+            .expect("QuaternionAdapter construction should succeed with valid config");
+        let out1 = a1
+            .forward(&x, 1)
+            .expect("forward should succeed with valid input dimensions");
+        let out2 = a2
+            .forward(&x, 1)
+            .expect("forward should succeed with valid input dimensions");
         for (v1, v2) in out1.iter().zip(out2.iter()) {
             assert_eq!(v1, v2, "determinism failed: {v1} vs {v2}");
         }
@@ -287,9 +301,12 @@ mod tests {
         let in_dim = 256;
         let bottleneck = 64;
         let seq_len = 10;
-        let adapter = QuaternionAdapter::new(cfg(in_dim, bottleneck), &mut h).unwrap();
+        let adapter = QuaternionAdapter::new(cfg(in_dim, bottleneck), &mut h)
+            .expect("QuaternionAdapter construction should succeed with valid config");
         let x: Vec<f32> = (0..seq_len * in_dim).map(|i| (i as f32) * 0.001).collect();
-        let out = adapter.forward(&x, seq_len).unwrap();
+        let out = adapter
+            .forward(&x, seq_len)
+            .expect("forward should succeed with valid input dimensions");
         assert_eq!(out.len(), seq_len * in_dim);
         for (i, &v) in out.iter().enumerate() {
             assert!(v.is_finite(), "output[{i}] is not finite: {v}");

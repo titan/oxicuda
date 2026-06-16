@@ -263,21 +263,21 @@ mod tests {
 
     #[test]
     fn sh_basis_degree0_is_constant() {
-        let basis = ShEncoder::sh_basis(0.0, 0.0, 1.0, 0).unwrap();
+        let basis = ShEncoder::sh_basis(0.0, 0.0, 1.0, 0).expect("sh_basis should succeed");
         assert_eq!(basis.len(), 1);
         assert!((basis[0] - 0.282_095).abs() < 1e-5, "Y_0^0 = {}", basis[0]);
     }
 
     #[test]
     fn sh_basis_degree4_length() {
-        let basis = ShEncoder::sh_basis(0.0, 0.0, 1.0, 4).unwrap();
+        let basis = ShEncoder::sh_basis(0.0, 0.0, 1.0, 4).expect("sh_basis should succeed");
         assert_eq!(basis.len(), 25);
     }
 
     #[test]
     fn sh_basis_orthogonality_spot_check() {
         // For (0, 0, 1): Y_1^{-1} = -0.488603 * y = 0, Y_1^0 = 0.488603 * z = 0.488603
-        let basis = ShEncoder::sh_basis(0.0_f32, 0.0, 1.0, 1).unwrap();
+        let basis = ShEncoder::sh_basis(0.0_f32, 0.0, 1.0, 1).expect("sh_basis should succeed");
         // basis[1] = Y_1^{-1} = -0.488603 * 0 = 0
         assert!(basis[1].abs() < 1e-6, "Y_1^{{-1}} at (0,0,1) should be 0");
         // basis[2] = Y_1^0 = 0.488603 * 1 = 0.488603
@@ -290,8 +290,10 @@ mod tests {
 
     #[test]
     fn encode_output_length() {
-        let enc = ShEncoder::new(ShConfig { degree: 3 }).unwrap();
-        let basis = enc.encode(&[1.0_f32, 0.0, 0.0]).unwrap();
+        let enc = ShEncoder::new(ShConfig { degree: 3 }).expect("new should succeed");
+        let basis = enc
+            .encode(&[1.0_f32, 0.0, 0.0])
+            .expect("encode should succeed");
         assert_eq!(basis.len(), 16);
     }
 
@@ -299,14 +301,14 @@ mod tests {
 
     #[test]
     fn normalize_unit_vector_unchanged() {
-        let unit = ShEncoder::normalize(&[0.0_f32, 1.0, 0.0]).unwrap();
+        let unit = ShEncoder::normalize(&[0.0_f32, 1.0, 0.0]).expect("normalize should succeed");
         let len = (unit[0] * unit[0] + unit[1] * unit[1] + unit[2] * unit[2]).sqrt();
         assert!((len - 1.0).abs() < 1e-6, "normalized length = {len}");
     }
 
     #[test]
     fn normalize_scales_correctly() {
-        let unit = ShEncoder::normalize(&[0.0_f32, 2.0, 0.0]).unwrap();
+        let unit = ShEncoder::normalize(&[0.0_f32, 2.0, 0.0]).expect("normalize should succeed");
         assert!(unit[0].abs() < 1e-6);
         assert!((unit[1] - 1.0).abs() < 1e-6);
         assert!(unit[2].abs() < 1e-6);
@@ -320,7 +322,8 @@ mod tests {
         let n_coeffs = ShEncoder::n_coeffs_for_degree(1);
         let n_channels = 3;
         let coeffs = vec![0.0_f32; n_coeffs * n_channels];
-        let color = ShEncoder::sh_color(&coeffs, &[0.0_f32, 0.0, 1.0], n_channels).unwrap();
+        let color = ShEncoder::sh_color(&coeffs, &[0.0_f32, 0.0, 1.0], n_channels)
+            .expect("sh_color should succeed");
         assert_eq!(color.len(), n_channels);
     }
 
@@ -331,7 +334,8 @@ mod tests {
         // 1 coeff × 3 channels
         let inv_c0 = 1.0_f32 / 0.282_095;
         let coeffs = vec![inv_c0; n_channels];
-        let color = ShEncoder::sh_color(&coeffs, &[0.0_f32, 0.0, 1.0], n_channels).unwrap();
+        let color = ShEncoder::sh_color(&coeffs, &[0.0_f32, 0.0, 1.0], n_channels)
+            .expect("sh_color should succeed");
         for (c, &ch) in color.iter().enumerate() {
             assert!((ch - 1.0).abs() < 1e-4, "channel {c}: color = {ch}");
         }
@@ -346,7 +350,7 @@ mod tests {
 
     #[test]
     fn err_dir_not_3d() {
-        let enc = ShEncoder::new(ShConfig { degree: 2 }).unwrap();
+        let enc = ShEncoder::new(ShConfig { degree: 2 }).expect("new should succeed");
         assert!(enc.encode(&[1.0_f32, 0.0]).is_err());
     }
 

@@ -339,9 +339,12 @@ mod tests {
 
     #[test]
     fn forward_is_zero_with_zero_b() {
-        let adapter = LoraPlusAdapter::new(cfg(6, 4, 2, 4.0, 0.01, 16.0), 7).unwrap();
+        let adapter = LoraPlusAdapter::new(cfg(6, 4, 2, 4.0, 0.01, 16.0), 7)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         let x: Vec<f64> = (0..6).map(|i| i as f64 - 2.5).collect();
-        let y = adapter.forward(&x).unwrap();
+        let y = adapter
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         assert_eq!(y.len(), 4);
         for &v in &y {
             assert!(v.abs() < 1e-15, "expected zero output, got {v}");
@@ -350,13 +353,20 @@ mod tests {
 
     #[test]
     fn forward_changes_after_update_with_nonzero_db() {
-        let mut adapter = LoraPlusAdapter::new(cfg(5, 4, 2, 4.0, 0.05, 16.0), 13).unwrap();
+        let mut adapter = LoraPlusAdapter::new(cfg(5, 4, 2, 4.0, 0.05, 16.0), 13)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3];
-        let y_before = adapter.forward(&x).unwrap();
+        let y_before = adapter
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         let grad_a = vec![0.0_f64; 2 * 5];
         let grad_b: Vec<f64> = (0..4 * 2).map(|i| 0.1 * (i as f64 + 1.0)).collect();
-        adapter.apply_update(&(grad_a, grad_b)).unwrap();
-        let y_after = adapter.forward(&x).unwrap();
+        adapter
+            .apply_update(&(grad_a, grad_b))
+            .expect("apply_update should succeed with valid gradient shapes");
+        let y_after = adapter
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         let diff: f64 = y_before
             .iter()
             .zip(y_after.iter())
@@ -370,27 +380,35 @@ mod tests {
 
     #[test]
     fn eta_b_equals_eta_a_times_lambda() {
-        let adapter = LoraPlusAdapter::new(cfg(4, 4, 2, 1.0, 0.03, 17.0), 0).unwrap();
+        let adapter = LoraPlusAdapter::new(cfg(4, 4, 2, 1.0, 0.03, 17.0), 0)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         let expected = 0.03_f64 * 17.0;
         assert!((adapter.eta_b() - expected).abs() < 1e-15);
     }
 
     #[test]
     fn backward_matches_finite_differences_on_a() {
-        let mut adapter = LoraPlusAdapter::new(cfg(4, 3, 2, 4.0, 0.01, 16.0), 99).unwrap();
+        let mut adapter = LoraPlusAdapter::new(cfg(4, 3, 2, 4.0, 0.01, 16.0), 99)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         for (i, b) in adapter.b.iter_mut().enumerate() {
             *b = 0.15 * (i as f64 + 1.0);
         }
         let x = vec![0.5_f64, -1.0, 0.25, 0.75];
         let gy = vec![1.0_f64, -0.5, 0.25];
-        let (grad_a, _) = adapter.backward(&x, &gy).unwrap();
+        let (grad_a, _) = adapter
+            .backward(&x, &gy)
+            .expect("backward pass should succeed with valid input");
         let eps = 1e-6_f64;
         for (k, &g_k) in grad_a.iter().enumerate() {
             let saved = adapter.a[k];
             adapter.a[k] = saved + eps;
-            let yp = adapter.forward(&x).unwrap();
+            let yp = adapter
+                .forward(&x)
+                .expect("forward pass should succeed with valid input");
             adapter.a[k] = saved - eps;
-            let ym = adapter.forward(&x).unwrap();
+            let ym = adapter
+                .forward(&x)
+                .expect("forward pass should succeed with valid input");
             adapter.a[k] = saved;
             let lp: f64 = gy.iter().zip(yp.iter()).map(|(a, b)| a * b).sum();
             let lm: f64 = gy.iter().zip(ym.iter()).map(|(a, b)| a * b).sum();
@@ -401,20 +419,27 @@ mod tests {
 
     #[test]
     fn backward_matches_finite_differences_on_b() {
-        let mut adapter = LoraPlusAdapter::new(cfg(4, 3, 2, 4.0, 0.01, 16.0), 99).unwrap();
+        let mut adapter = LoraPlusAdapter::new(cfg(4, 3, 2, 4.0, 0.01, 16.0), 99)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         for (i, b) in adapter.b.iter_mut().enumerate() {
             *b = 0.15 * (i as f64 + 1.0);
         }
         let x = vec![0.5_f64, -1.0, 0.25, 0.75];
         let gy = vec![1.0_f64, -0.5, 0.25];
-        let (_, grad_b) = adapter.backward(&x, &gy).unwrap();
+        let (_, grad_b) = adapter
+            .backward(&x, &gy)
+            .expect("backward pass should succeed with valid input");
         let eps = 1e-6_f64;
         for (k, &g_k) in grad_b.iter().enumerate() {
             let saved = adapter.b[k];
             adapter.b[k] = saved + eps;
-            let yp = adapter.forward(&x).unwrap();
+            let yp = adapter
+                .forward(&x)
+                .expect("forward pass should succeed with valid input");
             adapter.b[k] = saved - eps;
-            let ym = adapter.forward(&x).unwrap();
+            let ym = adapter
+                .forward(&x)
+                .expect("forward pass should succeed with valid input");
             adapter.b[k] = saved;
             let lp: f64 = gy.iter().zip(yp.iter()).map(|(a, b)| a * b).sum();
             let lm: f64 = gy.iter().zip(ym.iter()).map(|(a, b)| a * b).sum();
@@ -425,18 +450,22 @@ mod tests {
 
     #[test]
     fn forward_output_length_equals_out_features() {
-        let mut adapter = LoraPlusAdapter::new(cfg(7, 9, 3, 6.0, 0.01, 16.0), 11).unwrap();
+        let mut adapter = LoraPlusAdapter::new(cfg(7, 9, 3, 6.0, 0.01, 16.0), 11)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         for (i, b) in adapter.b.iter_mut().enumerate() {
             *b = (i as f64 + 1.0) * 0.05;
         }
         let x = vec![1.0_f64; 7];
-        let y = adapter.forward(&x).unwrap();
+        let y = adapter
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         assert_eq!(y.len(), 9);
     }
 
     #[test]
     fn forward_rejects_wrong_length_x() {
-        let adapter = LoraPlusAdapter::new(cfg(5, 3, 2, 2.0, 0.01, 16.0), 0).unwrap();
+        let adapter = LoraPlusAdapter::new(cfg(5, 3, 2, 2.0, 0.01, 16.0), 0)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         assert!(matches!(
             adapter.forward(&[1.0_f64, 2.0, 3.0]),
             Err(PeftError::DimensionMismatch { .. })
@@ -445,7 +474,8 @@ mod tests {
 
     #[test]
     fn backward_rejects_wrong_length_inputs() {
-        let adapter = LoraPlusAdapter::new(cfg(5, 3, 2, 2.0, 0.01, 16.0), 0).unwrap();
+        let adapter = LoraPlusAdapter::new(cfg(5, 3, 2, 2.0, 0.01, 16.0), 0)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         assert!(matches!(
             adapter.backward(&[0.1_f64; 5], &[0.1_f64; 2]),
             Err(PeftError::DimensionMismatch { .. })
@@ -458,12 +488,15 @@ mod tests {
 
     #[test]
     fn b_changes_more_than_a_per_step_for_equal_grad_norms() {
-        let mut adapter = LoraPlusAdapter::new(cfg(4, 4, 2, 4.0, 0.05, 16.0), 21).unwrap();
+        let mut adapter = LoraPlusAdapter::new(cfg(4, 4, 2, 4.0, 0.05, 16.0), 21)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         let a_before = adapter.a.clone();
         let b_before = adapter.b.clone();
         let grad_a = vec![1.0_f64; 2 * 4];
         let grad_b = vec![1.0_f64; 4 * 2];
-        adapter.apply_update(&(grad_a, grad_b)).unwrap();
+        adapter
+            .apply_update(&(grad_a, grad_b))
+            .expect("apply_update should succeed with valid gradient shapes");
         let da: f64 = adapter
             .a
             .iter()
@@ -487,8 +520,10 @@ mod tests {
     #[test]
     fn deterministic_given_same_seed() {
         let c = cfg(8, 5, 3, 6.0, 0.01, 16.0);
-        let a1 = LoraPlusAdapter::new(c.clone(), 42).unwrap();
-        let a2 = LoraPlusAdapter::new(c, 42).unwrap();
+        let a1 = LoraPlusAdapter::new(c.clone(), 42)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
+        let a2 = LoraPlusAdapter::new(c, 42)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         assert_eq!(a1.a, a2.a);
         assert_eq!(a1.b, a2.b);
     }
@@ -496,8 +531,10 @@ mod tests {
     #[test]
     fn different_seeds_give_different_a() {
         let c = cfg(8, 5, 3, 6.0, 0.01, 16.0);
-        let a1 = LoraPlusAdapter::new(c.clone(), 1).unwrap();
-        let a2 = LoraPlusAdapter::new(c, 2).unwrap();
+        let a1 = LoraPlusAdapter::new(c.clone(), 1)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
+        let a2 = LoraPlusAdapter::new(c, 2)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         let diff: f64 =
             a1.a.iter()
                 .zip(a2.a.iter())
@@ -508,7 +545,8 @@ mod tests {
 
     #[test]
     fn apply_update_rejects_wrong_grad_sizes() {
-        let mut adapter = LoraPlusAdapter::new(cfg(5, 3, 2, 2.0, 0.01, 16.0), 0).unwrap();
+        let mut adapter = LoraPlusAdapter::new(cfg(5, 3, 2, 2.0, 0.01, 16.0), 0)
+            .expect("LoraPlusAdapter::new should succeed with valid config");
         let bad_a = vec![0.0_f64; 5];
         let good_b = vec![0.0_f64; 6];
         assert!(matches!(

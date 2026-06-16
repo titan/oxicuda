@@ -157,7 +157,9 @@ mod tests {
     fn higher_bits_lower_mse() {
         let a = SensitivityAnalyzer::new();
         let w = make_weights(64);
-        let sens = a.analyze_layer(&w, &[2, 4, 8], "test_layer").unwrap();
+        let sens = a
+            .analyze_layer(&w, &[2, 4, 8], "test_layer")
+            .expect("analyze_layer should succeed");
         assert!(
             sens.mse_per_bits[0] >= sens.mse_per_bits[2],
             "MSE at 2 bits ({}) should be >= MSE at 8 bits ({})",
@@ -170,15 +172,22 @@ mod tests {
     fn int8_very_low_mse() {
         let a = SensitivityAnalyzer::new();
         let w = make_weights(128);
-        let sens = a.analyze_layer(&w, &[8], "layer0").unwrap();
-        assert!(sens.mse_at(8).unwrap() < 1e-4, "INT8 MSE should be tiny");
+        let sens = a
+            .analyze_layer(&w, &[8], "layer0")
+            .expect("analyze_layer should succeed");
+        assert!(
+            sens.mse_at(8).expect("mse_at should succeed") < 1e-4,
+            "INT8 MSE should be tiny"
+        );
     }
 
     #[test]
     fn mse_at_missing_bits_returns_none() {
         let a = SensitivityAnalyzer::new();
         let w = make_weights(16);
-        let sens = a.analyze_layer(&w, &[4, 8], "l").unwrap();
+        let sens = a
+            .analyze_layer(&w, &[4, 8], "l")
+            .expect("analyze_layer should succeed");
         assert!(sens.mse_at(2).is_none());
         assert!(sens.mse_at(4).is_some());
     }
@@ -187,7 +196,9 @@ mod tests {
     fn monotone_sensitivity() {
         let a = SensitivityAnalyzer::new();
         let w = make_weights(64);
-        let sens = a.analyze_layer(&w, &[2, 4, 8], "l").unwrap();
+        let sens = a
+            .analyze_layer(&w, &[2, 4, 8], "l")
+            .expect("analyze_layer should succeed");
         assert!(
             sens.is_monotone(),
             "MSE should decrease with increasing bits"
@@ -201,7 +212,7 @@ mod tests {
         let w1 = make_weights(64);
         let result = a
             .analyze_multiple(&[("layer0", &w0), ("layer1", &w1)], &[4, 8])
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "layer0");
         assert_eq!(result[1].name, "layer1");
@@ -230,7 +241,9 @@ mod tests {
     fn mean_sensitivity_nonzero() {
         let a = SensitivityAnalyzer::new();
         let w = make_weights(32);
-        let sens = a.analyze_layer(&w, &[2, 4], "l").unwrap();
+        let sens = a
+            .analyze_layer(&w, &[2, 4], "l")
+            .expect("analyze_layer should succeed");
         assert!(sens.mean_sensitivity() > 0.0);
         assert_abs_diff_eq!(
             sens.mean_sensitivity(),

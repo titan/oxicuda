@@ -319,12 +319,12 @@ mod tests {
     /// Create a minimal Dataset with one covariate from explicit observations.
     fn make_aalen_dataset() -> Dataset {
         let obs = vec![
-            Observation::new(1.0, true).unwrap(),
-            Observation::new(2.0, true).unwrap(),
-            Observation::new(3.0, false).unwrap(),
-            Observation::new(4.0, true).unwrap(),
-            Observation::new(5.0, false).unwrap(),
-            Observation::new(6.0, true).unwrap(),
+            Observation::new(1.0, true).expect("new should succeed"),
+            Observation::new(2.0, true).expect("new should succeed"),
+            Observation::new(3.0, false).expect("new should succeed"),
+            Observation::new(4.0, true).expect("new should succeed"),
+            Observation::new(5.0, false).expect("new should succeed"),
+            Observation::new(6.0, true).expect("new should succeed"),
         ];
         let covariates = vec![
             vec![0.5],
@@ -384,7 +384,7 @@ mod tests {
         let obs: Vec<Observation> = times
             .iter()
             .zip(events.iter())
-            .map(|(&t, &e)| Observation::new(t, e).unwrap())
+            .map(|(&t, &e)| Observation::new(t, e).expect("new should succeed"))
             .collect();
         Dataset::new(obs, Some(covariates), None).expect("valid dataset")
     }
@@ -592,7 +592,7 @@ mod tests {
         let fit = fit_aalen(&data, &config).expect("fit ok");
         assert!(!fit.event_times.is_empty(), "need event times");
 
-        let last_event_time = *fit.event_times.last().unwrap();
+        let last_event_time = *fit.event_times.last().expect("last should succeed");
         let beyond_times = vec![
             last_event_time,
             last_event_time + 1.0,
@@ -692,7 +692,7 @@ mod tests {
         let obs: Vec<Observation> = times
             .iter()
             .zip(events.iter())
-            .map(|(&t, &e)| Observation::new(t, e).unwrap())
+            .map(|(&t, &e)| Observation::new(t, e).expect("new should succeed"))
             .collect();
         let data = Dataset::new(obs, Some(covariates), None).expect("dataset ok");
 

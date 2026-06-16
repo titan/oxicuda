@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn ray_at_origin() {
-        let r = Ray::new([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]).unwrap();
+        let r = Ray::new([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]).expect("new should succeed");
         let pt = r.at(2.0);
         assert!((pt[2] - 2.0).abs() < 1e-6);
     }
@@ -171,16 +171,21 @@ mod tests {
 
     #[test]
     fn camera_principal_ray() {
-        let cam = PinholeCamera::new(100.0, 100.0, 50.0, 50.0, 100, 100).unwrap();
-        let ray = cam.ray_through_pixel(50.5, 50.5, &identity_c2w()).unwrap();
+        let cam =
+            PinholeCamera::new(100.0, 100.0, 50.0, 50.0, 100, 100).expect("new should succeed");
+        let ray = cam
+            .ray_through_pixel(50.5, 50.5, &identity_c2w())
+            .expect("value should be present");
         // Principal ray at (cx, cy) points forward (+z in camera = +z in world for identity)
         assert!(ray.dir[2] > 0.0);
     }
 
     #[test]
     fn generate_rays_count() {
-        let cam = PinholeCamera::new(100.0, 100.0, 50.0, 50.0, 4, 3).unwrap();
-        let rays = cam.generate_rays(&identity_c2w()).unwrap();
+        let cam = PinholeCamera::new(100.0, 100.0, 50.0, 50.0, 4, 3).expect("new should succeed");
+        let rays = cam
+            .generate_rays(&identity_c2w())
+            .expect("value should be present");
         assert_eq!(rays.len(), 12);
     }
 }

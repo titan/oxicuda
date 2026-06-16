@@ -159,14 +159,16 @@ mod tests {
             max_resolution: 32,
         };
         let mut rng = LcgRng::new(seed);
-        HashField::new(cfg, 16, 8, 3, &mut rng).unwrap()
+        HashField::new(cfg, 16, 8, 3, &mut rng).expect("new should succeed")
     }
 
     #[test]
     fn forward_output_types() {
         let hf = make_hash_field(42);
         let dir_enc = vec![0.1_f32; 8];
-        let (sigma, color) = hf.forward([0.5, 0.3, 0.7], &dir_enc).unwrap();
+        let (sigma, color) = hf
+            .forward([0.5, 0.3, 0.7], &dir_enc)
+            .expect("forward should succeed");
         assert!(sigma >= 0.0);
         assert_eq!(color.len(), 3);
     }

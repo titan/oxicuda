@@ -579,7 +579,7 @@ mod tests {
             hidden_dim: 16,
             ..Default::default()
         };
-        icarl_new(&cfg, 42).unwrap()
+        icarl_new(&cfg, 42).expect("iCaRL state should initialize with valid config")
     }
 
     /// 1. Encode produces unit-norm output.
@@ -639,7 +639,7 @@ mod tests {
             hidden_dim: 8,
             ..Default::default()
         };
-        let state = icarl_new(&cfg, 99).unwrap();
+        let state = icarl_new(&cfg, 99).expect("iCaRL state should initialize with valid config");
         // All-ones samples → identical features → mean = that feature.
         let n = 10_usize;
         let x_class: Vec<f64> = vec![1.0_f64; n * 4];
@@ -689,7 +689,8 @@ mod tests {
             hidden_dim: 8,
             ..Default::default()
         };
-        let mut state = icarl_new(&cfg, 7).unwrap();
+        let mut state =
+            icarl_new(&cfg, 7).expect("iCaRL state should initialize with valid config");
         let mut rng = LcgRng::new(7);
         let x = vec![0.5_f64; 4];
         let y = vec![0_usize];
@@ -705,13 +706,15 @@ mod tests {
             hidden_dim: 8,
             ..Default::default()
         };
-        let mut state = icarl_new(&cfg, 8).unwrap();
+        let mut state =
+            icarl_new(&cfg, 8).expect("iCaRL state should initialize with valid config");
         let mut rng = LcgRng::new(8);
         let n = 5_usize;
         let mut rng2 = LcgRng::new(100);
         let x: Vec<f64> = (0..n * 4).map(|_| rng2.next_f32() as f64).collect();
         let y = vec![3_usize; n];
-        icarl_fit_task(&mut state, &x, &y, n, &[3], &mut rng).unwrap();
+        icarl_fit_task(&mut state, &x, &y, n, &[3], &mut rng)
+            .expect("iCaRL task fitting should succeed with valid data");
         assert!(
             state.seen_classes.contains(&3),
             "Class 3 should be registered after fit_task"
@@ -726,13 +729,15 @@ mod tests {
             hidden_dim: 8,
             ..Default::default()
         };
-        let mut state = icarl_new(&cfg, 9).unwrap();
+        let mut state =
+            icarl_new(&cfg, 9).expect("iCaRL state should initialize with valid config");
         let mut rng = LcgRng::new(9);
         let n = 8_usize;
         let mut rng2 = LcgRng::new(200);
         let x: Vec<f64> = (0..n * 4).map(|_| rng2.next_f32() as f64).collect();
         let y = vec![5_usize; n];
-        icarl_fit_task(&mut state, &x, &y, n, &[5], &mut rng).unwrap();
+        icarl_fit_task(&mut state, &x, &y, n, &[5], &mut rng)
+            .expect("iCaRL task fitting should succeed with valid data");
         assert!(
             state.exemplar_sets.iter().any(|e| e.class_id == 5),
             "Exemplar set for class 5 should exist"

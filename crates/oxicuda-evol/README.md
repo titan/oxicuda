@@ -73,7 +73,7 @@ fn main() -> oxicuda_evol::EvolResult<()> {
 
 ## Status
 
-**Alpha** -- 15,366 SLoC, 424 passing tests. API may evolve before v1.0.
+**Alpha** -- 17,544 SLoC, 489 passing tests. API may evolve before v1.0.
 
 ## License
 

@@ -11,7 +11,7 @@ captioning, and VQA head. Part of [OxiCUDA](https://github.com/cool-japan/oxicud
 
 ## Implementation Status
 
-**Actual: 5,942 SLoC (22 files)** -- 156 unit tests + 12 E2E integration tests
+**Actual: 12,356 SLoC (43 files)** -- 380 unit tests + 12 E2E integration tests
 
 The crate covers the complete vision-language-audio-video pipeline used by
 modern multi-modal foundation models. Encoders are simulation-grade for CPU
@@ -168,6 +168,10 @@ unit testing; the seven PTX kernels target NVIDIA SM 7.5 through SM 12.0.
 - [ ] Sparse contrastive negatives via hard-negative mining for `clip_loss`
 - [ ] Multi-resolution ViT (NaViT) -- variable patch grids in a single batch
 - [ ] FP8 (E4M3 / E5M2) inference path for the encoders (Hopper / Ada)
+- [ ] `vlm/llava_next.rs` — LLaVA-1.5/Next (Liu 2023/2024): visual instruction tuning with MLP connector + high-res image tiles; `LlavaConfig { vision_tower, projector_type: ProjectorType }`
+- [ ] `vlm/qwen_vl.rs` — Qwen-VL (Bai 2023): visual receptive field (ViT + position-aware resampler); mixture of visual/text inputs; spatial bounding box tokens for grounding; `QwenVlConfig`
+- [ ] `audio_vision/av_hubert.rs` — AV-HuBERT (Shi 2022): audio-visual speech recognition; iterative clustering on fused AV features; `AvHubertConfig { n_clusters: usize }`
+- [ ] `grounding/gdino.rs` — Grounding DINO (Liu 2023): open-set detection; language-guided dense cross-modality fusion at feature pyramid levels; `GroundingDino { text_encoder_dim, vision_dim }`
 
 ## Dependencies
 
@@ -181,7 +185,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 156 unit + 12 E2E = 168 passing
+- Tests: 380 unit + 12 E2E = 392 passing
 - unwrap() calls: 0 (production code)
 - `#![allow(clippy::needless_range_loop)]` at crate root for kernel-style loops
 - All public APIs return `MmResult<T>` or `Result<T, MultiModalError>`

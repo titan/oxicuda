@@ -4,11 +4,12 @@
 //!
 //! ```text
 //! oxicuda-hdc
-//! ├── vector/       — Binary {±1}^D, integer Z^D, complex unit (FHRR) hypervectors
+//! ├── vector/       — Binary {±1}^D, integer Z^D, complex unit (FHRR), phasor-only FHRR
 //! ├── ops/          — Binding (XOR/multiply/circular-conv), bundling, permutation
 //! ├── memory/       — Item memory (symbol→HV), associative (Hopfield-style) memory
 //! ├── classifier/   — Online HD classifier with error-corrective update
-//! ├── encoding/     — Record-based, n-gram, spatial pattern encoding
+//! ├── learning/     — Adaptive (iteratively retrained) HD classifier, HD ridge regression
+//! ├── encoding/     — Record, n-gram, spatial pattern, level/thermometer, graph encoding
 //! ├── distance/     — Hamming, cosine, Jaccard similarity metrics
 //! └── metrics/      — Capacity bounds, dimensionality analysis, accuracy
 //! ```
@@ -18,6 +19,7 @@ pub mod distance;
 pub mod encoding;
 pub mod error;
 pub mod handle;
+pub mod learning;
 pub mod memory;
 pub mod metrics;
 pub mod ops;

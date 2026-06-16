@@ -123,7 +123,7 @@ mod tests {
         let mut rng = LcgRng::new(1);
         let reg = FitNetsRegressor::new(4, 8, &mut rng);
         let x: Vec<f32> = (0..12).map(|i| i as f32).collect(); // seq_len=3, in_dim=4
-        let out = reg.forward(&x, 3).unwrap();
+        let out = reg.forward(&x, 3).expect("forward should succeed");
         assert_eq!(out.len(), 3 * 8);
     }
 

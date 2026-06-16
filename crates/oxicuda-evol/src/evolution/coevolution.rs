@@ -523,7 +523,7 @@ mod tests {
     fn test_cooperative_species_bests_length() {
         let cfg = default_config();
         let mut rng = LcgRng::new(42);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         assert_eq!(result.species_bests.len(), cfg.n_species);
     }
 
@@ -531,7 +531,7 @@ mod tests {
     fn test_cooperative_combined_length() {
         let cfg = default_config();
         let mut rng = LcgRng::new(7);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         assert_eq!(
             result.best_combined.len(),
             cfg.n_species * cfg.genes_per_species
@@ -542,7 +542,7 @@ mod tests {
     fn test_cooperative_history_length() {
         let cfg = default_config();
         let mut rng = LcgRng::new(11);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         assert_eq!(result.history.len(), cfg.n_gens);
     }
 
@@ -550,7 +550,7 @@ mod tests {
     fn test_cooperative_history_non_increasing() {
         let cfg = default_config();
         let mut rng = LcgRng::new(13);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         for w in result.history.windows(2) {
             assert!(
                 w[1] <= w[0] + 1e-12,
@@ -570,7 +570,7 @@ mod tests {
         cfg.pop_per_species = 30;
         cfg.sigma_mut = 0.5;
         let mut rng = LcgRng::new(99);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         assert!(
             result.best_fitness < 5.0,
             "cooperative sphere did not converge: best = {}",
@@ -585,7 +585,7 @@ mod tests {
         let mut rng = LcgRng::new(21);
         let result = coevolve(&cfg, sphere, &mut rng);
         assert!(result.is_ok());
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert!(r.best_fitness.is_finite());
     }
 
@@ -596,7 +596,7 @@ mod tests {
         cfg.n_species = 1;
         cfg.genes_per_species = 4;
         let mut rng = LcgRng::new(55);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         assert_eq!(result.best_combined.len(), 4);
         assert_eq!(result.species_bests.len(), 1);
         assert!(result.best_fitness.is_finite());
@@ -611,7 +611,7 @@ mod tests {
         let mut rng = LcgRng::new(33);
         let result = coevolve(&cfg, sphere, &mut rng);
         assert!(result.is_ok(), "competitive coevolve failed: {:?}", result);
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert!(r.best_fitness.is_finite());
     }
 
@@ -620,7 +620,7 @@ mod tests {
         let mut cfg = default_config();
         cfg.mode = CoevolMode::Competitive;
         let mut rng = LcgRng::new(77);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         assert_eq!(result.history.len(), cfg.n_gens);
     }
 
@@ -631,7 +631,7 @@ mod tests {
         cfg.n_species = 4;
         cfg.genes_per_species = 3;
         let mut rng = LcgRng::new(88);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         assert_eq!(result.best_combined.len(), 4 * 3);
     }
 
@@ -639,9 +639,9 @@ mod tests {
     fn test_result_history_consistent_with_best_fitness() {
         let cfg = default_config();
         let mut rng = LcgRng::new(123);
-        let result = coevolve(&cfg, sphere, &mut rng).unwrap();
+        let result = coevolve(&cfg, sphere, &mut rng).expect("coevolve should succeed");
         // The last history entry should equal best_fitness
-        let last = *result.history.last().unwrap();
+        let last = *result.history.last().expect("last should succeed");
         assert!(
             (last - result.best_fitness).abs() < 1e-10,
             "history last ({last}) != best_fitness ({})",

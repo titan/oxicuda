@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn topk_k1_returns_max() {
         let vals = [0.1_f32, 0.9, 0.3, 0.5];
-        let (top_vals, top_idx) = topk(&vals, 1).unwrap();
+        let (top_vals, top_idx) = topk(&vals, 1).expect("topk should succeed");
         assert_eq!(top_vals.len(), 1);
         assert_eq!(top_idx[0], 1);
         assert!((top_vals[0] - 0.9).abs() < 1e-6);
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn topk_k2_returns_top2() {
         let vals = [0.1_f32, 0.9, 0.3, 0.5];
-        let (top_vals, top_idx) = topk(&vals, 2).unwrap();
+        let (top_vals, top_idx) = topk(&vals, 2).expect("topk should succeed");
         assert_eq!(top_vals.len(), 2);
         assert_eq!(top_idx[0], 1);
         assert_eq!(top_idx[1], 3);
@@ -351,9 +351,9 @@ mod tests {
             input_dim: 8,
             noise_std: 0.0,
         };
-        let router = TopKRouter::new(cfg, &mut rng).unwrap();
+        let router = TopKRouter::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32; 8];
-        let result = router.route(&x, 1).unwrap();
+        let result = router.route(&x, 1).expect("route should succeed");
         assert_eq!(result.scores.len(), 1);
         assert!(result.indices[0] < 4);
     }

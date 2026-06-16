@@ -478,13 +478,13 @@ mod tests {
             n_classes: 2,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(1);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x = vec![0.5_f32; 3 * 4]; // 3 samples × 4 features
         let out = model
             .tokenize(&x, &weights.cont_w, &weights.cont_b)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), 3 * 4 * 8, "shape mismatch");
     }
 
@@ -499,12 +499,14 @@ mod tests {
             n_classes: 1,
             use_residual: false,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         // cont_w: feat0=[1,2,3], feat1=[4,5,6]  cont_b: all zeros
         let cont_w = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let cont_b = vec![0.0_f32; 6];
         let x = vec![2.0_f32, 3.0]; // x[0]=2, x[1]=3
-        let out = model.tokenize(&x, &cont_w, &cont_b).unwrap();
+        let out = model
+            .tokenize(&x, &cont_w, &cont_b)
+            .expect("tokenize should succeed");
         // token0 = 2 * [1,2,3] = [2,4,6]
         // token1 = 3 * [4,5,6] = [12,15,18]
         let expected = [2.0_f32, 4.0, 6.0, 12.0, 15.0, 18.0];
@@ -525,11 +527,13 @@ mod tests {
             n_classes: 2,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(99);
         let layer_w = AutoIntLayerWeights::new_random(8, &mut rng);
         let h = vec![0.1_f32; 5 * 8];
-        let out = model.attention_layer(&h, &layer_w).unwrap();
+        let out = model
+            .attention_layer(&h, &layer_w)
+            .expect("attention_layer should succeed");
         assert_eq!(out.len(), 5 * 8, "attention_layer output shape mismatch");
     }
 
@@ -543,11 +547,13 @@ mod tests {
             n_classes: 2,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(42);
         let layer_w = AutoIntLayerWeights::new_random(4, &mut rng);
         let h: Vec<f32> = (0..16).map(|i| i as f32 * 0.1).collect();
-        let out = model.attention_layer(&h, &layer_w).unwrap();
+        let out = model
+            .attention_layer(&h, &layer_w)
+            .expect("attention_layer should succeed");
         // Output should differ from input due to attention transform
         let all_equal = h
             .iter()
@@ -568,11 +574,13 @@ mod tests {
             n_classes: 3,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(7);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x = vec![0.3_f32; 6];
-        let logits = model.forward_single(&x, &weights).unwrap();
+        let logits = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
         assert_eq!(logits.len(), 3, "forward_single output shape mismatch");
     }
 
@@ -586,11 +594,13 @@ mod tests {
             n_classes: 1,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(3);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x = vec![0.5_f32; 4];
-        let logits = model.forward_single(&x, &weights).unwrap();
+        let logits = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
         assert_eq!(logits.len(), 1, "regression output should have 1 element");
     }
 
@@ -606,22 +616,22 @@ mod tests {
             n_classes: 3,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(11);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x = vec![0.2_f32; 7 * 5]; // 7 samples × 5 features
-        let logits = model.forward(&x, &weights).unwrap();
+        let logits = model.forward(&x, &weights).expect("forward should succeed");
         assert_eq!(logits.len(), 7 * 3, "forward batch output shape mismatch");
     }
 
     #[test]
     fn forward_batch_output_is_finite() {
         let cfg = AutoIntConfig::default();
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(55);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x: Vec<f32> = (0..4 * 8).map(|i| (i as f32) * 0.01).collect();
-        let logits = model.forward(&x, &weights).unwrap();
+        let logits = model.forward(&x, &weights).expect("forward should succeed");
         assert!(
             logits.iter().all(|v| v.is_finite()),
             "logits must be finite"
@@ -638,12 +648,14 @@ mod tests {
             n_classes: 2,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(21);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x = vec![0.1_f32, 0.2, 0.3, 0.4];
-        let single = model.forward_single(&x, &weights).unwrap();
-        let batch = model.forward(&x, &weights).unwrap();
+        let single = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
+        let batch = model.forward(&x, &weights).expect("forward should succeed");
         assert_eq!(single.len(), batch.len());
         for (&s, &b) in single.iter().zip(batch.iter()) {
             assert!((s - b).abs() < 1e-5, "single vs batch mismatch: {s} vs {b}");
@@ -660,11 +672,11 @@ mod tests {
             n_classes: 2,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(88);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x = vec![0.5_f32; 4 * 3]; // 4 samples × 3 features
-        let logits = model.forward(&x, &weights).unwrap();
+        let logits = model.forward(&x, &weights).expect("forward should succeed");
         assert_eq!(logits.len(), 4 * 2);
         assert!(logits.iter().all(|v| v.is_finite()));
     }
@@ -700,11 +712,13 @@ mod tests {
             n_classes: 2,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(5);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x = vec![1.0_f32, 2.0, 3.0];
-        let logits = model.forward_single(&x, &weights).unwrap();
+        let logits = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
         assert_eq!(logits.len(), 2);
         assert!(logits.iter().all(|v| v.is_finite()));
     }
@@ -719,11 +733,13 @@ mod tests {
             n_classes: 3,
             use_residual: true,
         };
-        let model = AutoInt::new(cfg).unwrap();
+        let model = AutoInt::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(9);
         let weights = AutoIntWeights::new_random(&model.config, &mut rng);
         let x = vec![0.1_f32; 4];
-        let logits = model.forward_single(&x, &weights).unwrap();
+        let logits = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
         assert_eq!(logits.len(), 3);
     }
 }

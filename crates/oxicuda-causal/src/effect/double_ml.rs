@@ -158,7 +158,8 @@ mod tests {
         let x: Vec<f32> = (0..n * d).map(|i| i as f32 / (n * d) as f32).collect();
         let t: Vec<f32> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 0.0 }).collect();
         let y: Vec<f32> = (0..n).map(|i| x[i * d] * 0.5 + t[i] * 2.0).collect();
-        let result = DoubleML::fit(&y, &t, &x, n, d, 4).unwrap();
+        let result = DoubleML::fit(&y, &t, &x, n, d, 4)
+            .expect("DoubleML::fit should succeed for valid inputs");
         assert!(result.ate.is_finite());
         assert!(result.std_error >= 0.0);
     }

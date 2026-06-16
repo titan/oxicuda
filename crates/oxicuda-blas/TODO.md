@@ -7,7 +7,7 @@ to cuBLAS. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.3).
 
 ## Implementation Status
 
-- **Actual SLoC:** 21,845 (72 files)
+- **Actual SLoC:** 28,379 (92 files)
 - **Estimated SLoC (estimation.md):** 324K--604K (median 464K)
 - **Ratio:** ~3.4% of median estimate -- compact foundation covering all major API surfaces
 
@@ -113,6 +113,9 @@ to cuBLAS. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.3).
 
 #### P2 -- Nice-to-Have (Advanced Features)
 - [x] INT4/INT8 GEMM for inference (precision/int_ops.rs) -- dp4a-accelerated INT8 + packed INT4 GEMM for quantized model inference workloads
+- [x] BF16 standalone GEMM API (`precision/bf16_gemm.rs`) -- dedicated `BF16Gemm` struct with per-op scale factors and BF16 weight + BF16 accumulation path for Ampere+ transformer inference; distinct from the existing generic BF16 ops (P1)
+- [ ] Sparse GEMM (SpGEMM) via 2:4 structured sparsity (`sparse/sparse_gemm.rs`) -- 50% sparsity mask + compressed metadata format for Ampere+ sparse Tensor Core path; `SparseGemm` (P1)
+- [x] Strassen fast matrix multiplication (`advanced/strassen.rs`) — Strassen 1969: recursive 7-multiply sub-cubic algorithm with 128-bit threshold; `StrassenGemm` (P2)
 - [x] Cooperative GEMM across CTAs -- multi-CTA collaboration for very large matrix dimensions (cooperative.rs)
 - [x] Multi-stream batched GEMM -- distribute batched GEMM across multiple CUDA streams (multi_stream_batched.rs)
 - [x] Graph-based fusion of GEMM chains -- automatically fuse sequences of GEMMs (e.g., A*B*C) into optimized pipelines
@@ -135,7 +138,7 @@ to cuBLAS. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.3).
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 604 passing
+- Tests: 776 passing
 - unwrap() calls: 0 (production code)
 
 ## Performance Targets
@@ -159,8 +162,8 @@ Relaxed targets: 80% for small matrices (M,N < 64), 85% for skinny matrices, 90%
 
 | Metric | Estimated (estimation.md) | Actual |
 |--------|---------------------------|--------|
-| SLoC | 324K--604K (median 464K) | 19,913 |
-| Files | ~30+ subcomponents listed | 72 |
+| SLoC | 324K--604K (median 464K) | 28,379 |
+| Files | ~30+ subcomponents listed | 92 |
 | Development time | 13--22 days | Completed in Vol.1+2+3 batch |
 | AI generation ratio | 65% | -- |
 

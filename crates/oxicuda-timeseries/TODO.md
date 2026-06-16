@@ -9,8 +9,8 @@ NHiTS, PatchTST, TimesNet, iTransformer, RevIN, series decomposition. Time-major
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,490 (30 files, Rust 4,791 code + 870 comments + 829 blanks)
-- **Tests:** 177 passing (#[test] count in src/)
+- **Actual SLoC:** 20,036 (73 files, Rust 4,791 code + 870 comments + 829 blanks)
+- **Tests:** 615 passing (#[test] count in src/)
 - **Crate:** `oxicuda-timeseries` -- Vol.22 Time-Series Forecasting Architectures
 
 ### Completed [x]
@@ -104,7 +104,7 @@ NHiTS, PatchTST, TimesNet, iTransformer, RevIN, series decomposition. Time-major
 ### Future Enhancements [ ]
 
 #### P0 -- Critical (Mainstream Forecasting Coverage)
-- [ ] Autoformer auto-correlation attention (currently `auto_correlation_ptx` is a
+- [x] Autoformer auto-correlation attention (currently `auto_correlation_ptx` is a
       magnitude-squared kernel only)
 - [x] Informer ProbSparse self-attention
 - [x] N-BEATS basis-expansion forecasting backbone
@@ -117,12 +117,18 @@ NHiTS, PatchTST, TimesNet, iTransformer, RevIN, series decomposition. Time-major
 - [x] TimeMixer multi-scale mixing (timemixer.rs -- Wang 2024 ICLR; series decomp + multi-scale average-pooling downsample + Past-Decomposable-Mixing + Future-Multipredictor-Mixing ensemble pred)
 - [ ] Conformer-TS (audio Conformer adapted for TS)
 - [x] Probabilistic forecasting head (quantile regression / DeepAR-style)
+- [x] N-BEATS (nbeats) basis-expansion backbone (nbeats/nbeats.rs -- Oreshkin 2020 ICLR; trend + seasonality stacks with doubly residual learning; generic / interpretable basis functions; `NBeatsForecast`)
+- [x] SARIMA (sarima/sarima.rs) — Seasonal ARIMA: Box-Jenkins (p,d,q)×(P,D,Q,s) model; Yule-Walker AR initialisation; CSS-MLE parameter estimation; seasonal differencing + backshift operator; `SarimaModel { order, seasonal_order }`
 - [ ] Multi-task forecasting (joint horizon + classification)
 
 #### P2 -- Nice-to-Have (Research / Advanced)
-- [ ] Temporal Fusion Transformer (TFT) variable-selection + gated residual network
+- [x] Temporal Fusion Transformer (TFT) variable-selection + gated residual network
 - [ ] PatchTST-Crossformer hybrid
 - [ ] Foundation-model adapters (TimeGPT / Chronos / Moirai loading interfaces)
+- [ ] Moirai universal forecasting model (`foundation/moirai.rs`) — Salesforce 2024: Masked Encoder with any-variate patching + patch-mixture decoder for zero-shot universal forecasting; `MoiraiForecaster`
+- [ ] Chronos probabilistic foundation model (`foundation/chronos.rs`) — Amazon 2024: quantisation tokenisation of continuous time series → T5 seq2seq language model backbone for zero-shot probabilistic forecasting; `ChronosPredictor`
+- [x] Anomaly Transformer (`anomaly/anomaly_transformer.rs`) — Xu 2022 ICLR: association discrepancy between prior-association (Gaussian kernel) and series-association (attention) for unsupervised anomaly detection; `AnomalyTransformer`
+- [ ] Structural Time Series decomposition (`decomp/sts.rs`) — Harvey 1990: Kalman-filter-based trend + seasonality + irregular state-space decomposition with EM parameter estimation; `StsDecomposer`
 - [ ] Hierarchical reconciliation (MinT-style) for grouped time-series
 - [ ] Online / streaming forecasting helper
 - [ ] Quantised TCN / PatchTST (INT8 / FP8) inference path
@@ -140,7 +146,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 177 passing
+- Tests: 615 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)

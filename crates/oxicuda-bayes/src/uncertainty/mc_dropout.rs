@@ -158,7 +158,8 @@ mod tests {
     #[test]
     fn mc_dropout_constant_forward_zero_variance() {
         let mut rng = LcgRng::new(0);
-        let stats = mc_dropout_predict(8, &mut rng, |_r| Ok(vec![0.7_f32, 0.2, 0.1])).unwrap();
+        let stats = mc_dropout_predict(8, &mut rng, |_r| Ok(vec![0.7_f32, 0.2, 0.1]))
+            .expect("value should be present");
         assert_eq!(stats.mean.len(), 3);
         assert!((stats.mean[0] - 0.7).abs() < 1e-6);
         for v in &stats.variance {
@@ -174,7 +175,7 @@ mod tests {
             let (c, _) = r.next_normal_pair();
             Ok(vec![a, b, c])
         })
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(stats.n_samples, 256);
         // For N(0, 1) the sample variance should be near 1.
         let avg_var = stats.variance.iter().copied().sum::<f32>() / 3.0;
@@ -214,7 +215,7 @@ mod tests {
     fn mc_dropout_predictor_wraps_closure() {
         let mut rng = LcgRng::new(7);
         let mut p = McDropoutPredictor::new(4, |r| Ok(vec![r.next_f32(), r.next_f32()]));
-        let stats = p.predict(&mut rng).unwrap();
+        let stats = p.predict(&mut rng).expect("predict should succeed");
         assert_eq!(stats.n_samples, 4);
         assert_eq!(stats.mean.len(), 2);
     }

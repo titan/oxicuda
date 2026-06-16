@@ -88,19 +88,22 @@ mod tests {
 
     #[test]
     fn apply_x_gate_flips_zero_state() {
-        let mut sv = StateVector::new_zero_state(1).unwrap();
+        let mut sv = StateVector::new_zero_state(1).expect(
+            "1 is a valid qubit count; new_zero_state never fails for positive qubit counts",
+        );
         let x_gate = [
             [Complex32::new(0.0, 0.0), Complex32::new(1.0, 0.0)],
             [Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
         ];
-        apply_1q_inplace(&mut sv, 0, &x_gate).unwrap();
+        apply_1q_inplace(&mut sv, 0, &x_gate)
+            .expect("qubit 0 is within range of a 1-qubit state vector");
         assert!((sv.amps[0].re).abs() < 1e-6);
         assert!((sv.amps[1].re - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn qubit_out_of_range_error() {
-        let mut sv = StateVector::new_zero_state(2).unwrap();
+        let mut sv = StateVector::new_zero_state(2).expect("new_zero_state should succeed");
         let i_gate = [
             [Complex32::new(1.0, 0.0), Complex32::new(0.0, 0.0)],
             [Complex32::new(0.0, 0.0), Complex32::new(1.0, 0.0)],

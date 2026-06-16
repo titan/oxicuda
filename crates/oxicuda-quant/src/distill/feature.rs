@@ -148,7 +148,9 @@ mod tests {
         let feat = vec![1.0_f32, 2.0, 3.0];
         let t0 = feat.as_slice();
         let t1 = feat.as_slice();
-        let loss = d.compute_total_loss(&[t0, t1], &[t0, t1]).unwrap();
+        let loss = d
+            .compute_total_loss(&[t0, t1], &[t0, t1])
+            .expect("compute_total_loss should succeed");
         assert_abs_diff_eq!(loss, 0.0, epsilon = 1e-5);
     }
 
@@ -157,7 +159,9 @@ mod tests {
         let d = FeatureDistiller::uniform_mse(1);
         let teacher = vec![1.0_f32, 0.0, 0.0];
         let student = vec![0.0_f32, 1.0, 0.0];
-        let loss = d.compute_total_loss(&[&teacher], &[&student]).unwrap();
+        let loss = d
+            .compute_total_loss(&[&teacher], &[&student])
+            .expect("compute_total_loss should succeed");
         assert!(loss > 0.0, "loss should be positive for different features");
     }
 
@@ -202,7 +206,9 @@ mod tests {
         let d = FeatureDistiller::with_weights(vec![1.0], loss);
         let teacher = vec![0.1_f32, 0.7, 0.2];
         let student = vec![0.4_f32, 0.4, 0.2];
-        let l = d.compute_total_loss(&[&teacher], &[&student]).unwrap();
+        let l = d
+            .compute_total_loss(&[&teacher], &[&student])
+            .expect("compute_total_loss should succeed");
         assert!(l >= 0.0, "KL loss must be non-negative");
     }
 }

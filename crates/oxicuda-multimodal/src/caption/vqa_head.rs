@@ -141,25 +141,27 @@ mod tests {
 
     #[test]
     fn vqa_head_output_shape() {
-        let head = VqaHead::zeros(16, 32, 100).unwrap();
+        let head = VqaHead::zeros(16, 32, 100).expect("zeros should succeed");
         let x = vec![0.5_f32; 16];
-        let logits = head.forward(&x).unwrap();
+        let logits = head.forward(&x).expect("forward should succeed");
         assert_eq!(logits.len(), 100);
     }
 
     #[test]
     fn vqa_head_batched_shape() {
-        let head = VqaHead::zeros(8, 16, 50).unwrap();
+        let head = VqaHead::zeros(8, 16, 50).expect("zeros should succeed");
         let x = vec![0.3_f32; 4 * 8];
-        let logits = head.forward_batch(&x, 4).unwrap();
+        let logits = head
+            .forward_batch(&x, 4)
+            .expect("forward_batch should succeed");
         assert_eq!(logits.len(), 4 * 50);
     }
 
     #[test]
     fn vqa_head_zero_weights_bias_output() {
-        let head = VqaHead::zeros(8, 4, 10).unwrap();
+        let head = VqaHead::zeros(8, 4, 10).expect("zeros should succeed");
         let x = vec![1.0_f32; 8];
-        let logits = head.forward(&x).unwrap();
+        let logits = head.forward(&x).expect("forward should succeed");
         // All logits should be 0 (bias=0, weights=0)
         for &v in &logits {
             assert!(v.abs() < 1e-6, "expected ~0, got {v}");
@@ -168,7 +170,7 @@ mod tests {
 
     #[test]
     fn vqa_softmax_sums_to_one() {
-        let head = VqaHead::zeros(4, 8, 5).unwrap();
+        let head = VqaHead::zeros(4, 8, 5).expect("zeros should succeed");
         let mut head_nonzero = head.clone();
         // Set non-zero weights
         for (i, w) in head_nonzero.w1.iter_mut().enumerate() {
@@ -178,8 +180,8 @@ mod tests {
             *w = (i as f32 * 0.13).cos();
         }
         let x = vec![0.5_f32; 4];
-        let logits = head_nonzero.forward(&x).unwrap();
-        let probs = softmax(&logits).unwrap();
+        let logits = head_nonzero.forward(&x).expect("forward should succeed");
+        let probs = softmax(&logits).expect("softmax should succeed");
         let sum: f32 = probs.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5, "probs sum = {sum}");
     }
@@ -189,14 +191,14 @@ mod tests {
         // If logit for correct answer is very high, loss ≈ 0
         let mut logits = vec![0.0_f32; 10];
         logits[3] = 100.0;
-        let loss = vqa_loss(&logits, 3).unwrap();
+        let loss = vqa_loss(&logits, 3).expect("vqa_loss should succeed");
         assert!(loss < 0.01, "loss should be near zero: {loss}");
     }
 
     #[test]
     fn vqa_loss_nonnegative() {
         let logits: Vec<f32> = (0..5).map(|i| i as f32 * 0.5).collect();
-        let loss = vqa_loss(&logits, 2).unwrap();
+        let loss = vqa_loss(&logits, 2).expect("vqa_loss should succeed");
         assert!(loss >= 0.0, "cross-entropy loss should be >= 0: {loss}");
     }
 
@@ -216,7 +218,7 @@ mod tests {
     #[test]
     fn softmax_output_shape_and_sum() {
         let logits = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let probs = softmax(&logits).unwrap();
+        let probs = softmax(&logits).expect("softmax should succeed");
         assert_eq!(probs.len(), 4);
         let sum: f32 = probs.iter().sum();
         assert!((sum - 1.0).abs() < 1e-6);
@@ -225,7 +227,7 @@ mod tests {
     #[test]
     fn softmax_max_gets_highest_prob() {
         let logits = vec![0.0_f32, 0.0, 10.0, 0.0];
-        let probs = softmax(&logits).unwrap();
+        let probs = softmax(&logits).expect("softmax should succeed");
         assert!(
             probs[2] > 0.99,
             "max logit should get highest prob: {}",

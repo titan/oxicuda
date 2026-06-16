@@ -409,3 +409,179 @@ fn uno_full_followup_matches_harrell() {
     let cu = uno_c_index(&d, &eta, 10.0).expect("ok");
     assert!((ch - cu).abs() < 1.0e-9);
 }
+
+// 31. Fit Cox once → martingale residuals sum to 0 AND DFBeta agrees with refit.
+#[test]
+fn cox_residuals_and_dfbeta_on_one_fit() {
+    use crate::cox::influence_diagnostics::influence_diagnostics;
+    use crate::cox::residuals_diagnostic::{deviance_residuals, martingale_residuals};
+
+    // Synthetic Cox with right-censoring (~ heterogeneous risk sets).
+    let mut rng = LcgRng::new(4242);
+    let n = 60;
+    let mut obs = Vec::with_capacity(n);
+    let mut cov = Vec::with_capacity(n);
+    for _ in 0..n {
+        let x = rng.next_normal();
+        let lambda = (0.4 * x).exp();
+        let t = rng.next_exponential(lambda).max(1.0e-6);
+        let c = rng.next_exponential(0.3).max(1.0e-6);
+        let (time, event) = if t <= c { (t, true) } else { (c, false) };
+        obs.push(Observation::new(time, event).expect("ok"));
+        cov.push(vec![x]);
+    }
+    let data = Dataset::new(obs, Some(cov), None).expect("ok");
+    let cfg = CoxPhConfig {
+        tie: TieMethod::Breslow,
+        tol: 1.0e-10,
+        max_iter: 100,
+    };
+    let fit = fit_cox_ph(&data, cfg).expect("ok");
+
+    // (a) Martingale residuals sum to zero at the MLE.
+    let mart = martingale_residuals(&fit, &data).expect("ok");
+    let sum_m: f64 = mart.iter().sum();
+    assert!(sum_m.abs() < 1.0e-6, "Σ M = {sum_m}");
+    // Deviance residuals finite and both signs present.
+    let dev = deviance_residuals(&fit, &data).expect("ok");
+    assert!(dev.iter().all(|v| v.is_finite()));
+
+    // (b) DFBeta on the same fit vs leave-one-out refit: high correlation.
+    let diag = influence_diagnostics(&fit, &data).expect("ok");
+    let beta_full = fit.coefficients[0];
+    let mut approx = Vec::new();
+    let mut actual = Vec::new();
+    let cov_in = data.covariates.as_ref().expect("cov");
+    for i in 0..data.len() {
+        let mut o = Vec::with_capacity(data.len() - 1);
+        let mut c = Vec::with_capacity(data.len() - 1);
+        for (j, (obs_j, x_j)) in data.observations.iter().zip(cov_in.iter()).enumerate() {
+            if j == i {
+                continue;
+            }
+            o.push(*obs_j);
+            c.push(x_j.clone());
+        }
+        let reduced = Dataset::new(o, Some(c), None).expect("ok");
+        if reduced.n_events() == 0 {
+            continue;
+        }
+        if let Ok(f) = fit_cox_ph(&reduced, cfg) {
+            if f.converged {
+                approx.push(diag.dfbeta[i][0]);
+                actual.push(beta_full - f.coefficients[0]);
+            }
+        }
+    }
+    assert!(approx.len() >= 40);
+    let na = approx.len() as f64;
+    let ma = approx.iter().sum::<f64>() / na;
+    let mb = actual.iter().sum::<f64>() / na;
+    let mut num = 0.0;
+    let mut da = 0.0;
+    let mut db = 0.0;
+    for (a, b) in approx.iter().zip(actual.iter()) {
+        num += (a - ma) * (b - mb);
+        da += (a - ma).powi(2);
+        db += (b - mb).powi(2);
+    }
+    let corr = num / (da.sqrt() * db.sqrt());
+    assert!(corr > 0.97, "DFBeta-vs-refit correlation = {corr}");
+}
+
+// 32. Aalen-Johansen variance equals KM Greenwood on a shared dataset (2-state).
+#[test]
+fn aj_variance_equals_greenwood_shared_dataset() {
+    use crate::nonparametric::multi_state::{MultiStateConfig, MultiStateObs};
+    use crate::nonparametric::multi_state_inference::{MultiStateData, aalen_johansen_variance};
+
+    let times = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let events = [true, true, false, true, true, false];
+    let d = Dataset::from_arrays(&times, &events).expect("ok");
+    let km = kaplan_meier_estimate(&d).expect("ok");
+
+    let obs: Vec<MultiStateObs> = times
+        .iter()
+        .zip(events.iter())
+        .map(|(&t, &e)| MultiStateObs {
+            start_time: 0.0,
+            end_time: t,
+            from_state: 0,
+            to_state: if e { Some(1) } else { None },
+        })
+        .collect();
+    let model = MultiStateData::new(
+        obs,
+        MultiStateConfig {
+            n_states: 2,
+            initial_state: 0,
+        },
+    );
+
+    for (k, &t) in km.times.iter().enumerate() {
+        if km.events[k] == 0.0 {
+            continue;
+        }
+        let inf = aalen_johansen_variance(&model, 0.0, t, 0.05).expect("ok");
+        // P00 == KM survival, var(P00) == Greenwood variance.
+        assert!(
+            (inf.transition_prob[0] - km.survival[k]).abs() < 1.0e-12,
+            "P00 mismatch at t={t}"
+        );
+        assert!(
+            (inf.variance[0] - km.greenwood_var[k]).abs() < 1.0e-8,
+            "AJ var {} != Greenwood {} at t={t}",
+            inf.variance[0],
+            km.greenwood_var[k]
+        );
+    }
+}
+
+// 33. Competing-risks CIFs from AJ inference sum to one with the survivor.
+#[test]
+fn aj_competing_risks_cifs_sum_to_one() {
+    use crate::nonparametric::multi_state::{MultiStateConfig, MultiStateObs};
+    use crate::nonparametric::multi_state_inference::{MultiStateData, cif_with_variance};
+
+    // 0=alive, 1=cause A, 2=cause B.
+    let obs = vec![
+        MultiStateObs {
+            start_time: 0.0,
+            end_time: 1.0,
+            from_state: 0,
+            to_state: Some(1),
+        },
+        MultiStateObs {
+            start_time: 0.0,
+            end_time: 2.0,
+            from_state: 0,
+            to_state: Some(2),
+        },
+        MultiStateObs {
+            start_time: 0.0,
+            end_time: 3.0,
+            from_state: 0,
+            to_state: Some(1),
+        },
+        MultiStateObs {
+            start_time: 0.0,
+            end_time: 4.0,
+            from_state: 0,
+            to_state: None,
+        },
+    ];
+    let model = MultiStateData::new(
+        obs,
+        MultiStateConfig {
+            n_states: 3,
+            initial_state: 0,
+        },
+    );
+    let c = cif_with_variance(&model, 0, 3.5, 0.05).expect("ok");
+    let total: f64 = c.cif.iter().sum();
+    assert!((total - 1.0).abs() < 1.0e-12, "CIF+S sum = {total}");
+    for j in 0..3 {
+        assert!(c.variance[j].is_finite() && c.variance[j] >= 0.0);
+        assert!(c.cif[j] >= c.ci_lower[j] - 1.0e-9 && c.cif[j] <= c.ci_upper[j] + 1.0e-9);
+    }
+}

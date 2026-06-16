@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn new_valid_config_temperatures_equal_t_init() {
         let cfg = default_cfg(3);
-        let state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         assert_eq!(state.temperatures.len(), 3);
         for &t in &state.temperatures {
             assert!((t - 4.0_f32).abs() < 1e-7);
@@ -369,15 +369,15 @@ mod tests {
     #[test]
     fn temperature_valid_idx() {
         let cfg = default_cfg(2);
-        let state = AdaptiveTempScheduler::init(&cfg).unwrap();
-        let t = AdaptiveTempScheduler::temperature(&state, 0).unwrap();
+        let state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
+        let t = AdaptiveTempScheduler::temperature(&state, 0).expect("temperature should succeed");
         assert!((t - 4.0_f32).abs() < 1e-7);
     }
 
     #[test]
     fn temperature_out_of_range_returns_err() {
         let cfg = default_cfg(2);
-        let state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let result = AdaptiveTempScheduler::temperature(&state, 5);
         assert!(matches!(result, Err(DistillError::InvalidConfig { .. })));
     }
@@ -387,10 +387,10 @@ mod tests {
     #[test]
     fn layer_kd_loss_identical_logits_near_zero_kl() {
         let cfg = default_cfg(1);
-        let state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let logits = vec![1.0_f32, 2.0, 3.0];
-        let (loss, kl) =
-            AdaptiveTempScheduler::layer_kd_loss(&state, 0, &logits, &logits, 2).unwrap();
+        let (loss, kl) = AdaptiveTempScheduler::layer_kd_loss(&state, 0, &logits, &logits, 2)
+            .expect("layer_kd_loss should succeed");
         assert!(loss.abs() < 1e-5, "loss={loss}");
         assert!(kl.abs() < 1e-5, "kl={kl}");
     }
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn layer_kd_loss_mismatched_lengths_returns_err() {
         let cfg = default_cfg(1);
-        let state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let s = vec![1.0_f32, 2.0];
         let t = vec![1.0_f32, 2.0, 3.0];
         let result = AdaptiveTempScheduler::layer_kd_loss(&state, 0, &s, &t, 0);
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn layer_kd_loss_empty_logits_returns_err() {
         let cfg = default_cfg(1);
-        let state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let result = AdaptiveTempScheduler::layer_kd_loss(&state, 0, &[], &[], 0);
         assert!(matches!(result, Err(DistillError::EmptyInput)));
     }
@@ -421,10 +421,11 @@ mod tests {
     #[test]
     fn update_layer_high_divergence_increases_temperature() {
         let cfg = default_cfg(1);
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let t_before = state.temperatures[0];
         // observed_kl >> target_divergence → temperature should increase
-        AdaptiveTempScheduler::update_layer(&mut state, 0, 10.0, &cfg).unwrap();
+        AdaptiveTempScheduler::update_layer(&mut state, 0, 10.0, &cfg)
+            .expect("update_layer should succeed");
         assert!(
             state.temperatures[0] > t_before,
             "T should increase: was {t_before}, now {}",
@@ -435,10 +436,11 @@ mod tests {
     #[test]
     fn update_layer_low_divergence_decreases_temperature() {
         let cfg = default_cfg(1);
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let t_before = state.temperatures[0];
         // observed_kl << target_divergence → temperature should decrease
-        AdaptiveTempScheduler::update_layer(&mut state, 0, 0.0, &cfg).unwrap();
+        AdaptiveTempScheduler::update_layer(&mut state, 0, 0.0, &cfg)
+            .expect("update_layer should succeed");
         assert!(
             state.temperatures[0] < t_before,
             "T should decrease: was {t_before}, now {}",
@@ -450,10 +452,11 @@ mod tests {
     fn update_layer_temperature_clamped_to_t_max() {
         let mut cfg = default_cfg(1);
         cfg.t_init = cfg.t_max; // start at ceiling
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         // Push divergence very high → would want to increase T beyond t_max
         for _ in 0..20 {
-            AdaptiveTempScheduler::update_layer(&mut state, 0, 1000.0, &cfg).unwrap();
+            AdaptiveTempScheduler::update_layer(&mut state, 0, 1000.0, &cfg)
+                .expect("update_layer should succeed");
         }
         assert!(
             state.temperatures[0] <= cfg.t_max,
@@ -466,10 +469,11 @@ mod tests {
     fn update_layer_temperature_clamped_to_t_min() {
         let mut cfg = default_cfg(1);
         cfg.t_init = cfg.t_min; // start at floor
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         // Push divergence to zero → would want to decrease T below t_min
         for _ in 0..20 {
-            AdaptiveTempScheduler::update_layer(&mut state, 0, 0.0, &cfg).unwrap();
+            AdaptiveTempScheduler::update_layer(&mut state, 0, 0.0, &cfg)
+                .expect("update_layer should succeed");
         }
         assert!(
             state.temperatures[0] >= cfg.t_min,
@@ -483,20 +487,20 @@ mod tests {
     #[test]
     fn multi_layer_loss_returns_n_layer_losses() {
         let cfg = default_cfg(3);
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let logits = vec![1.0_f32, 2.0, 3.0];
         let layer_data: Vec<(Vec<f32>, Vec<f32>, usize)> = (0..3)
             .map(|_| (logits.clone(), logits.clone(), 0))
             .collect();
-        let losses =
-            AdaptiveTempScheduler::multi_layer_loss(&mut state, &layer_data, &cfg).unwrap();
+        let losses = AdaptiveTempScheduler::multi_layer_loss(&mut state, &layer_data, &cfg)
+            .expect("multi_layer_loss should succeed");
         assert_eq!(losses.len(), 3);
     }
 
     #[test]
     fn multi_layer_loss_wrong_n_layers_returns_err() {
         let cfg = default_cfg(3);
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let logits = vec![1.0_f32, 2.0];
         let layer_data: Vec<(Vec<f32>, Vec<f32>, usize)> = (0..2)
             .map(|_| (logits.clone(), logits.clone(), 0))
@@ -511,25 +515,28 @@ mod tests {
     #[test]
     fn multi_layer_loss_increments_step() {
         let cfg = default_cfg(2);
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         assert_eq!(state.step, 0);
         let logits = vec![1.0_f32, 2.0];
         let layer_data: Vec<(Vec<f32>, Vec<f32>, usize)> = (0..2)
             .map(|_| (logits.clone(), logits.clone(), 0))
             .collect();
-        AdaptiveTempScheduler::multi_layer_loss(&mut state, &layer_data, &cfg).unwrap();
+        AdaptiveTempScheduler::multi_layer_loss(&mut state, &layer_data, &cfg)
+            .expect("multi_layer_loss should succeed");
         assert_eq!(state.step, 1);
-        AdaptiveTempScheduler::multi_layer_loss(&mut state, &layer_data, &cfg).unwrap();
+        AdaptiveTempScheduler::multi_layer_loss(&mut state, &layer_data, &cfg)
+            .expect("multi_layer_loss should succeed");
         assert_eq!(state.step, 2);
     }
 
     #[test]
     fn ema_divergence_updates_correctly() {
         let cfg = default_cfg(1);
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         // Initial EMA = target_divergence = 0.1.
         // observed_kl = 0.5 → new EMA = 0.9 * 0.1 + 0.1 * 0.5 = 0.09 + 0.05 = 0.14
-        AdaptiveTempScheduler::update_layer(&mut state, 0, 0.5, &cfg).unwrap();
+        AdaptiveTempScheduler::update_layer(&mut state, 0, 0.5, &cfg)
+            .expect("update_layer should succeed");
         let expected_ema = 0.9_f32 * 0.1_f32 + 0.1_f32 * 0.5_f32;
         assert!(
             (state.ema_divergences[0] - expected_ema).abs() < 1e-6,
@@ -543,7 +550,7 @@ mod tests {
     #[test]
     fn total_loss_mean_of_vec() {
         let losses = vec![1.0_f32, 2.0, 3.0];
-        let total = AdaptiveTempScheduler::total_loss(&losses).unwrap();
+        let total = AdaptiveTempScheduler::total_loss(&losses).expect("total_loss should succeed");
         assert!((total - 2.0_f32).abs() < 1e-6);
     }
 
@@ -558,14 +565,15 @@ mod tests {
     #[test]
     fn reset_restores_initial_temperatures_and_step() {
         let cfg = default_cfg(2);
-        let mut state = AdaptiveTempScheduler::init(&cfg).unwrap();
+        let mut state = AdaptiveTempScheduler::init(&cfg).expect("init should succeed");
         let logits = vec![1.0_f32, 2.0];
         let layer_data: Vec<(Vec<f32>, Vec<f32>, usize)> = (0..2)
             .map(|_| (logits.clone(), logits.clone(), 0))
             .collect();
         // Run a few steps to alter state.
         for _ in 0..5 {
-            AdaptiveTempScheduler::multi_layer_loss(&mut state, &layer_data, &cfg).unwrap();
+            AdaptiveTempScheduler::multi_layer_loss(&mut state, &layer_data, &cfg)
+                .expect("multi_layer_loss should succeed");
         }
         AdaptiveTempScheduler::reset(&mut state, &cfg);
         assert_eq!(state.step, 0);

@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn latency_speedup_ok() {
-        let sp = latency_speedup(100.0, 25.0).unwrap();
+        let sp = latency_speedup(100.0, 25.0).expect("latency_speedup should succeed");
         assert!((sp - 4.0).abs() < 1e-4);
     }
 

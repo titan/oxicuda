@@ -188,7 +188,8 @@ mod tests {
         for _ in 0..50 {
             data.push(10.0 + rng.next_f32() * 0.1);
         }
-        let km = KMeans::fit(&data, 100, 1, 2, 100, &mut rng).unwrap();
+        let km =
+            KMeans::fit(&data, 100, 1, 2, 100, &mut rng).expect("k-means training should converge");
         let c0 = km.centroids()[0];
         let c1 = km.centroids()[1];
         let low = c0.min(c1);

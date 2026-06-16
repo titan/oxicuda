@@ -570,11 +570,11 @@ mod tests {
                 CppnActivation::Sigmoid,
             ],
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     fn default_substrate() -> Substrate {
-        Substrate::linear(3, 4, 2).unwrap()
+        Substrate::linear(3, 4, 2).expect("linear should succeed")
     }
 
     // ── 1. CppnActivation apply is bounded/finite ─────────────────────────────
@@ -613,7 +613,7 @@ mod tests {
 
     #[test]
     fn cppn_config_n_params() {
-        let cfg = CppnConfig::new(6, vec![CppnActivation::Tanh]).unwrap();
+        let cfg = CppnConfig::new(6, vec![CppnActivation::Tanh]).expect("new should succeed");
         // 5*6 + 6 + 6 + 1 = 30+6+6+1 = 43
         assert_eq!(cfg.n_params(), 43);
     }
@@ -625,7 +625,7 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let w = CppnWeights::random(4, 0.5, &mut rng);
         let flat = w.to_flat();
-        let w2 = CppnWeights::from_flat(&flat, 4).unwrap();
+        let w2 = CppnWeights::from_flat(&flat, 4).expect("from_flat should succeed");
         for (a, b) in w.hidden_weights.iter().zip(w2.hidden_weights.iter()) {
             assert!((a - b).abs() < 1e-12);
         }
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn substrate_linear_n_weights() {
-        let s = Substrate::linear(4, 5, 3).unwrap();
+        let s = Substrate::linear(4, 5, 3).expect("linear should succeed");
         // 4*5 + 5*3 = 20 + 15 = 35
         assert_eq!(s.n_weights(), 35);
     }
@@ -697,7 +697,7 @@ mod tests {
         let w = CppnWeights::random(cfg.n_hidden, 0.5, &mut rng);
         let sw = hyperneat_query_weights(&w, &cfg, &s, 0.0); // no threshold → keep all
         let x = vec![0.5, -0.3, 0.1];
-        let out = hyperneat_forward(&sw, &s, &x).unwrap();
+        let out = hyperneat_forward(&sw, &s, &x).expect("hyperneat_forward should succeed");
         assert_eq!(out.len(), s.output_coords.len());
         for &v in &out {
             assert!(v.abs() <= 1.0 + 1e-10, "tanh output must be in [-1,1]");
@@ -723,15 +723,15 @@ mod tests {
         // Fitness: negative norm of substrate weights (maximised → weights → 0)
         let cfg = HyperNeatConfig {
             cppn: default_cppn_cfg(),
-            substrate: Substrate::linear(2, 3, 1).unwrap(),
+            substrate: Substrate::linear(2, 3, 1).expect("linear should succeed"),
             expression_threshold: 0.1,
             n_evol_iters: 20,
             sigma_init: 0.3,
             sigma_decay: 0.95,
             seed: 99,
         };
-        let state =
-            hyperneat_run(|sw, _geom| -sw.iter().map(|w| w * w).sum::<f64>(), &cfg).unwrap();
+        let state = hyperneat_run(|sw, _geom| -sw.iter().map(|w| w * w).sum::<f64>(), &cfg)
+            .expect("value should be present");
         assert!(state.best_fitness.is_finite());
         assert_eq!(state.generation, 20);
         assert_eq!(state.substrate_weights.len(), cfg.substrate.n_weights());
@@ -777,7 +777,7 @@ mod tests {
     fn threshold_zero_keeps_all() {
         let mut rng = LcgRng::new(31);
         let cfg = default_cppn_cfg();
-        let s = Substrate::linear(2, 2, 2).unwrap();
+        let s = Substrate::linear(2, 2, 2).expect("linear should succeed");
         let w = CppnWeights::random(cfg.n_hidden, 2.0, &mut rng);
         let weights_strict = hyperneat_query_weights(&w, &cfg, &s, 1e9);
         let weights_all = hyperneat_query_weights(&w, &cfg, &s, 0.0);

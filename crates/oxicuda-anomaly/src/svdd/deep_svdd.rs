@@ -63,7 +63,7 @@ impl SvddEncoder {
             let b = vec![0.0_f32; fan_out];
             layers.push((w, b));
         }
-        let rep_dim = *dims.last().unwrap_or(&1);
+        let rep_dim = dims[dims.len() - 1];
         Ok(Self {
             layers,
             dims: dims.to_vec(),
@@ -141,7 +141,7 @@ impl DeepSvdd {
             });
         }
         let input_dim = dims[0];
-        let rep_dim = *dims.last().unwrap_or(&1);
+        let rep_dim = dims[dims.len() - 1];
         let encoder = SvddEncoder::new(dims, rng)?;
         Ok(Self {
             encoder,
@@ -218,26 +218,34 @@ mod tests {
     #[test]
     fn encoder_forward_shape() {
         let mut rng = LcgRng::new(1);
-        let enc = SvddEncoder::new(&[4, 8, 4], &mut rng).unwrap();
+        let enc = SvddEncoder::new(&[4, 8, 4], &mut rng)
+            .expect("SvddEncoder::new with valid dims [4, 8, 4] should succeed");
         let x = vec![1.0_f32; 4];
-        let out = enc.forward(&x).unwrap();
+        let out = enc
+            .forward(&x)
+            .expect("forward pass on valid 4-element input should succeed");
         assert_eq!(out.len(), 4);
     }
 
     #[test]
     fn deep_svdd_fit_score() {
         let mut rng = LcgRng::new(2);
-        let mut svdd = DeepSvdd::new(&[4, 8, 4], &mut rng).unwrap();
+        let mut svdd = DeepSvdd::new(&[4, 8, 4], &mut rng)
+            .expect("DeepSvdd::new with valid dims [4, 8, 4] should succeed");
         let x = vec![0.1_f32; 40]; // 10 samples
-        svdd.fit(&x, 10).unwrap();
-        let s = svdd.score(&[0.1_f32, 0.1, 0.1, 0.1]).unwrap();
+        svdd.fit(&x, 10)
+            .expect("fit on 10 uniform samples should succeed");
+        let s = svdd
+            .score(&[0.1_f32, 0.1, 0.1, 0.1])
+            .expect("score on fitted model with valid input should succeed");
         assert!(s.is_finite(), "score={s}");
     }
 
     #[test]
     fn deep_svdd_not_fitted_error() {
         let mut rng = LcgRng::new(3);
-        let svdd = DeepSvdd::new(&[4, 4], &mut rng).unwrap();
+        let svdd = DeepSvdd::new(&[4, 4], &mut rng)
+            .expect("DeepSvdd::new with valid dims [4, 4] should succeed");
         assert!(svdd.score(&[0.0_f32; 4]).is_err());
     }
 }

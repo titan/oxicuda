@@ -6,7 +6,7 @@ GPU-accelerated quantization and model compression engine: post-training quantiz
 
 ## Implementation Status
 
-**Actual: 5,887 SLoC across 24 files (includes Markdown doc-comments) / 4,122 pure Rust SLoC**
+**Actual: 5,726 SLoC across 27 files (includes Markdown doc-comments) / 4,122 pure Rust SLoC**
 
 Comprehensive PTQ + QAT + Pruning + Distillation + Mixed-Precision Analysis suite for LLM and DNN
 deployment. All quantization schemes commonly used in production inference frameworks (MinMax,
@@ -92,7 +92,7 @@ NF4 QLoRA, FP8 E4M3/E5M2, GPTQ Hessian-OBC, SmoothQuant) are implemented.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 151 passing (root TODO.md count)
+- Tests: 198 passing (root TODO.md count)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime

@@ -329,11 +329,13 @@ mod tests {
             n_iter: 10,
             ..BaseConfig::default()
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         let n_tokens = 8;
         let logits: Vec<f32> = (0..n_tokens * 4).map(|i| (i as f32) * 0.1).collect();
         let mut s = row_softmax(&logits, n_tokens, 4, 1.0);
-        router.sinkhorn_iterations(&mut s, n_tokens).unwrap();
+        router
+            .sinkhorn_iterations(&mut s, n_tokens)
+            .expect("sinkhorn_iterations should succeed");
         for t in 0..n_tokens {
             let row_sum: f32 = s[t * 4..t * 4 + 4].iter().sum();
             assert!(
@@ -353,12 +355,14 @@ mod tests {
             n_iter: 10,
             ..BaseConfig::default()
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         let logits: Vec<f32> = (0..n_tokens * n_experts)
             .map(|i| (i as f32) * 0.05)
             .collect();
         let mut s = row_softmax(&logits, n_tokens, n_experts, 1.0);
-        router.sinkhorn_iterations(&mut s, n_tokens).unwrap();
+        router
+            .sinkhorn_iterations(&mut s, n_tokens)
+            .expect("sinkhorn_iterations should succeed");
         let expected = n_tokens as f32 / n_experts as f32; // = 2.0
         let mut col_sums = vec![0.0_f32; n_experts];
         for t in 0..n_tokens {
@@ -437,7 +441,7 @@ mod tests {
             input_dim: 8,
             ..BaseConfig::default()
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         // Correct would be 3*4=12; give 10 instead.
         let logits = vec![0.0_f32; 10];
         assert!(router.route(&logits, 3).is_err());
@@ -450,7 +454,7 @@ mod tests {
             input_dim: 8,
             ..BaseConfig::default()
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         let logits = vec![0.0_f32; 0];
         assert!(router.route(&logits, 0).is_err());
     }
@@ -464,9 +468,11 @@ mod tests {
             input_dim: 8,
             ..BaseConfig::default()
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         let logits = vec![1.0_f32; n_tokens * n_experts];
-        let result = router.route(&logits, n_tokens).unwrap();
+        let result = router
+            .route(&logits, n_tokens)
+            .expect("route should succeed");
         assert_eq!(result.expert_assignments.len(), n_tokens);
     }
 
@@ -479,11 +485,13 @@ mod tests {
             input_dim: 8,
             ..BaseConfig::default()
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         let logits: Vec<f32> = (0..n_tokens * n_experts)
             .map(|i| (i as f32) * 0.3)
             .collect();
-        let result = router.route(&logits, n_tokens).unwrap();
+        let result = router
+            .route(&logits, n_tokens)
+            .expect("route should succeed");
         for &a in &result.expert_assignments {
             assert!(a < n_experts, "assignment {a} >= n_experts {n_experts}");
         }
@@ -499,11 +507,13 @@ mod tests {
             n_iter: 3,
             ..BaseConfig::default()
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         let logits: Vec<f32> = (0..n_tokens * n_experts)
             .map(|i| (i as f32) * 0.2 - 1.0)
             .collect();
-        let result = router.route(&logits, n_tokens).unwrap();
+        let result = router
+            .route(&logits, n_tokens)
+            .expect("route should succeed");
         for &v in &result.assignment {
             assert!(v >= 0.0, "negative assignment value: {v}");
         }
@@ -529,11 +539,13 @@ mod tests {
             temperature: 1.0,
             eps: 1e-7,
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         let logits = vec![
             0.5_f32, 1.0, 1.5, 2.0, 0.0, 1.0, 0.3, 0.6, 0.9, 0.1, 0.4, 0.8,
         ];
-        let result = router.route(&logits, n_tokens).unwrap();
+        let result = router
+            .route(&logits, n_tokens)
+            .expect("route should succeed");
         let expected = row_softmax(&logits, n_tokens, n_experts, 1.0);
         for (a, e) in result.assignment.iter().zip(expected.iter()) {
             assert!((a - e).abs() < 1e-6, "zero-iter mismatch: {a} vs {e}");
@@ -565,13 +577,13 @@ mod tests {
         };
 
         let r_few = BaseRouter::new(cfg_few)
-            .unwrap()
+            .expect("value should be present")
             .route(&logits, n_tokens)
-            .unwrap();
+            .expect("value should be present");
         let r_many = BaseRouter::new(cfg_many)
-            .unwrap()
+            .expect("value should be present")
             .route(&logits, n_tokens)
-            .unwrap();
+            .expect("value should be present");
 
         // Convergence deviation should be lower with more iterations.
         let dev_few = sinkhorn_convergence(&r_few.assignment, n_tokens, n_experts);
@@ -595,10 +607,12 @@ mod tests {
             n_iter: 20,
             ..BaseConfig::default()
         };
-        let router = BaseRouter::new(cfg).unwrap();
+        let router = BaseRouter::new(cfg).expect("new should succeed");
         // Row 0: [2.0, 0.0], Row 1: [0.0, 2.0], Row 2: [2.0, 0.0], Row 3: [0.0, 2.0]
         let logits = vec![2.0_f32, 0.0, 0.0, 2.0, 2.0_f32, 0.0, 0.0, 2.0];
-        let result = router.route(&logits, n_tokens).unwrap();
+        let result = router
+            .route(&logits, n_tokens)
+            .expect("route should succeed");
         let mut counts = vec![0_usize; n_experts];
         for &a in &result.expert_assignments {
             counts[a] += 1;

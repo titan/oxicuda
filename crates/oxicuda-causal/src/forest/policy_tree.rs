@@ -404,13 +404,14 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
         // Single leaf with action 1.
         assert!(matches!(res.tree.root, PolicyNode::Leaf { action: 1 }));
         assert!((res.train_welfare - 20.0).abs() < 1e-6);
         // Every sample maps to action 1.
         for &x in &features {
-            assert_eq!(res.tree.predict(&[x]).unwrap(), 1);
+            assert_eq!(res.tree.predict(&[x]).expect("predict should succeed"), 1);
         }
     }
 
@@ -447,7 +448,8 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
         match &res.tree.root {
             PolicyNode::Split {
                 feature, threshold, ..
@@ -465,8 +467,10 @@ mod tests {
         // Beats any constant policy: a constant action earns 3 on half = 12.
         let const0: Vec<usize> = vec![0; n];
         let const1: Vec<usize> = vec![1; n];
-        let w0 = PolicyTree::policy_welfare(&scores, n, n_actions, &const0).unwrap();
-        let w1 = PolicyTree::policy_welfare(&scores, n, n_actions, &const1).unwrap();
+        let w0 = PolicyTree::policy_welfare(&scores, n, n_actions, &const0)
+            .expect("policy_welfare should succeed");
+        let w1 = PolicyTree::policy_welfare(&scores, n, n_actions, &const1)
+            .expect("policy_welfare should succeed");
         assert!(res.train_welfare > w0);
         assert!(res.train_welfare > w1);
     }
@@ -481,7 +485,8 @@ mod tests {
                 n_actions,
                 min_leaf_samples: 1,
             };
-            let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+            let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+                .expect("fit should succeed with valid test inputs");
             assert!(
                 res.train_welfare >= last - 1e-9,
                 "welfare decreased at depth {depth}: {} < {}",
@@ -500,10 +505,11 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
         // x=0.1 → action 1; x=0.9 → action 0.
-        assert_eq!(res.tree.predict(&[0.1]).unwrap(), 1);
-        assert_eq!(res.tree.predict(&[0.9]).unwrap(), 0);
+        assert_eq!(res.tree.predict(&[0.1]).expect("predict should succeed"), 1);
+        assert_eq!(res.tree.predict(&[0.9]).expect("predict should succeed"), 0);
     }
 
     #[test]
@@ -514,8 +520,12 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
-        let preds = res.tree.predict_batch(&features, n, n_features).unwrap();
+        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
+        let preds = res
+            .tree
+            .predict_batch(&features, n, n_features)
+            .expect("predict_batch should succeed with valid inputs");
         assert_eq!(preds.len(), n);
     }
 
@@ -527,7 +537,8 @@ mod tests {
             3.0, 0.5, // sample 1: action0=3, action1=0.5
         ];
         let actions = vec![1usize, 0usize]; // pick 2.0 + 3.0
-        let w = PolicyTree::policy_welfare(&scores, 2, 2, &actions).unwrap();
+        let w = PolicyTree::policy_welfare(&scores, 2, 2, &actions)
+            .expect("policy_welfare should succeed");
         assert!((w - 5.0).abs() < 1e-6);
     }
 
@@ -540,7 +551,8 @@ mod tests {
             n_actions,
             min_leaf_samples: min_leaf,
         };
-        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
         let rows: Vec<usize> = (0..n).collect();
         let smallest = min_leaf_size(&res.tree.root, &rows, &features, n_features);
         assert!(
@@ -571,9 +583,10 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
-        assert_eq!(res.tree.predict(&[0.1]).unwrap(), 2);
-        assert_eq!(res.tree.predict(&[0.9]).unwrap(), 0);
+        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
+        assert_eq!(res.tree.predict(&[0.1]).expect("predict should succeed"), 2);
+        assert_eq!(res.tree.predict(&[0.9]).expect("predict should succeed"), 0);
         assert!((res.train_welfare - 30.0).abs() < 1e-6);
     }
 
@@ -594,11 +607,15 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
         // Welfare == sum over samples of any single action's score = 5 * 2 = 10.
         assert!((res.train_welfare - 10.0).abs() < 1e-6);
         // Predicts a valid action everywhere.
-        let preds = res.tree.predict_batch(&features, n, n_features).unwrap();
+        let preds = res
+            .tree
+            .predict_batch(&features, n, n_features)
+            .expect("predict_batch should succeed with valid inputs");
         for &a in &preds {
             assert!(a < n_actions);
         }
@@ -623,7 +640,8 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, 4, n_features, &cfg).unwrap();
+        let res =
+            PolicyTree::fit(&features, &scores, 4, n_features, &cfg).expect("fit should succeed");
         match res.tree.root {
             PolicyNode::Split {
                 feature, threshold, ..
@@ -644,7 +662,8 @@ mod tests {
                 n_actions,
                 min_leaf_samples: 1,
             };
-            let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+            let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+                .expect("fit should succeed with valid test inputs");
             assert!(
                 node_depth(&res.tree.root) <= depth,
                 "realised depth exceeds {depth}"
@@ -660,8 +679,10 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let a = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
-        let b = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+        let a = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
+        let b = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
         assert_eq!(a.tree.root, b.tree.root);
         assert!((a.train_welfare - b.train_welfare).abs() < 1e-12);
     }
@@ -735,7 +756,8 @@ mod tests {
             n_actions,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg).unwrap();
+        let res = PolicyTree::fit(&features, &scores, n, n_features, &cfg)
+            .expect("fit should succeed with valid test inputs");
         // Only triggers if the root is a split (it is for this dataset).
         assert!(matches!(res.tree.root, PolicyNode::Split { .. }));
         assert!(matches!(
@@ -774,7 +796,7 @@ mod tests {
             n_actions: 2,
             min_leaf_samples: 1,
         };
-        let res = PolicyTree::fit(&features, &scores, 1, 1, &cfg).unwrap();
+        let res = PolicyTree::fit(&features, &scores, 1, 1, &cfg).expect("fit should succeed");
         assert!(matches!(res.tree.root, PolicyNode::Leaf { action: 1 }));
         assert!((res.train_welfare - 7.0).abs() < 1e-6);
     }

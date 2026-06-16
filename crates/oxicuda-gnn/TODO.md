@@ -9,8 +9,8 @@ and hierarchical pooling, Set2Set readout. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 7,961 (25 files, Rust 6,282 code + 881 comments + 798 blanks)
-- **Tests:** 233 passing (#[test] count in src/)
+- **Actual SLoC:** 16,973 (52 files, Rust 6,282 code + 881 comments + 798 blanks)
+- **Tests:** 613 passing (#[test] count in src/)
 - **Crate:** `oxicuda-gnn` -- Vol.18 Graph Neural Network Primitives
 
 ### Completed [x]
@@ -89,17 +89,20 @@ and hierarchical pooling, Set2Set readout. Part of
       degree distributions
 - [ ] Edge-parallel GAT (one warp per edge) for high-degree graphs
 - [ ] Sparse-tensor backend integration with `oxicuda-sparse` for SpMM-based GCN
-- [ ] `scatter_softmax` numerical-stability test on >1M edges
+- [x] `scatter_softmax` numerical-stability test on >1M edges
 
 #### P1 -- Important (Architecture Coverage)
 - [x] Transformer-based GNN: `GraphTransformer` / Graphormer with edge-feature bias
 - [x] PNA (Principal Neighbourhood Aggregation, Corso 2020)
 - [x] EdgeConv (DGCNN, Wang 2019) point-cloud style layer
 - [x] R-GCN multi-relational layer (layers/rgcn.rs -- Schlichtkrull 2018; per-relation message passing with in-degree normalization + basis decomposition W_r=Σ_b a_rb V_b + self-loop; one CsrGraph per relation)
-- [ ] Neighbour sampling for mini-batch training (GraphSAGE inductive style)
+- [x] Neighbour sampling for mini-batch training (GraphSAGE inductive style)
 - [ ] Cluster-GCN partitioning helper for very large graphs
 
 #### P2 -- Nice-to-Have (Research / Advanced)
+- [x] SIGN scalable inception graph network (`layers/sign.rs`) — Rossi 2020 ICML workshop: multi-hop diffusion pre-computation Aᵏ X followed by MLP over concatenated hop features; `SignConv`
+- [ ] GRAND graph random neural diffusion (`layers/grand.rs`) — Chamberlain 2021 ICML: message passing as neural PDE diffusion with dropout augmentation for stochastic depth regularisation; `GrandLayer`
+- [ ] k-WL expressive GNN (`layers/k_wl_gnn.rs`) — Maron 2019 NeurIPS: invariant / equivariant networks over k-dimensional higher-order Weisfeiler-Leman features for improved expressivity; `KWlGnn`
 - [x] SGC (Simple Graph Convolution, Wu 2019) closed-form precomputation
 - [x] APPNP (predict-then-propagate) personalised PageRank propagation
 - [x] JK-Net Jumping Knowledge aggregator (layers/jk_net.rs -- Xu 2018 ICML; Concat / MaxPool / forward-LSTM-attention aggregation of per-node representations across all layers)
@@ -120,7 +123,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 233 passing
+- Tests: 613 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)

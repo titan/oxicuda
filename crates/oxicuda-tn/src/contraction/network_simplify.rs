@@ -829,7 +829,10 @@ fn fuse_axes_in_tensor(
         });
     }
     // Build the output dims and labels: replace fused axes with single fused dim.
-    let insert_pos = *axes.iter().min().unwrap();
+    let insert_pos = *axes
+        .iter()
+        .min()
+        .expect("axes is non-empty (empty case returned early above)");
     let mut new_dims: Vec<usize> = Vec::new();
     let mut new_labels: Vec<i64> = Vec::new();
     let mut fused_inserted = false;
@@ -1046,7 +1049,7 @@ mod tests {
         // 2×3 tensor with 6 elements should succeed.
         let t = NetworkTensor::new(vec![1.0; 6], vec![2, 3], vec![1, 2], "A".to_string());
         assert!(t.is_ok());
-        let t = t.unwrap();
+        let t = t.expect("t should be present");
         assert_eq!(t.dims, vec![2, 3]);
         assert_eq!(t.labels, vec![1, 2]);
     }
@@ -1066,8 +1069,9 @@ mod tests {
     fn remove_traces_rank2() {
         // Tensor A[i, i] = identity 2×2 → trace = 2.0
         let identity = vec![1.0, 0.0, 0.0, 1.0]; // [[1,0],[0,1]]
-        let t = NetworkTensor::new(identity, vec![2, 2], vec![-1, -1], "I".to_string()).unwrap();
-        let traced = trace_one_tensor(&t).unwrap();
+        let t = NetworkTensor::new(identity, vec![2, 2], vec![-1, -1], "I".to_string())
+            .expect("value should be present");
+        let traced = trace_one_tensor(&t).expect("trace_one_tensor should succeed");
         // Result should be a scalar.
         assert!(
             traced.is_scalar(),
@@ -1097,8 +1101,9 @@ mod tests {
             data[6 + j * 2 + 1] = (j + 1) as f64 * 2.0;
         }
         // Labels: axis 0 and axis 2 share label -1; axis 1 has label 1.
-        let t = NetworkTensor::new(data, vec![2, 3, 2], vec![-1, 1, -1], "A".to_string()).unwrap();
-        let traced = trace_one_tensor(&t).unwrap();
+        let t = NetworkTensor::new(data, vec![2, 3, 2], vec![-1, 1, -1], "A".to_string())
+            .expect("value should be present");
+        let traced = trace_one_tensor(&t).expect("trace_one_tensor should succeed");
         // Expect dims = [3], trace[j] = (j+1)*1.0 + (j+1)*2.0 = 3*(j+1).
         assert_eq!(traced.dims, vec![3]);
         for j in 0..3 {
@@ -1120,18 +1125,19 @@ mod tests {
         // Leaf A[k] and body B[k, l] connected via bond k=-1.
         // A = [2.0, 3.0], B = identity 2×2.
         // Result: C[l] = sum_k A[k] * B[k, l] = A = [2.0, 3.0].
-        let a = NetworkTensor::new(vec![2.0, 3.0], vec![2], vec![-1], "A".to_string()).unwrap();
+        let a = NetworkTensor::new(vec![2.0, 3.0], vec![2], vec![-1], "A".to_string())
+            .expect("value should be present");
         let b = NetworkTensor::new(
             vec![1.0, 0.0, 0.0, 1.0],
             vec![2, 2],
             vec![-1, 1],
             "B".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(a);
         net.push(b);
-        let count = absorb_leaves(&mut net).unwrap();
+        let count = absorb_leaves(&mut net).expect("absorb_leaves should succeed");
         assert_eq!(count, 1, "expected 1 leaf absorbed");
         assert_eq!(net.tensors.len(), 1, "expected 1 tensor remaining");
         let result = &net.tensors[0];
@@ -1146,20 +1152,22 @@ mod tests {
     fn absorb_leaves_chain() {
         // A[k] = [1.0, 1.0], B[k,l] = identity 2×2, C[l] = [3.0, 4.0].
         // Result should be A @ B @ C = dot([1,1], I, [3,4]) = 7.0 scalar.
-        let a = NetworkTensor::new(vec![1.0, 1.0], vec![2], vec![-1], "A".to_string()).unwrap();
+        let a = NetworkTensor::new(vec![1.0, 1.0], vec![2], vec![-1], "A".to_string())
+            .expect("value should be present");
         let b = NetworkTensor::new(
             vec![1.0, 0.0, 0.0, 1.0],
             vec![2, 2],
             vec![-1, -2],
             "B".to_string(),
         )
-        .unwrap();
-        let c = NetworkTensor::new(vec![3.0, 4.0], vec![2], vec![-2], "C".to_string()).unwrap();
+        .expect("value should be present");
+        let c = NetworkTensor::new(vec![3.0, 4.0], vec![2], vec![-2], "C".to_string())
+            .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(a);
         net.push(b);
         net.push(c);
-        let _count = absorb_leaves(&mut net).unwrap();
+        let _count = absorb_leaves(&mut net).expect("absorb_leaves should succeed");
         assert_eq!(net.tensors.len(), 1, "expected 1 tensor remaining");
         let result = &net.tensors[0];
         assert!(result.is_scalar() || result.numel() == 1);
@@ -1181,26 +1189,26 @@ mod tests {
             vec![1, -1],
             "A".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let m = NetworkTensor::new(
             vec![2.0, 0.0, 0.0, 3.0],
             vec![2, 2],
             vec![-1, -2],
             "M".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let b = NetworkTensor::new(
             vec![1.0, 0.0, 0.0, 1.0],
             vec![2, 2],
             vec![-2, 2],
             "B".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(a);
         net.push(m);
         net.push(b);
-        let count = simplify_chains(&mut net).unwrap();
+        let count = simplify_chains(&mut net).expect("simplify_chains should succeed");
         assert!(count >= 1, "expected at least 1 chain simplification");
         assert_eq!(
             net.tensors.len(),
@@ -1215,12 +1223,14 @@ mod tests {
     fn fold_scalars_multiplies_into_other() {
         // Scalar s = 3.0, tensor T[i] = [1.0, 2.0].
         // After fold: T = [3.0, 6.0].
-        let scalar = NetworkTensor::new(vec![3.0], vec![], vec![], "S".to_string()).unwrap();
-        let tensor = NetworkTensor::new(vec![1.0, 2.0], vec![2], vec![1], "T".to_string()).unwrap();
+        let scalar = NetworkTensor::new(vec![3.0], vec![], vec![], "S".to_string())
+            .expect("value should be present");
+        let tensor = NetworkTensor::new(vec![1.0, 2.0], vec![2], vec![1], "T".to_string())
+            .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(scalar);
         net.push(tensor);
-        let count = fold_scalars(&mut net).unwrap();
+        let count = fold_scalars(&mut net).expect("fold_scalars should succeed");
         assert_eq!(count, 1);
         assert_eq!(net.tensors.len(), 1);
         let t = &net.tensors[0];
@@ -1240,18 +1250,18 @@ mod tests {
             vec![-1, -2],
             "A".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let b = NetworkTensor::new(
             (0..6).map(|x| x as f64).collect(),
             vec![2, 3],
             vec![-1, -2],
             "B".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(a);
         net.push(b);
-        let count = fuse_parallel_bonds(&mut net).unwrap();
+        let count = fuse_parallel_bonds(&mut net).expect("fuse_parallel_bonds should succeed");
         assert_eq!(count, 1);
         // Each tensor now has a single internal axis of dim 6.
         assert_eq!(net.tensors[0].dims, vec![6]);
@@ -1270,18 +1280,18 @@ mod tests {
             vec![1, -1],
             "A".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let b = NetworkTensor::new(
             vec![5.0, 6.0, 7.0, 8.0],
             vec![2, 2],
             vec![-1, 2],
             "B".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(a);
         net.push(b);
-        let result = contract_network(&net).unwrap();
+        let result = contract_network(&net).expect("contract_network should succeed");
         assert_eq!(result.len(), 4);
         assert!((result[0] - 19.0).abs() < 1e-12, "C[0,0]={}", result[0]);
         assert!((result[1] - 22.0).abs() < 1e-12, "C[0,1]={}", result[1]);
@@ -1295,20 +1305,21 @@ mod tests {
     fn simplify_network_fixed_point() {
         // Simple 2-tensor network: leaf + body. After first simplify, 1 tensor remains.
         // Second simplify should change nothing.
-        let leaf = NetworkTensor::new(vec![1.0, 2.0], vec![2], vec![-1], "L".to_string()).unwrap();
+        let leaf = NetworkTensor::new(vec![1.0, 2.0], vec![2], vec![-1], "L".to_string())
+            .expect("value should be present");
         let body = NetworkTensor::new(
             vec![1.0, 0.0, 0.0, 1.0],
             vec![2, 2],
             vec![-1, 1],
             "B".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(leaf);
         net.push(body);
-        let _stats1 = simplify_network(&mut net).unwrap();
+        let _stats1 = simplify_network(&mut net).expect("simplify_network should succeed");
         let tensors_after_first = net.tensors.len();
-        let _stats2 = simplify_network(&mut net).unwrap();
+        let _stats2 = simplify_network(&mut net).expect("simplify_network should succeed");
         let tensors_after_second = net.tensors.len();
         assert_eq!(tensors_after_first, tensors_after_second);
     }
@@ -1317,18 +1328,19 @@ mod tests {
 
     #[test]
     fn simplify_network_stats_counts() {
-        let leaf = NetworkTensor::new(vec![1.0, 1.0], vec![2], vec![-1], "L".to_string()).unwrap();
+        let leaf = NetworkTensor::new(vec![1.0, 1.0], vec![2], vec![-1], "L".to_string())
+            .expect("value should be present");
         let body = NetworkTensor::new(
             vec![2.0, 0.0, 0.0, 3.0],
             vec![2, 2],
             vec![-1, 1],
             "B".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(leaf);
         net.push(body);
-        let stats = simplify_network(&mut net).unwrap();
+        let stats = simplify_network(&mut net).expect("simplify_network should succeed");
         assert!(
             stats.leaves_absorbed > 0,
             "expected leaves_absorbed > 0, got {}",
@@ -1347,14 +1359,14 @@ mod tests {
             vec![-1, 1],
             "A".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let b = NetworkTensor::new(
             vec![1.0, 0.0, 0.0, 1.0],
             vec![2, 2],
             vec![-1, 2],
             "B".to_string(),
         )
-        .unwrap();
+        .expect("value should be present");
         let mut net = TensorNetwork::new();
         net.push(a);
         net.push(b);
@@ -1369,14 +1381,14 @@ mod tests {
     #[test]
     fn contract_network_scalar() {
         // A[k] · B[k] = dot product = [1,2,3]·[4,5,6] = 32.
-        let a =
-            NetworkTensor::new(vec![1.0, 2.0, 3.0], vec![3], vec![-1], "A".to_string()).unwrap();
-        let b =
-            NetworkTensor::new(vec![4.0, 5.0, 6.0], vec![3], vec![-1], "B".to_string()).unwrap();
+        let a = NetworkTensor::new(vec![1.0, 2.0, 3.0], vec![3], vec![-1], "A".to_string())
+            .expect("value should be present");
+        let b = NetworkTensor::new(vec![4.0, 5.0, 6.0], vec![3], vec![-1], "B".to_string())
+            .expect("value should be present");
         let net = TensorNetwork {
             tensors: vec![a, b],
         };
-        let result = contract_network(&net).unwrap();
+        let result = contract_network(&net).expect("contract_network should succeed");
         assert_eq!(result.len(), 1);
         assert!((result[0] - 32.0).abs() < 1e-12, "result={}", result[0]);
     }
@@ -1389,7 +1401,8 @@ mod tests {
         // A = [[1,2],[3,4]], B = [[1,0],[0,1]], C = [[5,6],[7,8]].
         // Direct contraction: A @ I @ C = A @ C = [[19,22],[43,50]].
         let make = |data: Vec<f64>, dims: Vec<usize>, labels: Vec<i64>, name: &str| {
-            NetworkTensor::new(data, dims, labels, name.to_string()).unwrap()
+            NetworkTensor::new(data, dims, labels, name.to_string())
+                .expect("value should be present")
         };
         let a = make(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], vec![1, -1], "A");
         let b_mat = make(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2], vec![-1, -2], "B");
@@ -1399,14 +1412,16 @@ mod tests {
         let net_direct = TensorNetwork {
             tensors: vec![a.clone(), b_mat.clone(), c.clone()],
         };
-        let direct_result = contract_network(&net_direct).unwrap();
+        let direct_result = contract_network(&net_direct).expect("contract_network should succeed");
 
         // Simplified then contract.
         let mut net_simplified = TensorNetwork {
             tensors: vec![a, b_mat, c],
         };
-        let _stats = simplify_network(&mut net_simplified).unwrap();
-        let simplified_result = contract_network(&net_simplified).unwrap();
+        let _stats =
+            simplify_network(&mut net_simplified).expect("simplify_network should succeed");
+        let simplified_result =
+            contract_network(&net_simplified).expect("contract_network should succeed");
 
         assert_eq!(
             direct_result.len(),

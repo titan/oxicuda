@@ -97,7 +97,7 @@ mod tests {
         let t: Vec<Vec<f32>> = (0..3)
             .map(|i| vec![i as f32 * 0.9, (i + 1) as f32 * 1.1])
             .collect();
-        let loss = pkt_loss(&s, &t).unwrap();
+        let loss = pkt_loss(&s, &t).expect("pkt_loss should succeed");
         assert!(loss.is_finite() && loss >= 0.0);
     }
 }

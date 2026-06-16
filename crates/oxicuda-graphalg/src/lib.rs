@@ -14,6 +14,8 @@
 //! ├── max_flow/        — Edmonds-Karp, Dinic, push-relabel, min-cut
 //! ├── matching/        — Hopcroft-Karp bipartite, Hungarian (Munkres) assignment,
 //! │                      simplified blossom for general unweighted matching
+//! ├── flow/            — Gomory-Hu cut tree (Gusfield), Stoer-Wagner global min cut
+//! ├── path/            — Suurballe vertex-disjoint shortest path pair
 //! ├── connectivity/    — Tarjan / Kosaraju / Gabow SCC, bridges, articulation
 //! │                      points, biconnected components
 //! ├── centrality/      — Degree, betweenness (Brandes), closeness, eigenvector,
@@ -47,20 +49,25 @@
 
 pub mod arborescence;
 pub mod centrality;
+pub mod clique;
 pub mod coloring;
 pub mod community;
 pub mod connectivity;
 pub mod error;
 pub mod eulerian;
+pub mod flow;
 pub mod hamiltonian;
 pub mod handle;
 pub mod isomorphism;
 pub mod matching;
 pub mod max_flow;
 pub mod metrics;
+pub mod min_cost_flow;
 pub mod mst;
+pub mod path;
 pub mod ptx_kernels;
 pub mod repr;
+pub mod separation;
 pub mod shortest_path;
 pub mod topological;
 pub mod traversal;

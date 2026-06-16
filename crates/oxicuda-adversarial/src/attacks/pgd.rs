@@ -235,9 +235,9 @@ mod tests {
         let target = vec![0.5_f32; 5];
         let x = vec![0.5_f32; 5];
         let mut rng = LcgRng::new(0);
-        let cfg = PgdConfig::new(0.1, 0.02, 10, false).unwrap();
-        let y =
-            pgd_attack_l_inf(&x, -10.0, 10.0, &cfg, &mut rng, quad_grad(target.clone())).unwrap();
+        let cfg = PgdConfig::new(0.1, 0.02, 10, false).expect("new should succeed");
+        let y = pgd_attack_l_inf(&x, -10.0, 10.0, &cfg, &mut rng, quad_grad(target.clone()))
+            .expect("value should be present");
         // x == target ⇒ zero grad ⇒ y == x.
         for v in &y {
             assert!((*v - 0.5).abs() < 1e-6);
@@ -248,9 +248,10 @@ mod tests {
     fn n_steps_one_l_inf_matches_fgsm() {
         let x = vec![0.5_f32; 4];
         let g = vec![1.0_f32, -1.0, 0.5, -0.5];
-        let cfg = PgdConfig::new(0.05, 0.05, 1, false).unwrap();
+        let cfg = PgdConfig::new(0.05, 0.05, 1, false).expect("new should succeed");
         let mut rng = LcgRng::new(0);
-        let y = pgd_attack_l_inf(&x, -10.0, 10.0, &cfg, &mut rng, const_grad(g)).unwrap();
+        let y = pgd_attack_l_inf(&x, -10.0, 10.0, &cfg, &mut rng, const_grad(g))
+            .expect("value should be present");
         // n=1, alpha=eps, no random start ⇒ pure FGSM step.
         let expected = [0.55_f32, 0.45, 0.55, 0.45];
         for (a, b) in y.iter().zip(expected.iter()) {
@@ -261,11 +262,11 @@ mod tests {
     #[test]
     fn random_start_changes_iterate_l_inf() {
         let x = vec![0.5_f32; 16];
-        let cfg = PgdConfig::new(0.2, 0.01, 1, true).unwrap();
+        let cfg = PgdConfig::new(0.2, 0.01, 1, true).expect("new should succeed");
         let mut rng = LcgRng::new(123);
         // Zero gradient ⇒ output equals the (random) starting iterate.
-        let y =
-            pgd_attack_l_inf(&x, -10.0, 10.0, &cfg, &mut rng, const_grad(vec![0.0; 16])).unwrap();
+        let y = pgd_attack_l_inf(&x, -10.0, 10.0, &cfg, &mut rng, const_grad(vec![0.0; 16]))
+            .expect("value should be present");
         let any_diff = y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-6);
         assert!(any_diff);
     }
@@ -274,9 +275,10 @@ mod tests {
     fn projection_enforced_l_inf() {
         let target = vec![10.0_f32; 8]; // huge gradients
         let x = vec![0.5_f32; 8];
-        let cfg = PgdConfig::new(0.1, 0.05, 50, true).unwrap();
+        let cfg = PgdConfig::new(0.1, 0.05, 50, true).expect("new should succeed");
         let mut rng = LcgRng::new(7);
-        let y = pgd_attack_l_inf(&x, 0.0, 1.0, &cfg, &mut rng, quad_grad(target)).unwrap();
+        let y = pgd_attack_l_inf(&x, 0.0, 1.0, &cfg, &mut rng, quad_grad(target))
+            .expect("value should be present");
         let delta: Vec<f32> = y.iter().zip(x.iter()).map(|(a, b)| a - b).collect();
         assert!(l_inf_norm(&delta) <= 0.1 + 1e-5);
         for v in &y {
@@ -288,9 +290,10 @@ mod tests {
     fn smoke_l2_random_start() {
         let target = vec![1.0_f32; 6];
         let x = vec![0.0_f32; 6];
-        let cfg = PgdConfig::new(0.5, 0.1, 8, true).unwrap();
+        let cfg = PgdConfig::new(0.5, 0.1, 8, true).expect("new should succeed");
         let mut rng = LcgRng::new(99);
-        let y = pgd_attack_l2(&x, -10.0, 10.0, &cfg, &mut rng, quad_grad(target)).unwrap();
+        let y = pgd_attack_l2(&x, -10.0, 10.0, &cfg, &mut rng, quad_grad(target))
+            .expect("value should be present");
         let delta: Vec<f32> = y.iter().zip(x.iter()).map(|(a, b)| a - b).collect();
         assert!(l2_norm(&delta) <= 0.5 + 1e-5);
     }
@@ -299,9 +302,10 @@ mod tests {
     fn projection_enforced_l2() {
         let target = vec![10.0_f32; 12];
         let x = vec![0.5_f32; 12];
-        let cfg = PgdConfig::new(0.3, 0.2, 30, true).unwrap();
+        let cfg = PgdConfig::new(0.3, 0.2, 30, true).expect("new should succeed");
         let mut rng = LcgRng::new(11);
-        let y = pgd_attack_l2(&x, 0.0, 1.0, &cfg, &mut rng, quad_grad(target)).unwrap();
+        let y = pgd_attack_l2(&x, 0.0, 1.0, &cfg, &mut rng, quad_grad(target))
+            .expect("value should be present");
         let delta: Vec<f32> = y.iter().zip(x.iter()).map(|(a, b)| a - b).collect();
         assert!(l2_norm(&delta) <= 0.3 + 1e-4);
         for v in &y {
@@ -312,7 +316,7 @@ mod tests {
     #[test]
     fn dim_mismatch_in_grad() {
         let x = vec![0.0_f32; 4];
-        let cfg = PgdConfig::new(0.1, 0.05, 3, false).unwrap();
+        let cfg = PgdConfig::new(0.1, 0.05, 3, false).expect("new should succeed");
         let mut rng = LcgRng::new(0);
         let bad = const_grad(vec![1.0_f32; 3]);
         assert!(matches!(
@@ -324,7 +328,7 @@ mod tests {
     #[test]
     fn empty_input_rejected() {
         let x: Vec<f32> = vec![];
-        let cfg = PgdConfig::new(0.1, 0.05, 3, false).unwrap();
+        let cfg = PgdConfig::new(0.1, 0.05, 3, false).expect("new should succeed");
         let mut rng = LcgRng::new(0);
         assert_eq!(
             pgd_attack_l_inf(&x, -1.0, 1.0, &cfg, &mut rng, const_grad(vec![])).unwrap_err(),
@@ -339,7 +343,7 @@ mod tests {
     #[test]
     fn nan_grad_caught_l_inf() {
         let x = vec![0.0_f32; 3];
-        let cfg = PgdConfig::new(0.1, 0.05, 1, false).unwrap();
+        let cfg = PgdConfig::new(0.1, 0.05, 1, false).expect("new should succeed");
         let mut rng = LcgRng::new(0);
         let bad = const_grad(vec![1.0, f32::INFINITY, 1.0]);
         assert!(matches!(
@@ -352,11 +356,13 @@ mod tests {
     fn deterministic_with_same_seed() {
         let x = vec![0.5_f32; 8];
         let target = vec![1.0_f32; 8];
-        let cfg = PgdConfig::new(0.2, 0.05, 10, true).unwrap();
+        let cfg = PgdConfig::new(0.2, 0.05, 10, true).expect("new should succeed");
         let mut r1 = LcgRng::new(42);
         let mut r2 = LcgRng::new(42);
-        let y1 = pgd_attack_l_inf(&x, 0.0, 1.0, &cfg, &mut r1, quad_grad(target.clone())).unwrap();
-        let y2 = pgd_attack_l_inf(&x, 0.0, 1.0, &cfg, &mut r2, quad_grad(target)).unwrap();
+        let y1 = pgd_attack_l_inf(&x, 0.0, 1.0, &cfg, &mut r1, quad_grad(target.clone()))
+            .expect("value should be present");
+        let y2 = pgd_attack_l_inf(&x, 0.0, 1.0, &cfg, &mut r2, quad_grad(target))
+            .expect("value should be present");
         for (a, b) in y1.iter().zip(y2.iter()) {
             assert!((a - b).abs() < 1e-6);
         }

@@ -142,7 +142,7 @@ impl LaplaceSmoothing {
         }
         // 2^31 as f32 — divisor for u ∈ [0, 1) given LcgRng::next_u32 output
         // range [0, 2^31).
-        const U_DIVISOR: f32 = 2_147_483_648.0_f32;
+        const U_DIVISOR: f32 = 4_294_967_296.0_f32;
         let mut out = Vec::with_capacity(dim);
         for _ in 0..dim {
             let u = rng.next_u32() as f32 / U_DIVISOR;

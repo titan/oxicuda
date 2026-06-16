@@ -198,7 +198,7 @@ mod tests {
         let mut tape = Tape::new();
         let x = tape.variable(3.0);
         let f = tape.sq(x);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape.gradient(f).expect("gradient of x² should succeed");
         assert!(
             (grads[x.idx] - 6.0).abs() < 1e-6,
             "grad f(x)=x² at x=3 should be 6, got {}",
@@ -213,7 +213,7 @@ mod tests {
         let x = tape.variable(2.0);
         let y = tape.variable(5.0);
         let f = tape.mul(x, y);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape.gradient(f).expect("gradient of x*y should succeed");
         assert!((grads[x.idx] - 5.0).abs() < 1e-6);
         assert!((grads[y.idx] - 2.0).abs() < 1e-6);
     }
@@ -225,7 +225,7 @@ mod tests {
         let mut tape = Tape::new();
         let x = tape.variable(x_val);
         let f = tape.sin(x);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape.gradient(f).expect("gradient of sin(x) should succeed");
         assert!((grads[x.idx] - x_val.cos()).abs() < 1e-5);
     }
 
@@ -236,7 +236,7 @@ mod tests {
         let mut tape = Tape::new();
         let x = tape.variable(x_val);
         let f = tape.exp(x);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape.gradient(f).expect("gradient of exp(x) should succeed");
         assert!((grads[x.idx] - x_val.exp()).abs() < 1e-5);
     }
 
@@ -248,7 +248,9 @@ mod tests {
         let x = tape.variable(x_val);
         let x2 = tape.sq(x);
         let f = tape.exp(x2);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape
+            .gradient(f)
+            .expect("gradient of exp(x²) should succeed");
         let expected = 2.0 * x_val * (x_val * x_val).exp();
         assert!((grads[x.idx] - expected).abs() < 1e-5);
     }
@@ -259,7 +261,7 @@ mod tests {
         let x = tape.variable(3.0);
         let y = tape.variable(2.0);
         let s = tape.add(x, y); // x + y
-        let grads_s = tape.gradient(s).unwrap();
+        let grads_s = tape.gradient(s).expect("gradient of x+y should succeed");
         assert!((grads_s[x.idx] - 1.0).abs() < 1e-6);
         assert!((grads_s[y.idx] - 1.0).abs() < 1e-6);
     }
@@ -272,8 +274,10 @@ mod tests {
         let mut tape = Tape::new();
         let x = tape.variable(x_val);
         let y = tape.variable(y_val);
-        let f = tape.div(x, y).unwrap();
-        let grads = tape.gradient(f).unwrap();
+        let f = tape
+            .div(x, y)
+            .expect("division of 6.0/2.0 with non-zero denominator should succeed");
+        let grads = tape.gradient(f).expect("gradient of x/y should succeed");
         assert!((grads[x.idx] - 0.5).abs() < 1e-6);
         assert!((grads[y.idx] - (-x_val / y_val.powi(2))).abs() < 1e-6);
     }
@@ -284,7 +288,9 @@ mod tests {
         let mut tape = Tape::new();
         let x = tape.variable(x_val);
         let f = tape.tanh(x);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape
+            .gradient(f)
+            .expect("gradient of tanh(x) should succeed");
         let t = x_val.tanh();
         assert!((grads[x.idx] - (1.0 - t * t)).abs() < 1e-5);
     }
@@ -294,7 +300,7 @@ mod tests {
         let mut tape = Tape::new();
         let x = tape.variable(3.0);
         let f = tape.neg(x);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape.gradient(f).expect("gradient of -x should succeed");
         assert!((grads[x.idx] - (-1.0)).abs() < 1e-6);
     }
 
@@ -303,7 +309,7 @@ mod tests {
         let mut tape = Tape::new();
         let x = tape.variable(4.0);
         let f = tape.scale(x, 3.0);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape.gradient(f).expect("gradient of 3*x should succeed");
         assert!((grads[x.idx] - 3.0).abs() < 1e-6);
     }
 
@@ -328,7 +334,7 @@ mod tests {
         let x2 = tape.sq(x);
         let y2 = tape.sq(y);
         let f = tape.add(x2, y2);
-        let grads = tape.gradient(f).unwrap();
+        let grads = tape.gradient(f).expect("gradient of x²+y² should succeed");
         assert!((grads[x.idx] - 2.0 * x_val).abs() < 1e-5);
         assert!((grads[y.idx] - 2.0 * y_val).abs() < 1e-5);
     }

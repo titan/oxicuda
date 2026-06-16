@@ -448,8 +448,8 @@ mod tests {
         let cfg = &p.cfg;
         let in3 = vec![0.1_f32; 3 * cfg.input_dim];
         let in9 = vec![0.1_f32; 9 * cfg.input_dim];
-        let e3 = p.encode(&in3, 3).unwrap();
-        let e9 = p.encode(&in9, 9).unwrap();
+        let e3 = p.encode(&in3, 3).expect("encode should succeed");
+        let e9 = p.encode(&in9, 9).expect("encode should succeed");
         let expected = cfg.n_latents * cfg.latent_dim;
         assert_eq!(e3.len(), expected);
         assert_eq!(e9.len(), expected);
@@ -462,7 +462,7 @@ mod tests {
         let p = make_perceiver(2);
         let cfg = &p.cfg;
         let latents = vec![0.2_f32; cfg.n_latents * cfg.latent_dim];
-        let out = p.process(&latents).unwrap();
+        let out = p.process(&latents).expect("process should succeed");
         assert_eq!(out.len(), cfg.n_latents * cfg.latent_dim);
     }
 
@@ -472,7 +472,7 @@ mod tests {
         let p = make_perceiver(3);
         let cfg = &p.cfg;
         let latents = vec![0.15_f32; cfg.n_latents * cfg.latent_dim];
-        let out = p.decode(&latents).unwrap();
+        let out = p.decode(&latents).expect("decode should succeed");
         assert_eq!(out.len(), cfg.n_outputs * cfg.output_dim);
     }
 
@@ -482,7 +482,7 @@ mod tests {
         let p = make_perceiver(4);
         let cfg = &p.cfg;
         let inputs = vec![0.1_f32; 5 * cfg.input_dim];
-        let out = p.forward(&inputs, 5).unwrap();
+        let out = p.forward(&inputs, 5).expect("forward should succeed");
         assert_eq!(out.len(), cfg.n_outputs * cfg.output_dim);
     }
 
@@ -499,11 +499,11 @@ mod tests {
             output_dim: 10,
             n_outputs: 3,
         };
-        let p = PerceiverIo::new(cfg, &mut rng).unwrap();
+        let p = PerceiverIo::new(cfg, &mut rng).expect("new should succeed");
         let latents: Vec<f32> = (0..p.cfg.n_latents * p.cfg.latent_dim)
             .map(|i| i as f32 * 0.01)
             .collect();
-        let out = p.process(&latents).unwrap();
+        let out = p.process(&latents).expect("process should succeed");
         assert_eq!(out, latents);
     }
 
@@ -513,8 +513,8 @@ mod tests {
         let a = make_perceiver(6);
         let b = make_perceiver(6);
         let inputs = vec![0.3_f32; 5 * a.cfg.input_dim];
-        let out_a = a.forward(&inputs, 5).unwrap();
-        let out_b = b.forward(&inputs, 5).unwrap();
+        let out_a = a.forward(&inputs, 5).expect("forward should succeed");
+        let out_b = b.forward(&inputs, 5).expect("forward should succeed");
         assert_eq!(out_a, out_b);
     }
 
@@ -523,7 +523,7 @@ mod tests {
     fn forward_output_finite() {
         let p = make_perceiver(7);
         let inputs = vec![0.25_f32; 6 * p.cfg.input_dim];
-        let out = p.forward(&inputs, 6).unwrap();
+        let out = p.forward(&inputs, 6).expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -558,7 +558,7 @@ mod tests {
     fn single_input_token_works() {
         let p = make_perceiver(10);
         let inputs = vec![0.4_f32; p.cfg.input_dim];
-        let out = p.forward(&inputs, 1).unwrap();
+        let out = p.forward(&inputs, 1).expect("forward should succeed");
         assert_eq!(out.len(), p.cfg.n_outputs * p.cfg.output_dim);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -576,9 +576,9 @@ mod tests {
             output_dim: 10,
             n_outputs: 3,
         };
-        let p = PerceiverIo::new(cfg, &mut rng).unwrap();
+        let p = PerceiverIo::new(cfg, &mut rng).expect("new should succeed");
         let inputs = vec![0.2_f32; 5 * p.cfg.input_dim];
-        let out = p.forward(&inputs, 5).unwrap();
+        let out = p.forward(&inputs, 5).expect("forward should succeed");
         assert_eq!(out.len(), p.cfg.n_outputs * p.cfg.output_dim);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -592,8 +592,8 @@ mod tests {
         for (i, v) in in_b.iter_mut().enumerate() {
             *v = 0.1 + (i as f32 * 0.07).sin();
         }
-        let e_a = p.encode(&in_a, 4).unwrap();
-        let e_b = p.encode(&in_b, 4).unwrap();
+        let e_a = p.encode(&in_a, 4).expect("encode should succeed");
+        let e_b = p.encode(&in_b, 4).expect("encode should succeed");
         let diff: f32 = e_a.iter().zip(e_b.iter()).map(|(a, b)| (a - b).abs()).sum();
         assert!(
             diff > 1e-4,
@@ -719,7 +719,7 @@ mod tests {
     fn encode_output_finite() {
         let p = make_perceiver(21);
         let inputs = vec![0.5_f32; 7 * p.cfg.input_dim];
-        let out = p.encode(&inputs, 7).unwrap();
+        let out = p.encode(&inputs, 7).expect("encode should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 }

@@ -411,8 +411,9 @@ mod tests {
             ridge_y: 1e-3,
             ridge_a: 1e-3,
         };
-        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).unwrap();
-        let ate = LocalCentering::robinson_ate(&res.y_residuals, &res.a_residuals).unwrap();
+        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).expect("fit should succeed");
+        let ate = LocalCentering::robinson_ate(&res.y_residuals, &res.a_residuals)
+            .expect("robinson_ate should succeed");
         assert!((ate - 2.0).abs() < 0.3, "ATE={ate} not within 0.3 of 2.0");
     }
 
@@ -421,7 +422,7 @@ mod tests {
         let n = 30;
         let (x, y, a) = make_simple(n, 1.5, 2);
         let cfg = LocalCenteringConfig::default();
-        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).unwrap();
+        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).expect("fit should succeed");
         for (i, (&yi, (&yh, &yr))) in y
             .iter()
             .zip(res.y_hat.iter().zip(res.y_residuals.iter()))
@@ -440,7 +441,7 @@ mod tests {
         let n = 30;
         let (x, y, a) = make_simple(n, 1.5, 3);
         let cfg = LocalCenteringConfig::default();
-        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).unwrap();
+        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).expect("fit should succeed");
         for (i, (&ai, (&ah, &ar))) in a
             .iter()
             .zip(res.a_hat.iter().zip(res.a_residuals.iter()))
@@ -459,7 +460,7 @@ mod tests {
         let n = 40;
         let (x, y, a) = make_simple(n, 1.0, 4);
         let cfg = LocalCenteringConfig::default();
-        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).unwrap();
+        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).expect("fit should succeed");
         assert!(
             (0.0..=1.0).contains(&res.y_r2),
             "y_r2={} out of [0,1]",
@@ -477,7 +478,8 @@ mod tests {
         let n = 20;
         let y_res: Vec<f64> = (0..n).map(|i| i as f64 * 0.01).collect();
         let a_res: Vec<f64> = (0..n).map(|i| (i as f64 + 1.0) * 0.01).collect();
-        let psi = LocalCentering::robinson_pseudo_cate(&y_res, &a_res, 1e-6).unwrap();
+        let psi = LocalCentering::robinson_pseudo_cate(&y_res, &a_res, 1e-6)
+            .expect("robinson_pseudo_cate should succeed");
         assert_eq!(psi.len(), n);
     }
 
@@ -486,7 +488,8 @@ mod tests {
         // a_res = ±1 → denominator = a_res² + 0 = 1 → psi[i] = y_res[i] * a_res[i].
         let y_res = vec![0.5_f64, -0.3, 0.8];
         let a_res = vec![1.0_f64, -1.0, 1.0];
-        let psi = LocalCentering::robinson_pseudo_cate(&y_res, &a_res, 0.0).unwrap();
+        let psi = LocalCentering::robinson_pseudo_cate(&y_res, &a_res, 0.0)
+            .expect("robinson_pseudo_cate should succeed");
         for i in 0..3 {
             let expected = y_res[i] * a_res[i]; // / 1.0
             assert!(
@@ -576,8 +579,9 @@ mod tests {
             n_folds: 2,
             ..LocalCenteringConfig::default()
         };
-        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).unwrap();
-        let ate = LocalCentering::robinson_ate(&res.y_residuals, &res.a_residuals).unwrap();
+        let res = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).expect("fit should succeed");
+        let ate = LocalCentering::robinson_ate(&res.y_residuals, &res.a_residuals)
+            .expect("robinson_ate should succeed");
         assert!(
             ate.abs() < 0.5,
             "uncorrelated ATE={ate} should be near zero"
@@ -598,8 +602,8 @@ mod tests {
         let n = 20;
         let (x, y, a) = make_simple(n, 1.0, 10);
         let cfg = LocalCenteringConfig::default();
-        let r1 = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).unwrap();
-        let r2 = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).unwrap();
+        let r1 = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).expect("fit should succeed");
+        let r2 = LocalCentering::fit(&x, &y, &a, n, 1, &cfg).expect("fit should succeed");
         assert_eq!(r1.y_hat, r2.y_hat);
         assert_eq!(r1.a_hat, r2.a_hat);
         assert_eq!(r1.y_residuals, r2.y_residuals);

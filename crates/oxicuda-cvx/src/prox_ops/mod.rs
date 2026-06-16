@@ -9,6 +9,7 @@ pub mod indicator;
 pub mod l1;
 pub mod l2;
 pub mod linf;
+pub mod max_function;
 pub mod nuclear;
 pub mod total_variation_1d;
 
@@ -18,5 +19,6 @@ pub use indicator::prox_indicator_box;
 pub use l1::{prox_l1, soft_threshold};
 pub use l2::prox_l2;
 pub use linf::prox_linf;
+pub use max_function::{max_value, prox_max};
 pub use nuclear::prox_nuclear;
 pub use total_variation_1d::prox_tv_1d;

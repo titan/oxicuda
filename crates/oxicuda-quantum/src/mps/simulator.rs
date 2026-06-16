@@ -855,7 +855,7 @@ mod tests {
     use crate::statevec::state::StateVector;
 
     fn cfg(n: usize, chi: usize) -> MpsConfig {
-        MpsConfig::new(n, chi, 1e-12).unwrap()
+        MpsConfig::new(n, chi, 1e-12).expect("test config parameters are valid")
     }
 
     fn c(re: f32, im: f32) -> Complex32 {
@@ -880,8 +880,9 @@ mod tests {
 
     #[test]
     fn t01_product_state_is_zero_ket() {
-        let mps = MatrixProductState::new_zero_state(cfg(3, 4)).unwrap();
-        let sv = mps.to_statevector().unwrap();
+        let mps = MatrixProductState::new_zero_state(cfg(3, 4))
+            .expect("valid config produces zero state");
+        let sv = mps.to_statevector().expect("MPS converts to statevector");
         assert!((sv.amps[0].re - 1.0).abs() < 1e-6);
         for a in &sv.amps[1..] {
             assert!(a.norm() < 1e-6);
@@ -890,18 +891,22 @@ mod tests {
 
     #[test]
     fn t02_pauli_x_flips_amplitude() {
-        let mut mps = MatrixProductState::new_zero_state(cfg(1, 2)).unwrap();
-        mps.apply_1q(&gate_x(), 0).unwrap();
-        let sv = mps.to_statevector().unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(1, 2))
+            .expect("valid config produces zero state");
+        mps.apply_1q(&gate_x(), 0)
+            .expect("qubit 0 is in range for 1-qubit MPS");
+        let sv = mps.to_statevector().expect("MPS converts to statevector");
         assert!(sv.amps[0].norm() < 1e-6);
         assert!((sv.amps[1].re - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn t03_hadamard_uniform_superposition() {
-        let mut mps = MatrixProductState::new_zero_state(cfg(1, 2)).unwrap();
-        mps.apply_1q(&gate_h(), 0).unwrap();
-        let sv = mps.to_statevector().unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(1, 2))
+            .expect("valid config produces zero state");
+        mps.apply_1q(&gate_h(), 0)
+            .expect("qubit 0 is in range for 1-qubit MPS");
+        let sv = mps.to_statevector().expect("MPS converts to statevector");
         let inv = std::f32::consts::FRAC_1_SQRT_2;
         assert!((sv.amps[0].re - inv).abs() < 1e-5);
         assert!((sv.amps[1].re - inv).abs() < 1e-5);
@@ -912,10 +917,13 @@ mod tests {
         // |+0>: H on qubit 0, then CNOT(0->1). With qubit 0 the control and the
         // less-significant index in the state vector, build the gate in the
         // (q=0 control MSB-of-pair, q+1=1 target) convention.
-        let mut mps = MatrixProductState::new_zero_state(cfg(2, 4)).unwrap();
-        mps.apply_1q(&gate_h(), 0).unwrap();
-        mps.apply_2q(&cnot_4x4(), 0, 1).unwrap();
-        let sv = mps.to_statevector().unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(2, 4))
+            .expect("valid config produces zero state");
+        mps.apply_1q(&gate_h(), 0)
+            .expect("qubit 0 is in range for 2-qubit MPS");
+        mps.apply_2q(&cnot_4x4(), 0, 1)
+            .expect("qubits 0 and 1 are adjacent and in range");
+        let sv = mps.to_statevector().expect("MPS converts to statevector");
         let inv = std::f32::consts::FRAC_1_SQRT_2;
         // Bell |00> + |11>.
         assert!((sv.amps[0].re - inv).abs() < 1e-5, "amps={:?}", sv.amps);
@@ -932,34 +940,44 @@ mod tests {
         // dense StateVector, and compare amplitudes to ~1e-4.
         let n = 5usize;
         let chi = 1usize << n; // full bond, no truncation
-        let mut mps = MatrixProductState::new_zero_state(cfg(n, chi)).unwrap();
-        let mut sv = StateVector::new_zero_state(n).unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(n, chi))
+            .expect("valid config produces zero state");
+        let mut sv =
+            StateVector::new_zero_state(n).expect("valid qubit count produces zero statevector");
 
         let mut rng = LcgRng::new(12345);
         let angles = [0.3f32, 1.1, -0.7, 2.0, 0.45, -1.3];
         // Layer of Ry + H on each qubit.
         for (q, &ang) in angles.iter().take(n).enumerate() {
             let ry = gate_ry(ang);
-            mps.apply_1q(&ry, q).unwrap();
-            apply_1q_inplace(&mut sv, q, &ry).unwrap();
-            mps.apply_1q(&gate_h(), q).unwrap();
-            apply_1q_inplace(&mut sv, q, &gate_h()).unwrap();
+            mps.apply_1q(&ry, q)
+                .expect("qubit index q is within the n-qubit MPS");
+            apply_1q_inplace(&mut sv, q, &ry)
+                .expect("qubit index q is within the n-qubit statevector");
+            mps.apply_1q(&gate_h(), q)
+                .expect("qubit index q is within the n-qubit MPS");
+            apply_1q_inplace(&mut sv, q, &gate_h())
+                .expect("qubit index q is within the n-qubit statevector");
         }
         // Ladder of CNOTs on adjacent pairs.
         for q in 0..(n - 1) {
-            mps.apply_2q(&cnot_4x4(), q, q + 1).unwrap();
+            mps.apply_2q(&cnot_4x4(), q, q + 1)
+                .expect("adjacent qubits q and q+1 are in range");
             // Equivalent dense CNOT(control=q, target=q+1).
-            apply_1q_controlled(&mut sv, q, q + 1, &gate_x()).unwrap();
+            apply_1q_controlled(&mut sv, q, q + 1, &gate_x())
+                .expect("adjacent qubits q and q+1 are valid for controlled gate");
         }
         // A second Ry layer to entangle further.
         for (q, &ang) in angles.iter().take(n).enumerate() {
             let ry = gate_ry(ang * 0.5 + 0.2);
-            mps.apply_1q(&ry, q).unwrap();
-            apply_1q_inplace(&mut sv, q, &ry).unwrap();
+            mps.apply_1q(&ry, q)
+                .expect("qubit index q is within the n-qubit MPS");
+            apply_1q_inplace(&mut sv, q, &ry)
+                .expect("qubit index q is within the n-qubit statevector");
         }
         let _ = &mut rng;
 
-        let mps_sv = mps.to_statevector().unwrap();
+        let mps_sv = mps.to_statevector().expect("MPS converts to statevector");
         let diff = max_abs_diff(&mps_sv.amps, &sv.amps);
         assert!(diff < 1e-4, "max amplitude diff {diff}");
     }
@@ -968,10 +986,13 @@ mod tests {
     fn t06_truncation_reduces_bond() {
         // Create a maximally entangling pair, then re-split with χ = 1 to force
         // truncation of the bond from 2 down to 1.
-        let mut mps = MatrixProductState::new_zero_state(cfg(2, 1)).unwrap();
-        mps.apply_1q(&gate_h(), 0).unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(2, 1))
+            .expect("valid config produces zero state");
+        mps.apply_1q(&gate_h(), 0)
+            .expect("qubit 0 is in range for 2-qubit MPS");
         // χ = 1 ⇒ the Bell bond (rank 2) is truncated to 1.
-        mps.apply_2q(&cnot_4x4(), 0, 1).unwrap();
+        mps.apply_2q(&cnot_4x4(), 0, 1)
+            .expect("qubits 0 and 1 are adjacent and in range");
         assert_eq!(mps.bond_dims()[0], 1, "bond should be truncated to χ=1");
     }
 
@@ -979,16 +1000,22 @@ mod tests {
     fn t07_expectation_z_matches_statevector() {
         let n = 3usize;
         let chi = 1usize << n;
-        let mut mps = MatrixProductState::new_zero_state(cfg(n, chi)).unwrap();
-        let mut sv = StateVector::new_zero_state(n).unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(n, chi))
+            .expect("valid config produces zero state");
+        let mut sv =
+            StateVector::new_zero_state(n).expect("valid qubit count produces zero statevector");
         let angs = [0.6f32, -1.2, 0.9];
         for (q, &a) in angs.iter().enumerate() {
             let g = gate_ry(a);
-            mps.apply_1q(&g, q).unwrap();
-            apply_1q_inplace(&mut sv, q, &g).unwrap();
+            mps.apply_1q(&g, q)
+                .expect("qubit index q is within the n-qubit MPS");
+            apply_1q_inplace(&mut sv, q, &g)
+                .expect("qubit index q is within the n-qubit statevector");
         }
         for q in 0..n {
-            let z_mps = mps.expectation_z(q).unwrap();
+            let z_mps = mps
+                .expectation_z(q)
+                .expect("qubit index q is within the n-qubit MPS");
             // ⟨Z_q⟩ from statevector = Σ |amp|² (−1)^{bit q}.
             let mask = 1usize << q;
             let z_sv: f32 = sv
@@ -1006,11 +1033,16 @@ mod tests {
 
     #[test]
     fn t08_unitary_gates_preserve_norm() {
-        let mut mps = MatrixProductState::new_zero_state(cfg(3, 8)).unwrap();
-        mps.apply_1q(&gate_h(), 0).unwrap();
-        mps.apply_2q(&cnot_4x4(), 0, 1).unwrap();
-        mps.apply_1q(&gate_ry(0.8), 2).unwrap();
-        mps.apply_2q(&cnot_4x4(), 1, 2).unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(3, 8))
+            .expect("n=3 and chi=8 are valid MPS configuration parameters");
+        mps.apply_1q(&gate_h(), 0)
+            .expect("qubit 0 is within the 3-qubit MPS range");
+        mps.apply_2q(&cnot_4x4(), 0, 1)
+            .expect("qubits 0 and 1 are adjacent and both within the 3-qubit MPS range");
+        mps.apply_1q(&gate_ry(0.8), 2)
+            .expect("qubit 2 is within the 3-qubit MPS range");
+        mps.apply_2q(&cnot_4x4(), 1, 2)
+            .expect("qubits 1 and 2 are adjacent and both within the 3-qubit MPS range");
         let nrm = mps.norm();
         assert!((nrm - 1.0).abs() < 1e-4, "norm={nrm}");
     }
@@ -1025,7 +1057,8 @@ mod tests {
         for v in &mut mat {
             *v = c(rng.next_f32() - 0.5, rng.next_f32() - 0.5);
         }
-        let svd = svd_dense(&mat, m, n).unwrap();
+        let svd = svd_dense(&mat, m, n)
+            .expect("mat has exactly m*n=12 elements and m=4, n=3 are both positive");
         let k = svd.singular_values.len();
         // Reconstruct.
         let mut recon = vec![c0(); m * n];
@@ -1059,7 +1092,8 @@ mod tests {
         for v in &mut mat {
             *v = c(rng.next_f32() - 0.5, rng.next_f32() - 0.5);
         }
-        let svd = svd_dense(&mat, m, n).unwrap();
+        let svd = svd_dense(&mat, m, n)
+            .expect("mat has exactly m*n=10 elements and m=2, n=5 are both positive");
         let k = svd.singular_values.len();
         let mut recon = vec![c0(); m * n];
         for i in 0..m {
@@ -1079,7 +1113,8 @@ mod tests {
 
     #[test]
     fn t11_non_adjacent_apply_2q_errors() {
-        let mut mps = MatrixProductState::new_zero_state(cfg(3, 4)).unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(3, 4))
+            .expect("n=3 and chi=4 are valid MPS configuration parameters");
         assert!(mps.apply_2q(&cnot_4x4(), 0, 2).is_err());
     }
 
@@ -1087,13 +1122,17 @@ mod tests {
     fn t12_bond_never_exceeds_chi() {
         let n = 6usize;
         let chi = 3usize;
-        let mut mps = MatrixProductState::new_zero_state(cfg(n, chi)).unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(n, chi))
+            .expect("n=6 and chi=3 are valid MPS configuration parameters");
         for q in 0..n {
-            mps.apply_1q(&gate_h(), q).unwrap();
+            mps.apply_1q(&gate_h(), q)
+                .expect("q iterates over 0..n so it is always within the n-qubit MPS range");
         }
         for q in 0..(n - 1) {
-            mps.apply_2q(&cnot_4x4(), q, q + 1).unwrap();
-            mps.apply_2q(&cnot_4x4(), q, q + 1).unwrap();
+            mps.apply_2q(&cnot_4x4(), q, q + 1)
+                .expect("q < n-1 so both q and q+1 are within range and adjacent");
+            mps.apply_2q(&cnot_4x4(), q, q + 1)
+                .expect("q < n-1 so both q and q+1 are within range and adjacent");
         }
         for b in mps.bond_dims() {
             assert!(b <= chi, "bond {b} exceeds χ={chi}");
@@ -1102,7 +1141,8 @@ mod tests {
 
     #[test]
     fn t13_product_state_bonds_all_one() {
-        let mps = MatrixProductState::new_zero_state(cfg(5, 4)).unwrap();
+        let mps = MatrixProductState::new_zero_state(cfg(5, 4))
+            .expect("n=5 and chi=4 are valid MPS configuration parameters");
         for b in mps.bond_dims() {
             assert_eq!(b, 1);
         }
@@ -1110,7 +1150,8 @@ mod tests {
 
     #[test]
     fn t14_out_of_range_qubit_errors() {
-        let mut mps = MatrixProductState::new_zero_state(cfg(2, 4)).unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(2, 4))
+            .expect("n=2 and chi=4 are valid MPS configuration parameters");
         assert!(mps.apply_1q(&gate_x(), 5).is_err());
         assert!(mps.expectation_z(9).is_err());
     }
@@ -1123,8 +1164,10 @@ mod tests {
 
     #[test]
     fn t16_normalize_restores_unit_norm() {
-        let mut mps = MatrixProductState::new_zero_state(cfg(2, 4)).unwrap();
-        mps.apply_1q(&gate_h(), 0).unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(2, 4))
+            .expect("n=2 and chi=4 are valid MPS configuration parameters");
+        mps.apply_1q(&gate_h(), 0)
+            .expect("qubit 0 is within the 2-qubit MPS range");
         // Scale the first site to break normalization.
         if let Some(first) = mps.sites.first_mut() {
             for v in &mut first.data {
@@ -1139,22 +1182,44 @@ mod tests {
     #[test]
     fn t17_expectation_z_on_basis_states() {
         // |0> ⇒ +1, |1> ⇒ −1.
-        let mut mps = MatrixProductState::new_zero_state(cfg(1, 2)).unwrap();
-        assert!((mps.expectation_z(0).unwrap() - 1.0).abs() < 1e-5);
-        mps.apply_1q(&gate_x(), 0).unwrap();
-        assert!((mps.expectation_z(0).unwrap() + 1.0).abs() < 1e-5);
+        let mut mps = MatrixProductState::new_zero_state(cfg(1, 2))
+            .expect("n=1 and chi=2 are valid MPS configuration parameters");
+        assert!(
+            (mps.expectation_z(0)
+                .expect("qubit 0 is the only qubit in this 1-qubit MPS so it is always in range")
+                - 1.0)
+                .abs()
+                < 1e-5
+        );
+        mps.apply_1q(&gate_x(), 0)
+            .expect("qubit 0 is the only qubit in this 1-qubit MPS so it is always in range");
+        assert!(
+            (mps.expectation_z(0)
+                .expect("qubit 0 is the only qubit in this 1-qubit MPS so it is always in range")
+                + 1.0)
+                .abs()
+                < 1e-5
+        );
     }
 
     #[test]
     fn t18_gate_z_phase_then_statevector() {
         // Apply H then Z on qubit 0 of a 2-qubit register; compare to dense.
-        let mut mps = MatrixProductState::new_zero_state(cfg(2, 4)).unwrap();
-        let mut sv = StateVector::new_zero_state(2).unwrap();
-        mps.apply_1q(&gate_h(), 1).unwrap();
-        apply_1q_inplace(&mut sv, 1, &gate_h()).unwrap();
-        mps.apply_1q(&gate_z(), 1).unwrap();
-        apply_1q_inplace(&mut sv, 1, &gate_z()).unwrap();
-        let mps_sv = mps.to_statevector().unwrap();
+        let mut mps = MatrixProductState::new_zero_state(cfg(2, 4))
+            .expect("n=2 and chi=4 are valid MPS configuration parameters");
+        let mut sv = StateVector::new_zero_state(2)
+            .expect("n=2 is a valid positive qubit count for a statevector");
+        mps.apply_1q(&gate_h(), 1)
+            .expect("qubit 1 is within the 2-qubit MPS range");
+        apply_1q_inplace(&mut sv, 1, &gate_h())
+            .expect("qubit 1 is within the 2-qubit statevector range");
+        mps.apply_1q(&gate_z(), 1)
+            .expect("qubit 1 is within the 2-qubit MPS range");
+        apply_1q_inplace(&mut sv, 1, &gate_z())
+            .expect("qubit 1 is within the 2-qubit statevector range");
+        let mps_sv = mps
+            .to_statevector()
+            .expect("MPS was constructed with valid boundary bonds so contraction must succeed");
         let diff = max_abs_diff(&mps_sv.amps, &sv.amps);
         assert!(diff < 1e-5, "diff={diff}");
     }

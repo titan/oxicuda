@@ -576,7 +576,8 @@ mod tests {
             method: SdeMethod::EulerMaruyama,
             noise_type: NoiseType::Diagonal,
         };
-        NeuralSde::new(cfg, &mut rng).unwrap()
+        NeuralSde::new(cfg, &mut rng)
+            .expect("NeuralSde construction with valid diagonal config should succeed")
     }
 
     fn make_sde_scalar(state_dim: usize, noise_dim: usize, n_steps: usize) -> NeuralSde {
@@ -592,7 +593,8 @@ mod tests {
             method: SdeMethod::EulerMaruyama,
             noise_type: NoiseType::Scalar,
         };
-        NeuralSde::new(cfg, &mut rng).unwrap()
+        NeuralSde::new(cfg, &mut rng)
+            .expect("NeuralSde construction with valid scalar config should succeed")
     }
 
     fn make_sde_milstein(state_dim: usize, n_steps: usize) -> NeuralSde {
@@ -608,7 +610,8 @@ mod tests {
             method: SdeMethod::Milstein,
             noise_type: NoiseType::Diagonal,
         };
-        NeuralSde::new(cfg, &mut rng).unwrap()
+        NeuralSde::new(cfg, &mut rng)
+            .expect("NeuralSde construction with valid Milstein config should succeed")
     }
 
     // ── Drift / Diffusion shape ──
@@ -617,7 +620,9 @@ mod tests {
     fn drift_output_shape() {
         let sde = make_sde_diagonal(3, 10);
         let x = vec![0.1_f32, 0.2, 0.3];
-        let f = sde.drift(&x, 0.5).unwrap();
+        let f = sde
+            .drift(&x, 0.5)
+            .expect("drift evaluation with valid state should succeed");
         assert_eq!(f.len(), 3, "drift output should be state_dim");
         assert!(f.iter().all(|v| v.is_finite()));
     }
@@ -626,7 +631,9 @@ mod tests {
     fn diffusion_output_shape_diagonal() {
         let sde = make_sde_diagonal(4, 10);
         let x = vec![0.0_f32; 4];
-        let g = sde.diffusion(&x, 0.3).unwrap();
+        let g = sde
+            .diffusion(&x, 0.3)
+            .expect("diagonal diffusion evaluation with valid state should succeed");
         assert_eq!(
             g.len(),
             4,
@@ -639,7 +646,9 @@ mod tests {
     fn diffusion_output_shape_scalar() {
         let sde = make_sde_scalar(3, 2, 10);
         let x = vec![0.0_f32; 3];
-        let g = sde.diffusion(&x, 0.5).unwrap();
+        let g = sde
+            .diffusion(&x, 0.5)
+            .expect("scalar diffusion evaluation with valid state should succeed");
         assert_eq!(g.len(), 1, "scalar diffusion should return length-1 vec");
         assert!(g[0].is_finite());
     }
@@ -651,7 +660,9 @@ mod tests {
         let sde = make_sde_diagonal(3, 10);
         let mut rng = LcgRng::new(99);
         let x = vec![0.5_f32; 3];
-        let x_next = sde.euler_maruyama_step(&x, 0.0, 0.1, &mut rng).unwrap();
+        let x_next = sde
+            .euler_maruyama_step(&x, 0.0, 0.1, &mut rng)
+            .expect("Euler-Maruyama step with valid state and dt should succeed");
         assert_eq!(x_next.len(), 3, "EM step output should be state_dim");
     }
 
@@ -660,7 +671,9 @@ mod tests {
         let sde = make_sde_diagonal(2, 10);
         let mut rng = LcgRng::new(55);
         let x = vec![1.0_f32, -0.5];
-        let x_next = sde.euler_maruyama_step(&x, 0.0, 0.01, &mut rng).unwrap();
+        let x_next = sde
+            .euler_maruyama_step(&x, 0.0, 0.01, &mut rng)
+            .expect("Euler-Maruyama step with small dt should produce finite output");
         assert!(
             x_next.iter().all(|v| v.is_finite()),
             "EM step must produce finite output"
@@ -674,7 +687,9 @@ mod tests {
         let sde = make_sde_milstein(3, 10);
         let mut rng = LcgRng::new(88);
         let x = vec![0.3_f32; 3];
-        let x_next = sde.milstein_step(&x, 0.0, 0.1, &mut rng).unwrap();
+        let x_next = sde
+            .milstein_step(&x, 0.0, 0.1, &mut rng)
+            .expect("Milstein step with valid state and dt should succeed");
         assert_eq!(x_next.len(), 3, "Milstein step output should be state_dim");
     }
 
@@ -683,7 +698,9 @@ mod tests {
         let sde = make_sde_milstein(2, 10);
         let mut rng = LcgRng::new(77);
         let x = vec![0.0_f32, 1.0];
-        let x_next = sde.milstein_step(&x, 0.0, 0.05, &mut rng).unwrap();
+        let x_next = sde
+            .milstein_step(&x, 0.0, 0.05, &mut rng)
+            .expect("Milstein step with small dt should produce finite output");
         assert!(
             x_next.iter().all(|v| v.is_finite()),
             "Milstein step must produce finite output"
@@ -699,7 +716,9 @@ mod tests {
         let sde = make_sde_diagonal(state_dim, n_steps);
         let mut rng = LcgRng::new(11);
         let x0 = vec![1.0_f32; state_dim];
-        let path = sde.sample_path(&x0, &mut rng).unwrap();
+        let path = sde
+            .sample_path(&x0, &mut rng)
+            .expect("sample_path with valid initial condition should succeed");
 
         assert_eq!(
             path.times.len(),
@@ -718,7 +737,9 @@ mod tests {
         let sde = make_sde_diagonal(2, 10);
         let mut rng = LcgRng::new(22);
         let x0 = vec![1.5_f32, -0.7];
-        let path = sde.sample_path(&x0, &mut rng).unwrap();
+        let path = sde
+            .sample_path(&x0, &mut rng)
+            .expect("sample_path for initial state check should succeed");
         // First state should match x0 exactly.
         assert!((path.states[0] - x0[0]).abs() < 1e-7, "states[0] ≠ x0[0]");
         assert!((path.states[1] - x0[1]).abs() < 1e-7, "states[1] ≠ x0[1]");
@@ -730,7 +751,9 @@ mod tests {
         let sde = make_sde_diagonal(1, n_steps);
         let mut rng = LcgRng::new(33);
         let x0 = vec![0.0_f32];
-        let path = sde.sample_path(&x0, &mut rng).unwrap();
+        let path = sde
+            .sample_path(&x0, &mut rng)
+            .expect("sample_path for time grid check should succeed");
 
         assert!(
             (path.times[0] - 0.0_f32).abs() < 1e-6,
@@ -750,7 +773,9 @@ mod tests {
         let sde = make_sde_diagonal(3, 5);
         let mut rng = LcgRng::new(44);
         let x0 = vec![0.5_f32; 3];
-        let (mean, std) = sde.sample_statistics(&x0, 10, &mut rng).unwrap();
+        let (mean, std) = sde
+            .sample_statistics(&x0, 10, &mut rng)
+            .expect("sample_statistics with 10 paths should succeed");
         assert_eq!(mean.len(), 3, "mean should have state_dim entries");
         assert_eq!(std.len(), 3, "std should have state_dim entries");
     }
@@ -760,7 +785,9 @@ mod tests {
         let sde = make_sde_diagonal(2, 5);
         let mut rng = LcgRng::new(55);
         let x0 = vec![1.0_f32, -1.0];
-        let (_, std) = sde.sample_statistics(&x0, 20, &mut rng).unwrap();
+        let (_, std) = sde
+            .sample_statistics(&x0, 20, &mut rng)
+            .expect("sample_statistics with 20 paths should succeed");
         assert!(
             std.iter().all(|&s| s >= 0.0),
             "all std values must be non-negative: {:?}",
@@ -775,8 +802,12 @@ mod tests {
         let sde = make_sde_diagonal(2, 10);
         let mut rng = LcgRng::new(66);
         let x0 = vec![0.5_f32, -0.5];
-        let path = sde.sample_path(&x0, &mut rng).unwrap();
-        let elbo = sde.elbo_estimate(&path, &mut rng).unwrap();
+        let path = sde
+            .sample_path(&x0, &mut rng)
+            .expect("sample_path for ELBO test should succeed");
+        let elbo = sde
+            .elbo_estimate(&path, &mut rng)
+            .expect("ELBO estimate on valid path should return finite value");
         assert!(elbo.is_finite(), "ELBO estimate must be finite, got {elbo}");
     }
 

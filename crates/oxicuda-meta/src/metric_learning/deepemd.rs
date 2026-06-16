@@ -380,19 +380,19 @@ mod tests {
 
     #[test]
     fn cost_matrix_shape() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 1);
         let b = random_feats(3, 4, 2);
-        let cost = emd.cost_matrix(&a, &b).unwrap();
+        let cost = emd.cost_matrix(&a, &b).expect("cost_matrix should succeed");
         assert_eq!(cost.len(), 3 * 3);
     }
 
     #[test]
     fn cost_matrix_in_zero_two_range() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 3);
         let b = random_feats(3, 4, 4);
-        let cost = emd.cost_matrix(&a, &b).unwrap();
+        let cost = emd.cost_matrix(&a, &b).expect("cost_matrix should succeed");
         for &c in &cost {
             assert!((0.0..=2.0).contains(&c), "cost {c} outside [0,2]");
         }
@@ -400,9 +400,9 @@ mod tests {
 
     #[test]
     fn cost_self_diagonal_is_zero() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 5);
-        let cost = emd.cost_matrix(&a, &a).unwrap();
+        let cost = emd.cost_matrix(&a, &a).expect("cost_matrix should succeed");
         for i in 0..3 {
             assert!(
                 cost[i * 3 + i].abs() < 1e-5,
@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn cost_matrix_wrong_length_errs() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = vec![0.0_f32; 5];
         let b = random_feats(3, 4, 6);
         assert!(matches!(
@@ -433,12 +433,14 @@ mod tests {
             sinkhorn_iters: 200,
             epsilon: 0.1,
         };
-        let emd = DeepEmd::new(cfg.clone()).unwrap();
+        let emd = DeepEmd::new(cfg.clone()).expect("value should be present");
         let a = random_feats(cfg.n_local, cfg.feat_dim, 11);
         let b = random_feats(cfg.n_local, cfg.feat_dim, 12);
-        let cost = emd.cost_matrix(&a, &b).unwrap();
+        let cost = emd.cost_matrix(&a, &b).expect("cost_matrix should succeed");
         let uniform = vec![1.0_f32 / cfg.n_local as f32; cfg.n_local];
-        let plan = emd.sinkhorn(&cost, &uniform, &uniform).unwrap();
+        let plan = emd
+            .sinkhorn(&cost, &uniform, &uniform)
+            .expect("sinkhorn should succeed");
         let n = cfg.n_local;
         for i in 0..n {
             let row_sum: f32 = (0..n).map(|j| plan[i * n + j]).sum();
@@ -460,12 +462,14 @@ mod tests {
 
     #[test]
     fn sinkhorn_plan_non_negative() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 13);
         let b = random_feats(3, 4, 14);
-        let cost = emd.cost_matrix(&a, &b).unwrap();
+        let cost = emd.cost_matrix(&a, &b).expect("cost_matrix should succeed");
         let uniform = vec![1.0_f32 / 3.0; 3];
-        let plan = emd.sinkhorn(&cost, &uniform, &uniform).unwrap();
+        let plan = emd
+            .sinkhorn(&cost, &uniform, &uniform)
+            .expect("sinkhorn should succeed");
         assert!(
             plan.iter().all(|&t| t >= 0.0),
             "transport plan must be >= 0"
@@ -474,7 +478,7 @@ mod tests {
 
     #[test]
     fn sinkhorn_cost_wrong_length_errs() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let cost = vec![0.0_f32; 5];
         let uniform = vec![1.0_f32 / 3.0; 3];
         assert!(matches!(
@@ -485,9 +489,9 @@ mod tests {
 
     #[test]
     fn sinkhorn_weights_wrong_length_errs() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 15);
-        let cost = emd.cost_matrix(&a, &a).unwrap();
+        let cost = emd.cost_matrix(&a, &a).expect("cost_matrix should succeed");
         let bad = vec![0.5_f32; 2];
         let uniform = vec![1.0_f32 / 3.0; 3];
         assert!(matches!(
@@ -510,14 +514,20 @@ mod tests {
             epsilon: 5.0,
             ..base.clone()
         };
-        let emd_small = DeepEmd::new(base.clone()).unwrap();
-        let emd_big = DeepEmd::new(big).unwrap();
+        let emd_small = DeepEmd::new(base.clone()).expect("value should be present");
+        let emd_big = DeepEmd::new(big).expect("new should succeed");
         let a = random_feats(base.n_local, base.feat_dim, 21);
         let b = random_feats(base.n_local, base.feat_dim, 22);
-        let cost = emd_small.cost_matrix(&a, &b).unwrap();
+        let cost = emd_small
+            .cost_matrix(&a, &b)
+            .expect("cost_matrix should succeed");
         let uniform = vec![1.0_f32 / base.n_local as f32; base.n_local];
-        let plan_small = emd_small.sinkhorn(&cost, &uniform, &uniform).unwrap();
-        let plan_big = emd_big.sinkhorn(&cost, &uniform, &uniform).unwrap();
+        let plan_small = emd_small
+            .sinkhorn(&cost, &uniform, &uniform)
+            .expect("sinkhorn should succeed");
+        let plan_big = emd_big
+            .sinkhorn(&cost, &uniform, &uniform)
+            .expect("sinkhorn should succeed");
         let var = |p: &[f32]| {
             let mean = p.iter().sum::<f32>() / p.len() as f32;
             p.iter().map(|&x| (x - mean) * (x - mean)).sum::<f32>() / p.len() as f32
@@ -534,28 +544,36 @@ mod tests {
 
     #[test]
     fn emd_distance_non_negative() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 31);
         let b = random_feats(3, 4, 32);
-        let d = emd.emd_distance(&a, &b).unwrap();
+        let d = emd
+            .emd_distance(&a, &b)
+            .expect("emd_distance should succeed");
         assert!(d >= 0.0, "EMD must be >= 0, got {d}");
     }
 
     #[test]
     fn emd_self_is_zero() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 33);
-        let d = emd.emd_distance(&a, &a).unwrap();
+        let d = emd
+            .emd_distance(&a, &a)
+            .expect("emd_distance should succeed");
         assert!(d.abs() < 1e-4, "EMD(a,a) should be ~0, got {d}");
     }
 
     #[test]
     fn emd_symmetric() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 34);
         let b = random_feats(3, 4, 35);
-        let dab = emd.emd_distance(&a, &b).unwrap();
-        let dba = emd.emd_distance(&b, &a).unwrap();
+        let dab = emd
+            .emd_distance(&a, &b)
+            .expect("emd_distance should succeed");
+        let dba = emd
+            .emd_distance(&b, &a)
+            .expect("emd_distance should succeed");
         assert!(
             (dab - dba).abs() < 1e-4,
             "EMD should be symmetric: {dab} vs {dba}"
@@ -571,11 +589,13 @@ mod tests {
             sinkhorn_iters: 5,
             epsilon: 0.1,
         };
-        let emd = DeepEmd::new(cfg).unwrap();
+        let emd = DeepEmd::new(cfg).expect("new should succeed");
         let a = vec![1.0_f32, 0.0, 0.0];
         let b = vec![0.0_f32, 1.0, 0.0]; // orthogonal -> cos 0 -> cost 1
-        let cost = emd.cost_matrix(&a, &b).unwrap();
-        let d = emd.emd_distance(&a, &b).unwrap();
+        let cost = emd.cost_matrix(&a, &b).expect("cost_matrix should succeed");
+        let d = emd
+            .emd_distance(&a, &b)
+            .expect("emd_distance should succeed");
         assert!(
             (d - cost[0]).abs() < 1e-5,
             "n_local=1 EMD {d} should equal cost {}",
@@ -585,7 +605,7 @@ mod tests {
 
     #[test]
     fn emd_distance_wrong_length_errs() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = vec![0.0_f32; 7];
         let b = random_feats(3, 4, 36);
         assert!(matches!(
@@ -598,13 +618,15 @@ mod tests {
 
     #[test]
     fn classify_softmax_sums_to_one() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let n_way = 3;
         let q = random_feats(3, 4, 41);
         let class_feats: Vec<f32> = (0..n_way)
             .flat_map(|c| random_feats(3, 4, 50 + c as u64))
             .collect();
-        let probs = emd.classify(&q, &class_feats, n_way).unwrap();
+        let probs = emd
+            .classify(&q, &class_feats, n_way)
+            .expect("classify should succeed");
         let sum: f32 = probs.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5, "softmax must sum to 1, got {sum}");
         assert_eq!(probs.len(), n_way);
@@ -619,7 +641,7 @@ mod tests {
             sinkhorn_iters: 50,
             epsilon: 0.1,
         };
-        let emd = DeepEmd::new(cfg.clone()).unwrap();
+        let emd = DeepEmd::new(cfg.clone()).expect("value should be present");
         let n_way = 3;
         let query = vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0];
         let per_class = cfg.n_local * cfg.feat_dim;
@@ -630,19 +652,21 @@ mod tests {
         class_feats[per_class..2 * per_class].copy_from_slice(&query);
         // class 2: dissimilar
         class_feats[2 * per_class..3 * per_class].copy_from_slice(&[0.0, 0.0, 1.0, 1.0, 0.0, 0.0]);
-        let probs = emd.classify(&query, &class_feats, n_way).unwrap();
+        let probs = emd
+            .classify(&query, &class_feats, n_way)
+            .expect("classify should succeed");
         let best = probs
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).expect("partial_cmp should succeed"))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(best, 1, "class with identical local features must win");
     }
 
     #[test]
     fn classify_class_feats_wrong_length_errs() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let q = random_feats(3, 4, 42);
         let class_feats = vec![0.0_f32; 5];
         assert!(matches!(
@@ -653,7 +677,7 @@ mod tests {
 
     #[test]
     fn classify_query_wrong_length_errs() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let q = vec![0.0_f32; 5];
         let class_feats: Vec<f32> = (0..3).flat_map(|c| random_feats(3, 4, 60 + c)).collect();
         assert!(matches!(
@@ -666,11 +690,15 @@ mod tests {
 
     #[test]
     fn deterministic_emd() {
-        let emd = DeepEmd::new(default_config()).unwrap();
+        let emd = DeepEmd::new(default_config()).expect("value should be present");
         let a = random_feats(3, 4, 71);
         let b = random_feats(3, 4, 72);
-        let d1 = emd.emd_distance(&a, &b).unwrap();
-        let d2 = emd.emd_distance(&a, &b).unwrap();
+        let d1 = emd
+            .emd_distance(&a, &b)
+            .expect("emd_distance should succeed");
+        let d2 = emd
+            .emd_distance(&a, &b)
+            .expect("emd_distance should succeed");
         assert_eq!(d1, d2, "EMD must be deterministic");
     }
 }

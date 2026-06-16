@@ -358,7 +358,7 @@ mod tests {
         let cfg = make_cfg(8, 16, 4, 8.0);
         let mut rng = make_rng(42);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let dora = DoraAdapter::new(cfg.clone(), base, &mut rng).unwrap();
+        let dora = DoraAdapter::new(cfg.clone(), base, &mut rng).expect("value should be present");
         let expected = cfg.rank * cfg.d_in + cfg.d_out * cfg.rank + cfg.d_out;
         assert_eq!(dora.n_params(), expected);
     }
@@ -368,9 +368,9 @@ mod tests {
         let cfg = make_cfg(8, 16, 4, 8.0);
         let mut rng = make_rng(42);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let dora = DoraAdapter::new(cfg, base, &mut rng).unwrap();
+        let dora = DoraAdapter::new(cfg, base, &mut rng).expect("new should succeed");
         let x = vec![0.25_f32; 8];
-        let y = dora.forward(&x).unwrap();
+        let y = dora.forward(&x).expect("forward should succeed");
         assert_eq!(y.len(), 16);
     }
 
@@ -381,8 +381,11 @@ mod tests {
         let cfg = make_cfg(6, 5, 3, 4.0);
         let mut rng = make_rng(123);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let dora = DoraAdapter::new(cfg.clone(), base.clone(), &mut rng).unwrap();
-        let w = dora.effective_weight().unwrap();
+        let dora =
+            DoraAdapter::new(cfg.clone(), base.clone(), &mut rng).expect("value should be present");
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         for (i, (&we, &wb)) in w.iter().zip(&base).enumerate() {
             assert!(
                 (we - wb).abs() < EPS,
@@ -396,9 +399,10 @@ mod tests {
         let cfg = make_cfg(4, 3, 2, 2.0);
         let mut rng = make_rng(7);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let mut dora = DoraAdapter::new(cfg, base, &mut rng).unwrap();
+        let mut dora = DoraAdapter::new(cfg, base, &mut rng).expect("new should succeed");
         let new_m = vec![0.5_f32, 1.0, 2.0];
-        dora.set_magnitude(&new_m).unwrap();
+        dora.set_magnitude(&new_m)
+            .expect("set_magnitude should succeed");
         for (&a, &b) in dora.magnitude().iter().zip(&new_m) {
             assert!((a - b).abs() < EPS, "{a} != {b}");
         }
@@ -411,8 +415,10 @@ mod tests {
         let cfg = make_cfg(5, 4, 2, 4.0);
         let mut rng = make_rng(11);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let dora = DoraAdapter::new(cfg.clone(), base, &mut rng).unwrap();
-        let w = dora.effective_weight().unwrap();
+        let dora = DoraAdapter::new(cfg.clone(), base, &mut rng).expect("value should be present");
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         for o in 0..cfg.d_out {
             let n = row_norm(&w, cfg.d_out, cfg.d_in, o);
             assert!(
@@ -431,11 +437,14 @@ mod tests {
         let cfg = make_cfg(7, 5, 3, 6.0);
         let mut rng = make_rng(31);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let mut dora = DoraAdapter::new(cfg.clone(), base, &mut rng).unwrap();
+        let mut dora =
+            DoraAdapter::new(cfg.clone(), base, &mut rng).expect("value should be present");
         for v in dora.matrix_b_mut() {
             *v = 0.03;
         }
-        let w = dora.effective_weight().unwrap();
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         for o in 0..cfg.d_out {
             let n = row_norm(&w, cfg.d_out, cfg.d_in, o);
             assert!(
@@ -452,7 +461,8 @@ mod tests {
         let cfg = make_cfg(6, 4, 2, 4.0);
         let mut rng = make_rng(53);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let mut dora = DoraAdapter::new(cfg.clone(), base, &mut rng).unwrap();
+        let mut dora =
+            DoraAdapter::new(cfg.clone(), base, &mut rng).expect("value should be present");
         // Force B≠0 first so that A actually contributes to the row.
         for v in dora.matrix_b_mut() {
             *v = 0.05;
@@ -461,7 +471,9 @@ mod tests {
         for (k, v) in dora.matrix_a_mut().iter_mut().enumerate() {
             *v += 0.01 * (k as f32 + 1.0);
         }
-        let w = dora.effective_weight().unwrap();
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         for o in 0..cfg.d_out {
             let n = row_norm(&w, cfg.d_out, cfg.d_in, o);
             assert!(
@@ -478,11 +490,14 @@ mod tests {
         let cfg = make_cfg(6, 4, 2, 4.0);
         let mut rng = make_rng(91);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let mut dora = DoraAdapter::new(cfg.clone(), base, &mut rng).unwrap();
+        let mut dora =
+            DoraAdapter::new(cfg.clone(), base, &mut rng).expect("value should be present");
         for (k, v) in dora.matrix_b_mut().iter_mut().enumerate() {
             *v = 0.02 * ((k % 5) as f32 + 1.0);
         }
-        let w = dora.effective_weight().unwrap();
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         for o in 0..cfg.d_out {
             let n = row_norm(&w, cfg.d_out, cfg.d_in, o);
             assert!(
@@ -500,15 +515,21 @@ mod tests {
         let cfg = make_cfg(5, 4, 2, 4.0);
         let mut rng = make_rng(202);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let mut dora = DoraAdapter::new(cfg.clone(), base, &mut rng).unwrap();
+        let mut dora =
+            DoraAdapter::new(cfg.clone(), base, &mut rng).expect("value should be present");
         for v in dora.matrix_b_mut() {
             *v = 0.04;
         }
-        let w_before = dora.effective_weight().unwrap();
+        let w_before = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         let original_m = dora.magnitude().to_vec();
         let scaled_m: Vec<f32> = original_m.iter().map(|&v| 2.0 * v).collect();
-        dora.set_magnitude(&scaled_m).unwrap();
-        let w_after = dora.effective_weight().unwrap();
+        dora.set_magnitude(&scaled_m)
+            .expect("set_magnitude should succeed");
+        let w_after = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         for o in 0..cfg.d_out {
             for j in 0..cfg.d_in {
                 let idx = o * cfg.d_in + j;
@@ -529,8 +550,9 @@ mod tests {
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
         let mut rng_a = make_rng(777);
         let mut rng_b = make_rng(777);
-        let a = DoraAdapter::new(cfg.clone(), base.clone(), &mut rng_a).unwrap();
-        let b = DoraAdapter::new(cfg, base, &mut rng_b).unwrap();
+        let a = DoraAdapter::new(cfg.clone(), base.clone(), &mut rng_a)
+            .expect("value should be present");
+        let b = DoraAdapter::new(cfg, base, &mut rng_b).expect("new should succeed");
         for (x, y) in a.matrix_a().iter().zip(b.matrix_a()) {
             assert!((x - y).abs() < EPS, "A non-deterministic: {x} vs {y}");
         }
@@ -606,7 +628,7 @@ mod tests {
         let cfg = make_cfg(4, 4, 2, 4.0);
         let mut rng = make_rng(1);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let dora = DoraAdapter::new(cfg, base, &mut rng).unwrap();
+        let dora = DoraAdapter::new(cfg, base, &mut rng).expect("new should succeed");
         let x = vec![0.0_f32; 3];
         assert!(matches!(
             dora.forward(&x),
@@ -619,7 +641,7 @@ mod tests {
         let cfg = make_cfg(4, 4, 2, 4.0);
         let mut rng = make_rng(1);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let mut dora = DoraAdapter::new(cfg, base, &mut rng).unwrap();
+        let mut dora = DoraAdapter::new(cfg, base, &mut rng).expect("new should succeed");
         assert!(matches!(
             dora.set_magnitude(&[1.0_f32, 2.0]),
             Err(GenError::DimensionMismatch { .. })
@@ -631,10 +653,12 @@ mod tests {
         let cfg = make_cfg(6, 4, 1, 2.0);
         let mut rng = make_rng(303);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let dora = DoraAdapter::new(cfg, base.clone(), &mut rng).unwrap();
+        let dora = DoraAdapter::new(cfg, base.clone(), &mut rng).expect("value should be present");
         assert_eq!(dora.matrix_a().len(), 6);
         assert_eq!(dora.matrix_b().len(), 4);
-        let w = dora.effective_weight().unwrap();
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         // Initial: W' ≡ W₀.
         for (i, (&a, &b)) in w.iter().zip(&base).enumerate() {
             assert!(
@@ -651,9 +675,12 @@ mod tests {
         let cfg = make_cfg(4, 5, 4, 4.0);
         let mut rng = make_rng(404);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let dora = DoraAdapter::new(cfg.clone(), base.clone(), &mut rng).unwrap();
+        let dora =
+            DoraAdapter::new(cfg.clone(), base.clone(), &mut rng).expect("value should be present");
         assert_eq!(dora.matrix_a().len(), 4 * 4);
-        let w = dora.effective_weight().unwrap();
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         for (i, (&a, &b)) in w.iter().zip(&base).enumerate() {
             assert!(
                 (a - b).abs() < EPS,
@@ -676,8 +703,10 @@ mod tests {
             base[2 * cfg.d_in + j] = 0.7;
         }
         let mut rng = make_rng(909);
-        let dora = DoraAdapter::new(cfg.clone(), base, &mut rng).unwrap();
-        let w = dora.effective_weight().unwrap();
+        let dora = DoraAdapter::new(cfg.clone(), base, &mut rng).expect("value should be present");
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         for &v in &w {
             assert!(v.is_finite(), "non-finite entry: {v}");
         }
@@ -697,12 +726,15 @@ mod tests {
         let cfg = make_cfg(5, 4, 2, 4.0);
         let mut rng = make_rng(606);
         let base = nontrivial_base(cfg.d_out, cfg.d_in);
-        let mut dora = DoraAdapter::new(cfg.clone(), base, &mut rng).unwrap();
+        let mut dora =
+            DoraAdapter::new(cfg.clone(), base, &mut rng).expect("value should be present");
         for v in dora.matrix_b_mut() {
             *v = 0.05;
         }
         let x: Vec<f32> = (0..cfg.d_in).map(|i| 0.1 * (i as f32 + 1.0)).collect();
-        let w = dora.effective_weight().unwrap();
+        let w = dora
+            .effective_weight()
+            .expect("effective_weight should succeed");
         let mut y_ref = vec![0.0_f32; cfg.d_out];
         for o in 0..cfg.d_out {
             let mut acc = 0.0_f32;
@@ -711,7 +743,7 @@ mod tests {
             }
             y_ref[o] = acc;
         }
-        let y = dora.forward(&x).unwrap();
+        let y = dora.forward(&x).expect("forward should succeed");
         for (i, (&a, &b)) in y.iter().zip(&y_ref).enumerate() {
             assert!(
                 (a - b).abs() < 1e-4,

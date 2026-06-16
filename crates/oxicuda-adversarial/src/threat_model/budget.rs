@@ -80,30 +80,30 @@ mod tests {
 
     #[test]
     fn budget_spend_tracks() {
-        let mut b = EpsilonBudget::new(1.0).unwrap();
-        b.spend(0.3).unwrap();
+        let mut b = EpsilonBudget::new(1.0).expect("new should succeed");
+        b.spend(0.3).expect("spend should succeed");
         assert!((b.spent - 0.3).abs() < 1e-6);
         assert!((b.remaining() - 0.7).abs() < 1e-6);
     }
 
     #[test]
     fn budget_exhausted_after_full_spend() {
-        let mut b = EpsilonBudget::new(0.5).unwrap();
-        b.spend(0.5).unwrap();
+        let mut b = EpsilonBudget::new(0.5).expect("new should succeed");
+        b.spend(0.5).expect("spend should succeed");
         assert!(b.is_exhausted());
     }
 
     #[test]
     fn budget_overspend_errors() {
-        let mut b = EpsilonBudget::new(0.5).unwrap();
+        let mut b = EpsilonBudget::new(0.5).expect("new should succeed");
         let r = b.spend(0.6);
         assert!(r.is_err());
     }
 
     #[test]
     fn budget_reset_clears_spent() {
-        let mut b = EpsilonBudget::new(0.5).unwrap();
-        b.spend(0.5).unwrap();
+        let mut b = EpsilonBudget::new(0.5).expect("new should succeed");
+        b.spend(0.5).expect("spend should succeed");
         b.reset();
         assert!((b.spent - 0.0).abs() < 1e-6);
         assert!(!b.is_exhausted());
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn budget_rejects_negative_spend() {
-        let mut b = EpsilonBudget::new(1.0).unwrap();
+        let mut b = EpsilonBudget::new(1.0).expect("new should succeed");
         assert!(b.spend(-0.1).is_err());
     }
 }

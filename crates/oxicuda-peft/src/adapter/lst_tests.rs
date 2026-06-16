@@ -68,13 +68,14 @@ fn forward_layer_output_length() {
     let seq_len = 3;
     let cfg = default_cfg(d_trunk, d_side, 1);
     let mut h = make_handle(4);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let trunk_hidden = vec![0.1_f32; seq_len * d_trunk];
     let side_state = vec![0.0_f32; seq_len * d_side];
     let out = lst
         .forward_layer(0, &trunk_hidden, &side_state, seq_len)
-        .unwrap();
+        .expect("forward_layer should succeed with valid layer index and matching dimensions");
     assert_eq!(out.len(), seq_len * d_side);
 }
 
@@ -93,7 +94,8 @@ fn final_output_gate_one_returns_trunk() {
         gate_init: 1.0,
     };
     let mut h = make_handle(5);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     // up_w is zero by construction, so the up-projection contributes only up_b (=0).
     let side_state = vec![0.5_f32; seq_len * d_side];
@@ -101,7 +103,7 @@ fn final_output_gate_one_returns_trunk() {
 
     let out = lst
         .final_output(&side_state, &trunk_final, seq_len)
-        .unwrap();
+        .expect("final_output should succeed with valid inputs and matching dimensions");
     assert_eq!(out.len(), trunk_final.len());
     for (a, b) in out.iter().zip(trunk_final.iter()) {
         assert!(
@@ -126,7 +128,8 @@ fn final_output_gate_zero_uses_side() {
         gate_init: 0.0,
     };
     let mut h = make_handle(6);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let side_state = vec![1.0_f32; seq_len * d_side];
     let trunk_final = vec![99.0_f32; seq_len * d_trunk];
@@ -134,7 +137,7 @@ fn final_output_gate_zero_uses_side() {
     // up_w = 0 and up_b = 0 → output should be 0 (gate=0 ignores trunk).
     let out = lst
         .final_output(&side_state, &trunk_final, seq_len)
-        .unwrap();
+        .expect("final_output should succeed with valid inputs and matching dimensions");
     for &v in &out {
         assert!(
             v.abs() < 1e-6,
@@ -153,14 +156,15 @@ fn zero_side_state_output_determined_by_trunk() {
     let seq_len = 1;
     let cfg = default_cfg(d_trunk, d_side, 1);
     let mut h = make_handle(7);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let trunk_hidden: Vec<f32> = (0..d_trunk).map(|i| 0.1 * (i as f32 + 1.0)).collect();
     let zero_side = vec![0.0_f32; d_side];
 
     let out1 = lst
         .forward_layer(0, &trunk_hidden, &zero_side, seq_len)
-        .unwrap();
+        .expect("forward_layer should succeed with non-zero trunk and zero side state");
     // Non-zero trunk + zero side → non-zero output (down_w is Kaiming-initialized).
     // The output is purely from the down projection through side_w, starting from zero side.
     assert_eq!(out1.len(), seq_len * d_side);
@@ -168,7 +172,7 @@ fn zero_side_state_output_determined_by_trunk() {
     let zero_trunk = vec![0.0_f32; d_trunk];
     let out2 = lst
         .forward_layer(0, &zero_trunk, &zero_side, seq_len)
-        .unwrap();
+        .expect("forward_layer should succeed with all-zero inputs");
     // side residual from zero everything is just 0 + side_b (=0) → all zero.
     for &v in &out2 {
         assert!(
@@ -187,7 +191,8 @@ fn total_params_analytic() {
     let num_layers = 3;
     let cfg = default_cfg(d_trunk, d_side, num_layers);
     let mut h = make_handle(8);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let per_block = d_side * d_trunk   // down_w
         + d_side                        // down_b
@@ -206,13 +211,19 @@ fn deterministic_same_seed() {
     let cfg = default_cfg(8, 4, 2);
     let mut h1 = make_handle(9);
     let mut h2 = make_handle(9);
-    let lst1 = LadderSideTuning::new(cfg.clone(), &mut h1).unwrap();
-    let lst2 = LadderSideTuning::new(cfg, &mut h2).unwrap();
+    let lst1 = LadderSideTuning::new(cfg.clone(), &mut h1)
+        .expect("LadderSideTuning construction should succeed with valid config");
+    let lst2 = LadderSideTuning::new(cfg, &mut h2)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let trunk = vec![0.3_f32; 8];
     let side = vec![0.1_f32; 4];
-    let out1 = lst1.forward_layer(0, &trunk, &side, 1).unwrap();
-    let out2 = lst2.forward_layer(0, &trunk, &side, 1).unwrap();
+    let out1 = lst1
+        .forward_layer(0, &trunk, &side, 1)
+        .expect("forward_layer should succeed with valid inputs");
+    let out2 = lst2
+        .forward_layer(0, &trunk, &side, 1)
+        .expect("forward_layer should succeed with valid inputs");
     assert_eq!(out1, out2, "same seed must produce identical output");
 }
 
@@ -222,7 +233,8 @@ fn deterministic_same_seed() {
 fn forward_layer_out_of_range() {
     let cfg = default_cfg(8, 4, 2);
     let mut h = make_handle(10);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let trunk = vec![0.0_f32; 8];
     let side = vec![0.0_f32; 4];
@@ -240,7 +252,8 @@ fn forward_layer_out_of_range() {
 fn forward_layer_trunk_dim_mismatch() {
     let cfg = default_cfg(8, 4, 1);
     let mut h = make_handle(11);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let bad_trunk = vec![0.0_f32; 5]; // should be 1 * 8 = 8
     let side = vec![0.0_f32; 4];
@@ -258,7 +271,8 @@ fn forward_layer_trunk_dim_mismatch() {
 fn forward_layer_side_dim_mismatch() {
     let cfg = default_cfg(8, 4, 1);
     let mut h = make_handle(12);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let trunk = vec![0.0_f32; 8];
     let bad_side = vec![0.0_f32; 3]; // should be 1 * 4 = 4
@@ -276,7 +290,8 @@ fn forward_layer_side_dim_mismatch() {
 fn final_output_side_dim_mismatch() {
     let cfg = default_cfg(8, 4, 1);
     let mut h = make_handle(13);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let bad_side = vec![0.0_f32; 3]; // should be 1 * 4 = 4
     let trunk_final = vec![0.0_f32; 8];
@@ -298,7 +313,8 @@ fn full_forward_through_all_layers_then_final_output() {
     let seq_len = 2;
     let cfg = default_cfg(d_trunk, d_side, num_layers);
     let mut h = make_handle(14);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     // Simulate frozen trunk hidden states per layer.
     let trunk_hiddens: Vec<Vec<f32>> = (0..num_layers)
@@ -307,12 +323,16 @@ fn full_forward_through_all_layers_then_final_output() {
 
     let mut side = vec![0.0_f32; seq_len * d_side];
     for (layer, trunk) in trunk_hiddens.iter().enumerate() {
-        side = lst.forward_layer(layer, trunk, &side, seq_len).unwrap();
+        side = lst
+            .forward_layer(layer, trunk, &side, seq_len)
+            .expect("forward_layer should succeed for each trunk layer pass");
         assert_eq!(side.len(), seq_len * d_side);
     }
 
     let trunk_final = vec![0.5_f32; seq_len * d_trunk];
-    let out = lst.final_output(&side, &trunk_final, seq_len).unwrap();
+    let out = lst
+        .final_output(&side, &trunk_final, seq_len)
+        .expect("final_output should succeed after all forward_layer passes");
     assert_eq!(out.len(), seq_len * d_trunk);
 }
 
@@ -326,12 +346,15 @@ fn three_layer_forward_correct_dims() {
     let seq_len = 4;
     let cfg = default_cfg(d_trunk, d_side, num_layers);
     let mut h = make_handle(15);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let mut side = vec![0.0_f32; seq_len * d_side];
     for layer in 0..num_layers {
         let trunk = vec![0.0_f32; seq_len * d_trunk];
-        let new_side = lst.forward_layer(layer, &trunk, &side, seq_len).unwrap();
+        let new_side = lst
+            .forward_layer(layer, &trunk, &side, seq_len)
+            .expect("forward_layer should succeed for each layer in the 3-layer pass");
         assert_eq!(
             new_side.len(),
             seq_len * d_side,
@@ -352,8 +375,10 @@ fn total_params_increases_with_layers() {
     let cfg2 = default_cfg(d_trunk, d_side, 2);
     let mut h1 = make_handle(16);
     let mut h2 = make_handle(16);
-    let lst1 = LadderSideTuning::new(cfg1, &mut h1).unwrap();
-    let lst2 = LadderSideTuning::new(cfg2, &mut h2).unwrap();
+    let lst1 = LadderSideTuning::new(cfg1, &mut h1)
+        .expect("LadderSideTuning construction should succeed with 1-layer config");
+    let lst2 = LadderSideTuning::new(cfg2, &mut h2)
+        .expect("LadderSideTuning construction should succeed with 2-layer config");
     assert!(
         lst2.total_params() > lst1.total_params(),
         "2-layer should have more params than 1-layer"
@@ -366,7 +391,8 @@ fn total_params_increases_with_layers() {
 fn final_output_trunk_dim_mismatch() {
     let cfg = default_cfg(8, 4, 1);
     let mut h = make_handle(17);
-    let lst = LadderSideTuning::new(cfg, &mut h).unwrap();
+    let lst = LadderSideTuning::new(cfg, &mut h)
+        .expect("LadderSideTuning construction should succeed with valid config");
 
     let side = vec![0.0_f32; 4]; // seq_len=1, d_side=4
     let bad_trunk = vec![0.0_f32; 5]; // should be 1 * 8 = 8

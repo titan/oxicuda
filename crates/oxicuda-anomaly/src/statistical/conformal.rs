@@ -358,6 +358,7 @@ pub fn online_conformal_update(detector: &mut OnlineConformalDetector, score: f6
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AnomalyResult;
 
     // ── Test 1: score equal to max calibration → p = 1/(m+1) ────────────────
 
@@ -397,14 +398,15 @@ mod tests {
     // ── Test 4: conformal_predict — output shape matches n_test ─────────────
 
     #[test]
-    fn conformal_predict_shape() {
+    fn conformal_predict_shape() -> AnomalyResult<()> {
         let cal: Vec<f64> = (0..30).map(|i| i as f64).collect();
         let cfg = ConformalConfig::default();
         let detector = conformal_calibrate(cal, cfg);
         let test_scores = vec![5.0_f64, 15.0, 100.0, -1.0, 0.0];
-        let result = conformal_predict(&detector, &test_scores).unwrap();
+        let result = conformal_predict(&detector, &test_scores)?;
         assert_eq!(result.labels.len(), test_scores.len());
         assert_eq!(result.p_values.len(), test_scores.len());
+        Ok(())
     }
 
     // ── Test 5: FPR on clean data ≈ significance level ───────────────────────
@@ -413,7 +415,7 @@ mod tests {
     // calibration), the expected FPR is bounded by `significance`.
 
     #[test]
-    fn conformal_false_positive_rate() {
+    fn conformal_false_positive_rate() -> AnomalyResult<()> {
         let significance = 0.05;
         let m = 500_usize; // calibration size
         let n_test = 500_usize;
@@ -429,7 +431,7 @@ mod tests {
             smoothing: false,
         };
         let det = conformal_calibrate(cal, cfg);
-        let result = conformal_predict(&det, &test).unwrap();
+        let result = conformal_predict(&det, &test)?;
 
         let fpr = result.n_anomalies as f64 / n_test as f64;
         // The FPR must be ≤ significance + some slack for finite samples.
@@ -437,12 +439,13 @@ mod tests {
             fpr <= significance + 0.04,
             "FPR={fpr:.4} too high (significance={significance})"
         );
+        Ok(())
     }
 
     // ── Test 6: known outlier (very high score) is flagged ───────────────────
 
     #[test]
-    fn conformal_anomaly_detected() {
+    fn conformal_anomaly_detected() -> AnomalyResult<()> {
         // Calibration in [0, 1]; outlier score = 100.
         let cal: Vec<f64> = (0..100).map(|i| i as f64 / 100.0).collect();
         let cfg = ConformalConfig {
@@ -451,15 +454,16 @@ mod tests {
         };
         let det = conformal_calibrate(cal, cfg);
         // p-value for score=100 is 0.0 (no cal score ≥ 100) → labelled -1.
-        let result = conformal_predict(&det, &[100.0_f64]).unwrap();
+        let result = conformal_predict(&det, &[100.0_f64])?;
         assert_eq!(result.labels[0], -1, "outlier must be labelled -1");
         assert_eq!(result.p_values[0], 0.0);
+        Ok(())
     }
 
     // ── Test 7: Mondrian — p-values computed per class ───────────────────────
 
     #[test]
-    fn mondrian_per_class() {
+    fn mondrian_per_class() -> AnomalyResult<()> {
         // Class 0: calibration scores in [0, 1].
         // Class 1: calibration scores in [10, 11].
         let mut cal_scores = Vec::new();
@@ -479,8 +483,7 @@ mod tests {
         let test_labels = vec![0_usize, 1_usize];
 
         let result =
-            mondrian_conformal_predict(&cal_scores, &cal_labels, &test_scores, &test_labels, 0.05)
-                .unwrap();
+            mondrian_conformal_predict(&cal_scores, &cal_labels, &test_scores, &test_labels, 0.05)?;
 
         // Class-0 score 0.5 → p-value should be > 0 (it's within the calibration range).
         assert!(
@@ -491,6 +494,7 @@ mod tests {
         // Class-1 score 100 → no calibration score ≥ 100 → p = 0 → anomaly.
         assert_eq!(result.labels[1], -1, "class-1 outlier must be -1");
         assert_eq!(result.p_values[1], 0.0);
+        Ok(())
     }
 
     // ── Test 8: online detector window fills correctly ───────────────────────
@@ -530,7 +534,10 @@ mod tests {
             "window size must stay constant"
         );
         // The front element should now be 1.0 (0.0 evicted).
-        let front = *det.window.front().unwrap();
+        let front = *det
+            .window
+            .front()
+            .expect("window is non-empty after eviction");
         assert!(
             (front - 1.0).abs() < 1e-10,
             "oldest entry should be 1.0 after eviction, got {front}"
@@ -578,15 +585,15 @@ mod tests {
     // ── Test 12: mondrian empty-class falls back to p=0 ─────────────────────
 
     #[test]
-    fn mondrian_unseen_class() {
+    fn mondrian_unseen_class() -> AnomalyResult<()> {
         let cal_scores = vec![0.1_f64, 0.2, 0.3];
         let cal_labels = vec![0_usize, 0, 0];
         // Test point claims to be class 99, which is absent from calibration.
         let result =
-            mondrian_conformal_predict(&cal_scores, &cal_labels, &[0.5_f64], &[99_usize], 0.05)
-                .unwrap();
+            mondrian_conformal_predict(&cal_scores, &cal_labels, &[0.5_f64], &[99_usize], 0.05)?;
         assert_eq!(result.p_values[0], 0.0, "unseen class → p=0");
         assert_eq!(result.labels[0], -1);
+        Ok(())
     }
 
     // ── Test 13: empty test_scores returns error ─────────────────────────────
@@ -606,14 +613,15 @@ mod tests {
     // ── Test 14: n_anomalies is consistent with labels ───────────────────────
 
     #[test]
-    fn conformal_n_anomalies_consistent() {
+    fn conformal_n_anomalies_consistent() -> AnomalyResult<()> {
         let cal: Vec<f64> = (0..50).map(|i| i as f64).collect();
         let cfg = ConformalConfig::default();
         let det = conformal_calibrate(cal, cfg);
         // Mix of in-range and out-of-range scores.
         let test = vec![10.0_f64, 1000.0, 25.0, 999.0, 5.0];
-        let result = conformal_predict(&det, &test).unwrap();
+        let result = conformal_predict(&det, &test)?;
         let counted = result.labels.iter().filter(|&&l| l == -1).count();
         assert_eq!(result.n_anomalies, counted);
+        Ok(())
     }
 }

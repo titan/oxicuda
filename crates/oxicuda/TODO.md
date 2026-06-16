@@ -6,7 +6,7 @@ Umbrella crate that re-exports the entire OxiCUDA stack under a single dependenc
 
 ## Implementation Status
 
-**Actual: 18,764 SLoC (44 files) -- Estimated: 46K-72K SLoC (estimation.md Vol.5 integration portion)**
+**Actual: 21,994 SLoC (49 files) -- Estimated: 46K-72K SLoC (estimation.md Vol.5 integration portion)**
 
 Current implementation re-exports all 11 sub-crates (driver, memory, launch, ptx, autotune, blas, dnn, fft, sparse, solver, rand) with feature gates, provides the `init()` entry point, a `features` module for compile-time feature detection, a prelude with core type re-exports, the ComputeBackend trait with CudaBackend implementation, and three ecosystem backends: OxiONNX GPU inference (onnx_backend), ToRSh tensor operations (tensor_backend), and TrustformeRS transformer inference (transformer_backend).
 
@@ -65,12 +65,12 @@ Current implementation re-exports all 11 sub-crates (driver, memory, launch, ptx
 
 | Metric | Estimated (Vol.5 integration) | Actual |
 |--------|------------------------------|--------|
-| SLoC | 46K-72K | 18,764 |
-| Files | ~10-15 | 44 |
+| SLoC | 46K-72K | 21,994 |
+| Files | ~10-15 | 49 |
 | Coverage | Re-exports + ecosystem backends | Re-exports + ONNX/ToRSh/TrustformeRS backends |
 | Ratio | -- | ~30% of estimate |
 
-The estimation included SciRS2 ComputeBackend implementation (~10K-15K), oxionnx GPU backend (~15K-25K), ToRSh backend (~10K-15K), TrustformeRS backend (~8K-12K), and CI/CD tooling (~6K-10K). The current 18,764-SLoC umbrella crate provides re-exports, ComputeBackend trait, and three ecosystem backends (ONNX, ToRSh, TrustformeRS). Remaining: WASM+WebGPU backend (P2).
+The estimation included SciRS2 ComputeBackend implementation (~10K-15K), oxionnx GPU backend (~15K-25K), ToRSh backend (~10K-15K), TrustformeRS backend (~8K-12K), and CI/CD tooling (~6K-10K). The current 21,994-SLoC umbrella crate provides re-exports, ComputeBackend trait, and three ecosystem backends (ONNX, ToRSh, TrustformeRS). Remaining: WASM+WebGPU backend (P2).
 
 ---
 
@@ -173,7 +173,7 @@ The following 6 conditions define v1.0 readiness:
 
 **Default-features dep tree (top 30 lines):**
 ```
-oxicuda v0.1.5 (/Users/kitasan/work/oxicuda/crates/oxicuda)
+oxicuda v0.2.0 (crates/oxicuda)
 ├── half v2.7.1
 │   ├── bytemuck v1.25.0
 │   │   └── bytemuck_derive v1.10.2 (proc-macro)
@@ -195,8 +195,8 @@ oxicuda v0.1.5 (/Users/kitasan/work/oxicuda/crates/oxicuda)
 │           ├── proc-macro2 v1.0.106 (*)
 │           ├── quote v1.0.45 (*)
 │           └── syn v2.0.117 (*)
-├── oxicuda-backend v0.1.5 (/Users/kitasan/work/oxicuda/crates/oxicuda-backend)
-├── oxicuda-driver v0.1.5 (/Users/kitasan/work/oxicuda/crates/oxicuda-driver)
+├── oxicuda-backend v0.2.0 (crates/oxicuda-backend)
+├── oxicuda-driver v0.2.0 (crates/oxicuda-driver)
 │   ├── libloading v0.9.0
 │   │   └── cfg-if v1.0.4
 │   ├── thiserror v2.0.18
@@ -207,7 +207,7 @@ oxicuda v0.1.5 (/Users/kitasan/work/oxicuda/crates/oxicuda)
 
 **All-features dep tree (top 30 lines):**
 ```
-oxicuda v0.1.5 (/Users/kitasan/work/oxicuda/crates/oxicuda)
+oxicuda v0.2.0 (crates/oxicuda)
 ├── half v2.7.1
 │   ├── bytemuck v1.25.0
 │   │   └── bytemuck_derive v1.10.2 (proc-macro)

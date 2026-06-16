@@ -10,6 +10,7 @@ use crate::community::label_propagation::label_propagation;
 use crate::community::louvain::louvain_communities;
 use crate::connectivity::articulation_points::articulation_points;
 use crate::connectivity::bridges_tarjan::bridges_tarjan;
+use crate::connectivity::k_core::{degeneracy, k_core_decomposition};
 use crate::connectivity::scc_kosaraju::scc_kosaraju;
 use crate::connectivity::scc_tarjan::scc_tarjan;
 use crate::eulerian::hierholzer::eulerian_circuit_hierholzer;
@@ -32,6 +33,8 @@ use crate::shortest_path::a_star::a_star;
 use crate::shortest_path::bellman_ford::bellman_ford;
 use crate::shortest_path::dijkstra::dijkstra;
 use crate::shortest_path::floyd_warshall::floyd_warshall;
+use crate::shortest_path::transitive_closure::transitive_closure;
+use crate::shortest_path::transitive_reduction::transitive_reduction;
 use crate::topological::kahn::topo_sort_kahn;
 use crate::traversal::bfs::bfs_levels;
 use crate::traversal::dfs::dfs_iterative;
@@ -493,5 +496,65 @@ fn e2e_ptx_all_sm() {
             assert!(!s.is_empty());
             assert!(s.contains(".visible .entry"));
         }
+    }
+}
+
+// 31. Transitive reduction preserves the transitive closure (defining property).
+#[test]
+fn e2e_reduction_preserves_closure() {
+    // A non-trivial DAG with several redundant long edges.
+    let mut g = AdjacencyList::new(7);
+    for (u, v) in [
+        (0, 1),
+        (0, 2),
+        (0, 3),
+        (0, 6),
+        (1, 3),
+        (1, 4),
+        (2, 4),
+        (2, 5),
+        (3, 6),
+        (4, 6),
+        (5, 6),
+        (1, 6),
+    ] {
+        g.add_edge(u, v).expect("ok");
+    }
+    let reduced = transitive_reduction(&g).expect("ok");
+    let closure_orig = transitive_closure(&g, false).expect("ok");
+    let closure_reduced = transitive_closure(&reduced, false).expect("ok");
+    // Closures must be byte-identical, and the reduction must be no larger.
+    assert_eq!(closure_orig.matrix(), closure_reduced.matrix());
+    assert!(reduced.num_edges() <= g.num_edges());
+}
+
+// 32. k-core degeneracy on the same triangle-plus-pendant graph used elsewhere.
+#[test]
+fn e2e_kcore_degeneracy_triangle_pendant() {
+    // Triangle {0,1,2} plus pendant 3-2 -> cores [2,2,2,1], degeneracy 2.
+    let mut g = AdjacencyList::new(4);
+    g.add_undirected_edge(0, 1).expect("ok");
+    g.add_undirected_edge(1, 2).expect("ok");
+    g.add_undirected_edge(0, 2).expect("ok");
+    g.add_undirected_edge(3, 2).expect("ok");
+    let res = k_core_decomposition(&g).expect("ok");
+    assert_eq!(res.core_number, vec![2, 2, 2, 1]);
+    assert_eq!(res.degeneracy, 2);
+    assert_eq!(degeneracy(&g).expect("ok"), 2);
+}
+
+// 33. Transitive closure of a chain matches BFS reachability from the source.
+#[test]
+fn e2e_closure_chain_matches_bfs() {
+    let mut g = AdjacencyList::new(5);
+    for i in 0..4 {
+        g.add_edge(i, i + 1).expect("ok");
+    }
+    let tc = transitive_closure(&g, false).expect("ok");
+    // Reachability from source 0 via crate BFS (directed): all of 1..=4 reached.
+    let lv = bfs_levels(&g, 0).expect("ok");
+    for t in 0..5 {
+        let by_bfs = lv[t] != usize::MAX && t != 0;
+        assert_eq!(tc.reachable(0, t).expect("ok"), by_bfs, "vertex {t}");
     }
 }

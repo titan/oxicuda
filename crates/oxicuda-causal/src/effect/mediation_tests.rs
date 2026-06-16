@@ -193,7 +193,7 @@ fn no_mediation_dgp_acme_near_zero() {
         n_simulations: 500,
         seed: 7,
     };
-    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
     assert!(r.acme.abs() < 0.10, "ACME = {} (expected ≈ 0)", r.acme);
 }
 
@@ -210,7 +210,7 @@ fn all_mediation_dgp_ade_near_zero() {
         n_simulations: 500,
         seed: 8,
     };
-    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
     assert!(r.ade.abs() < 0.15, "ADE = {} (expected ≈ 0)", r.ade);
 }
 
@@ -224,7 +224,7 @@ fn total_equals_acme_plus_ade() {
         n_simulations: 200,
         seed: 9,
     };
-    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
     assert!(
         (r.total_effect - (r.acme + r.ade)).abs() < 1e-6,
         "total={} acme+ade={}",
@@ -243,8 +243,8 @@ fn deterministic_under_same_seed() {
         n_simulations: 200,
         seed: 42,
     };
-    let r1 = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
-    let r2 = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+    let r1 = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
+    let r2 = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
     assert_eq!(r1.acme, r2.acme);
     assert_eq!(r1.ade, r2.ade);
     assert_eq!(r1.acme_ci, r2.acme_ci);
@@ -270,7 +270,7 @@ fn cis_contain_truth_on_synthetic_dgp() {
             n_simulations: 500,
             seed: seed as u64,
         };
-        let r = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+        let r = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
         if r.acme_ci.0 <= acme_truth && acme_truth <= r.acme_ci.1 {
             covered_acme += 1;
         }
@@ -296,7 +296,7 @@ fn ci_lower_below_upper() {
         n_simulations: 200,
         seed: 13,
     };
-    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
     assert!(r.acme_ci.0 <= r.acme_ci.1);
     assert!(r.ade_ci.0 <= r.ade_ci.1);
 }
@@ -309,7 +309,7 @@ fn prop_mediated_finite_when_total_nonzero() {
         n_simulations: 200,
         seed: 15,
     };
-    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
     assert!(r.total_effect.abs() > 0.05);
     assert!(r.prop_mediated.is_finite());
 }
@@ -323,7 +323,7 @@ fn result_n_matches_input() {
         n_simulations: 100,
         seed: 17,
     };
-    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
     assert_eq!(r.n, n);
 }
 
@@ -335,7 +335,7 @@ fn acme_ade_are_finite() {
         n_simulations: 100,
         seed: 19,
     };
-    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).unwrap();
+    let r = Mediation::estimate(&y, &t, &m, &x, &cfg).expect("estimate should succeed");
     assert!(r.acme.is_finite());
     assert!(r.ade.is_finite());
     assert!(r.total_effect.is_finite());
@@ -351,8 +351,8 @@ fn larger_gamma_m_increases_acme() {
         n_simulations: 200,
         seed: 22,
     };
-    let r0 = Mediation::estimate(&y0, &t0, &m0, &x0, &cfg).unwrap();
-    let r1 = Mediation::estimate(&y1, &t1, &m1, &x1, &cfg).unwrap();
+    let r0 = Mediation::estimate(&y0, &t0, &m0, &x0, &cfg).expect("estimate should succeed");
+    let r1 = Mediation::estimate(&y1, &t1, &m1, &x1, &cfg).expect("estimate should succeed");
     assert!(
         r1.acme > r0.acme + 0.3,
         "acme small={} large={}",

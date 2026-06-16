@@ -8,7 +8,7 @@ neuroevolution (NEAT). Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) 
 
 ## Implementation Status
 
-**Actual: 4,748 lines / 3,686 SLoC (27 files)** — covers GA building blocks, CMA-ES, DE,
+**Actual: 17,544 SLoC (55 files)** — covers GA building blocks, CMA-ES, DE,
 NSGA-II, MOEA/D, NEAT, PSO, ACO, multi-objective metrics, and 7 PTX kernels × 6 SM
 versions. All algorithms are implemented end-to-end in pure Rust with no external
 linear-algebra or RNG dependencies.
@@ -98,6 +98,7 @@ linear-algebra or RNG dependencies.
   rules, stochastic ranking, epsilon-constrained variants (`genetic/constraints.rs`)
 
 #### P1 — Algorithmic Coverage
+- [x] `evolution/de/de_variants.rs` / `DeVariants` — consolidated DE strategy collection: DE/rand/1, DE/best/1, DE/rand-to-best/1, DE/rand/2, DE/current-to-best/2; unified `DeVariant` enum with `mutate()` dispatch; `DeVariants` registry allowing runtime strategy selection
 - [x] `evolution/de/sade.rs` — SaDE self-adaptive Differential Evolution with
   4-strategy probability adaptation and Cauchy/Normal CR/F sampling
 - [x] `multiobjective/sms_emoa.rs` — SMS-EMOA hypervolume-based selection for 2-3 objectives
@@ -123,6 +124,10 @@ linear-algebra or RNG dependencies.
   WFG1-9 standard test suites
 
 #### P2 — GPU / Architecture-Specific
+- [x] OpenAI ES gradient estimator (`evolution/openai_es.rs`) — Salimans 2017 OpenAI: Gaussian perturbation-based policy gradient estimator with antithetic sampling and rank normalisation of fitness; `OpenAiEs`
+- [x] Natural Evolution Strategies (`evolution/nes.rs`) — Wierstra 2014 JMLR: gradient ascent on expected fitness using the natural gradient (Fisher information matrix); `NaturalEvolutionStrategies`
+- [ ] NEAT + Novelty Search (`neuroevolution/neat_novelty.rs`) — Lehman 2011 Ecal: novelty-archive-driven NEAT where fitness replaced by behavioural novelty metric for deceptive tasks; `NeatNovelty`
+- [x] RVEA reference-vector-guided evolutionary algorithm (`multiobjective/rvea.rs`) — Cheng 2016 IEEE TEC: adaptive reference vector generation + cosine-angle-based scalarisation for many-objective optimisation; `Rvea`
 - [ ] PTX kernel for batched fitness evaluation across populations (currently a
   single-population kernel)
 - [ ] PTX kernel for parallel non-dominated sort (Jensen 2003 / Mishra 2018)

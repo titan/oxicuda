@@ -463,10 +463,11 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn single_tensor_no_contractions() {
-        let spec = TensorSpec::new(vec![0, 1], vec![3, 4]).unwrap();
+        let spec = TensorSpec::new(vec![0, 1], vec![3, 4]).expect("new should succeed");
         let index_dims = make_idx(&[(0, 3), (1, 4)]);
         let config = ContractionPathConfig::default();
-        let path = optimal_contraction_path(&[spec], &index_dims, &config).unwrap();
+        let path = optimal_contraction_path(&[spec], &index_dims, &config)
+            .expect("optimal_contraction_path should succeed");
         assert_eq!(path.n_tensors, 1);
         assert_eq!(path.pairs.len(), 0);
         assert_eq!(path.total_flops, 0);
@@ -479,11 +480,12 @@ mod tests {
     #[test]
     fn two_tensors_matrix_multiply_flops() {
         // A[i,j], B[j,k]; shared index j
-        let a = TensorSpec::new(vec![0, 1], vec![2, 3]).unwrap(); // i=0,j=1
-        let b = TensorSpec::new(vec![1, 2], vec![3, 4]).unwrap(); // j=1,k=2
+        let a = TensorSpec::new(vec![0, 1], vec![2, 3]).expect("new should succeed"); // i=0,j=1
+        let b = TensorSpec::new(vec![1, 2], vec![3, 4]).expect("new should succeed"); // j=1,k=2
         let index_dims = make_idx(&[(0, 2), (1, 3), (2, 4)]);
         let config = ContractionPathConfig::default();
-        let path = optimal_contraction_path(&[a, b], &index_dims, &config).unwrap();
+        let path = optimal_contraction_path(&[a, b], &index_dims, &config)
+            .expect("optimal_contraction_path should succeed");
         assert_eq!(path.pairs.len(), 1);
         assert_eq!(path.total_flops, 24); // 2*3*4
         assert_eq!(path.pairs[0], (0, 1));
@@ -526,12 +528,13 @@ mod tests {
     #[test]
     fn three_tensors_optimal_order() {
         // A[0,1], B[1,2], C[2,3]; dims: 0=2,1=100,2=2,3=2
-        let a = TensorSpec::new(vec![0, 1], vec![2, 100]).unwrap();
-        let b = TensorSpec::new(vec![1, 2], vec![100, 2]).unwrap();
-        let c = TensorSpec::new(vec![2, 3], vec![2, 2]).unwrap();
+        let a = TensorSpec::new(vec![0, 1], vec![2, 100]).expect("new should succeed");
+        let b = TensorSpec::new(vec![1, 2], vec![100, 2]).expect("new should succeed");
+        let c = TensorSpec::new(vec![2, 3], vec![2, 2]).expect("new should succeed");
         let index_dims = make_idx(&[(0, 2), (1, 100), (2, 2), (3, 2)]);
         let config = ContractionPathConfig::default();
-        let path = optimal_contraction_path(&[a, b, c], &index_dims, &config).unwrap();
+        let path = optimal_contraction_path(&[a, b, c], &index_dims, &config)
+            .expect("optimal_contraction_path should succeed");
         assert_eq!(path.pairs.len(), 2);
         // Optimal: contract A and B first (tensors 0,1), then with C
         // This means pairs[0] = (0,1), pairs[1] = (0,1) or similar
@@ -549,7 +552,7 @@ mod tests {
             prefer_memory: false,
         };
         let tensors: Vec<TensorSpec> = (0..6)
-            .map(|i| TensorSpec::new(vec![i], vec![2]).unwrap())
+            .map(|i| TensorSpec::new(vec![i], vec![2]).expect("new should succeed"))
             .collect();
         let index_dims: Vec<(usize, usize)> = (0..6).map(|i| (i, 2)).collect();
         let result = optimal_contraction_path(&tensors, &index_dims, &config);
@@ -578,11 +581,12 @@ mod tests {
     fn outer_product_no_shared_indices() {
         // A[0],B[1],C[2],D[3], all dim=3 → full outer product
         let tensors: Vec<TensorSpec> = (0..4)
-            .map(|i| TensorSpec::new(vec![i], vec![3]).unwrap())
+            .map(|i| TensorSpec::new(vec![i], vec![3]).expect("new should succeed"))
             .collect();
         let index_dims: Vec<(usize, usize)> = (0..4).map(|i| (i, 3)).collect();
         let config = ContractionPathConfig::default();
-        let path = optimal_contraction_path(&tensors, &index_dims, &config).unwrap();
+        let path = optimal_contraction_path(&tensors, &index_dims, &config)
+            .expect("optimal_contraction_path should succeed");
         assert_eq!(path.pairs.len(), 3);
         // All contractions are outer products; DP finds the minimum-cost order.
         // Optimal: pair up (A×B) and (C×D) first, then combine:
@@ -597,11 +601,12 @@ mod tests {
     #[test]
     fn full_shared_indices_scalar_result() {
         // A[0,1], B[0,1] — both share all indices → result is scalar
-        let a = TensorSpec::new(vec![0, 1], vec![4, 5]).unwrap();
-        let b = TensorSpec::new(vec![0, 1], vec![4, 5]).unwrap();
+        let a = TensorSpec::new(vec![0, 1], vec![4, 5]).expect("new should succeed");
+        let b = TensorSpec::new(vec![0, 1], vec![4, 5]).expect("new should succeed");
         let index_dims = make_idx(&[(0, 4), (1, 5)]);
         let config = ContractionPathConfig::default();
-        let path = optimal_contraction_path(&[a, b], &index_dims, &config).unwrap();
+        let path = optimal_contraction_path(&[a, b], &index_dims, &config)
+            .expect("optimal_contraction_path should succeed");
         assert_eq!(path.total_flops, 20); // 4*5
         // result has 0 indices → scalar
         let idx_map = build_index_dims(&index_dims);
@@ -621,12 +626,13 @@ mod tests {
     #[test]
     fn matrix_chain_optimal_matches_known_result() {
         // Index 0:row_A=10, 1:col_A=row_B=30, 2:col_B=row_C=5, 3:col_C=60
-        let a = TensorSpec::new(vec![0, 1], vec![10, 30]).unwrap();
-        let b = TensorSpec::new(vec![1, 2], vec![30, 5]).unwrap();
-        let c = TensorSpec::new(vec![2, 3], vec![5, 60]).unwrap();
+        let a = TensorSpec::new(vec![0, 1], vec![10, 30]).expect("new should succeed");
+        let b = TensorSpec::new(vec![1, 2], vec![30, 5]).expect("new should succeed");
+        let c = TensorSpec::new(vec![2, 3], vec![5, 60]).expect("new should succeed");
         let index_dims = make_idx(&[(0, 10), (1, 30), (2, 5), (3, 60)]);
         let config = ContractionPathConfig::default();
-        let path = optimal_contraction_path(&[a, b, c], &index_dims, &config).unwrap();
+        let path = optimal_contraction_path(&[a, b, c], &index_dims, &config)
+            .expect("optimal_contraction_path should succeed");
         // Optimal: (AB)C costs 10*30*5 + 10*5*60 = 1500+3000 = 4500
         assert_eq!(path.total_flops, 4500);
         assert_eq!(path.pairs.len(), 2);
@@ -639,12 +645,13 @@ mod tests {
     fn optimal_le_greedy_for_small_networks() {
         // Asymmetric network where greedy may not be optimal
         // A[0,1] dim 2,50; B[1,2] dim 50,3; C[0,2] dim 2,3; D[2,3] dim 3,4
-        let a = TensorSpec::new(vec![0, 1], vec![2, 50]).unwrap();
-        let b = TensorSpec::new(vec![1, 2], vec![50, 3]).unwrap();
-        let c = TensorSpec::new(vec![0, 2], vec![2, 3]).unwrap();
-        let d = TensorSpec::new(vec![2, 3], vec![3, 4]).unwrap();
+        let a = TensorSpec::new(vec![0, 1], vec![2, 50]).expect("new should succeed");
+        let b = TensorSpec::new(vec![1, 2], vec![50, 3]).expect("new should succeed");
+        let c = TensorSpec::new(vec![0, 2], vec![2, 3]).expect("new should succeed");
+        let d = TensorSpec::new(vec![2, 3], vec![3, 4]).expect("new should succeed");
         let index_dims = make_idx(&[(0, 2), (1, 50), (2, 3), (3, 4)]);
-        let (opt, gf) = compare_with_greedy(&[a, b, c, d], &index_dims).unwrap();
+        let (opt, gf) = compare_with_greedy(&[a, b, c, d], &index_dims)
+            .expect("compare_with_greedy should succeed");
         assert!(
             opt.total_flops <= gf,
             "optimal ({}) should be ≤ greedy ({})",
@@ -663,11 +670,15 @@ mod tests {
         let dim = 4usize;
         // Each tensor i has indices (i, (i+1)%n) with dimension dim
         let tensors: Vec<TensorSpec> = (0..n)
-            .map(|i| TensorSpec::new(vec![i, (i + 1) % n], vec![dim, dim]).unwrap())
+            .map(|i| {
+                TensorSpec::new(vec![i, (i + 1) % n], vec![dim, dim])
+                    .expect("value should be present")
+            })
             .collect();
         let index_dims: Vec<(usize, usize)> = (0..n).map(|i| (i, dim)).collect();
         let config = ContractionPathConfig::default();
-        let path = optimal_contraction_path(&tensors, &index_dims, &config).unwrap();
+        let path = optimal_contraction_path(&tensors, &index_dims, &config)
+            .expect("optimal_contraction_path should succeed");
         assert_eq!(path.pairs.len(), n - 1);
         // Sanity: total flops should be positive
         assert!(path.total_flops > 0);
@@ -678,9 +689,9 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn prefer_memory_produces_valid_path() {
-        let a = TensorSpec::new(vec![0, 1], vec![3, 3]).unwrap();
-        let b = TensorSpec::new(vec![1, 2], vec![3, 3]).unwrap();
-        let c = TensorSpec::new(vec![2, 0], vec![3, 3]).unwrap();
+        let a = TensorSpec::new(vec![0, 1], vec![3, 3]).expect("new should succeed");
+        let b = TensorSpec::new(vec![1, 2], vec![3, 3]).expect("new should succeed");
+        let c = TensorSpec::new(vec![2, 0], vec![3, 3]).expect("new should succeed");
         let index_dims = make_idx(&[(0, 3), (1, 3), (2, 3)]);
         let config_mem = ContractionPathConfig {
             max_n_tensors: 20,
@@ -689,8 +700,9 @@ mod tests {
         let config_flops = ContractionPathConfig::default();
         let path_mem =
             optimal_contraction_path(&[a.clone(), b.clone(), c.clone()], &index_dims, &config_mem)
-                .unwrap();
-        let path_flops = optimal_contraction_path(&[a, b, c], &index_dims, &config_flops).unwrap();
+                .expect("value should be present");
+        let path_flops = optimal_contraction_path(&[a, b, c], &index_dims, &config_flops)
+            .expect("optimal_contraction_path should succeed");
         // Both must produce a valid 2-step path
         assert_eq!(path_mem.pairs.len(), 2);
         assert_eq!(path_flops.pairs.len(), 2);
@@ -734,13 +746,14 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn chain_of_4_optimal_flops() {
-        let a = TensorSpec::new(vec![0, 1], vec![2, 3]).unwrap();
-        let b = TensorSpec::new(vec![1, 2], vec![3, 4]).unwrap();
-        let c = TensorSpec::new(vec![2, 3], vec![4, 5]).unwrap();
-        let d = TensorSpec::new(vec![3, 4], vec![5, 6]).unwrap();
+        let a = TensorSpec::new(vec![0, 1], vec![2, 3]).expect("new should succeed");
+        let b = TensorSpec::new(vec![1, 2], vec![3, 4]).expect("new should succeed");
+        let c = TensorSpec::new(vec![2, 3], vec![4, 5]).expect("new should succeed");
+        let d = TensorSpec::new(vec![3, 4], vec![5, 6]).expect("new should succeed");
         let index_dims = make_idx(&[(0, 2), (1, 3), (2, 4), (3, 5), (4, 6)]);
         let config = ContractionPathConfig::default();
-        let path = optimal_contraction_path(&[a, b, c, d], &index_dims, &config).unwrap();
+        let path = optimal_contraction_path(&[a, b, c, d], &index_dims, &config)
+            .expect("optimal_contraction_path should succeed");
         assert_eq!(path.pairs.len(), 3);
         // Optimal ((AB)C)D = 124
         assert_eq!(path.total_flops, 124);

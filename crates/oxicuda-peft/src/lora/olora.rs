@@ -380,7 +380,8 @@ mod tests {
     #[test]
     fn a_orthonormal_after_init() {
         let cfg = default_cfg(8, 5, 3, 6.0);
-        let adapter = OloraAdapter::new(cfg, 7).unwrap();
+        let adapter =
+            OloraAdapter::new(cfg, 7).expect("OloraAdapter::new should succeed with valid config");
         assert!(
             adapter.is_a_orthonormal(1e-9),
             "rows of A must be orthonormal after Gram-Schmidt"
@@ -390,17 +391,22 @@ mod tests {
     #[test]
     fn a_reproducible_across_seeds() {
         let cfg = default_cfg(7, 5, 3, 4.0);
-        let a1 = OloraAdapter::new(cfg.clone(), 42).unwrap();
-        let a2 = OloraAdapter::new(cfg, 42).unwrap();
+        let a1 = OloraAdapter::new(cfg.clone(), 42)
+            .expect("OloraAdapter::new should succeed with valid config");
+        let a2 =
+            OloraAdapter::new(cfg, 42).expect("OloraAdapter::new should succeed with valid config");
         assert_eq!(a1.a, a2.a);
     }
 
     #[test]
     fn initial_forward_is_zero_with_zero_b() {
         let cfg = default_cfg(6, 4, 2, 4.0);
-        let adapter = OloraAdapter::new(cfg, 11).unwrap();
+        let adapter =
+            OloraAdapter::new(cfg, 11).expect("OloraAdapter::new should succeed with valid config");
         let x: Vec<f64> = (0..6).map(|i| i as f64 - 2.5).collect();
-        let y = adapter.forward(&x).unwrap();
+        let y = adapter
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         assert_eq!(y.len(), 4);
         for &v in &y {
             assert!(v.abs() < 1e-15, "expected zero output, got {v}");
@@ -410,29 +416,39 @@ mod tests {
     #[test]
     fn forward_dimensions_correct() {
         let cfg = default_cfg(7, 9, 3, 6.0);
-        let mut adapter = OloraAdapter::new(cfg, 11).unwrap();
+        let mut adapter =
+            OloraAdapter::new(cfg, 11).expect("OloraAdapter::new should succeed with valid config");
         for (i, b) in adapter.b.iter_mut().enumerate() {
             *b = (i as f64 + 1.0) * 0.05;
         }
         let x = vec![1.0_f64; 7];
-        let y = adapter.forward(&x).unwrap();
+        let y = adapter
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         assert_eq!(y.len(), 9);
     }
 
     #[test]
     fn backward_shapes_correct() {
         let cfg = default_cfg(5, 4, 2, 4.0);
-        let adapter = OloraAdapter::new(cfg, 3).unwrap();
+        let adapter =
+            OloraAdapter::new(cfg, 3).expect("OloraAdapter::new should succeed with valid config");
         let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3];
         let grad_y = vec![0.1_f64, -0.2, 0.3, 0.4];
-        let (grad_a, grad_b) = adapter.backward(&x, &grad_y).unwrap();
+        let (grad_a, grad_b) = adapter
+            .backward(&x, &grad_y)
+            .expect("backward pass should succeed with valid input");
         assert_eq!(grad_a.len(), 2 * 5);
         assert_eq!(grad_b.len(), 4 * 2);
     }
 
     fn loss_at(a: &OloraAdapter, x: &[f64], gy: &[f64]) -> f64 {
         gy.iter()
-            .zip(a.forward(x).unwrap().iter())
+            .zip(
+                a.forward(x)
+                    .expect("forward pass should succeed with valid input")
+                    .iter(),
+            )
             .map(|(g, y)| g * y)
             .sum()
     }
@@ -440,7 +456,8 @@ mod tests {
     #[test]
     fn backward_matches_finite_differences() {
         let cfg = default_cfg(4, 3, 2, 4.0);
-        let mut adapter = OloraAdapter::new(cfg, 99).unwrap();
+        let mut adapter =
+            OloraAdapter::new(cfg, 99).expect("OloraAdapter::new should succeed with valid config");
         for (i, b) in adapter.b.iter_mut().enumerate() {
             *b = 0.1 * (i as f64 + 1.0);
         }
@@ -448,7 +465,9 @@ mod tests {
         adapter.a[3] -= 0.07;
         let x = vec![0.5_f64, -1.0, 0.25, 0.75];
         let gy = vec![1.0_f64, -0.5, 0.25];
-        let (grad_a, grad_b) = adapter.backward(&x, &gy).unwrap();
+        let (grad_a, grad_b) = adapter
+            .backward(&x, &gy)
+            .expect("backward pass should succeed with valid input");
         let eps = 1e-6_f64;
         for (k, &g_k) in grad_b.iter().enumerate() {
             let s = adapter.b[k];
@@ -472,18 +491,21 @@ mod tests {
 
     #[test]
     fn sgd_reduces_loss() {
-        let mut adapter = OloraAdapter::new(default_cfg(6, 4, 2, 4.0), 21).unwrap();
+        let mut adapter = OloraAdapter::new(default_cfg(6, 4, 2, 4.0), 21)
+            .expect("OloraAdapter::new should succeed with valid config");
         let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3, 0.75];
         let target = {
             let mut probe = adapter.clone();
             for (i, b) in probe.b.iter_mut().enumerate() {
                 *b = 0.4 * (i as f64 + 1.0);
             }
-            probe.forward(&x).unwrap()
+            probe
+                .forward(&x)
+                .expect("forward pass should succeed with valid input")
         };
         let mse = |a: &OloraAdapter| -> f64 {
             a.forward(&x)
-                .unwrap()
+                .expect("forward pass should succeed with valid input")
                 .iter()
                 .zip(target.iter())
                 .map(|(p, q)| (p - q).powi(2))
@@ -491,10 +513,16 @@ mod tests {
         };
         let initial = mse(&adapter);
         for _ in 0..200 {
-            let y = adapter.forward(&x).unwrap();
+            let y = adapter
+                .forward(&x)
+                .expect("forward pass should succeed with valid input");
             let gy: Vec<f64> = y.iter().zip(target.iter()).map(|(p, q)| p - q).collect();
-            let (ga, gb) = adapter.backward(&x, &gy).unwrap();
-            adapter.apply_grads(&ga, &gb, 0.02).unwrap();
+            let (ga, gb) = adapter
+                .backward(&x, &gy)
+                .expect("backward pass should succeed with valid input");
+            adapter
+                .apply_grads(&ga, &gb, 0.02)
+                .expect("gradient application should succeed");
         }
         let final_loss = mse(&adapter);
         assert!(
@@ -506,7 +534,8 @@ mod tests {
     #[test]
     fn a_loses_orthonormality_after_updates() {
         let cfg = default_cfg(6, 5, 3, 4.0);
-        let mut adapter = OloraAdapter::new(cfg, 33).unwrap();
+        let mut adapter =
+            OloraAdapter::new(cfg, 33).expect("OloraAdapter::new should succeed with valid config");
         assert!(adapter.is_a_orthonormal(1e-9));
         // Apply a single hand-crafted grad_a that we know is non-trivial — this directly
         // demonstrates that the adapter is "actually trainable" (the update path mutates
@@ -515,7 +544,9 @@ mod tests {
             .map(|i| 0.1 * (i as f64 + 1.0))
             .collect();
         let grad_b = vec![0.0_f64; adapter.b.len()];
-        adapter.apply_grads(&grad_a, &grad_b, 0.5).unwrap();
+        adapter
+            .apply_grads(&grad_a, &grad_b, 0.5)
+            .expect("gradient application should succeed");
         assert!(
             !adapter.is_a_orthonormal(1e-6),
             "A should drift from orthonormality once it is updated"
@@ -541,12 +572,15 @@ mod tests {
 
     #[test]
     fn alpha_zero_produces_zero_forward() {
-        let mut adapter = OloraAdapter::new(default_cfg(5, 4, 2, 0.0), 77).unwrap();
+        let mut adapter = OloraAdapter::new(default_cfg(5, 4, 2, 0.0), 77)
+            .expect("OloraAdapter::new should succeed with valid config");
         for (i, b) in adapter.b.iter_mut().enumerate() {
             *b = 0.1 * (i as f64 + 1.0);
         }
         let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3];
-        let y = adapter.forward(&x).unwrap();
+        let y = adapter
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         for &v in &y {
             assert!(v.abs() < 1e-15, "α=0 must zero out adapter, got {v}");
         }
@@ -554,7 +588,8 @@ mod tests {
 
     #[test]
     fn dim_mismatch_rejected() {
-        let mut adapter = OloraAdapter::new(default_cfg(5, 3, 2, 2.0), 0).unwrap();
+        let mut adapter = OloraAdapter::new(default_cfg(5, 3, 2, 2.0), 0)
+            .expect("OloraAdapter::new should succeed with valid config");
         let dm = |r: PeftResult<Vec<f64>>| matches!(r, Err(PeftError::DimensionMismatch { .. }));
         assert!(dm(adapter.forward(&[1.0, 2.0, 3.0])));
         assert!(matches!(
@@ -596,20 +631,27 @@ mod tests {
 
     #[test]
     fn n_trainable_counts_a_plus_b() {
-        let adapter = OloraAdapter::new(default_cfg(8, 12, 4, 8.0), 0).unwrap();
+        let adapter = OloraAdapter::new(default_cfg(8, 12, 4, 8.0), 0)
+            .expect("OloraAdapter::new should succeed with valid config");
         assert_eq!(adapter.n_trainable(), 4 * (8 + 12));
     }
 
     #[test]
     fn scale_alpha_over_rank_applied() {
-        let mut a1 = OloraAdapter::new(default_cfg(5, 3, 2, 4.0), 33).unwrap();
-        let mut a2 = OloraAdapter::new(default_cfg(5, 3, 2, 8.0), 33).unwrap();
+        let mut a1 = OloraAdapter::new(default_cfg(5, 3, 2, 4.0), 33)
+            .expect("OloraAdapter::new should succeed with valid config");
+        let mut a2 = OloraAdapter::new(default_cfg(5, 3, 2, 8.0), 33)
+            .expect("OloraAdapter::new should succeed with valid config");
         let b_seed: Vec<f64> = (0..a1.b.len()).map(|i| 0.1 * (i as f64 + 1.0)).collect();
         a1.b.copy_from_slice(&b_seed);
         a2.b.copy_from_slice(&b_seed);
         let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3];
-        let y1 = a1.forward(&x).unwrap();
-        let y2 = a2.forward(&x).unwrap();
+        let y1 = a1
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
+        let y2 = a2
+            .forward(&x)
+            .expect("forward pass should succeed with valid input");
         for (v1, v2) in y1.iter().zip(y2.iter()) {
             assert!((2.0 * v1 - v2).abs() < 1e-12);
         }

@@ -681,8 +681,10 @@ mod tests {
             ..Default::default()
         };
         let (feats, lbls) = make_binary_separable(20, 2, 10.0);
-        let probe = linear_probe_fit(&feats, &lbls, 20, 2, &cfg).unwrap();
-        let preds = linear_probe_predict(&probe, &feats, 20).unwrap();
+        let probe =
+            linear_probe_fit(&feats, &lbls, 20, 2, &cfg).expect("linear_probe_fit should succeed");
+        let preds =
+            linear_probe_predict(&probe, &feats, 20).expect("linear_probe_predict should succeed");
         let acc = accuracy(&preds, &lbls);
         assert!(
             acc >= 0.9,
@@ -696,8 +698,10 @@ mod tests {
     fn predict_shape() {
         let cfg = LinearProbeConfig::default();
         let (feats, lbls) = make_binary_separable(20, 4, 5.0);
-        let probe = linear_probe_fit(&feats, &lbls, 20, 4, &cfg).unwrap();
-        let preds = linear_probe_predict(&probe, &feats, 20).unwrap();
+        let probe =
+            linear_probe_fit(&feats, &lbls, 20, 4, &cfg).expect("linear_probe_fit should succeed");
+        let preds =
+            linear_probe_predict(&probe, &feats, 20).expect("linear_probe_predict should succeed");
         assert_eq!(preds.len(), 20);
     }
 
@@ -712,8 +716,10 @@ mod tests {
             ..Default::default()
         };
         let (feats, lbls) = make_multiclass_separable(10, 4);
-        let probe = linear_probe_fit(&feats, &lbls, 30, 4, &cfg).unwrap();
-        let preds = linear_probe_predict(&probe, &feats, 30).unwrap();
+        let probe =
+            linear_probe_fit(&feats, &lbls, 30, 4, &cfg).expect("linear_probe_fit should succeed");
+        let preds =
+            linear_probe_predict(&probe, &feats, 30).expect("linear_probe_predict should succeed");
         let acc = accuracy(&preds, &lbls);
         assert!(
             (acc - 1.0).abs() < 1e-9,
@@ -731,7 +737,8 @@ mod tests {
         };
         let in_dim = 5;
         let (feats, lbls) = make_multiclass_separable(5, in_dim);
-        let probe = linear_probe_fit(&feats, &lbls, 15, in_dim, &cfg).unwrap();
+        let probe = linear_probe_fit(&feats, &lbls, 15, in_dim, &cfg)
+            .expect("linear_probe_fit should succeed");
         assert_eq!(probe.weights.len(), cfg.n_classes * (in_dim + 1));
         assert_eq!(probe.in_dim, in_dim);
         assert_eq!(probe.n_classes, cfg.n_classes);
@@ -750,7 +757,8 @@ mod tests {
         };
         // Build a larger separable dataset so each fold has enough training data.
         let (feats, lbls) = make_binary_separable(50, 4, 10.0);
-        let result = linear_probe_eval(&feats, &lbls, 50, 4, &cfg).unwrap();
+        let result = linear_probe_eval(&feats, &lbls, 50, 4, &cfg)
+            .expect("linear_probe_eval should succeed");
         assert!(
             result.mean_accuracy > 0.8,
             "expected mean_accuracy > 0.8, got {:.4}",
@@ -769,7 +777,8 @@ mod tests {
             ..Default::default()
         };
         let (feats, lbls) = make_binary_separable(50, 4, 10.0);
-        let result = linear_probe_eval(&feats, &lbls, 50, 4, &cfg).unwrap();
+        let result = linear_probe_eval(&feats, &lbls, 50, 4, &cfg)
+            .expect("linear_probe_eval should succeed");
         assert!(result.std_accuracy.is_finite());
         assert!(result.std_accuracy >= 0.0);
     }
@@ -785,7 +794,8 @@ mod tests {
             ..Default::default()
         };
         let (feats, lbls) = make_binary_separable(50, 4, 10.0);
-        let result = linear_probe_eval(&feats, &lbls, 50, 4, &cfg).unwrap();
+        let result = linear_probe_eval(&feats, &lbls, 50, 4, &cfg)
+            .expect("linear_probe_eval should succeed");
         assert!(
             result.macro_f1 >= 0.0 && result.macro_f1 <= 1.0,
             "macro_f1 = {:.4} out of [0, 1]",
@@ -804,7 +814,8 @@ mod tests {
             ..Default::default()
         };
         let (feats, lbls) = make_multiclass_separable(15, 4);
-        let result = linear_probe_eval(&feats, &lbls, 45, 4, &cfg).unwrap();
+        let result = linear_probe_eval(&feats, &lbls, 45, 4, &cfg)
+            .expect("linear_probe_eval should succeed");
         assert_eq!(result.per_class_f1.len(), 3);
     }
 
@@ -818,7 +829,7 @@ mod tests {
             a[i * n + i] = 1.0;
         }
         let b = vec![1.0, -2.0, std::f64::consts::PI, 0.0];
-        let x = cholesky_solve(&a, &b, n).unwrap();
+        let x = cholesky_solve(&a, &b, n).expect("cholesky_solve should succeed");
         for (xi, bi) in x.iter().zip(b.iter()) {
             assert!((xi - bi).abs() < 1e-12, "expected x={bi}, got {xi}");
         }
@@ -831,7 +842,7 @@ mod tests {
         // A = [[4,2,1],[2,5,3],[1,3,6]] — positive definite.
         let a = vec![4.0, 2.0, 1.0, 2.0, 5.0, 3.0, 1.0, 3.0, 6.0];
         let b = vec![1.0, 2.0, 3.0];
-        let x = cholesky_solve(&a, &b, 3).unwrap();
+        let x = cholesky_solve(&a, &b, 3).expect("cholesky_solve should succeed");
         // Verify A·x ≈ b.
         let ax0 = 4.0 * x[0] + 2.0 * x[1] + 1.0 * x[2];
         let ax1 = 2.0 * x[0] + 5.0 * x[1] + 3.0 * x[2];

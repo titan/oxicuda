@@ -3,6 +3,7 @@ pub mod als;
 #[allow(clippy::module_inception)]
 pub mod bpr;
 pub mod ease;
+pub mod ffm;
 pub mod fism;
 pub mod ials;
 #[allow(clippy::module_inception)]
@@ -11,6 +12,7 @@ pub mod slim;
 pub mod warp;
 
 pub use ease::{Ease, EaseConfig};
+pub use ffm::{Ffm, FfmConfig, FfmEntry};
 pub use fism::{Fism, FismConfig};
 pub use ials::{Ials, IalsConfig};
 pub use slim::{SlimConfig, SlimModel};

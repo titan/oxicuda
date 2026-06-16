@@ -26,6 +26,7 @@ pub mod batched;
 pub mod complex_gemm;
 pub mod elementwise;
 pub mod error;
+pub mod gemm;
 pub mod handle;
 pub mod level1;
 pub mod level2;
@@ -42,6 +43,7 @@ pub use algorithm_selection::{
     SwizzleMode,
 };
 pub use error::{BlasError, BlasResult};
+pub use gemm::{Bf16, bf16_gemm_error, naive_dgemm, sgemm_bf16, strassen, strassen_with_threshold};
 pub use handle::BlasHandle;
 pub use types::{
     DiagType, E4M3, E5M2, FillMode, GpuFloat, Layout, MathMode, MatrixDesc, MatrixDescMut,

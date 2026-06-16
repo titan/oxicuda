@@ -281,8 +281,8 @@ mod tests {
         let t: Vec<f32> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 0.0 }).collect();
         let y: Vec<f32> = (0..n).map(|i| x[i * d] + t[i]).collect();
         let mut forest = CausalForest::new(5, d, 3, &mut rng);
-        forest.fit(&x, &t, &y, n).unwrap();
-        let preds = forest.predict(&x, n).unwrap();
+        forest.fit(&x, &t, &y, n).expect("fit should succeed");
+        let preds = forest.predict(&x, n).expect("predict should succeed");
         assert_eq!(preds.len(), n);
     }
 }

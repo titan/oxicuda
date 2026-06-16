@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn forward_quantize_dequantize_int8() {
-        let fq = FakeQuantize::new(8, true, 1.0 / 127.0, 0).unwrap();
+        let fq = FakeQuantize::new(8, true, 1.0 / 127.0, 0).expect("new should succeed");
         // Input 1.0 → q = 127 → dequant = 127 / 127 ≈ 1.0
         let out = fq.forward(&[1.0_f32]);
         assert_abs_diff_eq!(out[0], 1.0, epsilon = 0.01);
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn forward_passthrough_when_disabled() {
-        let mut fq = FakeQuantize::new(8, true, 0.01, 0).unwrap();
+        let mut fq = FakeQuantize::new(8, true, 0.01, 0).expect("new should succeed");
         fq.enabled = false;
         let data = vec![1.5_f32, -2.3, 0.7];
         let out = fq.forward(&data);
@@ -202,10 +202,10 @@ mod tests {
 
     #[test]
     fn backward_ste_passthrough() {
-        let fq = FakeQuantize::new(8, true, 1.0 / 127.0, 0).unwrap();
+        let fq = FakeQuantize::new(8, true, 1.0 / 127.0, 0).expect("new should succeed");
         let x = vec![0.5_f32, -0.5];
         let grad = vec![1.0_f32, -1.0];
-        let ste = fq.backward(&grad, &x).unwrap();
+        let ste = fq.backward(&grad, &x).expect("backward should succeed");
         // x is within [-1, 1]: gradient passed through unchanged.
         assert_abs_diff_eq!(ste[0], 1.0, epsilon = 1e-6);
         assert_abs_diff_eq!(ste[1], -1.0, epsilon = 1e-6);
@@ -213,18 +213,18 @@ mod tests {
 
     #[test]
     fn backward_ste_zero_outside_range() {
-        let fq = FakeQuantize::new(8, true, 1.0 / 127.0, 0).unwrap();
+        let fq = FakeQuantize::new(8, true, 1.0 / 127.0, 0).expect("new should succeed");
         // x = ±2.0 is outside [-1, 127/127] float range
         let x = vec![2.0_f32, -2.0];
         let grad = vec![1.0_f32, 1.0];
-        let ste = fq.backward(&grad, &x).unwrap();
+        let ste = fq.backward(&grad, &x).expect("backward should succeed");
         assert_abs_diff_eq!(ste[0], 0.0, epsilon = 1e-6);
         assert_abs_diff_eq!(ste[1], 0.0, epsilon = 1e-6);
     }
 
     #[test]
     fn backward_dimension_mismatch_error() {
-        let fq = FakeQuantize::new(8, true, 0.01, 0).unwrap();
+        let fq = FakeQuantize::new(8, true, 0.01, 0).expect("new should succeed");
         let x = vec![0.5_f32; 3];
         let grad = vec![1.0_f32; 4];
         assert!(matches!(
@@ -259,20 +259,20 @@ mod tests {
 
     #[test]
     fn quant_range_int8_symmetric() {
-        let fq = FakeQuantize::new(8, true, 0.01, 0).unwrap();
+        let fq = FakeQuantize::new(8, true, 0.01, 0).expect("new should succeed");
         assert_eq!(fq.quant_range(), (-128, 127));
     }
 
     #[test]
     fn quant_range_int4_asymmetric() {
-        let fq = FakeQuantize::new(4, false, 0.01, 0).unwrap();
+        let fq = FakeQuantize::new(4, false, 0.01, 0).expect("new should succeed");
         assert_eq!(fq.quant_range(), (0, 15));
     }
 
     #[test]
     fn quantization_noise_zero_for_fine_scale() {
         // With scale = 1/127 and INT8, values in [-1, 1] should have small noise.
-        let fq = FakeQuantize::new(8, true, 1.0 / 127.0, 0).unwrap();
+        let fq = FakeQuantize::new(8, true, 1.0 / 127.0, 0).expect("new should succeed");
         let data: Vec<f32> = (0..128).map(|i| i as f32 / 128.0 - 0.5).collect();
         let noise = fq.quantization_noise(&data);
         assert!(noise < 1e-5, "noise too high: {noise}");
@@ -280,15 +280,16 @@ mod tests {
 
     #[test]
     fn update_params_works() {
-        let mut fq = FakeQuantize::with_defaults(8, true).unwrap();
-        fq.update_params(0.5, 0).unwrap();
+        let mut fq = FakeQuantize::with_defaults(8, true).expect("with_defaults should succeed");
+        fq.update_params(0.5, 0)
+            .expect("update_params should succeed");
         assert_abs_diff_eq!(fq.scale, 0.5, epsilon = 1e-7);
     }
 
     #[test]
     fn asymmetric_forward_with_nonzero_zp() {
         // scale=1/15, zp=0 for [0, 1] range with INT4 asymmetric
-        let fq = FakeQuantize::new(4, false, 1.0 / 15.0, 0).unwrap();
+        let fq = FakeQuantize::new(4, false, 1.0 / 15.0, 0).expect("new should succeed");
         let out = fq.forward(&[0.0_f32, 0.5, 1.0]);
         // 0 → q=0, 0.5 → q≈7 → 7/15, 1.0 → q=15 → 1.0
         assert_abs_diff_eq!(out[0], 0.0, epsilon = 0.001);

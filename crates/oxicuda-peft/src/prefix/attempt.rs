@@ -385,10 +385,13 @@ mod tests {
     #[test]
     fn single_source_route_returns_source_prompt() {
         let mut h = handle(4);
-        let router = AttemptRouter::new(cfg(2, 4, 2, 1.0), 1, &mut h).unwrap();
+        let router = AttemptRouter::new(cfg(2, 4, 2, 1.0), 1, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         let source_prompt = router.source_prompts[0].clone();
         let input_repr = vec![1.0_f32, 0.0, 0.0, 0.0];
-        let result = router.route(&input_repr).unwrap();
+        let result = router
+            .route(&input_repr)
+            .expect("route should succeed with single source");
         for (r, &p) in result.embeddings.iter().zip(source_prompt.iter()) {
             assert!((r - p).abs() < 1e-5, "single source: got {r} expected {p}");
         }
@@ -407,7 +410,7 @@ mod tests {
             num_sources,
             &mut h,
         )
-        .unwrap();
+        .expect("AttemptRouter::new should succeed with valid config");
         // Force all source keys to be identical
         let common_key = vec![0.5_f32; key_dim];
         for k in 0..num_sources {
@@ -415,7 +418,9 @@ mod tests {
             router.source_keys[base..base + key_dim].copy_from_slice(&common_key);
         }
         let input_repr = vec![1.0_f32; prompt_dim];
-        let weights = router.attention_weights(&input_repr).unwrap();
+        let weights = router
+            .attention_weights(&input_repr)
+            .expect("attention_weights should succeed with valid input");
         let expected = 1.0 / num_sources as f32;
         for &w in &weights {
             assert!(
@@ -429,9 +434,12 @@ mod tests {
     #[test]
     fn attention_weights_sum_to_one() {
         let mut h = handle(6);
-        let router = AttemptRouter::new(cfg(3, 8, 4, 1.0), 5, &mut h).unwrap();
+        let router = AttemptRouter::new(cfg(3, 8, 4, 1.0), 5, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         let input_repr = vec![0.3_f32; 8];
-        let weights = router.attention_weights(&input_repr).unwrap();
+        let weights = router
+            .attention_weights(&input_repr)
+            .expect("attention_weights should succeed with valid input");
         let sum: f32 = weights.iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-5,
@@ -445,9 +453,12 @@ mod tests {
         let num_tokens = 4;
         let prompt_dim = 8;
         let mut h = handle(7);
-        let router = AttemptRouter::new(cfg(num_tokens, prompt_dim, 4, 1.0), 3, &mut h).unwrap();
+        let router = AttemptRouter::new(cfg(num_tokens, prompt_dim, 4, 1.0), 3, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         let input_repr = vec![0.0_f32; prompt_dim];
-        let result = router.route(&input_repr).unwrap();
+        let result = router
+            .route(&input_repr)
+            .expect("route should succeed with valid input");
         assert_eq!(result.embeddings.len(), num_tokens * prompt_dim);
         assert_eq!(result.num_tokens, num_tokens);
         assert_eq!(result.embed_dim, prompt_dim);
@@ -468,7 +479,7 @@ mod tests {
             num_sources,
             &mut h,
         )
-        .unwrap();
+        .expect("AttemptRouter::new should succeed with valid config");
 
         // Zero query_proj then set one entry so q[0] = input_repr[0]
         for v in router.query_proj.iter_mut() {
@@ -490,7 +501,9 @@ mod tests {
         router.source_prompts[2] = vec![0.0_f32; prompt_size];
 
         let input_repr = vec![1.0_f32, 0.0, 0.0, 0.0]; // q[0] = 1
-        let result = router.route_top_k(&input_repr, 1).unwrap();
+        let result = router
+            .route_top_k(&input_repr, 1)
+            .expect("route_top_k should succeed with k=1");
 
         // Source 1 should win (score[1] = 1.0 * 100.0 / sqrt(4) / 0.01 >> 0)
         for &v in &result.embeddings {
@@ -505,7 +518,8 @@ mod tests {
     #[test]
     fn route_top_k_zero_errors() {
         let mut h = handle(9);
-        let router = AttemptRouter::new(cfg(2, 4, 2, 1.0), 3, &mut h).unwrap();
+        let router = AttemptRouter::new(cfg(2, 4, 2, 1.0), 3, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         let res = router.route_top_k(&[0.0_f32; 4], 0);
         assert!(
             matches!(res, Err(PeftError::Internal { .. })),
@@ -518,7 +532,8 @@ mod tests {
     #[test]
     fn route_top_k_exceeds_sources_errors() {
         let mut h = handle(10);
-        let router = AttemptRouter::new(cfg(2, 4, 2, 1.0), 2, &mut h).unwrap();
+        let router = AttemptRouter::new(cfg(2, 4, 2, 1.0), 2, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         let res = router.route_top_k(&[0.0_f32; 4], 5);
         assert!(
             matches!(res, Err(PeftError::WeightCountMismatch { .. })),
@@ -531,7 +546,8 @@ mod tests {
     #[test]
     fn wrong_input_repr_dim_errors() {
         let mut h = handle(11);
-        let router = AttemptRouter::new(cfg(2, 8, 4, 1.0), 3, &mut h).unwrap();
+        let router = AttemptRouter::new(cfg(2, 8, 4, 1.0), 3, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         let bad = vec![1.0_f32; 5]; // prompt_dim = 8
         let res = router.attention_weights(&bad);
         assert!(
@@ -547,10 +563,16 @@ mod tests {
         let input_repr = vec![0.5_f32; 8];
         let mut h1 = handle(42);
         let mut h2 = handle(42);
-        let r1 = AttemptRouter::new(cfg(3, 8, 4, 1.0), 4, &mut h1).unwrap();
-        let r2 = AttemptRouter::new(cfg(3, 8, 4, 1.0), 4, &mut h2).unwrap();
-        let out1 = r1.route(&input_repr).unwrap();
-        let out2 = r2.route(&input_repr).unwrap();
+        let r1 = AttemptRouter::new(cfg(3, 8, 4, 1.0), 4, &mut h1)
+            .expect("AttemptRouter::new should succeed with valid config");
+        let r2 = AttemptRouter::new(cfg(3, 8, 4, 1.0), 4, &mut h2)
+            .expect("AttemptRouter::new should succeed with valid config");
+        let out1 = r1
+            .route(&input_repr)
+            .expect("route should succeed with valid input");
+        let out2 = r2
+            .route(&input_repr)
+            .expect("route should succeed with valid input");
         for (v1, v2) in out1.embeddings.iter().zip(out2.embeddings.iter()) {
             assert_eq!(v1, v2, "determinism failed: {v1} vs {v2}");
         }
@@ -569,7 +591,7 @@ mod tests {
             num_sources,
             &mut h,
         )
-        .unwrap();
+        .expect("AttemptRouter::new should succeed with valid config");
         let expected =
             key_dim * prompt_dim + num_sources * key_dim + num_sources * num_tokens * prompt_dim;
         assert_eq!(router.total_params(), expected);
@@ -585,9 +607,11 @@ mod tests {
             num_sources,
             &mut h,
         )
-        .unwrap();
+        .expect("AttemptRouter::new should succeed with large temperature");
         let input_repr = vec![1.0_f32; 4];
-        let weights = router.attention_weights(&input_repr).unwrap();
+        let weights = router
+            .attention_weights(&input_repr)
+            .expect("attention_weights should succeed with valid input");
         let max_w = weights.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let min_w = weights.iter().cloned().fold(f32::INFINITY, f32::min);
         let ratio = max_w / min_w.max(1e-10);
@@ -607,9 +631,11 @@ mod tests {
             num_sources,
             &mut h,
         )
-        .unwrap();
+        .expect("AttemptRouter::new should succeed with small temperature");
         let input_repr = vec![1.0_f32; 4];
-        let weights = router.attention_weights(&input_repr).unwrap();
+        let weights = router
+            .attention_weights(&input_repr)
+            .expect("attention_weights should succeed with valid input");
         let max_w = weights.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         assert!(
             max_w > 0.9,
@@ -624,15 +650,17 @@ mod tests {
         let prompt_dim = 4;
         let prompt_size = num_tokens * prompt_dim;
         let mut h = handle(16);
-        let mut router =
-            AttemptRouter::new(cfg(num_tokens, prompt_dim, 4, 1.0), 2, &mut h).unwrap();
+        let mut router = AttemptRouter::new(cfg(num_tokens, prompt_dim, 4, 1.0), 2, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         // Force both source prompts to be the same constant
         let common: Vec<f32> = (0..prompt_size).map(|i| i as f32 * 0.1).collect();
         router.source_prompts[0] = common.clone();
         router.source_prompts[1] = common.clone();
 
         let input_repr = vec![0.3_f32; prompt_dim];
-        let result = router.route(&input_repr).unwrap();
+        let result = router
+            .route(&input_repr)
+            .expect("route should succeed with identical source prompts");
         for (r, &p) in result.embeddings.iter().zip(common.iter()) {
             assert!(
                 (r - p).abs() < 1e-5,
@@ -645,7 +673,8 @@ mod tests {
     #[test]
     fn num_sources_accessor() {
         let mut h = handle(17);
-        let router = AttemptRouter::new(cfg(2, 4, 2, 1.0), 7, &mut h).unwrap();
+        let router = AttemptRouter::new(cfg(2, 4, 2, 1.0), 7, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         assert_eq!(router.num_sources(), 7);
     }
 
@@ -654,10 +683,15 @@ mod tests {
     fn route_top_k_all_matches_route() {
         let num_sources = 4;
         let mut h = handle(18);
-        let router = AttemptRouter::new(cfg(3, 8, 4, 1.0), num_sources, &mut h).unwrap();
+        let router = AttemptRouter::new(cfg(3, 8, 4, 1.0), num_sources, &mut h)
+            .expect("AttemptRouter::new should succeed with valid config");
         let input_repr = vec![0.5_f32; 8];
-        let full = router.route(&input_repr).unwrap();
-        let top_k = router.route_top_k(&input_repr, num_sources).unwrap();
+        let full = router
+            .route(&input_repr)
+            .expect("route should succeed with valid input");
+        let top_k = router
+            .route_top_k(&input_repr, num_sources)
+            .expect("route_top_k with k=num_sources should succeed");
         for (a, b) in full.embeddings.iter().zip(top_k.embeddings.iter()) {
             assert!(
                 (a - b).abs() < 1e-5,

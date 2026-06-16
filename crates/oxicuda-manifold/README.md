@@ -75,7 +75,7 @@ fn main() -> ManifoldResult<()> {
 
 ## Status
 
-**Alpha** — 19,877 SLoC, 388 passing tests. API may evolve before v1.0.
+**Alpha** — 26,639 SLoC, 520 passing tests. API may evolve before v1.0.
 
 ## License
 

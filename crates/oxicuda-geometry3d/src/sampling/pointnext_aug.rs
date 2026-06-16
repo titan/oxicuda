@@ -404,22 +404,24 @@ mod tests {
 
     #[test]
     fn random_scale_preserves_shape() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let mut pts = make_cloud(16);
         let original = pts.clone();
         let mut rng = LcgRng::new(7);
-        aug.random_scale(&mut pts, 16, &mut rng).unwrap();
+        aug.random_scale(&mut pts, 16, &mut rng)
+            .expect("random_scale should succeed");
         assert_eq!(pts.len(), original.len(), "shape must be n*3");
     }
 
     #[test]
     fn random_scale_same_factor_everywhere() {
         // Pick a cloud with no zeros so we can divide and check the ratio.
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let mut pts = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
         let original = pts.clone();
         let mut rng = LcgRng::new(11);
-        aug.random_scale(&mut pts, 3, &mut rng).unwrap();
+        aug.random_scale(&mut pts, 3, &mut rng)
+            .expect("random_scale should succeed");
         // All ratios scaled/original must equal the same scalar.
         let s0 = pts[0] / original[0];
         for (a, b) in pts.iter().zip(original.iter()) {
@@ -436,7 +438,7 @@ mod tests {
 
     #[test]
     fn random_scale_dim_mismatch_err() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let mut pts = vec![0.0_f32; 5];
         let mut rng = LcgRng::new(0);
         assert!(aug.random_scale(&mut pts, 2, &mut rng).is_err());
@@ -444,12 +446,13 @@ mod tests {
 
     #[test]
     fn random_jitter_bounded_by_clip() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let n = 64;
         let original = vec![0.0_f32; n * 3];
         let mut pts = original.clone();
         let mut rng = LcgRng::new(31);
-        aug.random_jitter(&mut pts, n, &mut rng).unwrap();
+        aug.random_jitter(&mut pts, n, &mut rng)
+            .expect("random_jitter should succeed");
         let clip = reference_cfg().jitter_clip;
         for (a, b) in pts.iter().zip(original.iter()) {
             assert!(
@@ -466,22 +469,25 @@ mod tests {
     fn random_jitter_sigma_zero_is_identity() {
         let mut cfg = reference_cfg();
         cfg.jitter_sigma = 0.0;
-        let aug = PointNextAug::new(cfg).unwrap();
+        let aug = PointNextAug::new(cfg).expect("new should succeed");
         let n = 8;
         let mut pts = make_cloud(n);
         let original = pts.clone();
         let mut rng = LcgRng::new(99);
-        aug.random_jitter(&mut pts, n, &mut rng).unwrap();
+        aug.random_jitter(&mut pts, n, &mut rng)
+            .expect("random_jitter should succeed");
         assert_eq!(pts, original, "sigma=0 must leave points untouched");
     }
 
     #[test]
     fn random_drop_kept_count_matches_formula() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let n = 100;
         let pts = make_cloud(n);
         let mut rng = LcgRng::new(13);
-        let (kept, n_kept) = aug.random_drop(&pts, n, &mut rng).unwrap();
+        let (kept, n_kept) = aug
+            .random_drop(&pts, n, &mut rng)
+            .expect("random_drop should succeed");
         let expected = n - ((n as f32) * reference_cfg().drop_ratio).floor() as usize;
         assert_eq!(n_kept, expected, "n_kept formula mismatch");
         assert_eq!(kept.len(), n_kept * 3, "kept buffer length mismatch");
@@ -489,13 +495,17 @@ mod tests {
 
     #[test]
     fn random_drop_reproducible_with_same_seed() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let n = 40;
         let pts = make_cloud(n);
         let mut rng_a = LcgRng::new(2024);
         let mut rng_b = LcgRng::new(2024);
-        let a = aug.random_drop(&pts, n, &mut rng_a).unwrap();
-        let b = aug.random_drop(&pts, n, &mut rng_b).unwrap();
+        let a = aug
+            .random_drop(&pts, n, &mut rng_a)
+            .expect("random_drop should succeed");
+        let b = aug
+            .random_drop(&pts, n, &mut rng_b)
+            .expect("random_drop should succeed");
         assert_eq!(a.0, b.0, "kept points must be identical for same seed");
         assert_eq!(a.1, b.1);
     }
@@ -504,11 +514,13 @@ mod tests {
     fn random_drop_ratio_zero_keeps_all() {
         let mut cfg = reference_cfg();
         cfg.drop_ratio = 0.0;
-        let aug = PointNextAug::new(cfg).unwrap();
+        let aug = PointNextAug::new(cfg).expect("new should succeed");
         let n = 17;
         let pts = make_cloud(n);
         let mut rng = LcgRng::new(0);
-        let (kept, n_kept) = aug.random_drop(&pts, n, &mut rng).unwrap();
+        let (kept, n_kept) = aug
+            .random_drop(&pts, n, &mut rng)
+            .expect("random_drop should succeed");
         assert_eq!(n_kept, n, "drop_ratio=0 must keep every point");
         assert_eq!(kept.len(), n * 3);
         // With drop_ratio == 0 the indices are sorted = (0..n) so the output
@@ -518,10 +530,12 @@ mod tests {
 
     #[test]
     fn random_drop_single_point() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let pts = vec![3.0_f32, 4.0, 5.0];
         let mut rng = LcgRng::new(0);
-        let (kept, n_kept) = aug.random_drop(&pts, 1, &mut rng).unwrap();
+        let (kept, n_kept) = aug
+            .random_drop(&pts, 1, &mut rng)
+            .expect("random_drop should succeed");
         // floor(1 * 0.1) = 0 so the point is preserved.
         assert_eq!(n_kept, 1);
         assert_eq!(kept, pts);
@@ -529,7 +543,7 @@ mod tests {
 
     #[test]
     fn random_drop_dim_mismatch_err() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let pts = vec![1.0_f32, 2.0, 3.0, 4.0];
         let mut rng = LcgRng::new(0);
         assert!(aug.random_drop(&pts, 2, &mut rng).is_err());
@@ -537,7 +551,7 @@ mod tests {
 
     #[test]
     fn random_rotation_yaw_preserves_distances() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let n = 5;
         let mut pts = vec![
             1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0,
@@ -553,7 +567,8 @@ mod tests {
             }
         }
         let mut rng = LcgRng::new(123);
-        aug.random_rotation_yaw(&mut pts, n, &mut rng).unwrap();
+        aug.random_rotation_yaw(&mut pts, n, &mut rng)
+            .expect("random_rotation_yaw should succeed");
         let mut k = 0;
         for i in 0..n {
             for j in (i + 1)..n {
@@ -574,12 +589,13 @@ mod tests {
 
     #[test]
     fn random_rotation_yaw_only_touches_x_and_z() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let n = 6;
         let mut pts = make_cloud(n);
         let original = pts.clone();
         let mut rng = LcgRng::new(7);
-        aug.random_rotation_yaw(&mut pts, n, &mut rng).unwrap();
+        aug.random_rotation_yaw(&mut pts, n, &mut rng)
+            .expect("random_rotation_yaw should succeed");
         for i in 0..n {
             assert!(
                 (pts[i * 3 + 1] - original[i * 3 + 1]).abs() < 1e-6,
@@ -592,11 +608,11 @@ mod tests {
 
     #[test]
     fn apply_returns_valid_output_size() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let n = 64;
         let pts = make_cloud(n);
         let mut rng = LcgRng::new(0);
-        let (out, n_kept) = aug.apply(&pts, n, &mut rng).unwrap();
+        let (out, n_kept) = aug.apply(&pts, n, &mut rng).expect("apply should succeed");
         let expected_drop = ((n as f32) * reference_cfg().drop_ratio).floor() as usize;
         assert_eq!(n_kept, n - expected_drop);
         assert_eq!(out.len(), n_kept * 3);
@@ -604,13 +620,17 @@ mod tests {
 
     #[test]
     fn apply_deterministic_with_same_seed() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let n = 32;
         let pts = make_cloud(n);
         let mut rng_a = LcgRng::new(42);
         let mut rng_b = LcgRng::new(42);
-        let a = aug.apply(&pts, n, &mut rng_a).unwrap();
-        let b = aug.apply(&pts, n, &mut rng_b).unwrap();
+        let a = aug
+            .apply(&pts, n, &mut rng_a)
+            .expect("apply should succeed");
+        let b = aug
+            .apply(&pts, n, &mut rng_b)
+            .expect("apply should succeed");
         assert_eq!(a.1, b.1);
         assert_eq!(a.0.len(), b.0.len());
         for (x, y) in a.0.iter().zip(b.0.iter()) {
@@ -630,11 +650,11 @@ mod tests {
             drop_ratio: 0.0,
             rotation_yaw: false,
         };
-        let aug = PointNextAug::new(cfg).unwrap();
+        let aug = PointNextAug::new(cfg).expect("new should succeed");
         let n = 5;
         let pts = make_cloud(n);
         let mut rng = LcgRng::new(7);
-        let (out, n_kept) = aug.apply(&pts, n, &mut rng).unwrap();
+        let (out, n_kept) = aug.apply(&pts, n, &mut rng).expect("apply should succeed");
         assert_eq!(n_kept, n);
         assert_eq!(out.len(), pts.len());
         for (a, b) in out.iter().zip(pts.iter()) {
@@ -644,7 +664,7 @@ mod tests {
 
     #[test]
     fn random_jitter_dim_mismatch_err() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let mut pts = vec![0.0_f32; 7];
         let mut rng = LcgRng::new(0);
         assert!(aug.random_jitter(&mut pts, 3, &mut rng).is_err());
@@ -652,7 +672,7 @@ mod tests {
 
     #[test]
     fn random_rotation_yaw_dim_mismatch_err() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let mut pts = vec![0.0_f32; 8];
         let mut rng = LcgRng::new(0);
         assert!(aug.random_rotation_yaw(&mut pts, 3, &mut rng).is_err());
@@ -660,7 +680,7 @@ mod tests {
 
     #[test]
     fn apply_dim_mismatch_err() {
-        let aug = PointNextAug::new(reference_cfg()).unwrap();
+        let aug = PointNextAug::new(reference_cfg()).expect("value should be present");
         let pts = vec![0.0_f32; 7];
         let mut rng = LcgRng::new(0);
         assert!(aug.apply(&pts, 3, &mut rng).is_err());
@@ -669,7 +689,7 @@ mod tests {
     #[test]
     fn config_accessor_roundtrip() {
         let cfg = reference_cfg();
-        let aug = PointNextAug::new(cfg.clone()).unwrap();
+        let aug = PointNextAug::new(cfg.clone()).expect("value should be present");
         assert_eq!(aug.config(), &cfg);
     }
 }

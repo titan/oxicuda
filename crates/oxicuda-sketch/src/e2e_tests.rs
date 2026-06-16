@@ -6,13 +6,14 @@ use crate::cardinality::LinearCounter;
 use crate::frequency::CountMinSketch;
 use crate::frequency::CountSketch;
 use crate::handle::LcgRng;
+use crate::hash::FourWiseHash;
 use crate::lsh::CosineLsh;
 use crate::lsh::JaccardLsh;
 use crate::lsh::LshIndex;
 use crate::membership::BloomFilter;
 use crate::membership::CuckooFilter;
 use crate::metrics::{recall_at_k, relative_error};
-use crate::moment::{AmsL2Sketch, JlProjection};
+use crate::moment::{AmsF2Sketch, AmsL2Sketch, JlProjection};
 use crate::ptx_kernels::{
     bloom_insert_ptx, cm_query_ptx, cm_update_ptx, hll_register_ptx, minhash_sketch_ptx,
     reservoir_sample_ptx, tdigest_merge_ptx,
@@ -25,6 +26,7 @@ use crate::similarity::SimHash;
 use crate::stream::WelfordOnline;
 use crate::topk::MisraGries;
 use crate::topk::SpaceSaving;
+use crate::topk::WeightedMisraGries;
 
 // 1. HyperLogLog estimates 10000 distinct items to within ±5% (p=14).
 #[test]
@@ -368,4 +370,190 @@ fn space_saving_top_k_recall() {
     let truth = vec![1u64, 2, 3];
     let r = recall_at_k(&est, &truth, 3);
     assert!(r >= 2.0 / 3.0, "top-k recall {r}");
+}
+
+// 23. KLL merge: A over 0..N, B over N..2N, merged quantiles ≈ true quantiles of 0..2N.
+#[test]
+fn kll_merge_median_accurate() {
+    let n: u64 = 60_000;
+    let k = 4096usize;
+    let mut a = KllSketch::new(k, 1).expect("ok");
+    let mut b = KllSketch::new(k, 2).expect("ok");
+    for i in 0..n {
+        a.add(i as f64);
+    }
+    for i in n..(2 * n) {
+        b.add(i as f64);
+    }
+    let merged = KllSketch::merged(&a, &b).expect("merge ok");
+    assert_eq!(merged.count(), 2 * n, "merged item count");
+    let total = (2 * n) as f64;
+    // Values are ranks ⇒ |est − truth| is rank error directly; envelope ε·(2N) ≈ 1.2% of range.
+    let tol = (total / k as f64) * 40.0;
+    for &q in &[0.1, 0.5, 0.9] {
+        let est = merged.quantile(q);
+        let truth = (q * (total - 1.0)).round();
+        assert!(
+            (est - truth).abs() <= tol,
+            "KLL merged q={q} err {}",
+            (est - truth).abs()
+        );
+    }
+}
+
+// 24. Weighted Misra-Gries: heavy keys retained, undercount ≤ W/k, W exact.
+#[test]
+fn weighted_mg_heavy_hitters_and_bound() {
+    let k = 16usize;
+    let mut w = WeightedMisraGries::new(k).expect("ok");
+    let heavy: [(u64, f64); 3] = [(7001, 1000.0), (7002, 800.0), (7003, 600.0)];
+    let mut expected_w = 0.0f64;
+    for &(key, weight) in &heavy {
+        w.update(key, weight);
+        expected_w += weight;
+    }
+    for i in 0..3000u64 {
+        w.update(i, 0.4);
+        expected_w += 0.4;
+    }
+    assert!(
+        (w.total_weight() - expected_w).abs() < 1.0e-6,
+        "W bookkeeping"
+    );
+    let bound = w.total_weight() / k as f64;
+    for &(key, true_w) in &heavy {
+        let est = w.estimate(key);
+        assert!(est > 0.0, "heavy key {key} dropped");
+        assert!(est <= true_w + 1.0e-9, "overcount key {key}");
+        assert!(
+            true_w - est <= bound + 1.0e-9,
+            "undercount key {key} exceeds W/k"
+        );
+    }
+}
+
+// 25. Weighted Misra-Gries with unit weights reproduces unweighted Misra-Gries counts.
+#[test]
+fn weighted_mg_unit_matches_unweighted() {
+    let k = 5usize;
+    let mut w = WeightedMisraGries::new(k).expect("ok");
+    let mut u = MisraGries::new(k).expect("ok");
+    let stream: Vec<u64> = (0..500u64)
+        .map(|i| if i % 3 == 0 { 11 } else { 100 + (i % 50) })
+        .collect();
+    for &x in &stream {
+        w.update(x, 1.0);
+        u.add(x);
+    }
+    let mut wc: Vec<(u64, i64)> = w
+        .counters()
+        .iter()
+        .map(|&(k, v)| (k, v.round() as i64))
+        .collect();
+    let mut uc: Vec<(u64, i64)> = u.candidates().iter().map(|&(k, c)| (k, c as i64)).collect();
+    wc.sort();
+    uc.sort();
+    assert_eq!(wc, uc, "weighted (w=1) vs unweighted MG mismatch");
+}
+
+// 26. AMS F2 (tug-of-war) estimates Σ f_i² within a few percent (fixed seed, generous d/t).
+#[test]
+fn ams_f2_close_to_truth() {
+    let mut s = AmsF2Sketch::new(21, 8192, 314_159).expect("ok");
+    let mut truth = 0.0f64;
+    for i in 0..80u64 {
+        let c = ((i % 9) + 1) as f64;
+        s.update(i, c);
+        truth += c * c;
+    }
+    let est = s.estimate_f2();
+    let rel = (est - truth).abs() / truth;
+    assert!(
+        rel < 0.05,
+        "AMS F2 rel-err = {rel} (est={est}, truth={truth})"
+    );
+}
+
+// 27. AMS F2 linearity: split stream, same seed, merge ≈ whole.
+#[test]
+fn ams_f2_merge_equals_whole() {
+    let seed = 8_675_309;
+    let (d, t) = (15, 4096);
+    let mut whole = AmsF2Sketch::new(d, t, seed).expect("ok");
+    let mut ha = AmsF2Sketch::new(d, t, seed).expect("ok");
+    let mut hb = AmsF2Sketch::new(d, t, seed).expect("ok");
+    for i in 0..200u64 {
+        let c = ((i % 6) + 1) as f64;
+        whole.update(i, c);
+        if i % 2 == 0 {
+            ha.update(i, c);
+        } else {
+            hb.update(i, c);
+        }
+    }
+    let merged = AmsF2Sketch::merged(&ha, &hb).expect("merge ok");
+    let ew = whole.estimate_f2();
+    let em = merged.estimate_f2();
+    assert!((ew - em).abs() / ew.max(1.0) < 1.0e-9, "F2 merge≠whole");
+}
+
+// 28. The 4-wise sign family genuinely beats a 2-universal one for F2 variance.
+//     Across many independent seeds, the 4-wise tug-of-war estimator concentrates around the
+//     truth far tighter than a degree-1 (2-universal) sign of the SAME (d,t) budget. This is the
+//     load-bearing property: 2-universal does not kill the 4th-moment cross terms.
+#[test]
+fn fourwise_beats_two_universal_for_f2() {
+    use crate::hash::TwoUniversal;
+
+    // Frequency vector: key i has count (i+1), i in 0..K ⇒ F2 = Σ (i+1)².
+    let kdim = 64u64;
+    let mut truth = 0.0f64;
+    for i in 0..kdim {
+        let c = (i + 1) as f64;
+        truth += c * c;
+    }
+
+    // Single-row, single-column estimators so the per-seed variance is laid bare; average the
+    // SQUARED RELATIVE ERROR (a variance proxy) over many seeds for each family.
+    let seeds = 400usize;
+    let mut sq_err_4wise = 0.0f64;
+    let mut sq_err_2univ = 0.0f64;
+
+    for s_idx in 0..seeds {
+        let seed = 90_000 + s_idx as u64;
+
+        // 4-wise tug-of-war: X = Σ s(i)·f_i.
+        let mut rng4 = LcgRng::new(seed);
+        let h4 = FourWiseHash::new(&mut rng4);
+        let mut x4 = 0.0f64;
+        for i in 0..kdim {
+            x4 += h4.sign(i) * (i + 1) as f64;
+        }
+        let est4 = x4 * x4;
+        let r4 = (est4 - truth) / truth;
+        sq_err_4wise += r4 * r4;
+
+        // 2-universal sign (degree-1): same construction, sign from low bit mod 2.
+        let mut rng2 = LcgRng::new(seed);
+        let h2 = TwoUniversal::new(&mut rng2, 2);
+        let mut x2 = 0.0f64;
+        for i in 0..kdim {
+            let s = if h2.hash(i) == 0 { -1.0 } else { 1.0 };
+            x2 += s * (i + 1) as f64;
+        }
+        let est2 = x2 * x2;
+        let r2 = (est2 - truth) / truth;
+        sq_err_2univ += r2 * r2;
+    }
+
+    let var4 = sq_err_4wise / seeds as f64;
+    let var2 = sq_err_2univ / seeds as f64;
+    // Both are unbiased, but the 4-wise variance must be the controlled one: for the AMS
+    // guarantee Var(X²) ≤ 2·F2², i.e. the squared relative error averages to ≤ 2. The 2-universal
+    // family has no such bound and, for this structured frequency vector, blows past it.
+    assert!(var4 < 2.5, "4-wise F2 variance proxy too high: {var4}");
+    assert!(
+        var2 > var4,
+        "2-universal should be no better than 4-wise (var2={var2}, var4={var4})"
+    );
 }

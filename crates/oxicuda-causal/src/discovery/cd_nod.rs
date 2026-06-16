@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn build_surrogate_length_and_values() {
         let labels = vec![0, 1, 2, 3];
-        let c = CdNod::build_surrogate(&labels, 4).unwrap();
+        let c = CdNod::build_surrogate(&labels, 4).expect("build_surrogate should succeed");
         assert_eq!(c.len(), 4);
         assert!((c[0] - 0.0).abs() < 1e-6);
         assert!((c[1] - (1.0 / 3.0)).abs() < 1e-6);
@@ -669,7 +669,7 @@ mod tests {
     #[test]
     fn build_surrogate_two_domains_endpoints() {
         let labels = vec![0, 0, 1, 1];
-        let c = CdNod::build_surrogate(&labels, 2).unwrap();
+        let c = CdNod::build_surrogate(&labels, 2).expect("build_surrogate should succeed");
         assert!((c[0]).abs() < 1e-6);
         assert!((c[2] - 1.0).abs() < 1e-6);
     }
@@ -780,7 +780,7 @@ mod tests {
             alpha: 0.05,
             max_cond_set: 2,
         };
-        let res = CdNod::run(&data, n, &labels, &cfg).unwrap();
+        let res = CdNod::run(&data, n, &labels, &cfg).expect("run should succeed");
         assert_eq!(res.c_index, p);
         assert_eq!(res.skeleton.len(), p + 1);
         for i in 0..(p + 1) {
@@ -804,7 +804,7 @@ mod tests {
             alpha: 0.05,
             max_cond_set: 2,
         };
-        let res = CdNod::run(&data, n, &labels, &cfg).unwrap();
+        let res = CdNod::run(&data, n, &labels, &cfg).expect("run should succeed");
         let total = (p + 1) * (p + 1);
         let count: usize = res.oriented.iter().map(|r| r.len()).sum();
         assert_eq!(count, total);
@@ -822,7 +822,7 @@ mod tests {
             alpha: 0.05,
             max_cond_set: 3,
         };
-        let res = CdNod::run(&data, n, &labels, &cfg).unwrap();
+        let res = CdNod::run(&data, n, &labels, &cfg).expect("run should succeed");
         assert!(
             res.changing_vars.is_empty(),
             "expected no changing vars, got {:?}",
@@ -855,7 +855,7 @@ mod tests {
             alpha: 0.05,
             max_cond_set: 3,
         };
-        let res = CdNod::run(&data, n, &labels, &cfg).unwrap();
+        let res = CdNod::run(&data, n, &labels, &cfg).expect("run should succeed");
         assert!(
             res.changing_vars.contains(&0),
             "expected X0 to be changing, got {:?}",
@@ -886,7 +886,7 @@ mod tests {
             alpha: 0.05,
             max_cond_set: 3,
         };
-        let res = CdNod::run(&data, n, &labels, &cfg).unwrap();
+        let res = CdNod::run(&data, n, &labels, &cfg).expect("run should succeed");
         let c = res.c_index;
         for &v in &res.changing_vars {
             assert_eq!(res.oriented[c][v], 1, "expected C->{v}");
@@ -905,7 +905,8 @@ mod tests {
             data[s * n_total] = rng.next_normal();
             data[s * n_total + 1] = rng.next_normal();
         }
-        let (_stat, p) = CdNod::fisher_z_test(&data, n, n_total, 0, 1, &[]).unwrap();
+        let (_stat, p) = CdNod::fisher_z_test(&data, n, n_total, 0, 1, &[])
+            .expect("fisher_z_test should succeed");
         assert!(
             p > 0.05,
             "independent gaussians should have p>0.05, got {p}"
@@ -923,7 +924,8 @@ mod tests {
             data[s * n_total] = x;
             data[s * n_total + 1] = 0.9 * x + 0.05 * rng.next_normal();
         }
-        let (_stat, p) = CdNod::fisher_z_test(&data, n, n_total, 0, 1, &[]).unwrap();
+        let (_stat, p) = CdNod::fisher_z_test(&data, n, n_total, 0, 1, &[])
+            .expect("fisher_z_test should succeed");
         assert!(p < 0.05, "correlated columns should have p<0.05, got {p}");
     }
 
@@ -942,7 +944,8 @@ mod tests {
         let n = 4;
         let n_total = 3;
         let data = vec![0.5_f32; n * n_total];
-        let (stat, p) = CdNod::fisher_z_test(&data, n, n_total, 0, 1, &[2]).unwrap();
+        let (stat, p) = CdNod::fisher_z_test(&data, n, n_total, 0, 1, &[2])
+            .expect("fisher_z_test should succeed");
         assert_eq!(stat, 0.0);
         assert_eq!(p, 1.0);
     }
@@ -971,7 +974,7 @@ mod tests {
             alpha: 0.05,
             max_cond_set: 3,
         };
-        let res = CdNod::run(&data, n, &labels, &cfg).unwrap();
+        let res = CdNod::run(&data, n, &labels, &cfg).expect("run should succeed");
         assert!(res.skeleton[0][1], "expected edge 0-1");
         assert!(res.skeleton[1][2], "expected edge 1-2");
         assert!(!res.skeleton[0][2], "expected NO edge 0-2 (separated by 1)");
@@ -986,8 +989,8 @@ mod tests {
             alpha: 0.05,
             max_cond_set: 2,
         };
-        let a = CdNod::run(&data, n, &labels, &cfg).unwrap();
-        let b = CdNod::run(&data, n, &labels, &cfg).unwrap();
+        let a = CdNod::run(&data, n, &labels, &cfg).expect("run should succeed");
+        let b = CdNod::run(&data, n, &labels, &cfg).expect("run should succeed");
         assert_eq!(a.skeleton, b.skeleton);
         assert_eq!(a.changing_vars, b.changing_vars);
         assert_eq!(a.oriented, b.oriented);

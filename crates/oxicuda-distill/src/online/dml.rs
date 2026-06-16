@@ -101,7 +101,7 @@ mod tests {
             .map(|i| vec![i as f32, 2.0 - i as f32, 1.0])
             .collect();
         let labels = vec![0_usize, 1, 0];
-        let losses = dml_all_losses(&logits, &labels).unwrap();
+        let losses = dml_all_losses(&logits, &labels).expect("dml_all_losses should succeed");
         assert_eq!(losses.len(), 3);
         for l in &losses {
             assert!(l.is_finite());

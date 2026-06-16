@@ -64,7 +64,7 @@ mod tests {
             5.0, 6.0, // pt 2
         ];
         let idx = vec![0usize, 1, 1, 2];
-        let out = group_features(&feat, 3, 2, &idx, 2, 2).unwrap();
+        let out = group_features(&feat, 3, 2, &idx, 2, 2).expect("group_features should succeed");
         assert_eq!(out.len(), 2 * 2 * 2);
         // center 0: pts[0]=[1,2], pts[1]=[3,4]
         assert_eq!(&out[0..4], &[1.0, 2.0, 3.0, 4.0]);
@@ -76,7 +76,7 @@ mod tests {
     fn group_features_sentinel() {
         let feat = vec![1.0_f32, 2.0];
         let idx = vec![0usize, usize::MAX];
-        let out = group_features(&feat, 1, 2, &idx, 1, 2).unwrap();
+        let out = group_features(&feat, 1, 2, &idx, 1, 2).expect("group_features should succeed");
         // sentinel slot should be zeros
         assert_eq!(&out[2..4], &[0.0, 0.0]);
     }

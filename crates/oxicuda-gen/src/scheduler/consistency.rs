@@ -300,7 +300,7 @@ mod tests {
     const TINY: f32 = 1e-6;
 
     fn default_sched() -> ConsistencyScheduler {
-        ConsistencyScheduler::new(ConsistencyConfig::default()).unwrap()
+        ConsistencyScheduler::new(ConsistencyConfig::default()).expect("value should be present")
     }
 
     fn make_rng() -> LcgRng {
@@ -388,7 +388,9 @@ mod tests {
         let s = default_sched();
         let x = vec![1.0_f32; 32];
         let f_out = vec![0.5_f32; 32];
-        let out = s.consistency_output(&x, 1.0, &f_out).unwrap();
+        let out = s
+            .consistency_output(&x, 1.0, &f_out)
+            .expect("consistency_output should succeed");
         assert_eq!(out.len(), 32);
     }
 
@@ -399,7 +401,9 @@ mod tests {
         let sigma = 2.0_f32;
         let x = vec![3.0_f32, -1.0, 0.5];
         let f_out = vec![0.0_f32; 3];
-        let out = s.consistency_output(&x, sigma, &f_out).unwrap();
+        let out = s
+            .consistency_output(&x, sigma, &f_out)
+            .expect("consistency_output should succeed");
         let cs = s.c_skip(sigma);
         for (&o, &xi) in out.iter().zip(&x) {
             let expected = cs * xi;
@@ -437,7 +441,9 @@ mod tests {
         let s = default_sched();
         let x = vec![1.0_f32; 16];
         let f_out = vec![0.0_f32; 16];
-        let out = s.single_step_sample(&x, 5.0, &f_out).unwrap();
+        let out = s
+            .single_step_sample(&x, 5.0, &f_out)
+            .expect("single_step_sample should succeed");
         assert_eq!(out.len(), 16);
     }
 
@@ -447,8 +453,12 @@ mod tests {
         let sigma = 3.0_f32;
         let x = vec![1.0_f32, 2.0, 3.0];
         let f_out = vec![0.1_f32, 0.2, 0.3];
-        let a = s.single_step_sample(&x, sigma, &f_out).unwrap();
-        let b = s.consistency_output(&x, sigma, &f_out).unwrap();
+        let a = s
+            .single_step_sample(&x, sigma, &f_out)
+            .expect("single_step_sample should succeed");
+        let b = s
+            .consistency_output(&x, sigma, &f_out)
+            .expect("consistency_output should succeed");
         for (&ai, &bi) in a.iter().zip(&b) {
             assert!((ai - bi).abs() < TINY, "single_step != consistency_output");
         }
@@ -464,7 +474,7 @@ mod tests {
         // f_theta returns zeros (perfect denoiser)
         let out = s
             .multi_step_sample(&x, |_, _| vec![0.0_f32; 8], &mut rng)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), 8);
     }
 
@@ -475,13 +485,13 @@ mod tests {
             n_steps: 1,
             ..ConsistencyConfig::default()
         };
-        let s = ConsistencyScheduler::new(cfg).unwrap();
+        let s = ConsistencyScheduler::new(cfg).expect("new should succeed");
         let x = vec![1.0_f32; 4];
         let mut rng = make_rng();
         // f_theta = identity: f_out = x
         let out = s
             .multi_step_sample(&x, |xi, _| xi.to_vec(), &mut rng)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), 4);
         // Result is consistency_output with f_out = x_t at sigma_max
         let sigma = s.sigmas[0];
@@ -512,7 +522,9 @@ mod tests {
     fn consistency_loss_zero() {
         let s = default_sched();
         let v = vec![1.0_f32, 2.0, 3.0];
-        let loss = s.consistency_loss(&v, &v).unwrap();
+        let loss = s
+            .consistency_loss(&v, &v)
+            .expect("consistency_loss should succeed");
         assert!(
             loss.abs() < TINY,
             "loss with identical inputs should be 0, got {loss}"
@@ -526,7 +538,9 @@ mod tests {
         let b = vec![1.0_f32, 2.0, 3.0];
         // MSE = (1 + 4 + 9) / 3 = 14/3
         let expected = 14.0_f32 / 3.0;
-        let loss = s.consistency_loss(&a, &b).unwrap();
+        let loss = s
+            .consistency_loss(&a, &b)
+            .expect("consistency_loss should succeed");
         assert!(
             (loss - expected).abs() < 1e-5,
             "MSE mismatch: {loss} vs {expected}"
@@ -558,7 +572,7 @@ mod tests {
     #[test]
     fn sigma_at_valid() {
         let s = default_sched();
-        let v = s.sigma_at(0).unwrap();
+        let v = s.sigma_at(0).expect("sigma_at should succeed");
         assert!((v - s.sigmas[0]).abs() < TINY);
     }
 

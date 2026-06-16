@@ -573,7 +573,7 @@ mod tests {
         }
         let ece =
             expected_calibration_error(&confidences, &predictions, &labels, equal_width(n_bins))
-                .unwrap();
+                .expect("value should be present");
         assert!(ece < 0.02, "ece={ece}");
     }
 
@@ -589,7 +589,7 @@ mod tests {
             labels.push(if j % 2 == 0 { 1u32 } else { 0u32 });
         }
         let ece = expected_calibration_error(&confidences, &predictions, &labels, equal_width(10))
-            .unwrap();
+            .expect("value should be present");
         assert!(ece > 0.3, "ece={ece}");
     }
 
@@ -608,8 +608,10 @@ mod tests {
             labels.push(if rng.next_f32() < c * 0.7 { 1u32 } else { 0u32 });
         }
         let cfg = equal_width(12);
-        let ece = expected_calibration_error(&confidences, &predictions, &labels, cfg).unwrap();
-        let mce = maximum_calibration_error(&confidences, &predictions, &labels, cfg).unwrap();
+        let ece = expected_calibration_error(&confidences, &predictions, &labels, cfg)
+            .expect("expected_calibration_error should succeed");
+        let mce = maximum_calibration_error(&confidences, &predictions, &labels, cfg)
+            .expect("maximum_calibration_error should succeed");
         assert!(mce >= ece - 1e-6, "mce={mce} < ece={ece}");
     }
 
@@ -630,7 +632,8 @@ mod tests {
             n_bins,
             binning: BinningScheme::EqualMass,
         };
-        let bins = reliability_bins(&confidences, &predictions, &labels, cfg).unwrap();
+        let bins = reliability_bins(&confidences, &predictions, &labels, cfg)
+            .expect("reliability_bins should succeed");
         let target = (n / n_bins) as i64;
         for bin in &bins {
             // Allow generous slack but each bin near N/n_bins.
@@ -651,7 +654,8 @@ mod tests {
         let predictions = vec![1u32; 5];
         let labels = vec![1u32; 5];
         let cfg = equal_width(5);
-        let bins = reliability_bins(&confidences, &predictions, &labels, cfg).unwrap();
+        let bins = reliability_bins(&confidences, &predictions, &labels, cfg)
+            .expect("reliability_bins should succeed");
         assert!((bins.first().map(|b| b.lo).unwrap_or(1.0)).abs() < 1e-6);
         assert!((bins.last().map(|b| b.hi).unwrap_or(0.0) - 1.0).abs() < 1e-6);
         // Edges contiguous: each bin.hi == next bin.lo.
@@ -674,7 +678,8 @@ mod tests {
             predictions.push(rng.next_usize(3) as u32);
             labels.push(rng.next_usize(3) as u32);
         }
-        let bins = reliability_bins(&confidences, &predictions, &labels, equal_width(8)).unwrap();
+        let bins = reliability_bins(&confidences, &predictions, &labels, equal_width(8))
+            .expect("value should be present");
         let total: usize = bins.iter().map(|b| b.count).sum();
         assert_eq!(total, n);
     }
@@ -689,7 +694,7 @@ mod tests {
             0.0, 0.0, 1.0, // y = 2
         ];
         let labels = vec![0u32, 1, 2];
-        let bs = brier_score(&probs, &labels, k).unwrap();
+        let bs = brier_score(&probs, &labels, k).expect("brier_score should succeed");
         assert!(bs.abs() < 1e-6, "bs={bs}");
     }
 
@@ -708,7 +713,7 @@ mod tests {
             }
             labels.push((i % k) as u32);
         }
-        let bs = brier_score(&probs, &labels, k).unwrap();
+        let bs = brier_score(&probs, &labels, k).expect("brier_score should succeed");
         let expected = (k as f32 - 1.0) / k as f32;
         assert!((bs - expected).abs() < 1e-5, "bs={bs}, expected={expected}");
     }
@@ -717,10 +722,10 @@ mod tests {
     fn temperature_softens_overconfident() {
         // Sharp logits ⇒ T > 1 lowers the max probability.
         let logits = vec![6.0_f32, 1.0, 0.5];
-        let cold = TemperatureScaler::new(1.0).unwrap();
-        let warm = TemperatureScaler::new(3.0).unwrap();
-        let p_cold = cold.apply(&logits).unwrap();
-        let p_warm = warm.apply(&logits).unwrap();
+        let cold = TemperatureScaler::new(1.0).expect("new should succeed");
+        let warm = TemperatureScaler::new(3.0).expect("new should succeed");
+        let p_cold = cold.apply(&logits).expect("apply should succeed");
+        let p_warm = warm.apply(&logits).expect("apply should succeed");
         let max_cold = p_cold.iter().cloned().fold(0.0_f32, f32::max);
         let max_warm = p_warm.iter().cloned().fold(0.0_f32, f32::max);
         assert!(max_warm < max_cold, "warm {max_warm} >= cold {max_cold}");
@@ -729,8 +734,8 @@ mod tests {
     #[test]
     fn apply_t_one_equals_plain_softmax() {
         let logits = vec![0.5_f32, -1.0, 2.0, 0.0];
-        let scaler = TemperatureScaler::new(1.0).unwrap();
-        let scaled = scaler.apply(&logits).unwrap();
+        let scaler = TemperatureScaler::new(1.0).expect("new should succeed");
+        let scaled = scaler.apply(&logits).expect("apply should succeed");
         let mut plain = vec![0.0_f32; logits.len()];
         softmax_row(&logits, &mut plain);
         for (a, b) in scaled.iter().zip(plain.iter()) {
@@ -770,7 +775,7 @@ mod tests {
             logits.extend_from_slice(&row);
             labels.push(y as u32);
         }
-        let scaler = TemperatureScaler::fit(&logits, &labels, k).unwrap();
+        let scaler = TemperatureScaler::fit(&logits, &labels, k).expect("fit should succeed");
         let nll_fit = temperature_nll(&logits, &labels, k, scaler.temperature());
         let nll_one = temperature_nll(&logits, &labels, k, 1.0);
         assert!(
@@ -810,12 +815,12 @@ mod tests {
         }
 
         let to_conf_pred = |t: f32| -> (Vec<f32>, Vec<u32>) {
-            let scaler = TemperatureScaler::new(t).unwrap();
+            let scaler = TemperatureScaler::new(t).expect("new should succeed");
             let mut confs = Vec::with_capacity(n);
             let mut preds = Vec::with_capacity(n);
             for i in 0..n {
                 if let Some(row) = logits.get(i * k..(i + 1) * k) {
-                    let p = scaler.apply(row).unwrap();
+                    let p = scaler.apply(row).expect("apply should succeed");
                     let mut best = 0usize;
                     let mut best_p = f32::NEG_INFINITY;
                     for (j, &pj) in p.iter().enumerate() {
@@ -831,13 +836,15 @@ mod tests {
             (confs, preds)
         };
 
-        let scaler = TemperatureScaler::fit(&logits, &labels, k).unwrap();
+        let scaler = TemperatureScaler::fit(&logits, &labels, k).expect("fit should succeed");
         let cfg = equal_width(15);
 
         let (c0, p0) = to_conf_pred(1.0);
-        let ece_before = expected_calibration_error(&c0, &p0, &labels, cfg).unwrap();
+        let ece_before = expected_calibration_error(&c0, &p0, &labels, cfg)
+            .expect("expected_calibration_error should succeed");
         let (c1, p1) = to_conf_pred(scaler.temperature());
-        let ece_after = expected_calibration_error(&c1, &p1, &labels, cfg).unwrap();
+        let ece_after = expected_calibration_error(&c1, &p1, &labels, cfg)
+            .expect("expected_calibration_error should succeed");
 
         assert!(
             ece_after <= ece_before + 0.02,
@@ -901,7 +908,8 @@ mod tests {
         let confidences = vec![0.99_f32, 0.98, 0.97];
         let predictions = vec![1u32, 1, 1];
         let labels = vec![1u32, 1, 1];
-        let bins = reliability_bins(&confidences, &predictions, &labels, equal_width(10)).unwrap();
+        let bins = reliability_bins(&confidences, &predictions, &labels, equal_width(10))
+            .expect("value should be present");
         let empties: Vec<&ReliabilityBin> = bins.iter().filter(|b| b.count == 0).collect();
         assert!(!empties.is_empty());
         for b in empties {

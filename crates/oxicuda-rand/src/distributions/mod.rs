@@ -8,6 +8,7 @@
 //! - [`log_normal`] -- Exponentiation of normal samples
 //! - [`poisson`] -- Poisson distribution via Knuth and normal approximation
 
+pub mod alias;
 pub mod binomial;
 pub mod geometric;
 pub mod log_normal;
@@ -16,3 +17,4 @@ pub mod normal;
 pub mod poisson;
 pub mod truncated_normal;
 pub mod uniform;
+pub use alias::AliasTable;

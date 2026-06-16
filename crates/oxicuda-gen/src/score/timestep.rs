@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn sinusoidal_dim_correct() {
-        let emb = SinusoidalEmbedding::new(64).unwrap();
+        let emb = SinusoidalEmbedding::new(64).expect("new should succeed");
         let out = emb.embed_timestep(1.0);
         assert_eq!(out.len(), 64);
     }
@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn sinusoidal_at_t0_sin_is_zero() {
         // sin(0) = 0 for all frequencies; cos(0) = 1
-        let emb = SinusoidalEmbedding::new(8).unwrap();
+        let emb = SinusoidalEmbedding::new(8).expect("new should succeed");
         let out = emb.embed_timestep(0.0);
         for i in 0..4 {
             assert!(
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn sinusoidal_output_finite() {
-        let emb = SinusoidalEmbedding::new(64).unwrap();
+        let emb = SinusoidalEmbedding::new(64).expect("new should succeed");
         for t in [0.0_f32, 0.5, 1.0, 100.0, 1000.0] {
             let out = emb.embed_timestep(t);
             assert!(out.iter().all(|v| v.is_finite()), "non-finite at t={t}");
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn sinusoidal_batch_shape() {
-        let emb = SinusoidalEmbedding::new(32).unwrap();
+        let emb = SinusoidalEmbedding::new(32).expect("new should succeed");
         let ts = vec![0.0_f32, 1.0, 2.0];
         let out = emb.embed_batch(&ts);
         assert_eq!(out.len(), 3 * 32);
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn sinusoidal_output_bounded() {
         // sin and cos values should be in [-1, 1]
-        let emb = SinusoidalEmbedding::new(16).unwrap();
+        let emb = SinusoidalEmbedding::new(16).expect("new should succeed");
         let out = emb.embed_timestep(500.0);
         for &v in &out {
             assert!((-1.0 - EPS..=1.0 + EPS).contains(&v), "out of [-1,1]: {v}");
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn sinusoidal_sin_cos_identity() {
         // For each pair: sin²(θ) + cos²(θ) ≈ 1
-        let emb = SinusoidalEmbedding::new(8).unwrap();
+        let emb = SinusoidalEmbedding::new(8).expect("new should succeed");
         let out = emb.embed_timestep(42.0);
         for i in 0..4 {
             let s = out[2 * i];
@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn fourier_dim_correct() {
         let mut rng = LcgRng::new(1234);
-        let emb = FourierEmbedding::new(64, &mut rng).unwrap();
+        let emb = FourierEmbedding::new(64, &mut rng).expect("new should succeed");
         let out = emb.embed(1.0);
         assert_eq!(out.len(), 64);
     }
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn fourier_output_bounded() {
         let mut rng = LcgRng::new(5);
-        let emb = FourierEmbedding::new(32, &mut rng).unwrap();
+        let emb = FourierEmbedding::new(32, &mut rng).expect("new should succeed");
         let out = emb.embed(100.0);
         for &v in &out {
             assert!((-1.0 - EPS..=1.0 + EPS).contains(&v), "out of [-1,1]: {v}");
@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn fourier_sin_cos_identity() {
         let mut rng = LcgRng::new(99);
-        let emb = FourierEmbedding::new(16, &mut rng).unwrap();
+        let emb = FourierEmbedding::new(16, &mut rng).expect("new should succeed");
         let out = emb.embed(std::f32::consts::PI);
         for i in 0..8 {
             let s = out[2 * i];
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn fourier_batch_shape() {
         let mut rng = LcgRng::new(77);
-        let emb = FourierEmbedding::new(32, &mut rng).unwrap();
+        let emb = FourierEmbedding::new(32, &mut rng).expect("new should succeed");
         let ts = vec![0.0_f32, 0.5, 1.0, 2.0, 5.0];
         let out = emb.embed_batch(&ts);
         assert_eq!(out.len(), 5 * 32);

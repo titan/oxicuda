@@ -17,6 +17,7 @@
 
 pub mod deep_ensemble;
 pub mod entropy;
+pub mod evidential;
 pub mod functional_laplace;
 pub mod laplace;
 pub mod mc_dropout;

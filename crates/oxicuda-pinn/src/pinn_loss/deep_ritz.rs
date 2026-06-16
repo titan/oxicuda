@@ -786,7 +786,8 @@ mod tests {
         let c = cfg(2);
         let lo = [0.0_f32, -1.0];
         let hi = [1.0_f32, 2.0];
-        let pts = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng).unwrap();
+        let pts = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng)
+            .expect("interior sampling should succeed");
         assert_eq!(pts.len(), c.n_interior * c.dim);
         for chunk in pts.chunks(2) {
             assert!(chunk[0] >= lo[0] && chunk[0] <= hi[0]);
@@ -800,7 +801,8 @@ mod tests {
         let c = cfg(2);
         let lo = [0.0_f32, 0.0];
         let hi = [1.0_f32, 1.0];
-        let pts = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng).unwrap();
+        let pts = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng)
+            .expect("boundary sampling should succeed");
         assert_eq!(pts.len(), c.n_boundary * c.dim);
         for chunk in pts.chunks(2) {
             let on_face =
@@ -812,16 +814,22 @@ mod tests {
     #[test]
     fn block_forward_length() {
         let mut rng = LcgRng::new(3);
-        let block = DeepRitzBlock::new(5, &mut rng).unwrap();
-        let out = block.forward(&[0.1, 0.2, 0.3, 0.4, 0.5]).unwrap();
+        let block = DeepRitzBlock::new(5, &mut rng)
+            .expect("DeepRitzBlock construction with valid params should succeed");
+        let out = block
+            .forward(&[0.1, 0.2, 0.3, 0.4, 0.5])
+            .expect("forward pass should succeed for valid input");
         assert_eq!(out.len(), 5);
     }
 
     #[test]
     fn block_jacobian_dims() {
         let mut rng = LcgRng::new(4);
-        let block = DeepRitzBlock::new(4, &mut rng).unwrap();
-        let jac = block.jacobian(&[0.1, -0.2, 0.3, 0.0]).unwrap();
+        let block = DeepRitzBlock::new(4, &mut rng)
+            .expect("DeepRitzBlock construction with valid params should succeed");
+        let jac = block
+            .jacobian(&[0.1, -0.2, 0.3, 0.0])
+            .expect("jacobian computation should succeed");
         assert_eq!(jac.len(), 16);
     }
 
@@ -829,17 +837,24 @@ mod tests {
     fn block_jacobian_matches_finite_difference() {
         let mut rng = LcgRng::new(40);
         let width = 4;
-        let block = DeepRitzBlock::new(width, &mut rng).unwrap();
+        let block = DeepRitzBlock::new(width, &mut rng)
+            .expect("DeepRitzBlock construction with valid params should succeed");
         let s = [0.2_f32, -0.3, 0.1, 0.4];
-        let jac = block.jacobian(&s).unwrap();
+        let jac = block
+            .jacobian(&s)
+            .expect("jacobian computation should succeed");
         let eps = 1e-3_f32;
         for j in 0..width {
             let mut sp = s;
             let mut sm = s;
             sp[j] += eps;
             sm[j] -= eps;
-            let yp = block.forward(&sp).unwrap();
-            let ym = block.forward(&sm).unwrap();
+            let yp = block
+                .forward(&sp)
+                .expect("forward pass should succeed for valid input");
+            let ym = block
+                .forward(&sm)
+                .expect("forward pass should succeed for valid input");
             for i in 0..width {
                 let fd = (yp[i] - ym[i]) / (2.0 * eps);
                 assert!(
@@ -854,33 +869,44 @@ mod tests {
     #[test]
     fn net_forward_scalar() {
         let mut rng = LcgRng::new(5);
-        let net = DeepRitzNet::new(2, 6, 2, &mut rng).unwrap();
-        let u = net.forward(&[0.3, 0.7]).unwrap();
+        let net = DeepRitzNet::new(2, 6, 2, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
+        let u = net
+            .forward(&[0.3, 0.7])
+            .expect("forward pass should succeed for valid input");
         assert!(u.is_finite());
     }
 
     #[test]
     fn grad_x_length() {
         let mut rng = LcgRng::new(6);
-        let net = DeepRitzNet::new(3, 5, 1, &mut rng).unwrap();
-        let grad = net.grad_x(&[0.1, 0.2, 0.3]).unwrap();
+        let net = DeepRitzNet::new(3, 5, 1, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
+        let grad = net
+            .grad_x(&[0.1, 0.2, 0.3])
+            .expect("gradient computation should succeed");
         assert_eq!(grad.len(), 3);
     }
 
     #[test]
     fn grad_x_matches_finite_difference() {
         let mut rng = LcgRng::new(7);
-        let net = DeepRitzNet::new(2, 6, 2, &mut rng).unwrap();
+        let net = DeepRitzNet::new(2, 6, 2, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let x = [0.35_f32, -0.2];
-        let grad = net.grad_x(&x).unwrap();
+        let grad = net.grad_x(&x).expect("gradient computation should succeed");
         let eps = 1e-3_f32;
         for j in 0..2 {
             let mut xp = x;
             let mut xm = x;
             xp[j] += eps;
             xm[j] -= eps;
-            let up = net.forward(&xp).unwrap();
-            let um = net.forward(&xm).unwrap();
+            let up = net
+                .forward(&xp)
+                .expect("forward pass should succeed for valid input");
+            let um = net
+                .forward(&xm)
+                .expect("forward pass should succeed for valid input");
             let fd = (up - um) / (2.0 * eps);
             assert!(
                 (grad[j] - fd).abs() < 1e-2,
@@ -893,14 +919,16 @@ mod tests {
     #[test]
     fn n_params_matches_get_params_len() {
         let mut rng = LcgRng::new(8);
-        let net = DeepRitzNet::new(2, 7, 3, &mut rng).unwrap();
+        let net = DeepRitzNet::new(2, 7, 3, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         assert_eq!(net.n_params(), net.get_params().len());
     }
 
     #[test]
     fn set_params_round_trip() {
         let mut rng = LcgRng::new(9);
-        let mut net = DeepRitzNet::new(2, 5, 2, &mut rng).unwrap();
+        let mut net = DeepRitzNet::new(2, 5, 2, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let p0 = net.get_params();
         // Map to new values, set, and read back.
         let p1: Vec<f32> = p0
@@ -908,7 +936,8 @@ mod tests {
             .enumerate()
             .map(|(i, _)| 0.01 * i as f32)
             .collect();
-        net.set_params(&p1).unwrap();
+        net.set_params(&p1)
+            .expect("set_params should succeed for valid param vector");
         let p2 = net.get_params();
         assert_eq!(p1.len(), p2.len());
         for (a, b) in p1.iter().zip(p2.iter()) {
@@ -920,17 +949,21 @@ mod tests {
     fn energy_terms_finite() {
         let mut rng = LcgRng::new(10);
         let c = cfg(1);
-        let net = DeepRitzNet::new(1, 6, 2, &mut rng).unwrap();
+        let net = DeepRitzNet::new(1, 6, 2, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let lo = [0.0_f32];
         let hi = [1.0_f32];
-        let interior = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng).unwrap();
-        let boundary = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng).unwrap();
+        let interior = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng)
+            .expect("interior sampling should succeed");
+        let boundary = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng)
+            .expect("boundary sampling should succeed");
         let f = |x: &[f32]| {
             let pi = std::f32::consts::PI;
             pi * pi * (pi * x[0]).sin()
         };
         let g = |_x: &[f32]| 0.0_f32;
-        let e = DeepRitz::energy(&net, &c, &interior, &boundary, f, g).unwrap();
+        let e = DeepRitz::energy(&net, &c, &interior, &boundary, f, g)
+            .expect("energy computation should succeed");
         assert!(e.total.is_finite());
         assert!(e.dirichlet_term.is_finite());
         assert!(e.source_term.is_finite());
@@ -942,14 +975,18 @@ mod tests {
         // Tiny hand setup: total == dirichlet − source + boundary.
         let mut rng = LcgRng::new(11);
         let c = cfg(1);
-        let net = DeepRitzNet::new(1, 4, 1, &mut rng).unwrap();
+        let net = DeepRitzNet::new(1, 4, 1, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let lo = [0.0_f32];
         let hi = [1.0_f32];
-        let interior = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng).unwrap();
-        let boundary = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng).unwrap();
+        let interior = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng)
+            .expect("interior sampling should succeed");
+        let boundary = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng)
+            .expect("boundary sampling should succeed");
         let f = |_x: &[f32]| 1.0_f32;
         let g = |_x: &[f32]| 0.5_f32;
-        let e = DeepRitz::energy(&net, &c, &interior, &boundary, f, g).unwrap();
+        let e = DeepRitz::energy(&net, &c, &interior, &boundary, f, g)
+            .expect("energy computation should succeed");
         let reassembled = e.dirichlet_term - e.source_term + e.boundary_term;
         assert!((e.total - reassembled).abs() < 1e-5);
     }
@@ -958,12 +995,16 @@ mod tests {
     fn energy_dirichlet_nonneg() {
         let mut rng = LcgRng::new(12);
         let c = cfg(2);
-        let net = DeepRitzNet::new(2, 5, 2, &mut rng).unwrap();
+        let net = DeepRitzNet::new(2, 5, 2, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let lo = [0.0_f32, 0.0];
         let hi = [1.0_f32, 1.0];
-        let interior = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng).unwrap();
-        let boundary = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng).unwrap();
-        let e = DeepRitz::energy(&net, &c, &interior, &boundary, |_| 0.0, |_| 0.0).unwrap();
+        let interior = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng)
+            .expect("interior sampling should succeed");
+        let boundary = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng)
+            .expect("boundary sampling should succeed");
+        let e = DeepRitz::energy(&net, &c, &interior, &boundary, |_| 0.0, |_| 0.0)
+            .expect("energy computation should succeed");
         // ½|∇u|² averaged is non-negative; boundary penalty (u−g)² non-negative.
         assert!(e.dirichlet_term >= 0.0);
         assert!(e.boundary_term >= 0.0);
@@ -979,7 +1020,8 @@ mod tests {
             n_interior: 16,
             n_boundary: 2,
         };
-        let mut net = DeepRitzNet::new(1, 8, 2, &mut rng).unwrap();
+        let mut net = DeepRitzNet::new(1, 8, 2, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let lo = [0.0_f32];
         let hi = [1.0_f32];
         let f = |x: &[f32]| {
@@ -991,14 +1033,14 @@ mod tests {
         let mut first_energy = None;
         let mut last_energy = 0.0_f32;
         for _ in 0..30 {
-            let e =
-                DeepRitz::train_step(&mut net, &c, &lo, &hi, &f, &g, 2e-3, 1e-3, &mut rng).unwrap();
+            let e = DeepRitz::train_step(&mut net, &c, &lo, &hi, &f, &g, 2e-3, 1e-3, &mut rng)
+                .expect("train_step should succeed");
             if first_energy.is_none() {
                 first_energy = Some(e);
             }
             last_energy = e;
         }
-        let e0 = first_energy.unwrap();
+        let e0 = first_energy.expect("first_energy should be set after at least one train step");
         assert!(
             last_energy < e0,
             "energy did not decrease: start={e0} end={last_energy}"
@@ -1008,7 +1050,8 @@ mod tests {
     #[test]
     fn err_dim_mismatch_forward() {
         let mut rng = LcgRng::new(13);
-        let net = DeepRitzNet::new(2, 4, 1, &mut rng).unwrap();
+        let net = DeepRitzNet::new(2, 4, 1, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         assert!(matches!(
             net.forward(&[0.1]),
             Err(PinnError::DimensionMismatch { .. })
@@ -1055,7 +1098,8 @@ mod tests {
     #[test]
     fn err_set_params_wrong_len() {
         let mut rng = LcgRng::new(16);
-        let mut net = DeepRitzNet::new(2, 4, 1, &mut rng).unwrap();
+        let mut net = DeepRitzNet::new(2, 4, 1, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let bad = vec![0.0_f32; net.n_params() + 1];
         assert!(matches!(
             net.set_params(&bad),
@@ -1082,7 +1126,8 @@ mod tests {
     fn err_train_step_bad_eps() {
         let mut rng = LcgRng::new(18);
         let c = cfg(1);
-        let mut net = DeepRitzNet::new(1, 4, 1, &mut rng).unwrap();
+        let mut net = DeepRitzNet::new(1, 4, 1, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let f = |_x: &[f32]| 1.0_f32;
         let g = |_x: &[f32]| 0.0_f32;
         assert!(matches!(
@@ -1095,8 +1140,10 @@ mod tests {
     fn deterministic_given_seed() {
         let mut rng_a = LcgRng::new(123);
         let mut rng_b = LcgRng::new(123);
-        let net_a = DeepRitzNet::new(2, 5, 2, &mut rng_a).unwrap();
-        let net_b = DeepRitzNet::new(2, 5, 2, &mut rng_b).unwrap();
+        let net_a = DeepRitzNet::new(2, 5, 2, &mut rng_a)
+            .expect("DeepRitzNet construction with valid params should succeed");
+        let net_b = DeepRitzNet::new(2, 5, 2, &mut rng_b)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let pa = net_a.get_params();
         let pb = net_b.get_params();
         assert_eq!(pa.len(), pb.len());
@@ -1104,8 +1151,12 @@ mod tests {
             assert!((a - b).abs() < 1e-9);
         }
         // Same forward output.
-        let ua = net_a.forward(&[0.2, 0.4]).unwrap();
-        let ub = net_b.forward(&[0.2, 0.4]).unwrap();
+        let ua = net_a
+            .forward(&[0.2, 0.4])
+            .expect("forward pass should succeed for valid input");
+        let ub = net_b
+            .forward(&[0.2, 0.4])
+            .expect("forward pass should succeed for valid input");
         assert!((ua - ub).abs() < 1e-9);
     }
 
@@ -1118,13 +1169,17 @@ mod tests {
             n_interior: 4,
             n_boundary: 0,
         };
-        let net = DeepRitzNet::new(1, 4, 1, &mut rng).unwrap();
+        let net = DeepRitzNet::new(1, 4, 1, &mut rng)
+            .expect("DeepRitzNet construction with valid params should succeed");
         let lo = [0.0_f32];
         let hi = [1.0_f32];
-        let interior = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng).unwrap();
-        let boundary = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng).unwrap();
+        let interior = DeepRitz::sample_interior(&c, &lo, &hi, &mut rng)
+            .expect("interior sampling should succeed");
+        let boundary = DeepRitz::sample_boundary(&c, &lo, &hi, &mut rng)
+            .expect("boundary sampling should succeed");
         assert!(boundary.is_empty());
-        let e = DeepRitz::energy(&net, &c, &interior, &boundary, |_| 1.0, |_| 0.0).unwrap();
+        let e = DeepRitz::energy(&net, &c, &interior, &boundary, |_| 1.0, |_| 0.0)
+            .expect("energy computation should succeed");
         assert_eq!(e.boundary_term, 0.0);
     }
 }

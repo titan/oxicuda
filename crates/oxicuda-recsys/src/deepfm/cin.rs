@@ -503,9 +503,9 @@ mod tests {
     fn xdeepfm_forward_finite() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = XDeepFm::new(cfg, &mut rng).unwrap();
+        let model = XDeepFm::new(cfg, &mut rng).expect("new should succeed");
         let embeds: Vec<f32> = (0..4 * 8).map(|_| rng.next_f32() * 0.1).collect();
-        let logit = model.forward(&embeds).unwrap();
+        let logit = model.forward(&embeds).expect("forward should succeed");
         assert!(
             logit.is_finite(),
             "forward output must be finite, got {logit}"
@@ -516,9 +516,9 @@ mod tests {
     fn xdeepfm_sigmoid_range() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = XDeepFm::new(cfg, &mut rng).unwrap();
+        let model = XDeepFm::new(cfg, &mut rng).expect("new should succeed");
         let embeds: Vec<f32> = (0..4 * 8).map(|_| rng.next_f32() * 0.1).collect();
-        let logit = model.forward(&embeds).unwrap();
+        let logit = model.forward(&embeds).expect("forward should succeed");
         let p = XDeepFm::sigmoid(logit);
         assert!(
             p > 0.0 && p < 1.0,
@@ -556,9 +556,9 @@ mod tests {
     fn embed_output_length() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = XDeepFm::new(cfg, &mut rng).unwrap();
+        let model = XDeepFm::new(cfg, &mut rng).expect("new should succeed");
         let field_ids: Vec<usize> = vec![0, 1, 2, 3];
-        let out = model.embed(&field_ids).unwrap();
+        let out = model.embed(&field_ids).expect("embed should succeed");
         assert_eq!(
             out.len(),
             4 * 8,
@@ -570,7 +570,7 @@ mod tests {
     fn embed_err_out_of_bounds() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = XDeepFm::new(cfg, &mut rng).unwrap();
+        let model = XDeepFm::new(cfg, &mut rng).expect("new should succeed");
         // field_id = 4 >= n_fields = 4 → error
         let field_ids = vec![0, 1, 2, 4];
         assert!(matches!(
@@ -583,13 +583,15 @@ mod tests {
     fn train_step_returns_finite_loss() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let mut model = XDeepFm::new(cfg.clone(), &mut rng).unwrap();
+        let mut model = XDeepFm::new(cfg.clone(), &mut rng).expect("value should be present");
         let m = cfg.n_fields;
         let d = cfg.embed_dim;
         let bs = cfg.batch_size;
         let embeds = random_embeds(bs, m, d, &mut rng);
         let labels = random_labels(bs, &mut rng);
-        let loss = model.train_step(&embeds, &labels, &mut rng).unwrap();
+        let loss = model
+            .train_step(&embeds, &labels, &mut rng)
+            .expect("train_step should succeed");
         assert!(
             loss.is_finite(),
             "train_step loss must be finite, got {loss}"
@@ -609,7 +611,7 @@ mod tests {
             n_iter: 10,
             batch_size: 8,
         };
-        let mut model = XDeepFm::new(cfg.clone(), &mut rng).unwrap();
+        let mut model = XDeepFm::new(cfg.clone(), &mut rng).expect("value should be present");
         let m = cfg.n_fields;
         let d = cfg.embed_dim;
         let bs = cfg.batch_size;
@@ -622,7 +624,9 @@ mod tests {
         let mut last_loss = f32::MAX;
         for step in 0..10 {
             let mut rng2 = LcgRng::new(step as u64);
-            let loss = model.train_step(&embeds, &labels, &mut rng2).unwrap();
+            let loss = model
+                .train_step(&embeds, &labels, &mut rng2)
+                .expect("train_step should succeed");
             if step == 0 {
                 first_loss = loss;
             }
@@ -638,7 +642,7 @@ mod tests {
     fn cin_forward_output_dim() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = XDeepFm::new(cfg.clone(), &mut rng).unwrap();
+        let model = XDeepFm::new(cfg.clone(), &mut rng).expect("value should be present");
         let embeds: Vec<f32> = (0..cfg.n_fields * cfg.embed_dim)
             .map(|_| rng.next_f32() * 0.1)
             .collect();
@@ -655,7 +659,7 @@ mod tests {
     fn dnn_forward_finite() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = XDeepFm::new(cfg.clone(), &mut rng).unwrap();
+        let model = XDeepFm::new(cfg.clone(), &mut rng).expect("value should be present");
         let input: Vec<f32> = (0..cfg.n_fields * cfg.embed_dim)
             .map(|_| rng.next_f32() * 0.1)
             .collect();

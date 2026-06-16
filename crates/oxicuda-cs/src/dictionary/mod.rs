@@ -1,9 +1,11 @@
 //! Dictionary learning: K-SVD, MOD, and online dictionary updates.
 
+pub mod coupled_dl;
 pub mod k_svd;
 pub mod mod_dl;
 pub mod online_dl;
 
+pub use coupled_dl::{CoupledDictionary, CoupledDlConfig, couple_code, coupled_dl};
 pub use k_svd::k_svd;
 pub use mod_dl::mod_dl;
 pub use online_dl::online_dl;

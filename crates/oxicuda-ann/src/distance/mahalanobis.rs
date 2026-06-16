@@ -351,13 +351,15 @@ mod tests {
     #[test]
     fn identity_distance_equals_euclidean() {
         let dim = 7;
-        let metric = MahalanobisMetric::identity(dim).unwrap();
+        let metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         let mut r = rng();
         for _ in 0..20 {
             let x = rand_vec(dim, &mut r);
             let y = rand_vec(dim, &mut r);
-            let m = metric.distance(&x, &y).unwrap();
-            let e = crate::distance::l2::l2(&x, &y).unwrap();
+            let m = metric
+                .distance(&x, &y)
+                .expect("test invariant: should succeed");
+            let e = crate::distance::l2::l2(&x, &y).expect("test invariant: should succeed");
             assert!((m - e).abs() < 1e-5, "mahalanobis={m} euclidean={e}");
         }
     }
@@ -365,12 +367,14 @@ mod tests {
     #[test]
     fn identity_distance_sq_equals_euclidean_sq() {
         let dim = 5;
-        let metric = MahalanobisMetric::identity(dim).unwrap();
+        let metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         let mut r = rng();
         let x = rand_vec(dim, &mut r);
         let y = rand_vec(dim, &mut r);
-        let m = metric.distance_sq(&x, &y).unwrap();
-        let e = l2_sq(&x, &y).unwrap();
+        let m = metric
+            .distance_sq(&x, &y)
+            .expect("test invariant: should succeed");
+        let e = l2_sq(&x, &y).expect("test invariant: should succeed");
         assert!((m - e).abs() < 1e-5, "m_sq={m} e_sq={e}");
     }
 
@@ -387,9 +391,11 @@ mod tests {
             },
             &mut r,
         )
-        .unwrap();
+        .expect("test invariant: should succeed");
         let x = rand_vec(dim, &mut r);
-        let d = metric.distance(&x, &x).unwrap();
+        let d = metric
+            .distance(&x, &x)
+            .expect("test invariant: should succeed");
         assert!(d.abs() < 1e-5, "d(x,x)={d}");
     }
 
@@ -406,11 +412,15 @@ mod tests {
             },
             &mut r,
         )
-        .unwrap();
+        .expect("test invariant: should succeed");
         let x = rand_vec(dim, &mut r);
         let y = rand_vec(dim, &mut r);
-        let dxy = metric.distance(&x, &y).unwrap();
-        let dyx = metric.distance(&y, &x).unwrap();
+        let dxy = metric
+            .distance(&x, &y)
+            .expect("test invariant: should succeed");
+        let dyx = metric
+            .distance(&y, &x)
+            .expect("test invariant: should succeed");
         assert!((dxy - dyx).abs() < 1e-6, "dxy={dxy} dyx={dyx}");
     }
 
@@ -427,11 +437,15 @@ mod tests {
             },
             &mut r,
         )
-        .unwrap();
+        .expect("test invariant: should succeed");
         let x = rand_vec(dim, &mut r);
         let y = rand_vec(dim, &mut r);
-        let d = metric.distance(&x, &y).unwrap();
-        let dsq = metric.distance_sq(&x, &y).unwrap();
+        let d = metric
+            .distance(&x, &y)
+            .expect("test invariant: should succeed");
+        let dsq = metric
+            .distance_sq(&x, &y)
+            .expect("test invariant: should succeed");
         assert!((d * d - dsq).abs() < 1e-5, "d^2={} dsq={dsq}", d * d);
     }
 
@@ -448,7 +462,7 @@ mod tests {
             },
             &mut r,
         )
-        .unwrap();
+        .expect("test invariant: should succeed");
         let m = metric.metric_matrix();
         for a in 0..dim {
             for b in 0..dim {
@@ -462,7 +476,7 @@ mod tests {
     #[test]
     fn identity_metric_matrix_is_identity() {
         let dim = 5;
-        let metric = MahalanobisMetric::identity(dim).unwrap();
+        let metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         let m = metric.metric_matrix();
         for a in 0..dim {
             for b in 0..dim {
@@ -485,11 +499,13 @@ mod tests {
             },
             &mut r,
         )
-        .unwrap();
+        .expect("test invariant: should succeed");
         for _ in 0..30 {
             let x = rand_vec(dim, &mut r);
             let y = rand_vec(dim, &mut r);
-            let d = metric.distance(&x, &y).unwrap();
+            let d = metric
+                .distance(&x, &y)
+                .expect("test invariant: should succeed");
             assert!(d >= 0.0, "d={d}");
         }
     }
@@ -519,16 +535,22 @@ mod tests {
             n_iter: 1,
         };
         let mut r = rng();
-        let mut metric = MahalanobisMetric::new(&cfg, &mut r).unwrap();
+        let mut metric =
+            MahalanobisMetric::new(&cfg, &mut r).expect("test invariant: should succeed");
 
         // Initial loss = one fit iteration's reported loss.
-        let initial = metric.clone().fit(&data, n, &pairs, &cfg).unwrap();
+        let initial = metric
+            .clone()
+            .fit(&data, n, &pairs, &cfg)
+            .expect("test invariant: should succeed");
         // Run many more iterations.
         let many = MahalanobisConfig {
             n_iter: 200,
             ..cfg.clone()
         };
-        let final_loss = metric.fit(&data, n, &pairs, &many).unwrap();
+        let final_loss = metric
+            .fit(&data, n, &pairs, &many)
+            .expect("test invariant: should succeed");
         assert!(final_loss < initial, "final={final_loss} initial={initial}");
     }
 
@@ -542,13 +564,20 @@ mod tests {
             n_iter: 300,
         };
         let mut r = rng();
-        let mut metric = MahalanobisMetric::new(&cfg, &mut r).unwrap();
+        let mut metric =
+            MahalanobisMetric::new(&cfg, &mut r).expect("test invariant: should succeed");
 
         let x0 = &data[0..dim];
         let x1 = &data[dim..2 * dim];
-        let before = metric.distance(x0, x1).unwrap();
-        metric.fit(&data, n, &pairs, &cfg).unwrap();
-        let after = metric.distance(x0, x1).unwrap();
+        let before = metric
+            .distance(x0, x1)
+            .expect("test invariant: should succeed");
+        metric
+            .fit(&data, n, &pairs, &cfg)
+            .expect("test invariant: should succeed");
+        let after = metric
+            .distance(x0, x1)
+            .expect("test invariant: should succeed");
         assert!(after < before, "before={before} after={after}");
     }
 
@@ -562,8 +591,11 @@ mod tests {
             n_iter: 250,
         };
         let mut r = rng();
-        let mut metric = MahalanobisMetric::new(&cfg, &mut r).unwrap();
-        metric.fit(&data, n, &pairs, &cfg).unwrap();
+        let mut metric =
+            MahalanobisMetric::new(&cfg, &mut r).expect("test invariant: should succeed");
+        metric
+            .fit(&data, n, &pairs, &cfg)
+            .expect("test invariant: should succeed");
 
         let m = metric.metric_matrix();
         // zᵀ M z >= 0 for several random z.
@@ -591,10 +623,14 @@ mod tests {
         };
         let mut r1 = LcgRng::new(7);
         let mut r2 = LcgRng::new(7);
-        let mut m1 = MahalanobisMetric::new(&cfg, &mut r1).unwrap();
-        let mut m2 = MahalanobisMetric::new(&cfg, &mut r2).unwrap();
-        let l1 = m1.fit(&data, n, &pairs, &cfg).unwrap();
-        let l2 = m2.fit(&data, n, &pairs, &cfg).unwrap();
+        let mut m1 = MahalanobisMetric::new(&cfg, &mut r1).expect("test invariant: should succeed");
+        let mut m2 = MahalanobisMetric::new(&cfg, &mut r2).expect("test invariant: should succeed");
+        let l1 = m1
+            .fit(&data, n, &pairs, &cfg)
+            .expect("test invariant: should succeed");
+        let l2 = m2
+            .fit(&data, n, &pairs, &cfg)
+            .expect("test invariant: should succeed");
         assert_eq!(l1, l2);
         assert_eq!(m1.factor(), m2.factor());
     }
@@ -608,9 +644,11 @@ mod tests {
             margin: 2.0,
             n_iter: 100,
         };
-        let mut metric = MahalanobisMetric::identity(dim).unwrap();
-        metric.fit(&data, n, &pairs, &cfg).unwrap();
-        let ident = MahalanobisMetric::identity(dim).unwrap();
+        let mut metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
+        metric
+            .fit(&data, n, &pairs, &cfg)
+            .expect("test invariant: should succeed");
+        let ident = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         let mut diff = 0.0_f32;
         for (a, b) in metric.factor().iter().zip(ident.factor().iter()) {
             diff += (a - b).abs();
@@ -624,11 +662,13 @@ mod tests {
         // M = L Lᵀ = [[4, 2],[2, 10]].
         // x-y = [1, 1] => (x-y)ᵀ M (x-y) = 4 + 2 + 2 + 10 = 18.
         let dim = 2;
-        let mut metric = MahalanobisMetric::identity(dim).unwrap();
+        let mut metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         metric.l = vec![2.0, 0.0, 1.0, 3.0];
         let x = vec![1.0_f32, 1.0];
         let y = vec![0.0_f32, 0.0];
-        let dsq = metric.distance_sq(&x, &y).unwrap();
+        let dsq = metric
+            .distance_sq(&x, &y)
+            .expect("test invariant: should succeed");
         assert!((dsq - 18.0).abs() < 1e-5, "dsq={dsq}");
         // Cross-check against M built by metric_matrix.
         let m = metric.metric_matrix();
@@ -640,7 +680,7 @@ mod tests {
 
     #[test]
     fn err_distance_x_dim_mismatch() {
-        let metric = MahalanobisMetric::identity(3).unwrap();
+        let metric = MahalanobisMetric::identity(3).expect("test invariant: should succeed");
         let x = vec![1.0_f32, 2.0];
         let y = vec![1.0_f32, 2.0, 3.0];
         assert!(matches!(
@@ -651,7 +691,7 @@ mod tests {
 
     #[test]
     fn err_distance_y_dim_mismatch() {
-        let metric = MahalanobisMetric::identity(3).unwrap();
+        let metric = MahalanobisMetric::identity(3).expect("test invariant: should succeed");
         let x = vec![1.0_f32, 2.0, 3.0];
         let y = vec![1.0_f32, 2.0];
         assert!(matches!(
@@ -670,7 +710,7 @@ mod tests {
             margin: 1.0,
             n_iter: 1,
         };
-        let mut metric = MahalanobisMetric::identity(dim).unwrap();
+        let mut metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         let pairs = vec![(0, 5, true)];
         assert!(matches!(
             metric.fit(&data, 2, &pairs, &cfg),
@@ -688,7 +728,7 @@ mod tests {
             margin: 1.0,
             n_iter: 1,
         };
-        let mut metric = MahalanobisMetric::identity(dim).unwrap();
+        let mut metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         let pairs = vec![(0, 1, true)];
         assert!(matches!(
             metric.fit(&data, 2, &pairs, &cfg),
@@ -706,7 +746,7 @@ mod tests {
             margin: 1.0,
             n_iter: 1,
         };
-        let mut metric = MahalanobisMetric::identity(dim).unwrap();
+        let mut metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         let pairs = vec![(0, 1, true)];
         assert!(matches!(
             metric.fit(&data, 2, &pairs, &cfg),
@@ -724,7 +764,7 @@ mod tests {
             margin: 1.0,
             n_iter: 0,
         };
-        let mut metric = MahalanobisMetric::identity(dim).unwrap();
+        let mut metric = MahalanobisMetric::identity(dim).expect("test invariant: should succeed");
         let pairs = vec![(0, 1, true)];
         assert!(matches!(
             metric.fit(&data, 2, &pairs, &cfg),
@@ -765,8 +805,8 @@ mod tests {
         };
         let mut r1 = LcgRng::new(123);
         let mut r2 = LcgRng::new(123);
-        let m1 = MahalanobisMetric::new(&cfg, &mut r1).unwrap();
-        let m2 = MahalanobisMetric::new(&cfg, &mut r2).unwrap();
+        let m1 = MahalanobisMetric::new(&cfg, &mut r1).expect("test invariant: should succeed");
+        let m2 = MahalanobisMetric::new(&cfg, &mut r2).expect("test invariant: should succeed");
         assert_eq!(m1.factor(), m2.factor());
     }
 }

@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_config_new_valid() {
-        let cfg = CuckooConfig::new(20, 100).unwrap();
+        let cfg = CuckooConfig::new(20, 100).expect("new should succeed");
         assert_eq!(cfg.n_nests, 20);
         assert_eq!(cfg.max_iter, 100);
         assert!((cfg.pa - 0.25).abs() < 1e-12);
@@ -382,7 +382,7 @@ mod tests {
     fn test_state_new_correct_sizes() {
         let bounds = vec![(-5.0_f64, 5.0_f64); 3];
         let mut rng = LcgRng::new(0);
-        let state = CuckooState::new(bounds, 10, &sphere, &mut rng).unwrap();
+        let state = CuckooState::new(bounds, 10, &sphere, &mut rng).expect("new should succeed");
         assert_eq!(state.nests.len(), 10);
         assert_eq!(state.fitness.len(), 10);
         assert_eq!(state.nests[0].len(), 3);
@@ -393,7 +393,8 @@ mod tests {
     fn test_state_new_positions_within_bounds() {
         let bounds: Vec<(f64, f64)> = vec![(-3.0, 3.0), (1.0, 5.0)];
         let mut rng = LcgRng::new(7);
-        let state = CuckooState::new(bounds.clone(), 12, &sphere, &mut rng).unwrap();
+        let state = CuckooState::new(bounds.clone(), 12, &sphere, &mut rng)
+            .expect("value should be present");
         for nest in &state.nests {
             for (d, &x) in nest.iter().enumerate() {
                 let (lb, ub) = bounds[d];
@@ -406,7 +407,7 @@ mod tests {
     fn test_state_new_best_fitness_correct() {
         let bounds = vec![(-2.0_f64, 2.0_f64); 2];
         let mut rng = LcgRng::new(42);
-        let state = CuckooState::new(bounds, 8, &sphere, &mut rng).unwrap();
+        let state = CuckooState::new(bounds, 8, &sphere, &mut rng).expect("new should succeed");
         let min_fit = state.fitness.iter().cloned().fold(f64::INFINITY, f64::min);
         assert!((state.best_fitness - min_fit).abs() < 1e-12);
     }
@@ -438,7 +439,7 @@ mod tests {
     fn test_cuckoo_step_increments_generation() {
         let bounds = vec![(-5.0_f64, 5.0_f64); 2];
         let mut rng = LcgRng::new(1);
-        let mut state = CuckooState::new(bounds, 5, &sphere, &mut rng).unwrap();
+        let mut state = CuckooState::new(bounds, 5, &sphere, &mut rng).expect("new should succeed");
         assert_eq!(state.generation, 0);
         cuckoo_step(&mut state, &sphere, &mut rng, 0.25, 0.01);
         assert_eq!(state.generation, 1);
@@ -450,7 +451,8 @@ mod tests {
     fn test_cuckoo_step_best_non_increasing() {
         let bounds = vec![(-5.0_f64, 5.0_f64); 3];
         let mut rng = LcgRng::new(99);
-        let mut state = CuckooState::new(bounds, 10, &sphere, &mut rng).unwrap();
+        let mut state =
+            CuckooState::new(bounds, 10, &sphere, &mut rng).expect("new should succeed");
         let initial_best = state.best_fitness;
         for _ in 0..50 {
             cuckoo_step(&mut state, &sphere, &mut rng, 0.25, 0.01);
@@ -475,7 +477,7 @@ mod tests {
             step_scale: 0.01,
             seed: 42,
         };
-        let state = cuckoo_run(sphere, &bounds, &cfg).unwrap();
+        let state = cuckoo_run(sphere, &bounds, &cfg).expect("cuckoo_run should succeed");
         assert!(state.best_fitness < 100.0, "best = {}", state.best_fitness);
         assert_eq!(state.best.len(), 1);
     }
@@ -490,7 +492,7 @@ mod tests {
             step_scale: 0.01,
             seed: 7,
         };
-        let state = cuckoo_run(sphere, &bounds, &cfg).unwrap();
+        let state = cuckoo_run(sphere, &bounds, &cfg).expect("cuckoo_run should succeed");
         // Worst possible ≈ 125; should improve.
         assert!(state.best_fitness < 125.0, "best = {}", state.best_fitness);
     }
@@ -506,7 +508,7 @@ mod tests {
             seed: 11,
         };
         let worst = ackley(&[5.0, 5.0, 5.0]);
-        let state = cuckoo_run(ackley, &bounds, &cfg).unwrap();
+        let state = cuckoo_run(ackley, &bounds, &cfg).expect("cuckoo_run should succeed");
         assert!(
             state.best_fitness < worst,
             "best={} worst={worst}",
@@ -525,7 +527,7 @@ mod tests {
             seed: 33,
         };
         let worst = rastrigin(&[5.12, 5.12]);
-        let state = cuckoo_run(rastrigin, &bounds, &cfg).unwrap();
+        let state = cuckoo_run(rastrigin, &bounds, &cfg).expect("cuckoo_run should succeed");
         assert!(
             state.best_fitness < worst,
             "best={} worst={worst}",
@@ -543,7 +545,7 @@ mod tests {
             step_scale: 0.01,
             seed: 77,
         };
-        let state = cuckoo_run(rosenbrock, &bounds, &cfg).unwrap();
+        let state = cuckoo_run(rosenbrock, &bounds, &cfg).expect("cuckoo_run should succeed");
         assert!(state.best_fitness < 200.0, "best = {}", state.best_fitness);
     }
 
@@ -582,7 +584,7 @@ mod tests {
             step_scale: 0.01,
             seed: 21,
         };
-        let state = cuckoo_run(sphere, &bounds, &cfg).unwrap();
+        let state = cuckoo_run(sphere, &bounds, &cfg).expect("cuckoo_run should succeed");
         for (d, &x) in state.best.iter().enumerate() {
             let (lb, ub) = bounds[d];
             assert!(x >= lb && x <= ub, "dim {d}: {x} out of [{lb},{ub}]");
@@ -599,8 +601,8 @@ mod tests {
             step_scale: 0.01,
             seed: 999,
         };
-        let s1 = cuckoo_run(sphere, &bounds, &cfg).unwrap();
-        let s2 = cuckoo_run(sphere, &bounds, &cfg).unwrap();
+        let s1 = cuckoo_run(sphere, &bounds, &cfg).expect("cuckoo_run should succeed");
+        let s2 = cuckoo_run(sphere, &bounds, &cfg).expect("cuckoo_run should succeed");
         assert_eq!(s1.best_fitness, s2.best_fitness, "runs not deterministic");
     }
 
@@ -614,7 +616,7 @@ mod tests {
             step_scale: 0.01,
             seed: 3,
         };
-        let state = cuckoo_run(sphere, &bounds, &cfg).unwrap();
+        let state = cuckoo_run(sphere, &bounds, &cfg).expect("cuckoo_run should succeed");
         assert_eq!(state.generation, 50);
     }
 }

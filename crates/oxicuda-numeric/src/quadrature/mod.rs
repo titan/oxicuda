@@ -7,4 +7,7 @@ pub mod gauss_hermite;
 pub mod gauss_kronrod;
 pub mod gauss_laguerre;
 pub mod gauss_legendre;
+pub mod richardson;
 pub mod romberg;
+pub mod sparse_grid;
+pub mod tanh_sinh;

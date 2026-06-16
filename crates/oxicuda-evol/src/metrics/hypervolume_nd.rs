@@ -382,7 +382,7 @@ mod tests {
     fn test_hv_nd_empty_front_returns_zero() {
         let result = hypervolume_nd(&[], &ref_wrap(vec![2.0, 2.0]));
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0.0);
+        assert_eq!(result.expect("result should be present"), 0.0);
     }
 
     #[test]
@@ -390,7 +390,7 @@ mod tests {
         // HV = ref - point = 2.0 - 0.5 = 1.5
         let result = hypervolume_nd(&[vec![0.5]], &ref_wrap(vec![2.0]));
         assert!(result.is_ok());
-        let hv = result.unwrap();
+        let hv = result.expect("result should be present");
         assert!((hv - 1.5).abs() < EPS, "expected 1.5, got {hv}");
     }
 
@@ -420,11 +420,12 @@ mod tests {
 
         // Use the existing 2D function for comparison
         let front_pairs: Vec<(f64, f64)> = front_2d.iter().map(|p| (p[0], p[1])).collect();
-        let hv_2d_val = hypervolume_2d(&front_pairs, reference).unwrap();
+        let hv_2d_val =
+            hypervolume_2d(&front_pairs, reference).expect("hypervolume_2d should succeed");
 
         // Use our nd function
-        let hv_nd_val =
-            hypervolume_nd(&front_2d, &ref_wrap(vec![reference.0, reference.1])).unwrap();
+        let hv_nd_val = hypervolume_nd(&front_2d, &ref_wrap(vec![reference.0, reference.1]))
+            .expect("value should be present");
 
         assert!(
             (hv_nd_val - hv_2d_val).abs() < 1e-9,
@@ -438,9 +439,10 @@ mod tests {
         let reference = (3.0, 3.0);
 
         let front_pairs: Vec<(f64, f64)> = front_2d.iter().map(|p| (p[0], p[1])).collect();
-        let hv_2d_val = hypervolume_2d(&front_pairs, reference).unwrap();
-        let hv_nd_val =
-            hypervolume_nd(&front_2d, &ref_wrap(vec![reference.0, reference.1])).unwrap();
+        let hv_2d_val =
+            hypervolume_2d(&front_pairs, reference).expect("hypervolume_2d should succeed");
+        let hv_nd_val = hypervolume_nd(&front_2d, &ref_wrap(vec![reference.0, reference.1]))
+            .expect("value should be present");
 
         assert!(
             (hv_nd_val - hv_2d_val).abs() < 1e-9,
@@ -459,7 +461,7 @@ mod tests {
             vec![1.0, 0.0, 0.0],
         ];
         let ref_pt = ref_wrap(vec![2.0, 2.0, 2.0]);
-        let hv = hypervolume_nd(&front, &ref_pt).unwrap();
+        let hv = hypervolume_nd(&front, &ref_pt).expect("hypervolume_nd should succeed");
         assert!(hv > 0.0, "3D tetrahedron HV must be positive, got {hv}");
         // The WFG algorithm gives the exact value; check it's in a reasonable range
         assert!(
@@ -473,7 +475,7 @@ mod tests {
         // A single point at (1,1,1) with reference (3,3,3) -> HV = 2*2*2 = 8
         let front = vec![vec![1.0, 1.0, 1.0]];
         let ref_pt = ref_wrap(vec![3.0, 3.0, 3.0]);
-        let hv = hypervolume_nd(&front, &ref_pt).unwrap();
+        let hv = hypervolume_nd(&front, &ref_pt).expect("hypervolume_nd should succeed");
         assert!((hv - 8.0).abs() < EPS, "expected 8.0, got {hv}");
     }
 
@@ -484,7 +486,7 @@ mod tests {
         // Single point at (1,1,1,1) with reference (3,3,3,3) -> HV = 2^4 = 16
         let front = vec![vec![1.0, 1.0, 1.0, 1.0]];
         let ref_pt = ref_wrap(vec![3.0, 3.0, 3.0, 3.0]);
-        let hv = hypervolume_nd(&front, &ref_pt).unwrap();
+        let hv = hypervolume_nd(&front, &ref_pt).expect("hypervolume_nd should succeed");
         assert!((hv - 16.0).abs() < EPS, "expected 16.0, got {hv}");
     }
 
@@ -494,7 +496,7 @@ mod tests {
         // reference = (2,2,2,2)
         let front = vec![vec![0.0, 0.0, 0.0, 1.0], vec![1.0, 1.0, 1.0, 0.0]];
         let ref_pt = ref_wrap(vec![2.0, 2.0, 2.0, 2.0]);
-        let hv = hypervolume_nd(&front, &ref_pt).unwrap();
+        let hv = hypervolume_nd(&front, &ref_pt).expect("hypervolume_nd should succeed");
         assert!(hv > 0.0, "4D two-point HV must be positive, got {hv}");
         // Upper bound: bounding box = 2^4 = 16
         assert!(hv <= 16.0, "HV cannot exceed 16: {hv}");
@@ -506,8 +508,9 @@ mod tests {
     fn test_hv_contributions_sum_at_most_total() {
         let front = vec![vec![1.0, 3.0], vec![2.0, 2.0], vec![3.0, 1.0]];
         let ref_pt = ref_wrap(vec![4.0, 4.0]);
-        let total = hypervolume_nd(&front, &ref_pt).unwrap();
-        let contribs = hypervolume_contributions(&front, &ref_pt).unwrap();
+        let total = hypervolume_nd(&front, &ref_pt).expect("hypervolume_nd should succeed");
+        let contribs = hypervolume_contributions(&front, &ref_pt)
+            .expect("hypervolume_contributions should succeed");
         assert_eq!(contribs.len(), front.len());
         // Each contribution is non-negative
         for &c in &contribs {
@@ -527,8 +530,9 @@ mod tests {
         // Single point: its contribution equals the total HV
         let front = vec![vec![1.0, 1.0]];
         let ref_pt = ref_wrap(vec![3.0, 3.0]);
-        let total = hypervolume_nd(&front, &ref_pt).unwrap();
-        let contribs = hypervolume_contributions(&front, &ref_pt).unwrap();
+        let total = hypervolume_nd(&front, &ref_pt).expect("hypervolume_nd should succeed");
+        let contribs = hypervolume_contributions(&front, &ref_pt)
+            .expect("hypervolume_contributions should succeed");
         assert_eq!(contribs.len(), 1);
         assert!((contribs[0] - total).abs() < EPS);
     }
@@ -541,7 +545,8 @@ mod tests {
             vec![1.9, 1.9], // far but non-dominated (no other point dominates it)
         ];
         let ref_pt = ref_wrap(vec![2.0, 2.0]);
-        let contribs = hypervolume_contributions(&front, &ref_pt).unwrap();
+        let contribs = hypervolume_contributions(&front, &ref_pt)
+            .expect("hypervolume_contributions should succeed");
         assert_eq!(contribs.len(), 2);
         // The near-optimal point should have a larger contribution
         assert!(
@@ -553,7 +558,8 @@ mod tests {
 
     #[test]
     fn test_hv_contributions_empty_front() {
-        let contribs = hypervolume_contributions(&[], &ref_wrap(vec![1.0, 1.0])).unwrap();
+        let contribs = hypervolume_contributions(&[], &ref_wrap(vec![1.0, 1.0]))
+            .expect("value should be present");
         assert!(contribs.is_empty());
     }
 
@@ -569,7 +575,7 @@ mod tests {
             .map(|_| (0..5).map(|_| rng.next_f64() * 5.0).collect())
             .collect();
         let ref_pt = ref_wrap(ref_vals);
-        let hv = hypervolume_nd(&points, &ref_pt).unwrap();
+        let hv = hypervolume_nd(&points, &ref_pt).expect("hypervolume_nd should succeed");
         assert!(hv > 0.0, "5D stress test HV must be positive, got {hv}");
         assert!(hv.is_finite(), "5D stress test HV must be finite");
     }

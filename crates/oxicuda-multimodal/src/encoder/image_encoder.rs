@@ -9,6 +9,7 @@ use crate::cross_attn::cross_attention::{
 };
 use crate::cross_attn::self_cross_block::LayerNorm;
 use crate::error::{MmResult, MultiModalError};
+use crate::handle::LcgRng;
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -162,6 +163,36 @@ impl ViTEncoderWeights {
             final_ln_bias: vec![0.0_f32; d],
         }
     }
+
+    /// Create non-trivial weights drawn from a deterministic Gaussian, so that
+    /// the encoder actually propagates the input image into its output (the
+    /// zero preset maps every image to the zero vector). Used by the VLMs.
+    #[must_use]
+    pub fn random(cfg: &ViTEncoderConfig, rng: &mut LcgRng) -> Self {
+        let d = cfg.d_model;
+        let scale = 1.0_f32 / (d as f32).sqrt();
+        let mut w = Self::zeros(cfg);
+        fill_gaussian(&mut w.patch_embed, scale, rng);
+        fill_gaussian(&mut w.cls_token, scale, rng);
+        fill_gaussian(&mut w.pos_embed, scale, rng);
+        for block in &mut w.blocks {
+            fill_gaussian(&mut block.attn.w_q, scale, rng);
+            fill_gaussian(&mut block.attn.w_k, scale, rng);
+            fill_gaussian(&mut block.attn.w_v, scale, rng);
+            fill_gaussian(&mut block.attn.w_o, scale, rng);
+            fill_gaussian(&mut block.ffn_w1, scale, rng);
+            fill_gaussian(&mut block.ffn_w2, 1.0 / (cfg.d_ff as f32).sqrt(), rng);
+        }
+        w
+    }
+}
+
+/// Fill `buf` with N(0, 1) samples scaled by `scale` (deterministic).
+fn fill_gaussian(buf: &mut [f32], scale: f32, rng: &mut LcgRng) {
+    rng.fill_normal(buf);
+    for v in buf.iter_mut() {
+        *v *= scale;
+    }
 }
 
 // ─── ViTEncoder ──────────────────────────────────────────────────────────────
@@ -174,6 +205,20 @@ impl ViTEncoder {
     ///
     /// `image`: flat `[n_channels × img_size × img_size]` (CHW format).
     pub fn forward(
+        image: &[f32],
+        cfg: &ViTEncoderConfig,
+        weights: &ViTEncoderWeights,
+    ) -> MmResult<Vec<f32>> {
+        let tokens = Self::forward_tokens(image, cfg, weights)?;
+        // CLS token = position 0.
+        Ok(tokens[..cfg.d_model].to_vec())
+    }
+
+    /// Encode an image to the full token sequence `[(1 + n_patches) × d_model]`
+    /// (CLS token at position 0, patch tokens at positions `1..`), after the
+    /// final layer norm. The patch tokens are what a resampler / Q-Former
+    /// attends to (used by Qwen-VL); `forward` returns only the CLS slice.
+    pub fn forward_tokens(
         image: &[f32],
         cfg: &ViTEncoderConfig,
         weights: &ViTEncoderWeights,
@@ -254,9 +299,7 @@ impl ViTEncoder {
         };
         tokens = ln.forward(&tokens, n_tokens)?;
 
-        // CLS token = position 0
-        let cls = tokens[..d].to_vec();
-        Ok(cls)
+        Ok(tokens)
     }
 }
 
@@ -352,7 +395,7 @@ mod tests {
         let cfg = ViTEncoderConfig::tiny();
         let weights = ViTEncoderWeights::zeros(&cfg);
         let image = vec![0.5_f32; 3 * 32 * 32];
-        let out = ViTEncoder::forward(&image, &cfg, &weights).unwrap();
+        let out = ViTEncoder::forward(&image, &cfg, &weights).expect("forward should succeed");
         assert_eq!(out.len(), cfg.d_model);
     }
 
@@ -366,7 +409,7 @@ mod tests {
         }
         weights.cls_token = vec![0.1_f32; cfg.d_model];
         let image: Vec<f32> = (0..3 * 32 * 32).map(|i| (i as f32 * 0.001).sin()).collect();
-        let out = ViTEncoder::forward(&image, &cfg, &weights).unwrap();
+        let out = ViTEncoder::forward(&image, &cfg, &weights).expect("forward should succeed");
         assert_eq!(out.len(), cfg.d_model);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -378,7 +421,7 @@ mod tests {
         // With zero patch embed and zero CLS token and zero pos embed,
         // all tokens start at 0, and zero attention weights keep them at 0.
         let image = vec![1.0_f32; 3 * 32 * 32];
-        let out = ViTEncoder::forward(&image, &cfg, &weights).unwrap();
+        let out = ViTEncoder::forward(&image, &cfg, &weights).expect("forward should succeed");
         for &v in &out {
             assert!(v.abs() < 1e-6, "expected ~0, got {v}");
         }

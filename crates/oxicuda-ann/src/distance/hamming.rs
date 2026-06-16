@@ -49,13 +49,19 @@ mod tests {
     #[test]
     fn hamming_zero_self() {
         let v = vec![0xDEAD_BEEFu32, 0xCAFE_BABE];
-        assert_eq!(hamming_u32(&v, &v).unwrap(), 0);
+        assert_eq!(
+            hamming_u32(&v, &v).expect("test invariant: should succeed"),
+            0
+        );
     }
 
     #[test]
     fn hamming_known() {
         let a = vec![0b0000_0000u32];
         let b = vec![0b1111_1111u32];
-        assert_eq!(hamming_u32(&a, &b).unwrap(), 8);
+        assert_eq!(
+            hamming_u32(&a, &b).expect("test invariant: should succeed"),
+            8
+        );
     }
 }

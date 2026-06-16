@@ -415,10 +415,12 @@ mod tests {
             dropout_rate: 0.1,
             n_classes: 3,
         };
-        let model = FtTransformer::new(cfg, &mut rng).unwrap();
+        let model = FtTransformer::new(cfg, &mut rng).expect("new should succeed");
         let x_cont = vec![0.5_f32; 4];
         let x_cat = vec![1usize, 0];
-        let logits = model.forward(&x_cont, &x_cat).unwrap();
+        let logits = model
+            .forward(&x_cont, &x_cat)
+            .expect("forward should succeed");
         assert_eq!(logits.len(), 3);
         assert!(logits.iter().all(|v| v.is_finite()));
     }
@@ -427,7 +429,9 @@ mod tests {
     fn feature_tokenizer_shape() {
         let mut rng = LcgRng::new(7);
         let tok = FeatureTokenizer::new(4, &[5, 3], 8, &mut rng);
-        let tokens = tok.tokenize(&[0.1, 0.2, 0.3, 0.4], &[1, 2]).unwrap();
+        let tokens = tok
+            .tokenize(&[0.1, 0.2, 0.3, 0.4], &[1, 2])
+            .expect("tokenize should succeed");
         assert_eq!(tokens.len(), (4 + 2) * 8);
     }
 
@@ -444,10 +448,12 @@ mod tests {
             dropout_rate: 0.0,
             n_classes: 2,
         };
-        let model = FtTransformer::new(cfg, &mut rng).unwrap();
+        let model = FtTransformer::new(cfg, &mut rng).expect("new should succeed");
         let x_cont = vec![0.5_f32; 3 * 2];
         let x_cat = vec![0usize; 3];
-        let logits = model.forward_batch(&x_cont, &x_cat, 3).unwrap();
+        let logits = model
+            .forward_batch(&x_cont, &x_cat, 3)
+            .expect("forward_batch should succeed");
         assert_eq!(logits.len(), 3 * 2);
     }
 }

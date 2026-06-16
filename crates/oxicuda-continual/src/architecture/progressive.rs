@@ -256,9 +256,10 @@ mod tests {
     fn single_column_no_laterals_forward() {
         let mut rng = LcgRng::new(42);
         let mut net = ProgNnNetwork::new();
-        add_column(&mut net, 8, 2, &mut rng).unwrap();
+        add_column(&mut net, 8, 2, &mut rng).expect("adding a progressive column should succeed");
         let input = vec![0.5_f32; 8];
-        let out = prog_forward(&net, &input, 0).unwrap();
+        let out = prog_forward(&net, &input, 0)
+            .expect("progressive forward pass should succeed for valid column");
         assert_eq!(out.len(), 8, "Output shape should match d_hidden");
         assert!(
             out.iter().all(|v| v.is_finite()),
@@ -275,12 +276,14 @@ mod tests {
     fn multi_column_forward_shape_correct() {
         let mut rng = LcgRng::new(7);
         let mut net = ProgNnNetwork::new();
-        add_column(&mut net, 4, 2, &mut rng).unwrap();
-        add_column(&mut net, 4, 2, &mut rng).unwrap();
+        add_column(&mut net, 4, 2, &mut rng).expect("adding a progressive column should succeed");
+        add_column(&mut net, 4, 2, &mut rng).expect("adding a progressive column should succeed");
         assert_eq!(net.n_columns(), 2);
         let input = vec![1.0_f32; 4];
-        let out0 = prog_forward(&net, &input, 0).unwrap();
-        let out1 = prog_forward(&net, &input, 1).unwrap();
+        let out0 = prog_forward(&net, &input, 0)
+            .expect("progressive forward pass should succeed for valid column");
+        let out1 = prog_forward(&net, &input, 1)
+            .expect("progressive forward pass should succeed for valid column");
         assert_eq!(out0.len(), 4);
         assert_eq!(out1.len(), 4);
         assert!(out0.iter().all(|v| v.is_finite()));
@@ -291,10 +294,10 @@ mod tests {
     fn frozen_columns_unchanged_after_add() {
         let mut rng = LcgRng::new(11);
         let mut net = ProgNnNetwork::new();
-        add_column(&mut net, 4, 2, &mut rng).unwrap();
+        add_column(&mut net, 4, 2, &mut rng).expect("adding a progressive column should succeed");
         // Snapshot column 0 weights before adding column 1
         let w0_before = net.columns[0].weights.clone();
-        add_column(&mut net, 4, 2, &mut rng).unwrap();
+        add_column(&mut net, 4, 2, &mut rng).expect("adding a progressive column should succeed");
         // Column 0 should be unchanged
         assert_eq!(
             net.columns[0].weights, w0_before,
@@ -313,7 +316,7 @@ mod tests {
     fn prog_forward_column_out_of_range() {
         let mut rng = LcgRng::new(42);
         let mut net = ProgNnNetwork::new();
-        add_column(&mut net, 4, 2, &mut rng).unwrap();
+        add_column(&mut net, 4, 2, &mut rng).expect("adding a progressive column should succeed");
         let input = vec![1.0_f32; 4];
         assert!(prog_forward(&net, &input, 5).is_err());
     }
@@ -322,7 +325,7 @@ mod tests {
     fn prog_forward_dimension_mismatch() {
         let mut rng = LcgRng::new(42);
         let mut net = ProgNnNetwork::new();
-        add_column(&mut net, 4, 2, &mut rng).unwrap();
+        add_column(&mut net, 4, 2, &mut rng).expect("adding a progressive column should succeed");
         let bad_input = vec![1.0_f32; 3]; // wrong dim
         assert!(prog_forward(&net, &bad_input, 0).is_err());
     }
@@ -339,11 +342,13 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let mut net = ProgNnNetwork::new();
         for _ in 0..3 {
-            add_column(&mut net, 4, 2, &mut rng).unwrap();
+            add_column(&mut net, 4, 2, &mut rng)
+                .expect("adding a progressive column should succeed");
         }
         let input = vec![0.1_f32; 4];
         for col in 0..3 {
-            let out = prog_forward(&net, &input, col).unwrap();
+            let out = prog_forward(&net, &input, col)
+                .expect("progressive forward pass should succeed for valid column");
             assert_eq!(out.len(), 4);
             assert!(out.iter().all(|v| v.is_finite()));
         }

@@ -418,7 +418,7 @@ mod tests {
             max_iter: 20,
             tol: 1e-5,
         };
-        let result = icp(&pts, 27, &pts, 27, &cfg).unwrap();
+        let result = icp(&pts, 27, &pts, 27, &cfg).expect("icp should succeed");
         assert!(
             result.residual < 1e-3,
             "ICP on identity should converge, residual={}",
@@ -447,7 +447,7 @@ mod tests {
             max_iter: 20,
             tol: 1e-5,
         };
-        let result = icp(&src, 8, &tgt, 8, &cfg).unwrap();
+        let result = icp(&src, 8, &tgt, 8, &cfg).expect("icp should succeed");
         assert!(result.transform.r.iter().all(|v| v.is_finite()));
         assert!(result.transform.t.iter().all(|v| v.is_finite()));
     }
@@ -463,7 +463,7 @@ mod tests {
             max_iter: 30,
             tol: 1e-6,
         };
-        let result = icp(&src, 27, &tgt, 27, &cfg).unwrap();
+        let result = icp(&src, 27, &tgt, 27, &cfg).expect("icp should succeed");
         assert!(result.residual.is_finite());
     }
 

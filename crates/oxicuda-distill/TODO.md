@@ -6,7 +6,7 @@ Pure Rust knowledge distillation primitives for teacher-student training, coveri
 
 ## Implementation Status
 
-**Actual: 3,689 SLoC (35 files)**
+**Actual: 11,889 SLoC (63 files)**
 
 Current implementation covers the canonical knowledge distillation taxonomy (logit / feature / relation / attention / online / born-again / data-free / metrics), with PTX kernel string templates emitted at runtime for SM 7.5 through SM 10.0.
 
@@ -80,8 +80,12 @@ Current implementation covers the canonical knowledge distillation taxonomy (log
 - [x] Self-knowledge distillation via cutmix / mixup consistency
 - [x] Decoupled feature-projection-free distillation (RA-DKD)
 - [x] Layer-wise adaptive temperature scheduling
-- [ ] LayerDrop / structured-pruning distillation
+- [x] LayerDrop / structured-pruning distillation
 - [ ] Quantisation-aware distillation (INT8 / FP8 student)
+- [ ] `distill/distwrd.rs` — DistWRD (Shen 2022): token-level distribution alignment via Wasserstein-Riesz divergence; soft label matching beyond KL; `DistWrd { lambda_wd: f32 }`
+- [ ] `distill/minkd.rs` — MiniLLM (Gu 2023): KD for LLMs via reverse KL + policy gradient; minimise E_student[-log p_teacher]; REINFORCE gradient estimator; avoids mean-seeking mode collapse of forward KL
+- [ ] `distill/progressive_kd.rs` — Progressive Knowledge Distillation (Wang 2021): curriculum of intermediate checkpoints as teachers; start with checkpoint closest to random init; `ProgressiveKd { n_stages: usize }`
+- [ ] `distill/data_free_dfad.rs` — DFAD (Fang 2022): data-free adversarial distillation; generator + student trained adversarially against frozen teacher; no original training data required; `DfadConfig { gen_lr, stu_lr }`
 
 #### P2 — Optimisations and Tooling
 - [ ] Fused softmax + KL kernel for Hinton KD (reduce two passes to one)
@@ -103,7 +107,7 @@ Current implementation covers the canonical knowledge distillation taxonomy (log
 
 ## Quality Status
 
-- Tests: 76 passing (unit + 12 e2e integration tests in `lib.rs`)
+- Tests: 447 passing (unit + 12 e2e integration tests in `lib.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches
@@ -172,6 +176,6 @@ Knowledge distillation kernels are bandwidth-limited (softmax / KL / MSE / Gram)
 ### Coverage Gaps vs Literature
 - [x] MGD (Masked Generative Distillation) — feature masking + generator (impl `src/feature/mgd.rs`; Yang et al. 2022 ECCV "Masked Generative Distillation")
 - [ ] FCFD (Feature Compression by Frequency Decomposition)
-- [ ] WCoRD / VID variational mutual-information bounds
+- [x] WCoRD / VID variational mutual-information bounds
 - [x] Relational graph distillation with edge-feature aggregation (impl `src/relation/graph_distill.rs`; Liu et al. 2019 CVPR "Knowledge Distillation via Instance Relationship Graph")
 - [ ] Cross-modal distillation (image teacher → text student, audio → vision)

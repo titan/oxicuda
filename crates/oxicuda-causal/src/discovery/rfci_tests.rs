@@ -39,8 +39,11 @@ fn test_rfci_chain_xyz_skeleton() {
         cols[1].push(y);
         cols[2].push(z);
     }
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
-    let pag = rfci.fit(&cols).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
+    let pag = rfci
+        .fit(&cols)
+        .expect("rfci.fit should succeed on chain data");
     assert!(pag.adj_pub(0, 1));
     assert!(pag.adj_pub(1, 2));
     assert!(!pag.adj_pub(0, 2));
@@ -61,8 +64,11 @@ fn test_rfci_latent_confounder_keeps_edge() {
         cols[0].push(x);
         cols[1].push(y);
     }
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
-    let pag = rfci.fit(&cols).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
+    let pag = rfci
+        .fit(&cols)
+        .expect("rfci.fit should succeed on latent confounder data");
     assert!(pag.adj_pub(0, 1));
 }
 
@@ -82,8 +88,11 @@ fn test_rfci_collider_orientation_three_vars() {
         cols[1].push(z);
         cols[2].push(y);
     }
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
-    let pag = rfci.fit(&cols).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
+    let pag = rfci
+        .fit(&cols)
+        .expect("rfci.fit should succeed on collider data");
     assert!(pag.adj_pub(0, 1));
     assert!(pag.adj_pub(2, 1));
     assert!(!pag.adj_pub(0, 2));
@@ -97,8 +106,11 @@ fn test_rfci_three_independent_vars() {
     let n = 400_usize;
     let mut rng = LcgRng::new(101);
     let cols = gen_normal_matrix(&mut rng, n, 3);
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
-    let pag = rfci.fit(&cols).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
+    let pag = rfci
+        .fit(&cols)
+        .expect("rfci.fit should succeed on independent-vars data");
     assert_eq!(count_edges(&pag), 0);
 }
 
@@ -118,8 +130,11 @@ fn test_rfci_five_var_chain() {
             prev = next;
         }
     }
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
-    let pag = rfci.fit(&cols).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
+    let pag = rfci
+        .fit(&cols)
+        .expect("rfci.fit should succeed on five-var chain data");
     for j in 0..4 {
         assert!(pag.adj_pub(j, j + 1), "missing edge {j}-{}", j + 1);
     }
@@ -138,14 +153,14 @@ fn test_rfci_alpha_sensitivity() {
         alpha: 0.5,
         max_cond_set_size: 2,
     })
-    .unwrap();
+    .expect("Rfci::new with alpha=0.5 should succeed");
     let sparse = Rfci::new(RfciConfig {
         alpha: 1e-6,
         max_cond_set_size: 2,
     })
-    .unwrap();
-    let dense_pag = dense.fit(&cols).unwrap();
-    let sparse_pag = sparse.fit(&cols).unwrap();
+    .expect("Rfci::new with alpha=1e-6 should succeed");
+    let dense_pag = dense.fit(&cols).expect("dense rfci.fit should succeed");
+    let sparse_pag = sparse.fit(&cols).expect("sparse rfci.fit should succeed");
     assert!(count_edges(&dense_pag) >= count_edges(&sparse_pag));
 }
 
@@ -169,8 +184,8 @@ fn test_rfci_max_cond_set_size_respected() {
         alpha: 0.05,
         max_cond_set_size: 0,
     })
-    .unwrap();
-    let pag0 = rfci0.fit(&cols).unwrap();
+    .expect("Rfci::new with max_cond_set_size=0 should succeed");
+    let pag0 = rfci0.fit(&cols).expect("rfci0.fit should succeed");
     assert!(pag0.adj_pub(0, 2));
     // With max_cond_set_size = 1, the conditioning test fires and the
     // X–Z edge disappears.
@@ -178,15 +193,16 @@ fn test_rfci_max_cond_set_size_respected() {
         alpha: 0.05,
         max_cond_set_size: 1,
     })
-    .unwrap();
-    let pag1 = rfci1.fit(&cols).unwrap();
+    .expect("Rfci::new with max_cond_set_size=1 should succeed");
+    let pag1 = rfci1.fit(&cols).expect("rfci1.fit should succeed");
     assert!(!pag1.adj_pub(0, 2));
 }
 
 /// Empty data (zero variables) must error.
 #[test]
 fn test_rfci_empty_data_errors() {
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
     let empty: Vec<Vec<f64>> = vec![];
     assert!(rfci.fit(&empty).is_err());
 }
@@ -195,7 +211,8 @@ fn test_rfci_empty_data_errors() {
 /// graph size for this discovery routine.
 #[test]
 fn test_rfci_single_variable_errors() {
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
     let one: Vec<Vec<f64>> = vec![vec![1.0, 2.0, 3.0, 4.0]];
     assert!(rfci.fit(&one).is_err());
 }
@@ -206,9 +223,10 @@ fn test_rfci_idempotent_fit() {
     let n = 200_usize;
     let mut rng = LcgRng::new(99);
     let cols = gen_normal_matrix(&mut rng, n, 4);
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
-    let a = rfci.fit(&cols).unwrap();
-    let b = rfci.fit(&cols).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
+    let a = rfci.fit(&cols).expect("rfci first fit should succeed");
+    let b = rfci.fit(&cols).expect("rfci second fit should succeed");
     assert_eq!(a.n_vars, b.n_vars);
     for i in 0..a.n_vars {
         for j in 0..a.n_vars {
@@ -226,9 +244,14 @@ fn test_rfci_deterministic_output() {
         vec![0.1, 0.9, 2.1, 2.9, 4.1, 4.9, 6.1, 6.9, 8.1, 8.9],
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
     ];
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
-    let p1 = rfci.fit(&cols).unwrap();
-    let p2 = rfci.fit(&cols).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
+    let p1 = rfci
+        .fit(&cols)
+        .expect("rfci first deterministic fit should succeed");
+    let p2 = rfci
+        .fit(&cols)
+        .expect("rfci second deterministic fit should succeed");
     for i in 0..3 {
         for j in 0..3 {
             assert_eq!(p1.mark_pub(i, j), p2.mark_pub(i, j));
@@ -256,10 +279,15 @@ fn test_rfci_skeleton_agrees_with_fci_on_chain() {
         cols[1].push(y);
         cols[2].push(z);
     }
-    let fci = Fci::new(FciConfig::default()).unwrap();
-    let fci_pag = fci.fit(&data_rm, n, 3).unwrap();
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
-    let rfci_pag = rfci.fit(&cols).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
+    let fci_pag = fci
+        .fit(&data_rm, n, 3)
+        .expect("fci.fit should succeed on chain data");
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
+    let rfci_pag = rfci
+        .fit(&cols)
+        .expect("rfci.fit should succeed on chain data");
     for i in 0..3 {
         for j in (i + 1)..3 {
             assert_eq!(
@@ -275,7 +303,8 @@ fn test_rfci_skeleton_agrees_with_fci_on_chain() {
 /// silently propagated.
 #[test]
 fn test_rfci_rejects_non_finite_input() {
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
     let cols: Vec<Vec<f64>> = vec![
         vec![0.0, 1.0, 2.0, 3.0, 4.0],
         vec![0.0, 1.0, f64::NAN, 3.0, 4.0],
@@ -286,7 +315,8 @@ fn test_rfci_rejects_non_finite_input() {
 /// Mismatched column lengths must be reported as a dimension mismatch.
 #[test]
 fn test_rfci_dim_mismatch() {
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
     let cols: Vec<Vec<f64>> = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0], vec![0.0, 1.0, 2.0, 3.0]];
     assert!(rfci.fit(&cols).is_err());
 }
@@ -313,7 +343,8 @@ fn test_rfci_invalid_alpha() {
 /// Too few samples must be rejected (Fisher-Z needs n > cond_set_size + 3).
 #[test]
 fn test_rfci_too_few_samples() {
-    let rfci = Rfci::new(RfciConfig::default()).unwrap();
+    let rfci =
+        Rfci::new(RfciConfig::default()).expect("Rfci::new with default config should succeed");
     let cols: Vec<Vec<f64>> = vec![vec![0.0, 1.0], vec![1.0, 2.0]];
     assert!(rfci.fit(&cols).is_err());
 }

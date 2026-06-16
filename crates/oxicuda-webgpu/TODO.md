@@ -7,8 +7,8 @@ through WGSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/ox
 
 ## Implementation Status
 
-- **Actual SLoC:** ~4,624 across 8 files
-- **Tests:** 91 passing
+- **Actual SLoC:** ~3,948 across 8 files
+- **Tests:** 129 passing
 - **Status:** Full memory + compute, WGSL generators, WASM target, FP16 path
 - **Targets:** Native (Vulkan / Metal / D3D12 / GL via wgpu) + browser (WebGPU API)
 
@@ -58,6 +58,8 @@ through WGSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/ox
 - [ ] Shader hot-reload during WGSL development (debug-build only)
 
 #### P2 -- Nice-to-Have
+- [ ] `shader/fft_wgsl.rs` — WGSL radix-2 Cooley-Tukey FFT butterfly (Cooley-Tukey 1965): shared-memory butterfly kernel with bit-reversal permutation and twiddle-factor LUT for compute-only FFT dispatch in browsers; `WgslFftPlan`
+- [ ] `backend/async_pipeline.rs` — async compute + render pipeline separation (2023): `wgpu::Device::create_compute_pipeline_async` for background shader compilation without blocking the render loop; `AsyncComputePipeline`
 - [ ] Browser WASM threading via `SharedArrayBuffer` + `Atomics` (requires COOP/COEP headers)
 - [ ] Multi-adapter dispatch on systems with discrete + integrated GPU (laptop dGPU/iGPU)
 - [ ] WGSL `f64` emulation (WebGPU has no double precision -- requires double-single arithmetic)
@@ -75,7 +77,7 @@ through WGSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/ox
 ## Quality Status
 
 - Warnings: 0
-- Tests: 91 passing
+- Tests: 129 passing
 - unwrap() calls: 0
 - Clippy: clean (pedantic + nursery)
 

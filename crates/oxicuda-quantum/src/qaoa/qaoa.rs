@@ -111,18 +111,20 @@ mod tests {
 
     #[test]
     fn qaoa_runs_without_error() {
-        let circuit = QaoaCircuit::new(3, 1, vec![0.3], vec![0.5]).unwrap();
+        let circuit = QaoaCircuit::new(3, 1, vec![0.3], vec![0.5])
+            .expect("valid QAOA circuit with 3 qubits and 1 layer");
         let graph = vec![(0, 1), (1, 2)];
-        let sv = circuit.run(&graph).unwrap();
+        let sv = circuit.run(&graph).expect("QAOA circuit run must succeed");
         let norm = sv.norm_sq();
         assert!((norm - 1.0).abs() < 1e-4, "norm={norm}");
     }
 
     #[test]
     fn qaoa_energy_non_negative() {
-        let circuit = QaoaCircuit::new(3, 1, vec![0.3], vec![0.5]).unwrap();
+        let circuit = QaoaCircuit::new(3, 1, vec![0.3], vec![0.5])
+            .expect("valid QAOA circuit with 3 qubits and 1 layer");
         let graph = vec![(0, 1), (1, 2)];
-        let sv = circuit.run(&graph).unwrap();
+        let sv = circuit.run(&graph).expect("QAOA circuit run must succeed");
         let e = circuit.energy(&sv, &graph);
         assert!(e >= -1e-4, "energy={e}");
     }

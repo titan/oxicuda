@@ -40,15 +40,15 @@
 //! // Training loop
 //! for step in 0..10_000u64 {
 //!     // ... compute gradients into params[i].grad ...
-//!     # for p in &mut params { p.set_grad(vec![0.001f32; p.len()]).unwrap(); }
+//!     # for p in &mut params { p.set_grad(vec![0.001f32; p.len()]).expect("value should be present"); }
 //!
 //!     // Clip gradients
-//!     clip_grad_norm(&mut params, 1.0).unwrap();
+//!     clip_grad_norm(&mut params, 1.0).expect("clip_grad_norm should succeed");
 //!
 //!     // Optimiser step
 //!     let lr = sched.step();
 //!     opt.set_lr(lr);
-//!     opt.step(&mut params).unwrap();
+//!     opt.step(&mut params).expect("step should succeed");
 //!
 //!     // Zero gradients for next step
 //!     opt.zero_grad(&mut params);
@@ -97,6 +97,15 @@ pub mod amp;
 
 /// Exponential Moving Average of model parameters.
 pub mod ema;
+
+/// CPU-side optimizer implementations (ADOPT, Muon, LAMB).
+pub mod optimizer;
+
+/// Additional learning rate schedulers (WSD).
+pub mod scheduler;
+
+/// Utility free functions for raw `f32` slices (gradient clipping etc.).
+pub mod utils;
 
 // ─── Re-exports ───────────────────────────────────────────────────────────────
 

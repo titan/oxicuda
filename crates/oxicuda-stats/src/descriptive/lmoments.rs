@@ -414,12 +414,12 @@ mod tests {
         let data = right_skewed_data();
         let min = *data
             .iter()
-            .min_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
+            .min_by(|a, b| a.partial_cmp(b).expect("partial_cmp should succeed"))
+            .expect("value should be present");
         let max = *data
             .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
+            .max_by(|a, b| a.partial_cmp(b).expect("partial_cmp should succeed"))
+            .expect("value should be present");
         let tm = trimmed_mean_lm(&data, 0.1).expect("ok");
         assert!(
             tm >= min && tm <= max,

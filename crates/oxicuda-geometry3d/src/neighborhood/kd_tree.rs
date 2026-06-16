@@ -307,8 +307,10 @@ mod tests {
     #[test]
     fn kdtree_nearest_single() {
         let pts = vec![1.0_f32, 2.0, 3.0];
-        let tree = KdTree::build(&pts, 1).unwrap();
-        let (idx, d) = tree.nearest([1.0, 2.0, 3.0]).unwrap();
+        let tree = KdTree::build(&pts, 1).expect("build should succeed");
+        let (idx, d) = tree
+            .nearest([1.0, 2.0, 3.0])
+            .expect("nearest should succeed");
         assert_eq!(idx, 0);
         assert!(d < 1e-6);
     }
@@ -316,8 +318,10 @@ mod tests {
     #[test]
     fn kdtree_nearest_correct() {
         let pts = make_line(10);
-        let tree = KdTree::build(&pts, 10).unwrap();
-        let (idx, _) = tree.nearest([3.1, 0.0, 0.0]).unwrap();
+        let tree = KdTree::build(&pts, 10).expect("build should succeed");
+        let (idx, _) = tree
+            .nearest([3.1, 0.0, 0.0])
+            .expect("nearest should succeed");
         assert_eq!(idx, 3, "Nearest to 3.1 should be index 3");
     }
 
@@ -327,10 +331,10 @@ mod tests {
         let pts: Vec<f32> = (0..n)
             .flat_map(|i| vec![i as f32 * 0.3, (i % 5) as f32, (i % 3) as f32])
             .collect();
-        let tree = KdTree::build(&pts, n).unwrap();
+        let tree = KdTree::build(&pts, n).expect("build should succeed");
         let query = [7.2_f32, 2.1, 0.9];
 
-        let (tree_idx, _) = tree.nearest(query).unwrap();
+        let (tree_idx, _) = tree.nearest(query).expect("nearest should succeed");
 
         // Brute force
         let bf_idx = (0..n)
@@ -349,7 +353,7 @@ mod tests {
                 };
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap();
+            .expect("value should be present");
 
         assert_eq!(tree_idx, bf_idx, "KD-tree nearest must match brute force");
     }
@@ -357,16 +361,16 @@ mod tests {
     #[test]
     fn kdtree_knn_correct_count() {
         let pts = make_line(20);
-        let tree = KdTree::build(&pts, 20).unwrap();
-        let result = tree.knn([9.5, 0.0, 0.0], 5).unwrap();
+        let tree = KdTree::build(&pts, 20).expect("build should succeed");
+        let result = tree.knn([9.5, 0.0, 0.0], 5).expect("knn should succeed");
         assert_eq!(result.len(), 5);
     }
 
     #[test]
     fn kdtree_knn_sorted() {
         let pts = make_line(20);
-        let tree = KdTree::build(&pts, 20).unwrap();
-        let result = tree.knn([5.5, 0.0, 0.0], 4).unwrap();
+        let tree = KdTree::build(&pts, 20).expect("build should succeed");
+        let result = tree.knn([5.5, 0.0, 0.0], 4).expect("knn should succeed");
         for w in result.windows(2) {
             assert!(
                 w[0].1 <= w[1].1,
@@ -378,7 +382,7 @@ mod tests {
     #[test]
     fn kdtree_knn_k_exceeds_n_error() {
         let pts = make_line(5);
-        let tree = KdTree::build(&pts, 5).unwrap();
+        let tree = KdTree::build(&pts, 5).expect("build should succeed");
         assert_eq!(
             tree.knn([0.0, 0.0, 0.0], 10),
             Err(Geom3dError::InvalidK { k: 10, n: 5 })
@@ -388,8 +392,10 @@ mod tests {
     #[test]
     fn kdtree_radius_search_correct() {
         let pts = make_line(10);
-        let tree = KdTree::build(&pts, 10).unwrap();
-        let results = tree.radius_search([4.5, 0.0, 0.0], 1.6).unwrap();
+        let tree = KdTree::build(&pts, 10).expect("build should succeed");
+        let results = tree
+            .radius_search([4.5, 0.0, 0.0], 1.6)
+            .expect("radius_search should succeed");
         // Should find 3,4,5,6 (within radius 1.6 of 4.5)
         let mut found: Vec<usize> = results.iter().map(|&(i, _)| i).collect();
         found.sort_unstable();
@@ -403,7 +409,7 @@ mod tests {
     #[test]
     fn kdtree_radius_search_invalid_radius() {
         let pts = vec![0.0_f32, 0.0, 0.0];
-        let tree = KdTree::build(&pts, 1).unwrap();
+        let tree = KdTree::build(&pts, 1).expect("build should succeed");
         assert!(tree.radius_search([0.0, 0.0, 0.0], -1.0).is_err());
     }
 
@@ -413,9 +419,9 @@ mod tests {
         let pts: Vec<f32> = (0..n)
             .flat_map(|i| vec![(i as f32).sin(), (i as f32).cos(), i as f32 * 0.01])
             .collect();
-        let tree = KdTree::build(&pts, n).unwrap();
+        let tree = KdTree::build(&pts, n).expect("build should succeed");
         let q = [0.5, 0.5, 0.5];
-        let (idx, sq_d) = tree.nearest(q).unwrap();
+        let (idx, sq_d) = tree.nearest(q).expect("nearest should succeed");
 
         // Verify brute force agrees
         let bf_idx = (0..n)
@@ -434,7 +440,7 @@ mod tests {
                 };
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap();
+            .expect("value should be present");
 
         assert_eq!(idx, bf_idx);
         assert!(sq_d.is_finite());

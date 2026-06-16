@@ -109,8 +109,12 @@ mod tests {
     fn knn_score_basic() {
         let data: Vec<f32> = (0..10).map(|i| i as f32).collect();
         let mut scorer = KnnAnomalyScorer::new(3);
-        scorer.fit(&data, 10, 1).unwrap();
-        let s = scorer.score(&[5.0_f32]).unwrap();
+        scorer
+            .fit(&data, 10, 1)
+            .expect("KNN scorer fit should succeed");
+        let s = scorer
+            .score(&[5.0_f32])
+            .expect("kNN scorer should return a valid score");
         assert!(s.is_finite() && s >= 0.0, "score={s}");
     }
 
@@ -118,8 +122,12 @@ mod tests {
     fn knn_score_zero_for_training_point() {
         let data = vec![0.0_f32, 1.0, 2.0, 3.0, 4.0];
         let mut scorer = KnnAnomalyScorer::new(1);
-        scorer.fit(&data, 5, 1).unwrap();
-        let s = scorer.score(&[2.0_f32]).unwrap();
+        scorer
+            .fit(&data, 5, 1)
+            .expect("kNN scorer fit should succeed");
+        let s = scorer
+            .score(&[2.0_f32])
+            .expect("kNN scorer should return a valid score");
         assert!(s < 1e-5, "score={s}"); // nearest is itself at distance 0
     }
 }

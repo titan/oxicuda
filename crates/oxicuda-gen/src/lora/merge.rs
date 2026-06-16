@@ -175,16 +175,17 @@ mod tests {
     }
 
     fn make_lora(in_f: usize, out_f: usize, rank: usize) -> LoraLinear {
-        let config = LoraConfig::new(rank, rank as f32).unwrap();
+        let config = LoraConfig::new(rank, rank as f32).expect("new should succeed");
         let mut rng = make_rng();
-        LoraLinear::new(in_f, out_f, &config, &mut rng).unwrap()
+        LoraLinear::new(in_f, out_f, &config, &mut rng).expect("new should succeed")
     }
 
     #[test]
     fn merge_unmerge_roundtrip() {
         let lora = make_lora(8, 16, 4);
         let base: Vec<f32> = (0..16 * 8).map(|i| i as f32 * 0.01).collect();
-        let ok = verify_merge_roundtrip(&base, &lora, 1e-4).unwrap();
+        let ok = verify_merge_roundtrip(&base, &lora, 1e-4)
+            .expect("verify_merge_roundtrip should succeed");
         assert!(ok, "merge/unmerge roundtrip failed");
     }
 
@@ -192,7 +193,7 @@ mod tests {
     fn zero_b_merge_gives_identity() {
         let lora = make_lora(4, 8, 2); // B=0 after new()
         let base: Vec<f32> = (0..8 * 4).map(|i| i as f32).collect();
-        let merged = merge_lora(&base, &lora).unwrap();
+        let merged = merge_lora(&base, &lora).expect("merge_lora should succeed");
         for (&m, &b) in merged.iter().zip(&base) {
             assert!((m - b).abs() < 1e-5, "B=0 merge should not change base");
         }
@@ -202,7 +203,7 @@ mod tests {
     fn zero_b_unmerge_gives_identity() {
         let lora = make_lora(4, 8, 2);
         let base: Vec<f32> = (0..8 * 4).map(|i| i as f32).collect();
-        let unmerged = unmerge_lora(&base, &lora).unwrap();
+        let unmerged = unmerge_lora(&base, &lora).expect("unmerge_lora should succeed");
         for (&u, &b) in unmerged.iter().zip(&base) {
             assert!((u - b).abs() < 1e-5, "B=0 unmerge should not change weight");
         }
@@ -211,9 +212,9 @@ mod tests {
     #[test]
     fn scale_factor_applied() {
         // Create lora with nonzero B, then scale
-        let config = LoraConfig::new(2, 2.0).unwrap();
+        let config = LoraConfig::new(2, 2.0).expect("new should succeed");
         let mut rng = make_rng();
-        let mut lora = LoraLinear::new(4, 8, &config, &mut rng).unwrap();
+        let mut lora = LoraLinear::new(4, 8, &config, &mut rng).expect("new should succeed");
         // Set B to all-ones
         for v in lora.matrix_b_mut() {
             *v = 1.0;
@@ -229,7 +230,7 @@ mod tests {
     fn compose_adapters_shape() {
         let lora1 = make_lora(8, 16, 4);
         let lora2 = make_lora(8, 16, 4);
-        let composed = compose_adapters(&lora1, &lora2).unwrap();
+        let composed = compose_adapters(&lora1, &lora2).expect("compose_adapters should succeed");
         assert_eq!(composed.in_features(), 8);
         assert_eq!(composed.out_features(), 16);
         assert_eq!(composed.rank(), 4);
@@ -237,10 +238,10 @@ mod tests {
 
     #[test]
     fn compose_b_is_sum() {
-        let config = LoraConfig::new(2, 2.0).unwrap();
+        let config = LoraConfig::new(2, 2.0).expect("new should succeed");
         let mut rng = make_rng();
-        let mut lora1 = LoraLinear::new(4, 4, &config, &mut rng).unwrap();
-        let mut lora2 = LoraLinear::new(4, 4, &config, &mut rng).unwrap();
+        let mut lora1 = LoraLinear::new(4, 4, &config, &mut rng).expect("new should succeed");
+        let mut lora2 = LoraLinear::new(4, 4, &config, &mut rng).expect("new should succeed");
         // Set B1 = 1, B2 = 2
         for v in lora1.matrix_b_mut() {
             *v = 1.0;
@@ -248,7 +249,7 @@ mod tests {
         for v in lora2.matrix_b_mut() {
             *v = 2.0;
         }
-        let composed = compose_adapters(&lora1, &lora2).unwrap();
+        let composed = compose_adapters(&lora1, &lora2).expect("compose_adapters should succeed");
         for &v in composed.matrix_b() {
             assert!((v - 3.0).abs() < 1e-5, "composed B should be 3.0: {v}");
         }
@@ -276,15 +277,15 @@ mod tests {
 
     #[test]
     fn merge_with_nonzero_b() {
-        let config = LoraConfig::new(2, 2.0).unwrap();
+        let config = LoraConfig::new(2, 2.0).expect("new should succeed");
         let mut rng = make_rng();
-        let mut lora = LoraLinear::new(4, 4, &config, &mut rng).unwrap();
+        let mut lora = LoraLinear::new(4, 4, &config, &mut rng).expect("new should succeed");
         // Set B and A to identity-like values
         for v in lora.matrix_b_mut() {
             *v = 0.01;
         }
         let base = vec![0.0_f32; 4 * 4];
-        let merged = merge_lora(&base, &lora).unwrap();
+        let merged = merge_lora(&base, &lora).expect("merge_lora should succeed");
         // With nonzero A and B, merged should differ from base
         let diff: f32 = merged
             .iter()
@@ -296,14 +297,15 @@ mod tests {
 
     #[test]
     fn roundtrip_with_nonzero_b() {
-        let config = LoraConfig::new(4, 4.0).unwrap();
+        let config = LoraConfig::new(4, 4.0).expect("new should succeed");
         let mut rng = make_rng();
-        let mut lora = LoraLinear::new(8, 16, &config, &mut rng).unwrap();
+        let mut lora = LoraLinear::new(8, 16, &config, &mut rng).expect("new should succeed");
         for v in lora.matrix_b_mut() {
             *v = 0.01;
         }
         let base: Vec<f32> = (0..16 * 8).map(|i| (i as f32) * 0.001).collect();
-        let ok = verify_merge_roundtrip(&base, &lora, 1e-4).unwrap();
+        let ok = verify_merge_roundtrip(&base, &lora, 1e-4)
+            .expect("verify_merge_roundtrip should succeed");
         assert!(ok, "roundtrip with nonzero B failed");
     }
 }

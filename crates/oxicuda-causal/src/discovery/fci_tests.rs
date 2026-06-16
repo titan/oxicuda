@@ -40,8 +40,10 @@ fn test_collider_orientation_three_vars() {
         data[i * d + 1] = y;
         data[i * d + 2] = z;
     }
-    let fci = Fci::new(FciConfig::default()).unwrap();
-    let pag = fci.fit(&data, n, d).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
+    let pag = fci
+        .fit(&data, n, d)
+        .expect("fci.fit should succeed on collider data");
     assert!(pag.adj_pub(0, 1));
     assert!(pag.adj_pub(2, 1));
     assert_eq!(pag.mark_pub(0, 1), EdgeMark::Arrow);
@@ -62,8 +64,10 @@ fn test_chain_no_collider() {
         data[i * d + 1] = y;
         data[i * d + 2] = z;
     }
-    let fci = Fci::new(FciConfig::default()).unwrap();
-    let pag = fci.fit(&data, n, d).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
+    let pag = fci
+        .fit(&data, n, d)
+        .expect("fci.fit should succeed on chain data");
     assert!(!pag.adj_pub(0, 2));
     assert!(pag.adj_pub(0, 1));
     assert!(pag.adj_pub(1, 2));
@@ -84,8 +88,10 @@ fn test_latent_confounder_marginalised() {
         data[i * d + 1] = b;
         data[i * d + 2] = c;
     }
-    let fci = Fci::new(FciConfig::default()).unwrap();
-    let pag = fci.fit(&data, n, d).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
+    let pag = fci
+        .fit(&data, n, d)
+        .expect("fci.fit should succeed on latent confounder data");
     assert!(count_edges(&pag) >= 1);
 }
 
@@ -99,8 +105,10 @@ fn test_large_alpha_keeps_many_edges() {
         alpha: 0.5,
         max_cond_set_size: 2,
     })
-    .unwrap();
-    let pag = fci.fit(&data, n, d).unwrap();
+    .expect("Fci::new with alpha=0.5 should succeed");
+    let pag = fci
+        .fit(&data, n, d)
+        .expect("fci.fit should succeed with large alpha");
     assert!(count_edges(&pag) >= 1);
 }
 
@@ -114,8 +122,10 @@ fn test_small_alpha_on_noise_yields_near_empty() {
         alpha: 0.001,
         max_cond_set_size: 2,
     })
-    .unwrap();
-    let pag = fci.fit(&data, n, d).unwrap();
+    .expect("Fci::new with alpha=0.001 should succeed");
+    let pag = fci
+        .fit(&data, n, d)
+        .expect("fci.fit should succeed on noise data");
     let max_edges = d * (d - 1) / 2;
     assert!(count_edges(&pag) <= max_edges / 2 + 1);
 }
@@ -126,8 +136,10 @@ fn test_adjacency_symmetric() {
     let d = 4_usize;
     let mut rng = LcgRng::new(2);
     let data = make_data(&mut rng, n, d);
-    let fci = Fci::new(FciConfig::default()).unwrap();
-    let pag = fci.fit(&data, n, d).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
+    let pag = fci
+        .fit(&data, n, d)
+        .expect("fci.fit should succeed for adjacency-symmetry test");
     for i in 0..d {
         for j in 0..d {
             assert_eq!(pag.adjacency[i * d + j], pag.adjacency[j * d + i]);
@@ -151,8 +163,10 @@ fn test_sep_set_determines_orientation_explicit() {
         data[i * d + 2] = z;
         data[i * d + 3] = w;
     }
-    let fci = Fci::new(FciConfig::default()).unwrap();
-    let pag = fci.fit(&data, n, d).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
+    let pag = fci
+        .fit(&data, n, d)
+        .expect("fci.fit should succeed for sep-set orientation test");
     assert_eq!(pag.mark_pub(0, 1), EdgeMark::Arrow);
     assert_eq!(pag.mark_pub(2, 1), EdgeMark::Arrow);
     assert!(!pag.adj_pub(3, 0) || count_edges(&pag) <= 4);
@@ -176,8 +190,10 @@ fn test_five_node_sem_skeleton() {
         data[i * d + 3] = x3;
         data[i * d + 4] = x4;
     }
-    let fci = Fci::new(FciConfig::default()).unwrap();
-    let pag = fci.fit(&data, n, d).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
+    let pag = fci
+        .fit(&data, n, d)
+        .expect("fci.fit should succeed on five-node SEM");
     assert!(pag.adj_pub(0, 1));
     assert!(pag.adj_pub(0, 2));
     assert!(pag.adj_pub(1, 3));
@@ -283,7 +299,7 @@ fn test_invalid_config_alpha_one_returns_err() {
 
 #[test]
 fn test_wrong_data_length_returns_err() {
-    let fci = Fci::new(FciConfig::default()).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
     let data = vec![0.0_f64; 10];
     let res = fci.fit(&data, 10, 3);
     assert!(res.is_err());
@@ -291,15 +307,17 @@ fn test_wrong_data_length_returns_err() {
 
 #[test]
 fn test_single_variable_handled() {
-    let fci = Fci::new(FciConfig::default()).unwrap();
-    let pag = fci.fit(&[], 0, 1).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
+    let pag = fci
+        .fit(&[], 0, 1)
+        .expect("fci.fit should succeed on single variable");
     assert_eq!(pag.n_vars, 1);
     assert_eq!(count_edges(&pag), 0);
 }
 
 #[test]
 fn test_zero_variable_returns_err() {
-    let fci = Fci::new(FciConfig::default()).unwrap();
+    let fci = Fci::new(FciConfig::default()).expect("Fci::new with default config should succeed");
     let res = fci.fit(&[], 0, 0);
     assert!(res.is_err());
 }

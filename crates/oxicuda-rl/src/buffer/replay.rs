@@ -23,7 +23,7 @@
 //!     buf.push([i as f32; 4], [0.0_f32; 2], 1.0, [i as f32 + 1.0; 4], false);
 //! }
 //!
-//! let batch = buf.sample(32, &mut handle).unwrap();
+//! let batch = buf.sample(32, &mut handle).expect("sample should succeed");
 //! assert_eq!(batch.len(), 32);
 //! ```
 

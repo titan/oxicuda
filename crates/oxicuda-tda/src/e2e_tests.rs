@@ -5,11 +5,15 @@
 
 use crate::complex::filtration::{FilteredSimplex, Filtration};
 use crate::complex::simplex::Simplex;
+use crate::distance::kernel::{
+    KernelConfig, persistence_scale_space_distance, persistence_scale_space_kernel,
+};
 use crate::distance::pairwise::pairwise_euclidean;
 use crate::handle::LcgRng;
 use crate::homology::boundary::BoundaryMatrix;
 use crate::homology::persistent::extract_persistence_pairs;
 use crate::homology::reduction::reduce_boundary_matrix;
+use crate::homology::zigzag::{ZigzagArrow, ZigzagComplex, ZigzagInput, zigzag_persistence};
 use crate::mapper::mapper::{MapperConfig, build_mapper};
 use crate::metrics::metrics::{
     betti_numbers, count_components, persistence_landscape, persistent_entropy,
@@ -20,6 +24,7 @@ use crate::ptx_kernels::{
     betti_count_ptx, boundary_reduce_ptx, diagram_match_ptx, filtration_sort_ptx,
     mapper_cluster_ptx, pairwise_dist_ptx, witness_dist_ptx,
 };
+use crate::vector::betti_curve::betti_curve;
 use crate::witness::witness::{lazy_witness_complex, maxmin_landmarks};
 
 // ──────────────────────────────────────────────
@@ -561,4 +566,132 @@ fn pairwise_euclidean_symmetry() {
         }
         assert!(d[i * n + i] < 1e-12, "diagonal should be 0");
     }
+}
+
+// ──────────────────────────────────────────────
+// Test 19: Betti curve from the VR pipeline on a hexagon loop
+// ──────────────────────────────────────────────
+#[test]
+fn betti_curve_from_vr_pipeline_on_loop() {
+    // 6 points on a unit circle (regular hexagon). Adjacent points are 1.0 apart,
+    // so a 1-cycle (the loop) is born at radius ≈ 1.0 and dies once the disc fills.
+    let pts: Vec<f64> = (0..6)
+        .flat_map(|i| {
+            let a = std::f64::consts::PI * i as f64 / 3.0;
+            vec![a.cos(), a.sin()]
+        })
+        .collect();
+
+    let filt = Filtration::vietoris_rips_from_points(&pts, 2, 1.2, 2).expect("ok");
+    let mut bm = BoundaryMatrix::from_filtration(&filt).expect("ok");
+    reduce_boundary_matrix(&mut bm);
+    let pairs = extract_persistence_pairs(&bm, &filt).expect("ok");
+    let diagrams = PersistenceDiagram::from_pairs_by_dim(&pairs, 2);
+    let h1 = &diagrams[1];
+
+    // Find the H1 loop's birth radius.
+    let h1_total = h1.essential_classes().len() + h1.finite_pairs().len();
+    assert!(h1_total >= 1, "expected an H1 loop, got {h1_total}");
+    let birth = h1
+        .pairs
+        .iter()
+        .map(|p| p.birth)
+        .fold(f64::INFINITY, f64::min);
+
+    // Below the loop's birth radius the H1 Betti number is 0; at a radius just above
+    // it should be ≥ 1.
+    let grid = [(birth - 0.2).max(0.0) as f32, (birth + 0.05) as f32];
+    let curve = betti_curve(h1, 1, &grid).expect("ok");
+    assert_eq!(
+        curve.values[0], 0,
+        "H1 Betti must be 0 below the loop birth"
+    );
+    assert!(
+        curve.values[1] >= 1,
+        "H1 Betti must be ≥ 1 once the loop appears"
+    );
+}
+
+// ──────────────────────────────────────────────
+// Test 20: Scale-space kernel on two real point-cloud diagrams
+// ──────────────────────────────────────────────
+#[test]
+fn scale_space_kernel_on_real_diagrams() {
+    // Diagram A: a square loop (4 corners of a unit square) — has H1.
+    let square = vec![0.0f64, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
+    let filt_a = Filtration::vietoris_rips_from_points(&square, 2, 1.5, 2).expect("ok");
+    let mut bm_a = BoundaryMatrix::from_filtration(&filt_a).expect("ok");
+    reduce_boundary_matrix(&mut bm_a);
+    let pairs_a = extract_persistence_pairs(&bm_a, &filt_a).expect("ok");
+    let diags_a = PersistenceDiagram::from_pairs_by_dim(&pairs_a, 1);
+    let da = &diags_a[0]; // H0 diagram
+
+    // Diagram B: four collinear points spaced at 2.0 — H0 deaths fall at 2.0,
+    // distinct from the square's unit-spaced H0 deaths at 1.0.
+    let line = vec![0.0f64, 0.0, 2.0, 0.0, 4.0, 0.0, 6.0, 0.0];
+    let filt_b = Filtration::vietoris_rips_from_points(&line, 2, 6.5, 1).expect("ok");
+    let mut bm_b = BoundaryMatrix::from_filtration(&filt_b).expect("ok");
+    reduce_boundary_matrix(&mut bm_b);
+    let pairs_b = extract_persistence_pairs(&bm_b, &filt_b).expect("ok");
+    let diags_b = PersistenceDiagram::from_pairs_by_dim(&pairs_b, 1);
+    let db = &diags_b[0]; // H0 diagram
+
+    let cfg = KernelConfig::default();
+
+    // Self-kernel positive.
+    let kaa = persistence_scale_space_kernel(da, da, &cfg).expect("ok");
+    assert!(kaa > 0.0, "self-kernel must be positive, got {kaa}");
+
+    // Symmetric.
+    let kab = persistence_scale_space_kernel(da, db, &cfg).expect("ok");
+    let kba = persistence_scale_space_kernel(db, da, &cfg).expect("ok");
+    assert!((kab - kba).abs() < 1e-12, "kernel must be symmetric");
+
+    // Identical-diagram distance ≈ 0; distinct-diagram distance > 0.
+    let d_same = persistence_scale_space_distance(da, da, &cfg).expect("ok");
+    assert!(d_same < 1e-9, "self-distance must be ~0, got {d_same}");
+    let d_diff = persistence_scale_space_distance(da, db, &cfg).expect("ok");
+    assert!(
+        d_diff > 0.0,
+        "distinct diagrams must have positive distance"
+    );
+}
+
+// ──────────────────────────────────────────────
+// Test 21: Full build-and-tear zigzag → born-by-deletion H1 bar
+// ──────────────────────────────────────────────
+#[test]
+fn zigzag_build_and_tear_born_by_deletion() {
+    let s = |v: &[usize]| Simplex::new(v.to_vec()).expect("valid simplex");
+    let complex = |sx: &[&[usize]]| ZigzagComplex {
+        simplices: sx.iter().map(|v| s(v)).collect(),
+    };
+
+    // Build a triangle boundary, fill it, then tear out the 2-simplex: the loop is
+    // reborn by deletion at the last complex.
+    let x0 = complex(&[&[0], &[1], &[2]]);
+    let x1 = complex(&[&[0], &[1], &[2], &[0, 1]]);
+    let x2 = complex(&[&[0], &[1], &[2], &[0, 1], &[0, 2], &[1, 2]]);
+    let x3 = complex(&[&[0], &[1], &[2], &[0, 1], &[0, 2], &[1, 2], &[0, 1, 2]]);
+    let x4 = x2.clone();
+
+    let input = ZigzagInput {
+        complexes: vec![x0, x1, x2, x3, x4],
+        arrows: vec![
+            ZigzagArrow::Forward,
+            ZigzagArrow::Forward,
+            ZigzagArrow::Forward,
+            ZigzagArrow::Backward,
+        ],
+    };
+    let bc = zigzag_persistence(&input).expect("zigzag");
+
+    // The born-by-deletion H1 bar lives in the final complex only: [4, 4].
+    let h1 = bc.bars_in_dim(1);
+    assert!(
+        h1.iter().any(|b| b.birth == 4 && b.death == 4),
+        "expected born-by-deletion H1 bar [4,4], got {:?}",
+        h1.iter().map(|b| (b.birth, b.death)).collect::<Vec<_>>()
+    );
+    assert_eq!(bc.betti(4, 1), 1, "β1(X4) must be 1 (loop reborn)");
 }

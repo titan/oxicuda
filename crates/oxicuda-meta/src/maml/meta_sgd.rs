@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn state_new_valid() {
-        let state = MetaSgdState::new(5, 0.01).unwrap();
+        let state = MetaSgdState::new(5, 0.01).expect("new should succeed");
         assert_eq!(state.params.len(), 5);
         assert_eq!(state.alpha.len(), 5);
         for &a in &state.alpha {
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn state_from_params() {
         let p = vec![1.0_f32, 2.0, 3.0];
-        let state = MetaSgdState::from_params(p.clone(), 0.01).unwrap();
+        let state = MetaSgdState::from_params(p.clone(), 0.01).expect("value should be present");
         assert_eq!(state.params, p);
         assert_eq!(state.n_params, 3);
         assert_eq!(state.alpha.len(), 3);
@@ -222,9 +222,10 @@ mod tests {
         // Simple convex task: Σ(x_i - 1)^2 -> minimum at all ones
         let task = quadratic_task(1.0);
         let cfg = MetaSgdConfig::default();
-        let state = MetaSgdState::new(4, 0.01).unwrap();
+        let state = MetaSgdState::new(4, 0.01).expect("new should succeed");
         let loss_before = task(&state.params);
-        let adapted = MetaSgd::inner_adapt(&state, &task, &cfg).unwrap();
+        let adapted =
+            MetaSgd::inner_adapt(&state, &task, &cfg).expect("inner_adapt should succeed");
         let loss_after = task(&adapted);
         assert!(loss_after < loss_before);
     }
@@ -233,14 +234,15 @@ mod tests {
     fn inner_adapt_length_preserved() {
         let task = quadratic_task(2.0);
         let cfg = MetaSgdConfig::default();
-        let state = MetaSgdState::new(7, 0.01).unwrap();
-        let adapted = MetaSgd::inner_adapt(&state, &task, &cfg).unwrap();
+        let state = MetaSgdState::new(7, 0.01).expect("new should succeed");
+        let adapted =
+            MetaSgd::inner_adapt(&state, &task, &cfg).expect("inner_adapt should succeed");
         assert_eq!(adapted.len(), 7);
     }
 
     #[test]
     fn alpha_init() {
-        let state = MetaSgdState::new(10, 0.05).unwrap();
+        let state = MetaSgdState::new(10, 0.05).expect("new should succeed");
         for &a in &state.alpha {
             assert!((a - 0.05_f32).abs() < 1e-7);
         }
@@ -250,7 +252,7 @@ mod tests {
     fn meta_update_returns_result() {
         let task = quadratic_task(3.0);
         let cfg = MetaSgdConfig::default();
-        let mut state = MetaSgdState::new(4, 0.01).unwrap();
+        let mut state = MetaSgdState::new(4, 0.01).expect("new should succeed");
         let result = MetaSgd::meta_update(&mut state, &[task], &cfg);
         assert!(result.is_ok());
     }
@@ -259,8 +261,9 @@ mod tests {
     fn meta_update_result_length() {
         let task = quadratic_task(1.5);
         let cfg = MetaSgdConfig::default();
-        let mut state = MetaSgdState::new(6, 0.01).unwrap();
-        let result = MetaSgd::meta_update(&mut state, &[task], &cfg).unwrap();
+        let mut state = MetaSgdState::new(6, 0.01).expect("new should succeed");
+        let result =
+            MetaSgd::meta_update(&mut state, &[task], &cfg).expect("meta_update should succeed");
         assert_eq!(result.params.len(), 6);
     }
 
@@ -269,9 +272,9 @@ mod tests {
         // Non-trivial task: quadratic away from zero
         let task = quadratic_task(5.0);
         let cfg = MetaSgdConfig::default();
-        let mut state = MetaSgdState::new(3, 0.01).unwrap();
+        let mut state = MetaSgdState::new(3, 0.01).expect("new should succeed");
         let params_before = state.params.clone();
-        MetaSgd::meta_update(&mut state, &[task], &cfg).unwrap();
+        MetaSgd::meta_update(&mut state, &[task], &cfg).expect("meta_update should succeed");
         // At least one parameter should have changed
         let changed = state
             .params
@@ -285,8 +288,9 @@ mod tests {
     fn alpha_clamped_nonneg() {
         let task = quadratic_task(2.0);
         let cfg = MetaSgdConfig::default();
-        let mut state = MetaSgdState::new(5, 0.01).unwrap();
-        let result = MetaSgd::meta_update(&mut state, &[task], &cfg).unwrap();
+        let mut state = MetaSgdState::new(5, 0.01).expect("new should succeed");
+        let result =
+            MetaSgd::meta_update(&mut state, &[task], &cfg).expect("meta_update should succeed");
         for &a in &result.alpha {
             assert!(a >= 0.0);
         }
@@ -299,8 +303,9 @@ mod tests {
             clip_alpha: 1.0,
             ..MetaSgdConfig::default()
         };
-        let mut state = MetaSgdState::new(5, 0.01).unwrap();
-        let result = MetaSgd::meta_update(&mut state, &[task], &cfg).unwrap();
+        let mut state = MetaSgdState::new(5, 0.01).expect("new should succeed");
+        let result =
+            MetaSgd::meta_update(&mut state, &[task], &cfg).expect("meta_update should succeed");
         for &a in &result.alpha {
             assert!(a <= 1.0);
         }
@@ -313,7 +318,7 @@ mod tests {
             inner_steps: 3,
             ..MetaSgdConfig::default()
         };
-        let mut state = MetaSgdState::new(4, 0.01).unwrap();
+        let mut state = MetaSgdState::new(4, 0.01).expect("new should succeed");
         let result = MetaSgd::meta_update(&mut state, &[task], &cfg);
         assert!(result.is_ok());
     }
@@ -322,7 +327,7 @@ mod tests {
     fn single_task() {
         let task = quadratic_task(2.0);
         let cfg = MetaSgdConfig::default();
-        let mut state = MetaSgdState::new(3, 0.01).unwrap();
+        let mut state = MetaSgdState::new(3, 0.01).expect("new should succeed");
         let result = MetaSgd::meta_update(&mut state, &[task], &cfg);
         assert!(result.is_ok());
     }
@@ -331,8 +336,9 @@ mod tests {
     fn mean_task_loss_finite() {
         let task = quadratic_task(1.0);
         let cfg = MetaSgdConfig::default();
-        let mut state = MetaSgdState::new(4, 0.01).unwrap();
-        let result = MetaSgd::meta_update(&mut state, &[task], &cfg).unwrap();
+        let mut state = MetaSgdState::new(4, 0.01).expect("new should succeed");
+        let result =
+            MetaSgd::meta_update(&mut state, &[task], &cfg).expect("meta_update should succeed");
         assert!(result.mean_task_loss.is_finite());
     }
 
@@ -340,7 +346,7 @@ mod tests {
     fn empty_tasks_err() {
         type TaskFn = Box<dyn Fn(&[f32]) -> f32>;
         let cfg = MetaSgdConfig::default();
-        let mut state = MetaSgdState::new(4, 0.01).unwrap();
+        let mut state = MetaSgdState::new(4, 0.01).expect("new should succeed");
         let tasks: Vec<TaskFn> = vec![];
         let result = MetaSgd::meta_update(&mut state, tasks.as_slice(), &cfg);
         assert!(matches!(result, Err(MetaError::EmptySupport)));
@@ -353,7 +359,7 @@ mod tests {
             meta_lr: 0.0,
             ..MetaSgdConfig::default()
         };
-        let mut state = MetaSgdState::new(4, 0.01).unwrap();
+        let mut state = MetaSgdState::new(4, 0.01).expect("new should succeed");
         let result = MetaSgd::meta_update(&mut state, &[task], &cfg);
         assert!(matches!(result, Err(MetaError::InvalidLr { .. })));
     }
@@ -365,7 +371,7 @@ mod tests {
             inner_steps: 0,
             ..MetaSgdConfig::default()
         };
-        let mut state = MetaSgdState::new(4, 0.01).unwrap();
+        let mut state = MetaSgdState::new(4, 0.01).expect("new should succeed");
         let result = MetaSgd::meta_update(&mut state, &[task], &cfg);
         assert!(matches!(
             result,
@@ -383,14 +389,15 @@ mod tests {
             fd_eps: 1e-4,
             clip_alpha: 1.0,
         };
-        let mut state = MetaSgdState::new(4, 0.05).unwrap();
+        let mut state = MetaSgdState::new(4, 0.05).expect("new should succeed");
 
         let mut prev_loss = f32::MAX;
         let mut n_improvements = 0_usize;
 
         for _ in 0..30 {
             let task = quadratic_task(1.0);
-            let result = MetaSgd::meta_update(&mut state, &[task], &cfg).unwrap();
+            let result = MetaSgd::meta_update(&mut state, &[task], &cfg)
+                .expect("meta_update should succeed");
             let loss = result.mean_task_loss;
             if loss < prev_loss {
                 n_improvements += 1;

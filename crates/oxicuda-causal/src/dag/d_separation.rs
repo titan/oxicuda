@@ -86,8 +86,8 @@ mod tests {
     fn chain_d_separation() {
         // X -> Z -> Y: X d-sep Y given Z
         let mut dag = Dag::new(3);
-        dag.add_edge(0, 2).unwrap();
-        dag.add_edge(2, 1).unwrap();
+        dag.add_edge(0, 2).expect("add_edge should succeed");
+        dag.add_edge(2, 1).expect("add_edge should succeed");
         assert!(d_separated(&dag, 0, 1, &[2]));
         assert!(!d_separated(&dag, 0, 1, &[]));
     }
@@ -96,8 +96,8 @@ mod tests {
     fn fork_d_separation() {
         // X <- Z -> Y: X d-sep Y given Z
         let mut dag = Dag::new(3);
-        dag.add_edge(2, 0).unwrap();
-        dag.add_edge(2, 1).unwrap();
+        dag.add_edge(2, 0).expect("add_edge should succeed");
+        dag.add_edge(2, 1).expect("add_edge should succeed");
         assert!(d_separated(&dag, 0, 1, &[2]));
         assert!(!d_separated(&dag, 0, 1, &[]));
     }
@@ -106,8 +106,8 @@ mod tests {
     fn collider_d_separation() {
         // X -> Z <- Y: X and Y independent, but dependent given Z
         let mut dag = Dag::new(3);
-        dag.add_edge(0, 2).unwrap();
-        dag.add_edge(1, 2).unwrap();
+        dag.add_edge(0, 2).expect("add_edge should succeed");
+        dag.add_edge(1, 2).expect("add_edge should succeed");
         assert!(d_separated(&dag, 0, 1, &[]));
         assert!(!d_separated(&dag, 0, 1, &[2]));
     }

@@ -394,7 +394,7 @@ mod tests {
     fn ifor_fit_basic() {
         let data: Vec<f64> = (0..200).map(|i| i as f64 * 0.1).collect();
         let cfg = make_cfg(10, 64, 42);
-        let fit = ifor_fit(&data, 100, 2, &cfg).unwrap();
+        let fit = ifor_fit(&data, 100, 2, &cfg).expect("ifor_fit should succeed with valid input");
         assert_eq!(fit.trees.len(), 10);
         assert_eq!(fit.d, 2);
     }
@@ -405,8 +405,8 @@ mod tests {
         let d = 2_usize;
         let data: Vec<f64> = (0..n * d).map(|i| i as f64 * 0.01).collect();
         let cfg = make_cfg(20, 64, 7);
-        let fit = ifor_fit(&data, n, d, &cfg).unwrap();
-        let scores = ifor_score(&fit, &data, n).unwrap();
+        let fit = ifor_fit(&data, n, d, &cfg).expect("ifor_fit should succeed with valid data");
+        let scores = ifor_score(&fit, &data, n).expect("ifor_score should succeed on valid fit");
         assert_eq!(scores.len(), n);
         for s in &scores {
             assert!((0.0..=1.0).contains(s), "score={s}");
@@ -420,11 +420,13 @@ mod tests {
         // Dense cluster around 0.0
         let mut data: Vec<f64> = (0..n).map(|i| (i as f64 - 100.0) * 0.01).collect();
         let cfg = make_cfg(50, 128, 13);
-        let fit = ifor_fit(&data, n, d, &cfg).unwrap();
+        let fit = ifor_fit(&data, n, d, &cfg).expect("ifor_fit should succeed with cluster data");
 
         // Score a typical inlier and a far outlier
-        let s_inlier = ifor_score(&fit, &[0.0_f64], 1).unwrap()[0];
-        let s_outlier = ifor_score(&fit, &[1000.0_f64], 1).unwrap()[0];
+        let s_inlier =
+            ifor_score(&fit, &[0.0_f64], 1).expect("ifor_score should succeed for inlier")[0];
+        let s_outlier =
+            ifor_score(&fit, &[1000.0_f64], 1).expect("ifor_score should succeed for outlier")[0];
 
         // Use data again to silence warning
         let _ = data.pop();
@@ -441,8 +443,10 @@ mod tests {
         let d = 2_usize;
         let data: Vec<f64> = (0..n * d).map(|i| (i as f64).sin()).collect();
         let cfg = make_cfg(30, 64, 99);
-        let fit = ifor_fit(&data, n, d, &cfg).unwrap();
-        let preds = ifor_predict(&fit, &data, n, 0.5).unwrap();
+        let fit =
+            ifor_fit(&data, n, d, &cfg).expect("ifor_fit should succeed with sinusoidal data");
+        let preds =
+            ifor_predict(&fit, &data, n, 0.5).expect("ifor_predict should succeed on valid fit");
         assert_eq!(preds.len(), n);
     }
 
@@ -450,7 +454,7 @@ mod tests {
     fn ifor_path_length_finite() {
         let data: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let cfg = make_cfg(10, 4, 55);
-        let fit = ifor_fit(&data, 4, 2, &cfg).unwrap();
+        let fit = ifor_fit(&data, 4, 2, &cfg).expect("ifor_fit should succeed with small dataset");
         let pl = ifor_path_length(&fit, &[2.5_f64, 3.5]);
         assert!(pl.is_finite() && pl >= 0.0, "path_length={pl}");
     }
@@ -471,8 +475,10 @@ mod tests {
             max_depth: 4,
             seed: 3,
         };
-        let fit = ifor_fit(&data, 2, 2, &cfg).unwrap();
-        let s = ifor_score(&fit, &[1.5_f64, 2.5], 1).unwrap();
+        let fit = ifor_fit(&data, 2, 2, &cfg)
+            .expect("ifor_fit should clamp oversized subsample gracefully");
+        let s = ifor_score(&fit, &[1.5_f64, 2.5], 1)
+            .expect("ifor_score should succeed after clamped subsample fit");
         assert_eq!(s.len(), 1);
         assert!((0.0..=1.0).contains(&s[0]));
     }

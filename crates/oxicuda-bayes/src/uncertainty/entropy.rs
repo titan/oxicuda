@@ -107,14 +107,14 @@ mod tests {
     fn entropy_uniform_two_classes_log2() {
         // Single member; uniform distribution gives ln(2)
         let s = vec![0.5_f32, 0.5];
-        let h = predictive_entropy(&s, 2, 1).unwrap();
+        let h = predictive_entropy(&s, 2, 1).expect("predictive_entropy should succeed");
         assert!((h - std::f32::consts::LN_2).abs() < 1e-5);
     }
 
     #[test]
     fn entropy_certain_zero() {
         let s = vec![1.0_f32, 0.0];
-        let h = predictive_entropy(&s, 2, 1).unwrap();
+        let h = predictive_entropy(&s, 2, 1).expect("predictive_entropy should succeed");
         assert!(h.abs() < 1e-5);
     }
 
@@ -122,7 +122,7 @@ mod tests {
     fn aleatoric_average_of_member_entropies() {
         // member1 = uniform → H = ln 2; member2 = certain → H = 0; mean = ln(2)/2
         let s = vec![0.5_f32, 0.5, 1.0, 0.0];
-        let h = aleatoric_entropy(&s, 2, 2).unwrap();
+        let h = aleatoric_entropy(&s, 2, 2).expect("aleatoric_entropy should succeed");
         let expected = std::f32::consts::LN_2 / 2.0;
         assert!((h - expected).abs() < 1e-5);
     }
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn bald_zero_when_members_agree() {
         let s = vec![0.7_f32, 0.3, 0.7, 0.3];
-        let mi = mutual_information(&s, 2, 2).unwrap();
+        let mi = mutual_information(&s, 2, 2).expect("mutual_information should succeed");
         assert!(mi.abs() < 1e-5);
     }
 
@@ -139,15 +139,15 @@ mod tests {
         // member1 says (1, 0), member2 says (0, 1). Mean = (0.5, 0.5).
         // H[p̄] = ln 2; aleatoric = 0; MI = ln 2.
         let s = vec![1.0_f32, 0.0, 0.0, 1.0];
-        let mi = mutual_information(&s, 2, 2).unwrap();
+        let mi = mutual_information(&s, 2, 2).expect("mutual_information should succeed");
         assert!((mi - std::f32::consts::LN_2).abs() < 1e-5);
     }
 
     #[test]
     fn epistemic_alias_matches_mutual_information() {
         let s = vec![1.0_f32, 0.0, 0.0, 1.0];
-        let a = mutual_information(&s, 2, 2).unwrap();
-        let b = epistemic_entropy(&s, 2, 2).unwrap();
+        let a = mutual_information(&s, 2, 2).expect("mutual_information should succeed");
+        let b = epistemic_entropy(&s, 2, 2).expect("epistemic_entropy should succeed");
         assert!((a - b).abs() < 1e-7);
     }
 

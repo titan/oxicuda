@@ -52,7 +52,8 @@ mod tests {
         let n_experts = 4_usize;
         // Uniform distribution: p = 1/E for all experts
         let probs = vec![0.25_f32; n_tokens * n_experts];
-        let entropy = routing_entropy(&probs, n_tokens, n_experts).unwrap();
+        let entropy =
+            routing_entropy(&probs, n_tokens, n_experts).expect("routing_entropy should succeed");
         let max_entropy = (n_experts as f32).ln();
         assert!(
             (entropy - max_entropy).abs() < 1e-3,
@@ -66,7 +67,8 @@ mod tests {
         let n_experts = 4_usize;
         // One-hot: p = [1, 0, 0, 0]
         let probs = [1.0_f32, 0.0, 0.0, 0.0];
-        let entropy = routing_entropy(&probs, n_tokens, n_experts).unwrap();
+        let entropy =
+            routing_entropy(&probs, n_tokens, n_experts).expect("routing_entropy should succeed");
         // Entropy should be near 0
         assert!(entropy < 0.01, "entropy={entropy}");
     }
@@ -75,7 +77,7 @@ mod tests {
     fn entropy_nonneg_for_softmax_output() {
         let logits = [0.5_f32, 1.5, -0.3, 2.0, 0.1, 0.9, 1.2, -0.5];
         let probs = stable_softmax(&logits);
-        let entropy = routing_entropy(&probs, 1, logits.len()).unwrap();
+        let entropy = routing_entropy(&probs, 1, logits.len()).expect("value should be present");
         assert!(entropy >= 0.0, "entropy must be >= 0, got {entropy}");
     }
 }

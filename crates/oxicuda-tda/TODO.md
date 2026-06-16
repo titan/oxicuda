@@ -9,7 +9,7 @@ landscapes). Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.49).
 
 ## Implementation Status
 
-**Actual: 3,675 lines / 2,849 SLoC (25 files)** — implements the standard ELZ-2002
+**Actual: 3,675 lines / 12,009 SLoC (52 files)** — implements the standard ELZ-2002
 persistence reduction over Z_2, exact bottleneck and Wasserstein-1 distances,
 landscape distance, Mapper with single-linkage clustering, lazy-witness complex with
 maxmin landmark sampling, and 7 PTX kernels × 6 SM versions.
@@ -90,7 +90,7 @@ maxmin landmark sampling, and 7 PTX kernels × 6 SM versions.
 - [x] `complex/cech.rs` — Exact Čech filtration via minimum enclosing ball / smallest
   circle (Welzl). Currently only Vietoris-Rips is provided.
   (complex/cech.rs -- Čech filtration with minimum-enclosing-ball radius per simplex via deterministic Badoiu-Clarkson MEB)
-- [ ] `complex/alpha.rs` — Alpha filtration via Delaunay triangulation
+- [x] `complex/alpha.rs` — Alpha filtration via Delaunay triangulation
   (planar + 3D) for sparser but topologically equivalent complexes
 - [x] `homology/cohomology.rs` — Cohomology reduction (transpose of boundary matrix)
   giving identical pairs but often a faster reduction path
@@ -111,9 +111,9 @@ maxmin landmark sampling, and 7 PTX kernels × 6 SM versions.
   (persistence/landscape_p.rs -- Bubenik 2015 persistence landscapes (tent functions, k-th largest) + Lᵖ norm/distance via grid trapezoid)
 - [x] `mapper/ball_mapper.rs` — Ball Mapper variant: clusters as balls of fixed radius
   around landmark points (Dlotko 2019)
-- [ ] `mapper/multiscale.rs` — Multiscale Mapper with cover refinement and persistence
+- [x] `mapper/multiscale.rs` — Multiscale Mapper with cover refinement and persistence
   of the Mapper graph
-- [ ] `witness/strong_witness.rs` — Strong witness complex (de Silva & Carlsson 2004)
+- [x] `witness/strong_witness.rs` — Strong witness complex (de Silva & Carlsson 2004)
   as a stricter alternative to the lazy variant
 
 #### P1 — Vectorisation & Representations
@@ -122,19 +122,21 @@ maxmin landmark sampling, and 7 PTX kernels × 6 SM versions.
 - [x] `persistence/persistence_silhouette` — Persistence silhouettes (Chazal et al.):
   weighted average of landscape functions (implemented inside `persistence_image.rs`
   as `persistence_silhouette`)
-- [ ] `vector/betti_curve.rs` — Betti curves as a vector representation of barcodes
+- [x] `vector/betti_curve.rs` — Betti curves as a vector representation of barcodes
 
 #### P2 — Advanced
-- [ ] `homology/zigzag.rs` — Zigzag persistence (Carlsson & de Silva 2010) for
+- [x] `homology/zigzag.rs` — Zigzag persistence (Carlsson & de Silva 2010) for
   diagrams that allow both insertion and deletion of simplices
 - [ ] `homology/multi_parameter.rs` — Multi-parameter persistence (RIVET interface,
   Hilbert function, fibered barcodes)
-- [ ] `distance/kernel.rs` — Persistence-based kernels: scale-space kernel
+- [x] `distance/kernel.rs` — Persistence-based kernels: scale-space kernel
   (Reininghaus 2015), sliced Wasserstein kernel (Carrière 2017)
 - [ ] `mapper/stable.rs` — Stable Mapper (Carrière & Oudot 2018) with statistical
   bootstrap confidence intervals
 - [ ] `benches/algo_bench.rs` — Extended algorithm benches on standard datasets
   (Stanford Dragon, MNIST point cloud, torus / sphere parametric surfaces)
+- [x] `persistence/tropical.rs` — Tropical geometry encoding (Monod 2019): tropical coordinates of persistence diagrams as Γ-type statistics; vectorisation stable under reordering and permutation; `TropicalCoordinates`
+- [ ] `homology/gpu_reduction.rs` — GPU persistence reduction (Otter 2017 spectral): parallel column-reduction with chunk-based pivot lookups in shared memory; PTX kernel for batched boundary-matrix reduction; sm_80+ warp-level synchronisation
 
 #### P2 — GPU / Architecture-Specific
 - [ ] PTX kernel for batched parallel column-reduction with chunk-based pivot lookups

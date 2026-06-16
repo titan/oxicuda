@@ -8,15 +8,19 @@
 //! - [`hyperbolic_poincare`]  Poincaré ball model of hyperbolic space.
 //! - [`hyperbolic_lorentz`]   Lorentz (hyperboloid) model of hyperbolic space.
 //! - [`so_n`]                 Special Orthogonal Group SO(n) with matrix-exponential retraction.
+//! - [`mod@riemannian_median`] Riemannian (geometric) median on SPD(d) via Weiszfeld/IRLS.
+//! - [`wrapped_normal`]       Wrapped Normal distribution on the Poincaré ball (Nagano 2019).
 
 pub mod grassmann;
 pub mod hyperbolic_lorentz;
 pub mod hyperbolic_poincare;
+pub mod riemannian_median;
 pub mod so_n;
 pub mod spd;
 pub mod spd_bures;
 pub mod spd_kmeans;
 pub mod stiefel;
+pub mod wrapped_normal;
 
 pub use grassmann::{grassmann_distance, grassmann_project_tangent, grassmann_retract};
 pub use hyperbolic_lorentz::{
@@ -25,6 +29,10 @@ pub use hyperbolic_lorentz::{
     lorentz_to_poincare,
 };
 pub use hyperbolic_poincare::{mobius_add, poincare_distance, poincare_project};
+pub use riemannian_median::{
+    RiemannianMedianConfig, RiemannianMedianResult, riemannian_median, riemannian_median_objective,
+    riemannian_trimmed_mean,
+};
 pub use so_n::{
     so_2_rotation, so_n_check, so_n_distance, so_n_geodesic, so_n_identity, so_n_inner, so_n_log,
     so_n_norm, so_n_project_tangent, so_n_random, so_n_retract_cayley, so_n_retract_expm,
@@ -40,3 +48,8 @@ pub use spd_kmeans::{
     spd_kmeans,
 };
 pub use stiefel::{stiefel_project_tangent, stiefel_retract_qr};
+pub use wrapped_normal::{
+    WrappedNormalConfig, WrappedNormalSample, poincare_exp, poincare_log,
+    validate_wrapped_normal_config, wrapped_normal_log_prob, wrapped_normal_sample,
+    wrapped_normal_sample_n,
+};

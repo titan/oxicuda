@@ -515,7 +515,7 @@ mod tests {
             0.0, 1.0, 0.0, //
             0.0, 0.0, 1.0, //
         ];
-        MetaOptNet::cholesky(&mut a, n).unwrap();
+        MetaOptNet::cholesky(&mut a, n).expect("cholesky should succeed");
         // L should also be identity
         for i in 0..n {
             for j in 0..n {
@@ -534,7 +534,7 @@ mod tests {
         // A = [[4, 2], [2, 3]]  → L = [[2, 0], [1, √2]]
         let n = 2;
         let mut a = vec![4.0_f32, 2.0, 2.0, 3.0];
-        MetaOptNet::cholesky(&mut a, n).unwrap();
+        MetaOptNet::cholesky(&mut a, n).expect("cholesky should succeed");
         assert!((a[0] - 2.0).abs() < 1e-5, "L[0,0] = {}", a[0]);
         assert!((a[2] - 1.0).abs() < 1e-5, "L[1,0] = {}", a[2]);
         assert!((a[3] - 2.0_f32.sqrt()).abs() < 1e-5, "L[1,1] = {}", a[3]);
@@ -559,7 +559,7 @@ mod tests {
     fn ridge_solve_output_shape() {
         let cfg = default_ridge_cfg();
         let (feats, labels) = orthogonal_support(cfg.n_way, cfg.k_shot, cfg.feat_dim);
-        let w = MetaOptNet::ridge_solve(&feats, &labels, &cfg).unwrap();
+        let w = MetaOptNet::ridge_solve(&feats, &labels, &cfg).expect("ridge_solve should succeed");
         assert_eq!(w.w.len(), cfg.n_way * cfg.feat_dim);
         assert_eq!(w.b.len(), cfg.n_way);
     }
@@ -568,7 +568,7 @@ mod tests {
     fn ridge_solve_finite() {
         let cfg = default_ridge_cfg();
         let (feats, labels) = orthogonal_support(cfg.n_way, cfg.k_shot, cfg.feat_dim);
-        let w = MetaOptNet::ridge_solve(&feats, &labels, &cfg).unwrap();
+        let w = MetaOptNet::ridge_solve(&feats, &labels, &cfg).expect("ridge_solve should succeed");
         assert!(w.w.iter().all(|v| v.is_finite()));
         assert!(w.b.iter().all(|v| v.is_finite()));
     }
@@ -586,7 +586,8 @@ mod tests {
             svm_tol: 1e-4,
         };
         let (s_feats, s_labels) = orthogonal_support(cfg.n_way, cfg.k_shot, cfg.feat_dim);
-        let w = MetaOptNet::ridge_solve(&s_feats, &s_labels, &cfg).unwrap();
+        let w =
+            MetaOptNet::ridge_solve(&s_feats, &s_labels, &cfg).expect("ridge_solve should succeed");
 
         // Query = the same prototypes (one-hot)
         let q_feats: Vec<f32> = (0..cfg.n_way)
@@ -594,8 +595,8 @@ mod tests {
             .collect();
         let q_labels: Vec<usize> = (0..cfg.n_way).collect();
 
-        let (_, acc) =
-            MetaOptNet::predict_query(&w, &q_feats, &q_labels, cfg.n_way, cfg.feat_dim).unwrap();
+        let (_, acc) = MetaOptNet::predict_query(&w, &q_feats, &q_labels, cfg.n_way, cfg.feat_dim)
+            .expect("predict_query should succeed");
         assert!(
             acc >= 0.9,
             "Ridge on separable data should achieve ≥90% accuracy, got {acc}"
@@ -608,7 +609,7 @@ mod tests {
     fn svm_solve_output_shape() {
         let cfg = default_svm_cfg();
         let (feats, labels) = orthogonal_support(cfg.n_way, cfg.k_shot, cfg.feat_dim);
-        let w = MetaOptNet::svm_solve(&feats, &labels, &cfg).unwrap();
+        let w = MetaOptNet::svm_solve(&feats, &labels, &cfg).expect("svm_solve should succeed");
         assert_eq!(w.w.len(), cfg.n_way * cfg.feat_dim);
         assert_eq!(w.b.len(), cfg.n_way);
     }
@@ -617,7 +618,7 @@ mod tests {
     fn svm_solve_finite() {
         let cfg = default_svm_cfg();
         let (feats, labels) = orthogonal_support(cfg.n_way, cfg.k_shot, cfg.feat_dim);
-        let w = MetaOptNet::svm_solve(&feats, &labels, &cfg).unwrap();
+        let w = MetaOptNet::svm_solve(&feats, &labels, &cfg).expect("svm_solve should succeed");
         assert!(w.w.iter().all(|v| v.is_finite()));
         assert!(w.b.iter().all(|v| v.is_finite()));
     }
@@ -647,11 +648,11 @@ mod tests {
 
         let (loss_zero, _) =
             MetaOptNet::predict_query(&w_zero, &q_feats, &q_labels, cfg.n_way, cfg.feat_dim)
-                .unwrap();
-        let w_svm = MetaOptNet::svm_solve(&feats, &labels, &cfg).unwrap();
+                .expect("value should be present");
+        let w_svm = MetaOptNet::svm_solve(&feats, &labels, &cfg).expect("svm_solve should succeed");
         let (loss_svm, _) =
             MetaOptNet::predict_query(&w_svm, &q_feats, &q_labels, cfg.n_way, cfg.feat_dim)
-                .unwrap();
+                .expect("value should be present");
 
         assert!(
             loss_svm <= loss_zero + 1e-3,
@@ -679,7 +680,8 @@ mod tests {
         let q_labels: Vec<usize> = (0..n_way).collect();
 
         let (_loss, acc) =
-            MetaOptNet::predict_query(&weights, &q_feats, &q_labels, n_way, feat_dim).unwrap();
+            MetaOptNet::predict_query(&weights, &q_feats, &q_labels, n_way, feat_dim)
+                .expect("predict_query should succeed");
         assert!((acc - 1.0).abs() < 1e-5, "Perfect classifier: acc={acc}");
     }
 
@@ -688,7 +690,7 @@ mod tests {
     #[test]
     fn forward_ridge_runs() {
         let cfg = default_ridge_cfg();
-        let net = MetaOptNet::new(cfg.clone()).unwrap();
+        let net = MetaOptNet::new(cfg.clone()).expect("value should be present");
         let (s_feats, s_labels) = orthogonal_support(cfg.n_way, cfg.k_shot, cfg.feat_dim);
         let q_feats: Vec<f32> = (0..cfg.n_way)
             .flat_map(|c| {
@@ -704,7 +706,7 @@ mod tests {
         let q_labels: Vec<usize> = (0..cfg.n_way).collect();
         let result = net
             .forward(&s_feats, &s_labels, &q_feats, &q_labels)
-            .unwrap();
+            .expect("value should be present");
         assert!(result.query_loss.is_finite());
         assert!(result.query_accuracy >= 0.0 && result.query_accuracy <= 1.0);
     }
@@ -712,7 +714,7 @@ mod tests {
     #[test]
     fn forward_svm_runs() {
         let cfg = default_svm_cfg();
-        let net = MetaOptNet::new(cfg.clone()).unwrap();
+        let net = MetaOptNet::new(cfg.clone()).expect("value should be present");
         let (s_feats, s_labels) = orthogonal_support(cfg.n_way, cfg.k_shot, cfg.feat_dim);
         let q_feats: Vec<f32> = (0..cfg.n_way)
             .flat_map(|c| {
@@ -728,7 +730,7 @@ mod tests {
         let q_labels: Vec<usize> = (0..cfg.n_way).collect();
         let result = net
             .forward(&s_feats, &s_labels, &q_feats, &q_labels)
-            .unwrap();
+            .expect("value should be present");
         assert!(result.query_loss.is_finite());
         assert!(result.query_accuracy >= 0.0 && result.query_accuracy <= 1.0);
     }

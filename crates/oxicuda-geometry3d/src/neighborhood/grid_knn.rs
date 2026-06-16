@@ -335,10 +335,10 @@ mod tests {
     fn knn_matches_brute_force_k1_k3() {
         let n = 200;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
         let q = [4.0_f32, 5.0, 3.0];
         for &k in &[1usize, 3] {
-            let got = grid.knn(&q, k).unwrap();
+            let got = grid.knn(&q, k).expect("knn should succeed");
             let exp = brute_knn(&pts, n, &q, k);
             assert_eq!(got.len(), exp.len());
             for ((gi, gd), (ei, ed)) in got.iter().zip(exp.iter()) {
@@ -354,8 +354,8 @@ mod tests {
         let pts = make_cloud(n);
         let q = [2.3_f32, 7.1, 4.4];
         for &cell in &[0.5_f32, 1.0, 2.5, 5.0] {
-            let grid = SpatialHashGrid::build(&pts, n, cfg(cell)).unwrap();
-            let got = grid.knn(&q, 5).unwrap();
+            let grid = SpatialHashGrid::build(&pts, n, cfg(cell)).expect("value should be present");
+            let got = grid.knn(&q, 5).expect("knn should succeed");
             let exp = brute_knn(&pts, n, &q, 5);
             for ((gi, _), (ei, _)) in got.iter().zip(exp.iter()) {
                 assert_eq!(gi, ei, "cell {cell} knn mismatch");
@@ -367,10 +367,12 @@ mod tests {
     fn radius_search_matches_brute_force() {
         let n = 200;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
         let q = [5.0_f32, 5.0, 5.0];
         for &radius in &[1.0_f32, 2.5, 4.0] {
-            let mut got = grid.radius_search(&q, radius).unwrap();
+            let mut got = grid
+                .radius_search(&q, radius)
+                .expect("radius_search should succeed");
             got.sort_unstable();
             let mut exp = brute_radius(&pts, n, &q, radius);
             exp.sort_unstable();
@@ -381,7 +383,7 @@ mod tests {
     #[test]
     fn cell_of_known_coords() {
         let pts = vec![0.0_f32, 0.0, 0.0];
-        let grid = SpatialHashGrid::build(&pts, 1, cfg(2.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, 1, cfg(2.0)).expect("value should be present");
         assert_eq!(grid.cell_of(&[0.0, 0.0, 0.0]), (0, 0, 0));
         assert_eq!(grid.cell_of(&[3.0, 5.0, 1.5]), (1, 2, 0));
         assert_eq!(grid.cell_of(&[4.0, 4.0, 4.0]), (2, 2, 2));
@@ -390,7 +392,7 @@ mod tests {
     #[test]
     fn cell_of_negative_coords_floor() {
         let pts = vec![0.0_f32, 0.0, 0.0];
-        let grid = SpatialHashGrid::build(&pts, 1, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, 1, cfg(1.0)).expect("value should be present");
         // floor(-0.5) == -1, floor(-1.0) == -1, floor(-1.5) == -2
         assert_eq!(grid.cell_of(&[-0.5, -1.0, -1.5]), (-1, -1, -2));
         assert_eq!(grid.cell_of(&[-0.001, -2.999, -3.0]), (-1, -3, -3));
@@ -400,7 +402,7 @@ mod tests {
     fn len_and_is_empty() {
         let n = 17;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
         assert_eq!(grid.len(), n);
         assert!(!grid.is_empty());
         assert!(grid.cell_count() >= 1);
@@ -416,8 +418,8 @@ mod tests {
     fn knn_k_larger_than_n_returns_n() {
         let n = 6;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
-        let res = grid.knn(&[3.0, 3.0, 3.0], 100).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
+        let res = grid.knn(&[3.0, 3.0, 3.0], 100).expect("knn should succeed");
         assert_eq!(res.len(), n);
     }
 
@@ -430,10 +432,10 @@ mod tests {
             1.05, 0.5, 0.5, // cell (1,0,0) — true NN of a query near x=1
             5.0, 5.0, 5.0, // far away
         ];
-        let grid = SpatialHashGrid::build(&pts, 3, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, 3, cfg(1.0)).expect("value should be present");
         // Query at (0.95, 0.5, 0.5): own cell (0,0,0) holds index 0 at dist^2
         // ~0.85, but the true NN is index 1 in cell (1,0,0) at dist^2 = 0.01.
-        let res = grid.knn(&[0.95, 0.5, 0.5], 1).unwrap();
+        let res = grid.knn(&[0.95, 0.5, 0.5], 1).expect("knn should succeed");
         assert_eq!(res[0].0, 1, "must find NN in the neighbouring cell");
         assert!(res[0].1 < 0.02);
     }
@@ -444,9 +446,9 @@ mod tests {
         let pts = vec![
             0.10_f32, 0.10, 0.10, 0.20, 0.20, 0.20, 0.30, 0.30, 0.30, 0.40, 0.40, 0.40,
         ];
-        let grid = SpatialHashGrid::build(&pts, 4, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, 4, cfg(1.0)).expect("value should be present");
         assert_eq!(grid.cell_count(), 1, "all share one cell");
-        let got = grid.knn(&[0.0, 0.0, 0.0], 3).unwrap();
+        let got = grid.knn(&[0.0, 0.0, 0.0], 3).expect("knn should succeed");
         let exp = brute_knn(&pts, 4, &[0.0, 0.0, 0.0], 3);
         for ((gi, _), (ei, _)) in got.iter().zip(exp.iter()) {
             assert_eq!(gi, ei);
@@ -457,12 +459,19 @@ mod tests {
     fn deterministic_queries() {
         let n = 120;
         let pts = make_cloud(n);
-        let a = SpatialHashGrid::build(&pts, n, cfg(1.5)).unwrap();
-        let b = SpatialHashGrid::build(&pts, n, cfg(1.5)).unwrap();
+        let a = SpatialHashGrid::build(&pts, n, cfg(1.5)).expect("value should be present");
+        let b = SpatialHashGrid::build(&pts, n, cfg(1.5)).expect("value should be present");
         let q = [3.3_f32, 4.4, 5.5];
-        assert_eq!(a.knn(&q, 7).unwrap(), b.knn(&q, 7).unwrap());
-        let mut ra = a.radius_search(&q, 2.0).unwrap();
-        let mut rb = b.radius_search(&q, 2.0).unwrap();
+        assert_eq!(
+            a.knn(&q, 7).expect("knn should succeed"),
+            b.knn(&q, 7).expect("knn should succeed")
+        );
+        let mut ra = a
+            .radius_search(&q, 2.0)
+            .expect("radius_search should succeed");
+        let mut rb = b
+            .radius_search(&q, 2.0)
+            .expect("radius_search should succeed");
         ra.sort_unstable();
         rb.sort_unstable();
         assert_eq!(ra, rb);
@@ -472,9 +481,9 @@ mod tests {
     fn knn_k1_single_nearest() {
         let n = 64;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
         let q = [6.6_f32, 1.2, 8.8];
-        let got = grid.knn(&q, 1).unwrap();
+        let got = grid.knn(&q, 1).expect("knn should succeed");
         let exp = brute_knn(&pts, n, &q, 1);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, exp[0].0);
@@ -484,8 +493,10 @@ mod tests {
     #[test]
     fn radius_zero_at_exact_point() {
         let pts = vec![1.0_f32, 2.0, 3.0, 7.0, 8.0, 9.0];
-        let grid = SpatialHashGrid::build(&pts, 2, cfg(1.0)).unwrap();
-        let res = grid.radius_search(&[1.0, 2.0, 3.0], 0.0).unwrap();
+        let grid = SpatialHashGrid::build(&pts, 2, cfg(1.0)).expect("value should be present");
+        let res = grid
+            .radius_search(&[1.0, 2.0, 3.0], 0.0)
+            .expect("radius_search should succeed");
         assert_eq!(res, vec![0]);
     }
 
@@ -515,7 +526,7 @@ mod tests {
     fn err_k_zero() {
         let n = 10;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
         assert_eq!(
             grid.knn(&[0.0, 0.0, 0.0], 0),
             Err(Geom3dError::InvalidK { k: 0, n })
@@ -526,7 +537,7 @@ mod tests {
     fn err_radius_negative() {
         let n = 10;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
         assert_eq!(
             grid.radius_search(&[0.0, 0.0, 0.0], -2.0),
             Err(Geom3dError::InvalidRadius { radius: -2.0 })
@@ -542,11 +553,11 @@ mod tests {
             0.0, 80.0, 0.0, // cell (0,80,0)
             100.0, 100.0, 100.0,
         ];
-        let grid = SpatialHashGrid::build(&pts, 4, cfg(1.0)).unwrap();
+        let grid = SpatialHashGrid::build(&pts, 4, cfg(1.0)).expect("value should be present");
         // Query near the second point; many empty rings lie between it and the
         // populated cell, but ring expansion (capped) must still locate it.
         let q = [48.0_f32, 1.0, 0.0];
-        let res = grid.knn(&q, 1).unwrap();
+        let res = grid.knn(&q, 1).expect("knn should succeed");
         assert_eq!(res[0].0, 1, "must find the only nearby point");
         let exp = brute_knn(&pts, 4, &q, 1);
         assert_eq!(res[0].0, exp[0].0);
@@ -556,8 +567,8 @@ mod tests {
     fn two_equidistant_points_stable() {
         // Two points exactly equidistant from the query along ±x.
         let pts = vec![-1.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 10.0, 10.0, 10.0];
-        let grid = SpatialHashGrid::build(&pts, 3, cfg(1.0)).unwrap();
-        let res = grid.knn(&[0.0, 0.0, 0.0], 2).unwrap();
+        let grid = SpatialHashGrid::build(&pts, 3, cfg(1.0)).expect("value should be present");
+        let res = grid.knn(&[0.0, 0.0, 0.0], 2).expect("knn should succeed");
         assert_eq!(res.len(), 2);
         // Both nearest have equal squared distance 1.0.
         assert!((res[0].1 - 1.0).abs() < 1e-5);
@@ -572,11 +583,11 @@ mod tests {
         use crate::neighborhood::kd_tree::KdTree;
         let n = 130;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
-        let kd = KdTree::build(&pts, n).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
+        let kd = KdTree::build(&pts, n).expect("build should succeed");
         let q = [4.2_f32, 6.6, 2.2];
-        let g = grid.knn(&q, 6).unwrap();
-        let k = kd.knn(q, 6).unwrap();
+        let g = grid.knn(&q, 6).expect("knn should succeed");
+        let k = kd.knn(q, 6).expect("knn should succeed");
         for ((gi, gd), (ki, kd_d)) in g.iter().zip(k.iter()) {
             assert_eq!(gi, ki);
             assert!((gd - kd_d).abs() < 1e-5);
@@ -587,8 +598,10 @@ mod tests {
     fn radius_search_empty_far_away() {
         let n = 30;
         let pts = make_cloud(n);
-        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).unwrap();
-        let res = grid.radius_search(&[1000.0, 1000.0, 1000.0], 1.0).unwrap();
+        let grid = SpatialHashGrid::build(&pts, n, cfg(1.0)).expect("value should be present");
+        let res = grid
+            .radius_search(&[1000.0, 1000.0, 1000.0], 1.0)
+            .expect("radius_search should succeed");
         assert!(res.is_empty());
     }
 }

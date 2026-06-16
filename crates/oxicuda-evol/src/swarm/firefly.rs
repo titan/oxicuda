@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_config_new_valid() {
-        let cfg = FireflyConfig::new(20, 100).unwrap();
+        let cfg = FireflyConfig::new(20, 100).expect("new should succeed");
         assert_eq!(cfg.n_fireflies, 20);
         assert_eq!(cfg.max_iter, 100);
         assert!((cfg.alpha - 0.2).abs() < 1e-12);
@@ -316,7 +316,7 @@ mod tests {
     fn test_state_new_correct_sizes() {
         let bounds = vec![(-5.0_f64, 5.0_f64); 3];
         let mut rng = LcgRng::new(0);
-        let state = FireflyState::new(bounds, 10, &sphere, &mut rng).unwrap();
+        let state = FireflyState::new(bounds, 10, &sphere, &mut rng).expect("new should succeed");
         assert_eq!(state.positions.len(), 10);
         assert_eq!(state.light.len(), 10);
         assert_eq!(state.positions[0].len(), 3);
@@ -327,7 +327,7 @@ mod tests {
     fn test_state_new_best_is_max_light() {
         let bounds = vec![(-2.0_f64, 2.0_f64); 2];
         let mut rng = LcgRng::new(42);
-        let state = FireflyState::new(bounds, 8, &sphere, &mut rng).unwrap();
+        let state = FireflyState::new(bounds, 8, &sphere, &mut rng).expect("new should succeed");
         let max_light = state
             .light
             .iter()
@@ -340,7 +340,8 @@ mod tests {
     fn test_state_new_positions_within_bounds() {
         let bounds: Vec<(f64, f64)> = vec![(-3.0, 3.0), (1.0, 5.0), (-10.0, 0.0)];
         let mut rng = LcgRng::new(7);
-        let state = FireflyState::new(bounds.clone(), 15, &sphere, &mut rng).unwrap();
+        let state = FireflyState::new(bounds.clone(), 15, &sphere, &mut rng)
+            .expect("value should be present");
         for pos in &state.positions {
             for (d, &x) in pos.iter().enumerate() {
                 let (lb, ub) = bounds[d];
@@ -355,7 +356,8 @@ mod tests {
     fn test_firefly_step_increments_generation() {
         let bounds = vec![(-5.0_f64, 5.0_f64); 2];
         let mut rng = LcgRng::new(1);
-        let mut state = FireflyState::new(bounds, 5, &sphere, &mut rng).unwrap();
+        let mut state =
+            FireflyState::new(bounds, 5, &sphere, &mut rng).expect("new should succeed");
         assert_eq!(state.generation, 0);
         firefly_step(&mut state, sphere, &mut rng);
         assert_eq!(state.generation, 1);
@@ -367,7 +369,8 @@ mod tests {
     fn test_firefly_step_best_non_decreasing() {
         let bounds = vec![(-5.0_f64, 5.0_f64); 3];
         let mut rng = LcgRng::new(99);
-        let mut state = FireflyState::new(bounds, 8, &sphere, &mut rng).unwrap();
+        let mut state =
+            FireflyState::new(bounds, 8, &sphere, &mut rng).expect("new should succeed");
         let initial_best_light = state.best_light;
         for _ in 0..20 {
             firefly_step(&mut state, sphere, &mut rng);
@@ -385,7 +388,8 @@ mod tests {
     fn test_firefly_step_positions_within_bounds() {
         let bounds: Vec<(f64, f64)> = vec![(-2.0, 2.0), (-2.0, 2.0)];
         let mut rng = LcgRng::new(5);
-        let mut state = FireflyState::new(bounds.clone(), 6, &sphere, &mut rng).unwrap();
+        let mut state = FireflyState::new(bounds.clone(), 6, &sphere, &mut rng)
+            .expect("value should be present");
         for _ in 0..30 {
             firefly_step(&mut state, sphere, &mut rng);
         }
@@ -410,7 +414,7 @@ mod tests {
             gamma: 1.0,
             seed: 42,
         };
-        let state = firefly_run(sphere, &bounds, &cfg).unwrap();
+        let state = firefly_run(sphere, &bounds, &cfg).expect("firefly_run should succeed");
         // Should meaningfully reduce from 100 (max sphere at ±10).
         assert!(
             state.best_light > -50.0,
@@ -431,7 +435,7 @@ mod tests {
             gamma: 0.5,
             seed: 7,
         };
-        let state = firefly_run(sphere, &bounds, &cfg).unwrap();
+        let state = firefly_run(sphere, &bounds, &cfg).expect("firefly_run should succeed");
         // Worst case: 5 * 25 = 125; should do better.
         let best_fitness = -state.best_light;
         assert!(best_fitness < 125.0, "best_fitness = {best_fitness}");
@@ -449,7 +453,7 @@ mod tests {
             seed: 11,
         };
         let worst = ackley(&[5.0, 5.0, 5.0]);
-        let state = firefly_run(ackley, &bounds, &cfg).unwrap();
+        let state = firefly_run(ackley, &bounds, &cfg).expect("firefly_run should succeed");
         let best_fitness = -state.best_light;
         assert!(best_fitness < worst, "best={best_fitness} worst={worst}");
     }
@@ -466,7 +470,7 @@ mod tests {
             seed: 33,
         };
         let worst = rastrigin(&[5.12, 5.12]);
-        let state = firefly_run(rastrigin, &bounds, &cfg).unwrap();
+        let state = firefly_run(rastrigin, &bounds, &cfg).expect("firefly_run should succeed");
         let best_fitness = -state.best_light;
         assert!(best_fitness < worst, "best={best_fitness} worst={worst}");
     }
@@ -482,7 +486,7 @@ mod tests {
             gamma: 0.5,
             seed: 77,
         };
-        let state = firefly_run(rosenbrock, &bounds, &cfg).unwrap();
+        let state = firefly_run(rosenbrock, &bounds, &cfg).expect("firefly_run should succeed");
         // Rosenbrock global min = 0; should be < 200.
         let best_fitness = -state.best_light;
         assert!(best_fitness < 200.0, "best_fitness = {best_fitness}");
@@ -512,7 +516,7 @@ mod tests {
             gamma: 1.0,
             seed: 21,
         };
-        let state = firefly_run(sphere, &bounds, &cfg).unwrap();
+        let state = firefly_run(sphere, &bounds, &cfg).expect("firefly_run should succeed");
         for (d, &x) in state.best.iter().enumerate() {
             let (lb, ub) = bounds[d];
             assert!(x >= lb && x <= ub, "dim {d}: {x} out of [{lb},{ub}]");
@@ -530,8 +534,8 @@ mod tests {
             gamma: 1.0,
             seed: 999,
         };
-        let s1 = firefly_run(sphere, &bounds, &cfg).unwrap();
-        let s2 = firefly_run(sphere, &bounds, &cfg).unwrap();
+        let s1 = firefly_run(sphere, &bounds, &cfg).expect("firefly_run should succeed");
+        let s2 = firefly_run(sphere, &bounds, &cfg).expect("firefly_run should succeed");
         assert_eq!(s1.best_light, s2.best_light, "runs not deterministic");
     }
 
@@ -554,7 +558,7 @@ mod tests {
             gamma: 1.0,
             seed: 3,
         };
-        let state = firefly_run(sphere, &bounds, &cfg).unwrap();
+        let state = firefly_run(sphere, &bounds, &cfg).expect("firefly_run should succeed");
         assert_eq!(state.generation, 50);
     }
 }

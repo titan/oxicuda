@@ -156,8 +156,12 @@ impl StepFunction {
                 "n_points must be >= 2".to_string(),
             ));
         }
-        let t_min = *self.times.first().unwrap();
-        let t_max = *self.times.last().unwrap();
+        let t_min = *self.times.first().ok_or_else(|| {
+            SurvivalError::InvalidParameter("step function has no time points".to_string())
+        })?;
+        let t_max = *self.times.last().ok_or_else(|| {
+            SurvivalError::InvalidParameter("step function has no time points".to_string())
+        })?;
         let step = (t_max - t_min) / (n_points - 1) as f64;
         let grid: Vec<f64> = (0..n_points).map(|i| t_min + i as f64 * step).collect();
         let vals: Vec<f64> = grid.iter().map(|&t| self.eval(t)).collect();
@@ -374,7 +378,8 @@ mod tests {
     fn km_to_step_function_length() {
         let times = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let surv = vec![0.9, 0.8, 0.6, 0.4, 0.2];
-        let sf = km_to_step_function(&times, &surv, None).unwrap();
+        let sf =
+            km_to_step_function(&times, &surv, None).expect("km_to_step_function should succeed");
         assert_eq!(sf.times.len(), 5);
         assert_eq!(sf.values.len(), 5);
         assert!(sf.stderr.is_none());
@@ -411,7 +416,7 @@ mod tests {
     #[test]
     fn eval_beyond_last_time() {
         let sf = simple_km();
-        let last = *sf.values.last().unwrap();
+        let last = *sf.values.last().expect("last should succeed");
         let v = sf.eval(100.0);
         assert!(
             (v - last).abs() < 1e-12,
@@ -436,7 +441,9 @@ mod tests {
     #[test]
     fn confidence_band_lower_le_upper() {
         let sf = simple_km();
-        let (lower, upper) = sf.confidence_band(0.05).unwrap();
+        let (lower, upper) = sf
+            .confidence_band(0.05)
+            .expect("confidence_band should succeed");
         for (&lo, &hi) in lower.values.iter().zip(upper.values.iter()) {
             assert!(lo <= hi, "lower={lo} > upper={hi}");
         }
@@ -457,7 +464,9 @@ mod tests {
     #[test]
     fn to_regular_grid_shape() {
         let sf = simple_km();
-        let (grid_t, grid_v) = sf.to_regular_grid(100).unwrap();
+        let (grid_t, grid_v) = sf
+            .to_regular_grid(100)
+            .expect("to_regular_grid should succeed");
         assert_eq!(grid_t.len(), 100);
         assert_eq!(grid_v.len(), 100);
         // Endpoints match
@@ -486,7 +495,7 @@ mod tests {
             values: vec![0.5, 0.0],
             stderr: None,
         };
-        let rmst = rmst_from_step(&sf, 2.0).unwrap();
+        let rmst = rmst_from_step(&sf, 2.0).expect("rmst_from_step should succeed");
         assert!((rmst - 1.0).abs() < 1e-10, "expected RMST=1.0, got {rmst}");
     }
 
@@ -539,7 +548,7 @@ mod tests {
     fn na_to_step_function_correct() {
         let times = vec![1.0, 2.0, 3.0];
         let cum_haz = vec![0.1, 0.25, 0.5];
-        let sf = na_to_step_function(&times, &cum_haz).unwrap();
+        let sf = na_to_step_function(&times, &cum_haz).expect("na_to_step_function should succeed");
         assert_eq!(sf.times.len(), 3);
         assert!((sf.eval(2.0) - 0.25).abs() < 1e-12);
     }
@@ -549,7 +558,7 @@ mod tests {
     fn cif_to_step_function_correct() {
         let times = vec![1.0, 2.0, 3.0];
         let cif = vec![0.05, 0.15, 0.30];
-        let sf = cif_to_step_function(&times, &cif).unwrap();
+        let sf = cif_to_step_function(&times, &cif).expect("cif_to_step_function should succeed");
         assert_eq!(sf.times.len(), 3);
         assert!((sf.eval(3.0) - 0.30).abs() < 1e-12);
     }
@@ -560,9 +569,9 @@ mod tests {
         let times = vec![1.0, 2.0, 3.0];
         let surv = vec![0.9, 0.7, 0.5];
         let se = vec![0.05, 0.08, 0.12];
-        let sf = km_to_step_function(&times, &surv, Some(&se)).unwrap();
+        let sf = km_to_step_function(&times, &surv, Some(&se)).expect("value should be present");
         assert!(sf.stderr.is_some());
-        assert_eq!(sf.stderr.as_ref().unwrap().len(), 3);
+        assert_eq!(sf.stderr.as_ref().expect("as_ref should succeed").len(), 3);
     }
 
     // ── Test 18: rmst_from_step within step interval ──────────────────────────
@@ -584,7 +593,7 @@ mod tests {
             values: vec![0.5, 0.2],
             stderr: None,
         };
-        let rmst = rmst_from_step(&sf, 4.0).unwrap();
+        let rmst = rmst_from_step(&sf, 4.0).expect("rmst_from_step should succeed");
         // [0,2): 0.5*2=1.0; [2,4): 0.5*2=1.0; Total=2.0
         assert!((rmst - 2.0).abs() < 1e-10, "expected 2.0, got {rmst}");
     }
@@ -597,7 +606,9 @@ mod tests {
             values: vec![0.05],
             stderr: Some(vec![0.10]),
         };
-        let (lower, upper) = sf.confidence_band(0.05).unwrap();
+        let (lower, upper) = sf
+            .confidence_band(0.05)
+            .expect("confidence_band should succeed");
         // Lower: 0.05 - 1.96*0.10 ≈ -0.146 → clamped to 0.0
         assert!(lower.values[0] >= 0.0);
         // Upper: 0.05 + 1.96*0.10 ≈ 0.246 → in [0,1]

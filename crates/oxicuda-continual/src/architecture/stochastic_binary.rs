@@ -196,11 +196,17 @@ mod tests {
     #[test]
     fn empty_input_returns_empty_ok() {
         let mut s = default_state(1);
-        let out = s.forward(&[]).unwrap();
+        let out = s
+            .forward(&[])
+            .expect("stochastic binary forward should succeed");
         assert!(out.is_empty());
-        let exp = s.forward_expected(&[]).unwrap();
+        let exp = s
+            .forward_expected(&[])
+            .expect("stochastic binary expected forward should succeed");
         assert!(exp.is_empty());
-        let back = s.backward(&[]).unwrap();
+        let back = s
+            .backward(&[])
+            .expect("stochastic binary backward should succeed");
         assert!(back.is_empty());
     }
 
@@ -282,9 +288,12 @@ mod tests {
             clip_grad: None,
             seed: 0,
         };
-        let s = StochasticBinaryState::new(cfg).unwrap();
+        let s = StochasticBinaryState::new(cfg)
+            .expect("stochastic binary state should construct with valid config");
         let m = vec![-4.0_f64, -1.0, 0.0, 1.5, 3.0];
-        let out = s.forward_expected(&m).unwrap();
+        let out = s
+            .forward_expected(&m)
+            .expect("stochastic binary expected forward should succeed");
         for (i, &m_i) in m.iter().enumerate() {
             let expected = stable_sigmoid(m_i / 2.0);
             assert!(
@@ -299,7 +308,9 @@ mod tests {
     #[test]
     fn forward_expected_is_symmetric_around_zero_for_signed_pair() {
         let s = default_state(123);
-        let out = s.forward_expected(&[-2.5_f64, 2.5]).unwrap();
+        let out = s
+            .forward_expected(&[-2.5_f64, 2.5])
+            .expect("stochastic binary expected forward should succeed");
         assert!(
             (out[0] + out[1] - 1.0).abs() < 1e-15,
             "σ(-x) + σ(x) must equal 1, got {} + {} = {}",
@@ -326,7 +337,9 @@ mod tests {
     fn forward_extreme_positive_samples_mostly_one() {
         let mut s = default_state(7);
         let m = vec![20.0_f64; 256];
-        let out = s.forward(&m).unwrap();
+        let out = s
+            .forward(&m)
+            .expect("stochastic binary forward should succeed");
         let n_one = out.iter().filter(|&&v| v == 1.0).count();
         assert!(
             n_one >= 250,
@@ -341,7 +354,9 @@ mod tests {
     fn forward_extreme_negative_samples_mostly_zero() {
         let mut s = default_state(11);
         let m = vec![-20.0_f64; 256];
-        let out = s.forward(&m).unwrap();
+        let out = s
+            .forward(&m)
+            .expect("stochastic binary forward should succeed");
         let n_zero = out.iter().filter(|&&v| v == 0.0).count();
         assert!(
             n_zero >= 250,
@@ -354,7 +369,9 @@ mod tests {
         let mut s = default_state(2024);
         let n = 2048;
         let m = vec![0.0_f64; n];
-        let out = s.forward(&m).unwrap();
+        let out = s
+            .forward(&m)
+            .expect("stochastic binary forward should succeed");
         let n_one = out.iter().filter(|&&v| v == 1.0).count() as f64;
         let frac = n_one / n as f64;
         assert!(
@@ -367,7 +384,9 @@ mod tests {
     fn backward_identity_passthrough_without_clip() {
         let s = default_state(0);
         let g = vec![-3.0_f64, 0.0, 1.5, 100.0, -50.0];
-        let out = s.backward(&g).unwrap();
+        let out = s
+            .backward(&g)
+            .expect("stochastic binary backward should succeed");
         assert_eq!(out, g);
     }
 
@@ -378,9 +397,12 @@ mod tests {
             clip_grad: Some(2.0),
             seed: 0,
         };
-        let s = StochasticBinaryState::new(cfg).unwrap();
+        let s = StochasticBinaryState::new(cfg)
+            .expect("stochastic binary state should construct with valid config");
         let g = vec![-5.0_f64, -1.0, 0.0, 1.0, 3.0, 2.0, -2.0];
-        let out = s.backward(&g).unwrap();
+        let out = s
+            .backward(&g)
+            .expect("stochastic binary backward should succeed");
         assert_eq!(out, vec![-2.0, -1.0, 0.0, 1.0, 2.0, 2.0, -2.0]);
     }
 
@@ -391,11 +413,17 @@ mod tests {
             clip_grad: None,
             seed: 4242,
         };
-        let mut a = StochasticBinaryState::new(cfg).unwrap();
-        let mut b = StochasticBinaryState::new(cfg).unwrap();
+        let mut a = StochasticBinaryState::new(cfg)
+            .expect("stochastic binary state should construct with valid config");
+        let mut b = StochasticBinaryState::new(cfg)
+            .expect("stochastic binary state should construct with valid config");
         let m = vec![-1.0_f64, 0.5, 2.0, -0.3, 0.0, 4.0, -7.0];
-        let out_a = a.forward(&m).unwrap();
-        let out_b = b.forward(&m).unwrap();
+        let out_a = a
+            .forward(&m)
+            .expect("stochastic binary forward should succeed");
+        let out_b = b
+            .forward(&m)
+            .expect("stochastic binary forward should succeed");
         assert_eq!(out_a, out_b, "same seed must produce identical samples");
     }
 
@@ -420,12 +448,14 @@ mod tests {
             clip_grad: Some(10.0),
             seed: 99,
         })
-        .unwrap();
+        .expect("should succeed with valid test inputs");
         let n = 4096;
         let m: Vec<f64> = (0..n)
             .map(|i| ((i as f64) - (n as f64) * 0.5) * 0.01)
             .collect();
-        let bin = s.forward(&m).unwrap();
+        let bin = s
+            .forward(&m)
+            .expect("stochastic binary forward should succeed");
         assert_eq!(bin.len(), n);
         for v in &bin {
             assert!(*v == 0.0 || *v == 1.0);
@@ -434,7 +464,9 @@ mod tests {
             .iter()
             .map(|&b| if b > 0.5 { 0.25 } else { -0.25 })
             .collect();
-        let grad = s.backward_checked(&upstream, n).unwrap();
+        let grad = s
+            .backward_checked(&upstream, n)
+            .expect("stochastic binary checked backward should succeed");
         assert_eq!(grad.len(), n);
         for &g in &grad {
             assert!((-10.0..=10.0).contains(&g));
@@ -453,11 +485,17 @@ mod tests {
             clip_grad: None,
             seed: 3,
         };
-        let s_cold = StochasticBinaryState::new(cfg_cold).unwrap();
-        let s_warm = StochasticBinaryState::new(cfg_warm).unwrap();
+        let s_cold = StochasticBinaryState::new(cfg_cold)
+            .expect("stochastic binary state should construct with valid config");
+        let s_warm = StochasticBinaryState::new(cfg_warm)
+            .expect("stochastic binary state should construct with valid config");
         let m = vec![1.0_f64; 4];
-        let exp_cold = s_cold.forward_expected(&m).unwrap();
-        let exp_warm = s_warm.forward_expected(&m).unwrap();
+        let exp_cold = s_cold
+            .forward_expected(&m)
+            .expect("stochastic binary expected forward should succeed");
+        let exp_warm = s_warm
+            .forward_expected(&m)
+            .expect("stochastic binary expected forward should succeed");
         for (c, w) in exp_cold.iter().zip(exp_warm.iter()) {
             assert!(
                 *c > *w,

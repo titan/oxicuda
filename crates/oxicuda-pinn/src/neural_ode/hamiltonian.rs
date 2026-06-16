@@ -857,7 +857,8 @@ mod tests {
             n_layers: 2,
             fd_epsilon: 1e-4,
         };
-        HamiltonianNn::new(cfg, &mut rng).unwrap()
+        HamiltonianNn::new(cfg, &mut rng)
+            .expect("HamiltonianNn construction with valid config should succeed")
     }
 
     fn make_lnn(q_dim: usize) -> LagrangianNn {
@@ -868,7 +869,8 @@ mod tests {
             n_layers: 2,
             fd_epsilon: 1e-4,
         };
-        LagrangianNn::new(cfg, &mut rng).unwrap()
+        LagrangianNn::new(cfg, &mut rng)
+            .expect("LagrangianNn construction with valid config should succeed")
     }
 
     // ── HNN tests ──
@@ -878,7 +880,9 @@ mod tests {
         let hnn = make_hnn(2);
         let q = vec![0.5_f32, -0.3];
         let p = vec![0.1_f32, 0.7];
-        let h = hnn.hamiltonian(&q, &p).unwrap();
+        let h = hnn
+            .hamiltonian(&q, &p)
+            .expect("hamiltonian evaluation with valid q and p should return a finite scalar");
         assert!(h.is_finite(), "H should be finite, got {h}");
     }
 
@@ -887,7 +891,9 @@ mod tests {
         let hnn = make_hnn(3);
         let q = vec![0.1_f32; 3];
         let p = vec![0.2_f32; 3];
-        let (grad_q, grad_p) = hnn.hamiltonian_grad(&q, &p).unwrap();
+        let (grad_q, grad_p) = hnn
+            .hamiltonian_grad(&q, &p)
+            .expect("hamiltonian_grad with valid q and p should succeed");
         assert_eq!(grad_q.len(), 3, "grad_q wrong length");
         assert_eq!(grad_p.len(), 3, "grad_p wrong length");
         assert!(grad_q.iter().all(|v| v.is_finite()));
@@ -899,7 +905,9 @@ mod tests {
         let hnn = make_hnn(4);
         let q = vec![0.0_f32; 4];
         let p = vec![0.5_f32; 4];
-        let (dq, dp) = hnn.time_derivative(&q, &p).unwrap();
+        let (dq, dp) = hnn
+            .time_derivative(&q, &p)
+            .expect("time_derivative with valid q and p should succeed");
         assert_eq!(dq.len(), 4);
         assert_eq!(dp.len(), 4);
     }
@@ -912,7 +920,7 @@ mod tests {
         let n_steps = 10;
         let traj = hnn
             .integrate_leapfrog(&q0, &p0, (0.0, 1.0), n_steps)
-            .unwrap();
+            .expect("leapfrog integration with valid params should succeed");
         assert_eq!(traj.times.len(), n_steps);
         assert_eq!(traj.q.len(), n_steps * 2);
         assert_eq!(traj.p.len(), n_steps * 2);
@@ -931,7 +939,7 @@ mod tests {
         let n_steps = 100;
         let traj = hnn
             .integrate_leapfrog(&q0, &p0, (0.0, 1.0), n_steps)
-            .unwrap();
+            .expect("leapfrog integration for energy conservation test should succeed");
 
         let e0 = traj.energy[0];
         let e_final = traj.energy[n_steps - 1];
@@ -959,12 +967,16 @@ mod tests {
         for pt in 0..2 {
             let qi = &q[pt * 2..(pt + 1) * 2];
             let pi = &p[pt * 2..(pt + 1) * 2];
-            let (dq, dp) = hnn.time_derivative(qi, pi).unwrap();
+            let (dq, dp) = hnn
+                .time_derivative(qi, pi)
+                .expect("time_derivative at each training point should succeed");
             dq_true[pt * 2..pt * 2 + 2].copy_from_slice(&dq);
             dp_true[pt * 2..pt * 2 + 2].copy_from_slice(&dp);
         }
 
-        let loss = hnn.hnn_loss(&q, &p, &dq_true, &dp_true, 2).unwrap();
+        let loss = hnn
+            .hnn_loss(&q, &p, &dq_true, &dp_true, 2)
+            .expect("HNN loss with self-predicted derivatives should succeed");
         assert!(
             loss < 1e-6,
             "HNN loss should be ~0 when using exact derivatives, got {loss}"
@@ -975,7 +987,9 @@ mod tests {
     fn forward_mlp_shape() {
         let hnn = make_hnn(2);
         let input = vec![0.1_f32, 0.2, 0.3, 0.4]; // 2*state_dim
-        let out = hnn.forward_mlp(&input).unwrap();
+        let out = hnn
+            .forward_mlp(&input)
+            .expect("forward_mlp with valid 2*state_dim input should succeed");
         assert!(out.is_finite(), "forward_mlp should return finite f32");
     }
 
@@ -986,7 +1000,9 @@ mod tests {
         let lnn = make_lnn(3);
         let q = vec![0.5_f32, -0.1, 0.3];
         let q_dot = vec![1.0_f32, -0.5, 0.2];
-        let l = lnn.lagrangian(&q, &q_dot).unwrap();
+        let l = lnn
+            .lagrangian(&q, &q_dot)
+            .expect("LNN lagrangian evaluation with valid inputs should succeed");
         assert!(l.is_finite(), "L should be finite, got {l}");
     }
 
@@ -995,7 +1011,9 @@ mod tests {
         let lnn = make_lnn(3);
         let q = vec![0.1_f32; 3];
         let q_dot = vec![0.2_f32; 3];
-        let m = lnn.mass_matrix(&q, &q_dot).unwrap();
+        let m = lnn
+            .mass_matrix(&q, &q_dot)
+            .expect("LNN mass_matrix with valid inputs should succeed");
         assert_eq!(
             m.len(),
             3,
@@ -1009,7 +1027,9 @@ mod tests {
         let lnn = make_lnn(2);
         let q = vec![0.4_f32, -0.2];
         let q_dot = vec![0.1_f32, 0.3];
-        let qdd = lnn.equations_of_motion(&q, &q_dot).unwrap();
+        let qdd = lnn
+            .equations_of_motion(&q, &q_dot)
+            .expect("LNN equations_of_motion with valid inputs should succeed");
         assert_eq!(
             qdd.len(),
             2,
@@ -1023,7 +1043,9 @@ mod tests {
         let q0 = vec![1.0_f32, 0.0];
         let qd0 = vec![0.0_f32, 0.5];
         let n_steps = 8;
-        let traj = lnn.integrate_rk4(&q0, &qd0, (0.0, 1.0), n_steps).unwrap();
+        let traj = lnn
+            .integrate_rk4(&q0, &qd0, (0.0, 1.0), n_steps)
+            .expect("LNN RK4 integration with valid params should succeed");
         assert_eq!(traj.times.len(), n_steps);
         assert_eq!(traj.q.len(), n_steps * 2);
         assert_eq!(traj.q_dot.len(), n_steps * 2);
@@ -1036,7 +1058,9 @@ mod tests {
         let q = vec![0.3_f32, -0.2, 0.7, 0.1];
         let q_dot = vec![0.1_f32, 0.4, -0.3, 0.5];
         let q_ddot = vec![0.0_f32; 4];
-        let loss = lnn.lnn_loss(&q, &q_dot, &q_ddot, 2).unwrap();
+        let loss = lnn
+            .lnn_loss(&q, &q_dot, &q_ddot, 2)
+            .expect("LNN loss computation with valid inputs should succeed");
         assert!(loss >= 0.0, "LNN loss must be non-negative, got {loss}");
     }
 

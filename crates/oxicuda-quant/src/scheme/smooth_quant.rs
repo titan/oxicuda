@@ -313,7 +313,9 @@ mod tests {
         let m = SmoothQuantMigrator::new(0.5);
         let act_max = vec![4.0_f32, 1.0, 9.0];
         let weight_max = vec![1.0_f32, 4.0, 1.0];
-        let scales = m.compute_migration_scales(&act_max, &weight_max).unwrap();
+        let scales = m
+            .compute_migration_scales(&act_max, &weight_max)
+            .expect("compute_migration_scales should succeed");
         // s[0] = 4^0.5 / 1^0.5 = 2/1 = 2
         assert_abs_diff_eq!(scales[0], 2.0, epsilon = 1e-5);
         // s[1] = 1^0.5 / 4^0.5 = 1/2 = 0.5
@@ -328,7 +330,9 @@ mod tests {
         let m = SmoothQuantMigrator::new(1.0);
         let act_max = vec![2.0_f32, 5.0];
         let weight_max = vec![3.0_f32, 7.0]; // ignored
-        let scales = m.compute_migration_scales(&act_max, &weight_max).unwrap();
+        let scales = m
+            .compute_migration_scales(&act_max, &weight_max)
+            .expect("compute_migration_scales should succeed");
         assert_abs_diff_eq!(scales[0], 2.0, epsilon = 1e-5);
         assert_abs_diff_eq!(scales[1], 5.0, epsilon = 1e-5);
     }
@@ -339,7 +343,9 @@ mod tests {
         let m = SmoothQuantMigrator::new(0.0);
         let act_max = vec![4.0_f32, 1.0]; // ignored
         let weight_max = vec![2.0_f32, 5.0];
-        let scales = m.compute_migration_scales(&act_max, &weight_max).unwrap();
+        let scales = m
+            .compute_migration_scales(&act_max, &weight_max)
+            .expect("compute_migration_scales should succeed");
         assert_abs_diff_eq!(scales[0], 1.0 / 2.0, epsilon = 1e-5);
         assert_abs_diff_eq!(scales[1], 1.0 / 5.0, epsilon = 1e-5);
     }
@@ -362,7 +368,7 @@ mod tests {
 
         // Smooth the layer.
         m.smooth_layer(&mut acts, &mut weights, n_tok, n_ch, n_out)
-            .unwrap();
+            .expect("value should be present");
 
         // Compute smoothed output.
         let y_smooth = matmul_nt(&acts, &weights, n_tok, n_ch, n_out);
@@ -378,7 +384,8 @@ mod tests {
         // 2 tokens, 3 channels
         // acts = [[1, -5, 2], [-3, 4, 1]]
         let acts = vec![1.0_f32, -5.0, 2.0, -3.0, 4.0, 1.0];
-        let stats = SmoothQuantMigrator::compute_act_stats(&acts, 2, 3).unwrap();
+        let stats = SmoothQuantMigrator::compute_act_stats(&acts, 2, 3)
+            .expect("compute_act_stats should succeed");
         assert_abs_diff_eq!(stats[0], 3.0, epsilon = 1e-6); // max(|1|, |-3|) = 3
         assert_abs_diff_eq!(stats[1], 5.0, epsilon = 1e-6); // max(|-5|, |4|) = 5
         assert_abs_diff_eq!(stats[2], 2.0, epsilon = 1e-6); // max(|2|, |1|) = 2
@@ -388,7 +395,8 @@ mod tests {
     fn weight_stats_max_per_column() {
         // weights [2 out, 3 in] = [[0.5, -2.0, 1.0], [-1.5, 0.3, 3.0]]
         let w = vec![0.5_f32, -2.0, 1.0, -1.5, 0.3, 3.0];
-        let stats = SmoothQuantMigrator::compute_weight_stats(&w, 2, 3).unwrap();
+        let stats = SmoothQuantMigrator::compute_weight_stats(&w, 2, 3)
+            .expect("compute_weight_stats should succeed");
         assert_abs_diff_eq!(stats[0], 1.5, epsilon = 1e-6);
         assert_abs_diff_eq!(stats[1], 2.0, epsilon = 1e-6);
         assert_abs_diff_eq!(stats[2], 3.0, epsilon = 1e-6);
@@ -426,7 +434,7 @@ mod tests {
 
         let scales = m
             .smooth_layer(&mut acts, &mut weights, n_tok, n_ch, n_out)
-            .unwrap();
+            .expect("value should be present");
         // After smoothing, channel 0 max |act| should be reduced.
         let act_max_0: f32 = (0..n_tok)
             .map(|t| acts[t * n_ch].abs())

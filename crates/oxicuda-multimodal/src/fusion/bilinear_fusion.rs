@@ -244,7 +244,7 @@ mod tests {
         let f = MlbFusion::zeros(16, 16, 32, 8);
         let v = vec![0.5_f32; 4 * 16];
         let q = vec![0.3_f32; 4 * 16];
-        let out = f.forward(&v, &q, 4).unwrap();
+        let out = f.forward(&v, &q, 4).expect("forward should succeed");
         assert_eq!(out.len(), 4 * 8);
     }
 
@@ -263,7 +263,7 @@ mod tests {
         }
         let v = vec![1.0_f32; 2 * 8];
         let q = vec![1.0_f32; 2 * 8];
-        let out = f.forward(&v, &q, 2).unwrap();
+        let out = f.forward(&v, &q, 2).expect("forward should succeed");
         assert!(out.iter().all(|x| x.is_finite()));
     }
 
@@ -283,7 +283,9 @@ mod tests {
         }
         let v = vec![1.0_f32; 4];
         let q = vec![1.0_f32; 4];
-        let out = f.forward_single(&v, &q).unwrap();
+        let out = f
+            .forward_single(&v, &q)
+            .expect("forward_single should succeed");
         // tanh(1)^2 * 0.1 * 8 joints = non-zero
         let total: f32 = out.iter().sum();
         assert!(total.abs() > 1e-6, "expected non-zero output: {total}");
@@ -302,16 +304,16 @@ mod tests {
 
     #[test]
     fn mfb_output_shape() {
-        let f = MfbFusion::zeros(16, 16, 4, 8).unwrap();
+        let f = MfbFusion::zeros(16, 16, 4, 8).expect("zeros should succeed");
         let v = vec![0.5_f32; 3 * 16];
         let q = vec![0.3_f32; 3 * 16];
-        let out = f.forward(&v, &q, 3).unwrap();
+        let out = f.forward(&v, &q, 3).expect("forward should succeed");
         assert_eq!(out.len(), 3 * 8);
     }
 
     #[test]
     fn mfb_output_finite() {
-        let mut f = MfbFusion::zeros(8, 8, 3, 4).unwrap();
+        let mut f = MfbFusion::zeros(8, 8, 3, 4).expect("zeros should succeed");
         let inner = 3 * 4;
         for (i, w) in f.w_v.iter_mut().enumerate() {
             *w = (i as f32 * 0.07).sin() * 0.1;
@@ -322,7 +324,7 @@ mod tests {
         let _ = inner; // suppress warning
         let v = vec![1.0_f32; 2 * 8];
         let q = vec![1.0_f32; 2 * 8];
-        let out = f.forward(&v, &q, 2).unwrap();
+        let out = f.forward(&v, &q, 2).expect("forward should succeed");
         assert!(out.iter().all(|x| x.is_finite()));
     }
 
@@ -334,10 +336,12 @@ mod tests {
 
     #[test]
     fn mfb_tanh_bounds() {
-        let f = MfbFusion::zeros(4, 4, 2, 4).unwrap();
+        let f = MfbFusion::zeros(4, 4, 2, 4).expect("zeros should succeed");
         let v = vec![100.0_f32; 4]; // large values
         let q = vec![100.0_f32; 4];
-        let out = f.forward_single(&v, &q).unwrap();
+        let out = f
+            .forward_single(&v, &q)
+            .expect("forward_single should succeed");
         // tanh of any value is in (-1, 1)
         for &x in &out {
             assert!(x.abs() <= 1.0 + 1e-6, "tanh output out of range: {x}");
@@ -346,10 +350,12 @@ mod tests {
 
     #[test]
     fn mfb_zero_weights_zero_output() {
-        let f = MfbFusion::zeros(4, 4, 2, 4).unwrap();
+        let f = MfbFusion::zeros(4, 4, 2, 4).expect("zeros should succeed");
         let v = vec![1.0_f32; 4];
         let q = vec![1.0_f32; 4];
-        let out = f.forward_single(&v, &q).unwrap();
+        let out = f
+            .forward_single(&v, &q)
+            .expect("forward_single should succeed");
         // tanh(0*...) = 0
         for &x in &out {
             assert!(x.abs() < 1e-6);

@@ -68,7 +68,7 @@ fn example() -> Result<(), AutotuneError> {
 
 | Version | Date       | Tests        |
 |---------|------------|--------------|
-| 0.1.5   | 2026-05-01 | 408 passing  |
+| 0.2.0   | 2026-06-16 | 449 passing  |
 | 0.1.4   | 2026-04-18 | 408 passing  |
 
 ## License

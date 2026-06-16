@@ -170,7 +170,7 @@ mod tests {
         for i in 0..n {
             z[i * d + i] = 1.0; // basis vector — orthogonal between rows.
         }
-        let (loss, acc) = info_nce_loss(&z, &z, n, d, 0.1).unwrap();
+        let (loss, acc) = info_nce_loss(&z, &z, n, d, 0.1).expect("info_nce_loss should succeed");
         assert!(loss < 0.5, "loss = {loss}");
         assert!((acc - 1.0).abs() < 1e-6);
     }
@@ -188,7 +188,8 @@ mod tests {
                 .wrapping_add(1_442_695_040_888_963_407);
             *v = ((rng_state >> 33) as f32 / (u32::MAX as f32 + 1.0)) - 0.5;
         }
-        let (loss, _acc) = info_nce_loss(&z_a, &z_b, n, d, 0.1).unwrap();
+        let (loss, _acc) =
+            info_nce_loss(&z_a, &z_b, n, d, 0.1).expect("info_nce_loss should succeed");
         // ln(N) is the loss for completely random inputs.
         let upper_bound = (n as f32).ln() + 1.0;
         assert!(loss > 0.0 && loss < upper_bound, "loss = {loss}");
@@ -224,7 +225,7 @@ mod tests {
     #[test]
     fn l2_normalize_rows_unit_norm() {
         let mut z = vec![1.0_f32, 2.0, 3.0, 4.0];
-        l2_normalize_rows(&mut z, 1, 4).unwrap();
+        l2_normalize_rows(&mut z, 1, 4).expect("l2_normalize_rows should succeed");
         let s: f32 = z.iter().map(|v| v * v).sum();
         assert!((s - 1.0).abs() < 1e-5);
     }
@@ -232,7 +233,7 @@ mod tests {
     #[test]
     fn l2_normalize_rows_zero_row_safe() {
         let mut z = vec![0.0_f32; 4];
-        l2_normalize_rows(&mut z, 1, 4).unwrap();
+        l2_normalize_rows(&mut z, 1, 4).expect("l2_normalize_rows should succeed");
         // zero row stays zero (no NaN)
         for v in &z {
             assert!(v.is_finite());
@@ -253,7 +254,8 @@ mod tests {
             *v = (rng >> 33) as f32 / (u32::MAX as f32 + 1.0);
         }
         let z_b = z_a.clone();
-        let (_loss, acc) = info_nce_loss(&z_a, &z_b, n, d, 0.1).unwrap();
+        let (_loss, acc) =
+            info_nce_loss(&z_a, &z_b, n, d, 0.1).expect("info_nce_loss should succeed");
         assert!(acc > 0.9, "acc = {acc}");
     }
 }

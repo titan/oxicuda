@@ -84,7 +84,7 @@ mod tests {
     fn mha_mse_nonneg() {
         let s = vec![vec![0.4_f32, 0.6], vec![0.3, 0.7]];
         let t = vec![vec![0.45_f32, 0.55], vec![0.35, 0.65]];
-        let loss = mha_distill_loss(&s, &t, false).unwrap();
+        let loss = mha_distill_loss(&s, &t, false).expect("mha_distill_loss should succeed");
         assert!(loss >= 0.0 && loss.is_finite());
     }
 
@@ -92,7 +92,7 @@ mod tests {
     fn mha_wasserstein_nonneg() {
         let s = vec![vec![0.4_f32, 0.6], vec![0.3, 0.7]];
         let t = vec![vec![0.45_f32, 0.55], vec![0.35, 0.65]];
-        let loss = mha_distill_loss(&s, &t, true).unwrap();
+        let loss = mha_distill_loss(&s, &t, true).expect("mha_distill_loss should succeed");
         assert!(loss >= 0.0 && loss.is_finite());
     }
 }

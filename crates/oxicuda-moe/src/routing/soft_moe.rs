@@ -227,9 +227,11 @@ mod tests {
             input_dim: 16,
         };
         let n_tokens = 8;
-        let router = SoftMoeRouter::new(cfg.clone(), &mut rng).unwrap();
+        let router = SoftMoeRouter::new(cfg.clone(), &mut rng).expect("value should be present");
         let x = vec![0.5_f32; n_tokens * cfg.input_dim];
-        let dispatch = router.dispatch_weights(&x, n_tokens).unwrap();
+        let dispatch = router
+            .dispatch_weights(&x, n_tokens)
+            .expect("dispatch_weights should succeed");
         let n_slots = cfg.n_experts * cfg.n_slots_per_expert;
         for tok in 0..n_tokens {
             let row_sum: f32 = dispatch[tok * n_slots..(tok + 1) * n_slots].iter().sum();

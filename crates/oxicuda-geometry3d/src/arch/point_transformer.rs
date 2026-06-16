@@ -238,7 +238,9 @@ mod tests {
         let layer = PointTransformerLayer::new(cfg, &mut rng);
         let xyz: Vec<f32> = (0..n * 3).map(|i| i as f32 * 0.1).collect();
         let feat: Vec<f32> = vec![0.1; n * d];
-        let out = layer.forward(&xyz, &feat, n).unwrap();
+        let out = layer
+            .forward(&xyz, &feat, n)
+            .expect("forward should succeed");
         assert_eq!(out.len(), n * d);
     }
 
@@ -257,7 +259,9 @@ mod tests {
         let xyz: Vec<f32> = (0..n * 3).map(|i| (i as f32) * 0.5).collect();
         let mut feat = vec![0.0_f32; n * d];
         feat_rng.fill_normal(&mut feat);
-        let out = layer.forward(&xyz, &feat, n).unwrap();
+        let out = layer
+            .forward(&xyz, &feat, n)
+            .expect("forward should succeed");
         assert!(
             out.iter().all(|v| v.is_finite()),
             "Point Transformer output must be finite"

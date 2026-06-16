@@ -10,7 +10,7 @@ privacy mechanisms with RDP / Moments accountants, secure aggregation
 
 ## Implementation Status
 
-- **Actual SLoC:** 4,791 (26 files)
+- **Actual SLoC:** 10,530 (44 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
@@ -86,6 +86,10 @@ privacy mechanisms with RDP / Moments accountants, secure aggregation
 - [ ] Cohort fairness metrics (per-stratum accuracy / loss tracking)
 - [ ] PATE Confident-GNMax voter -- noisy-max with stability check on top of `noisy_voting`
 - [ ] Renyi-DP zCDP conversion -- additional accountant interop with zero-concentrated DP
+- [x] `federated/moon.rs` — MOON (Li 2021): Model-Contrastive Federated Learning; contrastive loss between current model + global model (positive) vs previous model (negative); representation alignment; `MoonConfig { mu: f32, temperature: f32 }`
+- [ ] `federated/feddf.rs` — FedDF (Lin 2020): ensemble distillation on public data; aggregate by distilling ensemble of client models into global model; removes need for FedAvg aggregation; `FedDf { public_batches: usize }`
+- [ ] `federated/flute.rs` — FLUTE (Dimitriadis 2022): federated learning using heterogeneous data; personalised heads + shared body; task vectors for client adaptation without fine-tuning
+- [x] `privacy/ldp_fl.rs` — Local DP for Federated Learning (Truex 2020): Gaussian/Laplace mechanism on client updates before transmission; privacy amplification via subsampling; `LdpFlConfig { epsilon, delta, clip_norm }`
 
 #### GPU Launcher Wiring
 - [ ] Wire `ptx_kernels::*` strings through `oxicuda-launch::Kernel::from_module` for end-to-end GPU execution (PTX strings are emitted but currently only CPU paths are exercised end-to-end)

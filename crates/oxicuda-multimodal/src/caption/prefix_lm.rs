@@ -346,7 +346,8 @@ mod tests {
         let weights = PrefixLmWeights::zeros(&cfg);
         let mut rng = LcgRng::new(42);
         let prefix = vec![0.5_f32; 4 * cfg.d_model];
-        let tokens = PrefixLm::generate(&prefix, 4, 5, &cfg, &weights, &mut rng).unwrap();
+        let tokens = PrefixLm::generate(&prefix, 4, 5, &cfg, &weights, &mut rng)
+            .expect("generate should succeed");
         assert!(
             tokens.len() <= 5,
             "generated {} tokens, expected ≤ 5",
@@ -360,7 +361,8 @@ mod tests {
         let weights = PrefixLmWeights::zeros(&cfg);
         let mut rng = LcgRng::new(0);
         let prefix = vec![0.3_f32; 3 * cfg.d_model];
-        let tokens = PrefixLm::generate(&prefix, 3, 8, &cfg, &weights, &mut rng).unwrap();
+        let tokens = PrefixLm::generate(&prefix, 3, 8, &cfg, &weights, &mut rng)
+            .expect("generate should succeed");
         for &tid in &tokens {
             assert!(
                 (tid as usize) < cfg.vocab_size,
@@ -386,8 +388,10 @@ mod tests {
         let prefix = vec![0.1_f32; 4 * cfg.d_model];
         let mut rng1 = LcgRng::new(7);
         let mut rng2 = LcgRng::new(7);
-        let t1 = PrefixLm::generate(&prefix, 4, 5, &cfg, &weights, &mut rng1).unwrap();
-        let t2 = PrefixLm::generate(&prefix, 4, 5, &cfg, &weights, &mut rng2).unwrap();
+        let t1 = PrefixLm::generate(&prefix, 4, 5, &cfg, &weights, &mut rng1)
+            .expect("generate should succeed");
+        let t2 = PrefixLm::generate(&prefix, 4, 5, &cfg, &weights, &mut rng2)
+            .expect("generate should succeed");
         assert_eq!(t1, t2);
     }
 

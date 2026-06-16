@@ -886,7 +886,8 @@ mod tests {
         let expected_len = c * h * w;
 
         for op in all_aug_ops() {
-            let out = apply_aug_op(&img, c, h, w, &op, 15.0, 0.5).unwrap();
+            let out =
+                apply_aug_op(&img, c, h, w, &op, 15.0, 0.5).expect("apply_aug_op should succeed");
             assert_eq!(out.len(), expected_len, "shape mismatch for op {:?}", op);
         }
     }
@@ -899,7 +900,8 @@ mod tests {
         let img = gradient_image(c, h, w);
 
         for op in all_aug_ops() {
-            let out = apply_aug_op(&img, c, h, w, &op, 20.0, 0.5).unwrap();
+            let out =
+                apply_aug_op(&img, c, h, w, &op, 20.0, 0.5).expect("apply_aug_op should succeed");
             assert_unit_range(&out, &format!("{op:?}"));
         }
     }
@@ -910,7 +912,8 @@ mod tests {
     fn identity_op_returns_exact_copy() {
         let (c, h, w) = (3, 8, 8);
         let img = gradient_image(c, h, w);
-        let out = apply_aug_op(&img, c, h, w, &AugOp::Identity, 15.0, 0.5).unwrap();
+        let out = apply_aug_op(&img, c, h, w, &AugOp::Identity, 15.0, 0.5)
+            .expect("apply_aug_op should succeed");
         assert_eq!(out, img, "Identity must return exact copy");
     }
 
@@ -939,7 +942,8 @@ mod tests {
             *v = 0.3;
         }
 
-        let out = apply_aug_op(&img, c, h, w, &AugOp::AutoContrast, 0.0, 0.5).unwrap();
+        let out = apply_aug_op(&img, c, h, w, &AugOp::AutoContrast, 0.0, 0.5)
+            .expect("apply_aug_op should succeed");
         // Channel 0: min should become 0, max should become 1.
         let ch0_min = out[..plane].iter().cloned().fold(f32::INFINITY, f32::min);
         let ch0_max = out[..plane]
@@ -960,7 +964,8 @@ mod tests {
     fn equalize_output_in_unit_range() {
         let (c, h, w) = (1, 32, 32);
         let img = gradient_image(c, h, w);
-        let out = apply_aug_op(&img, c, h, w, &AugOp::Equalize, 0.0, 0.5).unwrap();
+        let out = apply_aug_op(&img, c, h, w, &AugOp::Equalize, 0.0, 0.5)
+            .expect("apply_aug_op should succeed");
         assert_unit_range(&out, "Equalize");
         assert_eq!(out.len(), c * h * w);
     }
@@ -972,7 +977,8 @@ mod tests {
         let (c, h, w) = (1, 8, 8);
         let img = gradient_image(c, h, w);
         // magnitude = 0 → angle = 0°.
-        let out = apply_aug_op(&img, c, h, w, &AugOp::Rotate, 0.0, 0.5).unwrap();
+        let out = apply_aug_op(&img, c, h, w, &AugOp::Rotate, 0.0, 0.5)
+            .expect("apply_aug_op should succeed");
         for (i, (&a, &b)) in img.iter().zip(out.iter()).enumerate() {
             assert!(
                 (a - b).abs() < 1e-4,
@@ -989,7 +995,8 @@ mod tests {
         // No pixel in [0,1] is ≥ 1.0 (strictly), so nothing flips.
         let (c, h, w) = (3, 8, 8);
         let img = gradient_image(c, h, w);
-        let out = apply_aug_op(&img, c, h, w, &AugOp::Solarize, 0.0, 0.5).unwrap();
+        let out = apply_aug_op(&img, c, h, w, &AugOp::Solarize, 0.0, 0.5)
+            .expect("apply_aug_op should succeed");
         // Pixels < 1.0 are unchanged; pixel at exactly 1.0 (if any) gets flipped to 0.
         for (i, (&a, &b)) in img.iter().zip(out.iter()).enumerate() {
             if a < 1.0 {
@@ -1014,7 +1021,8 @@ mod tests {
             ops: all_aug_ops(),
         };
         let mut rng = LcgRng::new(42);
-        let out = rand_augment(&img, c, h, w, &config, &mut rng).unwrap();
+        let out =
+            rand_augment(&img, c, h, w, &config, &mut rng).expect("rand_augment should succeed");
         assert_eq!(out, img, "n_ops=0 must return exact input copy");
     }
 
@@ -1031,7 +1039,8 @@ mod tests {
             ops: all_aug_ops(),
         };
         let mut rng = LcgRng::new(7);
-        let out = rand_augment(&img, c, h, w, &config, &mut rng).unwrap();
+        let out =
+            rand_augment(&img, c, h, w, &config, &mut rng).expect("rand_augment should succeed");
         assert_eq!(out.len(), c * h * w);
         assert_unit_range(&out, "RandAugment(N=3)");
     }
@@ -1047,7 +1056,8 @@ mod tests {
             fill_value: 0.5,
         };
         let mut rng = LcgRng::new(13);
-        let out = auto_augment(&img, c, h, w, &config, &mut rng).unwrap();
+        let out =
+            auto_augment(&img, c, h, w, &config, &mut rng).expect("auto_augment should succeed");
         assert_eq!(out.len(), c * h * w);
         assert_unit_range(&out, "AutoAugment(ImageNet)");
         for &v in &out {
@@ -1065,8 +1075,10 @@ mod tests {
 
         let mut rng_a = LcgRng::new(1);
         let mut rng_b = LcgRng::new(999);
-        let out_a = rand_augment(&img, c, h, w, &config, &mut rng_a).unwrap();
-        let out_b = rand_augment(&img, c, h, w, &config, &mut rng_b).unwrap();
+        let out_a =
+            rand_augment(&img, c, h, w, &config, &mut rng_a).expect("rand_augment should succeed");
+        let out_b =
+            rand_augment(&img, c, h, w, &config, &mut rng_b).expect("rand_augment should succeed");
 
         // It is overwhelmingly unlikely that two different random seeds produce
         // identical augmented outputs; if they do, the test catches a RNG bug.
@@ -1087,8 +1099,10 @@ mod tests {
 
         let mut rng_a = LcgRng::new(42);
         let mut rng_b = LcgRng::new(42);
-        let out_a = rand_augment(&img, c, h, w, &config, &mut rng_a).unwrap();
-        let out_b = rand_augment(&img, c, h, w, &config, &mut rng_b).unwrap();
+        let out_a =
+            rand_augment(&img, c, h, w, &config, &mut rng_a).expect("rand_augment should succeed");
+        let out_b =
+            rand_augment(&img, c, h, w, &config, &mut rng_b).expect("rand_augment should succeed");
         assert_eq!(out_a, out_b, "same seed must produce identical output");
     }
 
@@ -1099,7 +1113,8 @@ mod tests {
         let (c, h, w) = (3, 8, 8);
         let img = vec![0.8_f32; c * h * w];
         // magnitude=0 → strength = 0*0.9 + 0.1 = 0.1.
-        let out = apply_aug_op(&img, c, h, w, &AugOp::Brightness, 0.0, 0.5).unwrap();
+        let out = apply_aug_op(&img, c, h, w, &AugOp::Brightness, 0.0, 0.5)
+            .expect("apply_aug_op should succeed");
         let mean_out: f32 = out.iter().sum::<f32>() / out.len() as f32;
         // 0.8 * 0.1 = 0.08; allow tolerance.
         assert!(
@@ -1123,7 +1138,10 @@ mod tests {
                     op,
                     result
                 );
-                assert_unit_range(&result.unwrap(), &format!("{op:?}@{mag}"));
+                assert_unit_range(
+                    &result.expect("result should be present"),
+                    &format!("{op:?}@{mag}"),
+                );
             }
         }
     }
@@ -1139,7 +1157,8 @@ mod tests {
             fill_value: 0.5,
         };
         let mut rng = LcgRng::new(77);
-        let out = auto_augment(&img, c, h, w, &config, &mut rng).unwrap();
+        let out =
+            auto_augment(&img, c, h, w, &config, &mut rng).expect("auto_augment should succeed");
         assert_eq!(out.len(), c * h * w);
         assert_unit_range(&out, "AutoAugment(Cifar10)");
     }
@@ -1159,7 +1178,8 @@ mod tests {
             fill_value: 0.5,
         };
         let mut rng = LcgRng::new(1);
-        let out = auto_augment(&img, c, h, w, &config, &mut rng).unwrap();
+        let out =
+            auto_augment(&img, c, h, w, &config, &mut rng).expect("auto_augment should succeed");
         assert_eq!(
             out, img,
             "custom Identity × Identity should return exact copy"
@@ -1190,7 +1210,8 @@ mod tests {
         let (c, h, w) = (1, 16, 16);
         let img = gradient_image(c, h, w);
         // magnitude=30 → k = 8 - floor(1.0 * 4) = 4 bits.
-        let out = apply_aug_op(&img, c, h, w, &AugOp::Posterize, 30.0, 0.5).unwrap();
+        let out = apply_aug_op(&img, c, h, w, &AugOp::Posterize, 30.0, 0.5)
+            .expect("apply_aug_op should succeed");
         // With 4-bit posterization we expect at most 16 distinct values.
         let mut values: Vec<u32> = out.iter().map(|&v| (v * 255.0).round() as u32).collect();
         values.sort_unstable();
@@ -1209,7 +1230,8 @@ mod tests {
         let (c, h, w) = (3, 8, 8);
         let img = gradient_image(c, h, w);
         // alpha = magnitude/30 = 1.0 → pure original, no blur blended in.
-        let out = apply_aug_op(&img, c, h, w, &AugOp::Sharpness, 30.0, 0.5).unwrap();
+        let out = apply_aug_op(&img, c, h, w, &AugOp::Sharpness, 30.0, 0.5)
+            .expect("apply_aug_op should succeed");
         for (i, (&a, &b)) in img.iter().zip(out.iter()).enumerate() {
             assert!(
                 (a - b).abs() < 1e-5,

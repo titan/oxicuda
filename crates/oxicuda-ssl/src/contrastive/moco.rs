@@ -222,34 +222,34 @@ mod tests {
 
     #[test]
     fn queue_enqueue_grows_until_capacity() {
-        let mut q = MocoQueue::new(4, 2).unwrap();
+        let mut q = MocoQueue::new(4, 2).expect("new should succeed");
         let batch = vec![1.0_f32, 0.0, 0.0, 1.0];
-        q.enqueue(&batch).unwrap();
+        q.enqueue(&batch).expect("enqueue should succeed");
         assert_eq!(q.len(), 2);
-        q.enqueue(&batch).unwrap();
+        q.enqueue(&batch).expect("enqueue should succeed");
         assert_eq!(q.len(), 4);
         // Overflow: existing entries are evicted FIFO.
-        q.enqueue(&[0.5_f32, 0.5]).unwrap();
+        q.enqueue(&[0.5_f32, 0.5]).expect("enqueue should succeed");
         assert_eq!(q.len(), 4);
     }
 
     #[test]
     fn queue_enqueue_empty_batch_ok() {
-        let mut q = MocoQueue::new(4, 2).unwrap();
-        q.enqueue(&[]).unwrap();
+        let mut q = MocoQueue::new(4, 2).expect("new should succeed");
+        q.enqueue(&[]).expect("enqueue should succeed");
         assert!(q.is_empty());
     }
 
     #[test]
     fn queue_enqueue_rejects_misaligned() {
-        let mut q = MocoQueue::new(4, 3).unwrap();
+        let mut q = MocoQueue::new(4, 3).expect("new should succeed");
         let r = q.enqueue(&[1.0_f32, 2.0]);
         assert!(r.is_err());
     }
 
     #[test]
     fn moco_loss_perfect_positives_low() {
-        let mut q = MocoQueue::new(8, 4).unwrap();
+        let mut q = MocoQueue::new(8, 4).expect("new should succeed");
         // Random negatives: small inner products with the positives.
         let mut rng = 42u64;
         let mut neg = vec![0.0_f32; 8 * 4];
@@ -259,17 +259,17 @@ mod tests {
                 .wrapping_add(1_442_695_040_888_963_407);
             *v = ((rng >> 33) as f32 / (u32::MAX as f32 + 1.0)) - 0.5;
         }
-        q.enqueue(&neg).unwrap();
+        q.enqueue(&neg).expect("enqueue should succeed");
         // Identical query and key positive → max similarity, so loss is small.
         let pos = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-        let loss = moco_loss(&pos, &pos, 2, 4, &q, 0.1).unwrap();
+        let loss = moco_loss(&pos, &pos, 2, 4, &q, 0.1).expect("moco_loss should succeed");
         assert!(loss.is_finite());
         assert!(loss < 1.0);
     }
 
     #[test]
     fn moco_loss_empty_queue_errors() {
-        let q = MocoQueue::new(4, 2).unwrap();
+        let q = MocoQueue::new(4, 2).expect("new should succeed");
         let pos = vec![1.0_f32, 0.0];
         let r = moco_loss(&pos, &pos, 1, 2, &q, 0.1);
         assert!(r.is_err());
@@ -277,24 +277,25 @@ mod tests {
 
     #[test]
     fn moco_loss_dim_mismatch_errors() {
-        let mut q = MocoQueue::new(2, 4).unwrap();
-        q.enqueue(&[1.0_f32; 8]).unwrap();
+        let mut q = MocoQueue::new(2, 4).expect("new should succeed");
+        q.enqueue(&[1.0_f32; 8]).expect("enqueue should succeed");
         let r = moco_loss(&[1.0_f32; 4], &[1.0_f32; 4], 1, 2, &q, 0.1);
         assert!(r.is_err());
     }
 
     #[test]
     fn moco_loss_temperature_must_be_positive() {
-        let mut q = MocoQueue::new(2, 2).unwrap();
-        q.enqueue(&[1.0_f32; 4]).unwrap();
+        let mut q = MocoQueue::new(2, 2).expect("new should succeed");
+        q.enqueue(&[1.0_f32; 4]).expect("enqueue should succeed");
         let r = moco_loss(&[1.0_f32, 0.0], &[1.0_f32, 0.0], 1, 2, &q, 0.0);
         assert!(r.is_err());
     }
 
     #[test]
     fn queue_entries_view_correct_length() {
-        let mut q = MocoQueue::new(4, 2).unwrap();
-        q.enqueue(&[1.0_f32, 2.0, 3.0, 4.0]).unwrap();
+        let mut q = MocoQueue::new(4, 2).expect("new should succeed");
+        q.enqueue(&[1.0_f32, 2.0, 3.0, 4.0])
+            .expect("enqueue should succeed");
         let entries = q.entries();
         assert_eq!(entries.len(), 4);
     }

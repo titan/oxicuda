@@ -948,7 +948,7 @@ mod tests {
     #[test]
     fn clear_new_valid() {
         let cfg = make_cfg(100);
-        let state = clear_new(&cfg, 42).unwrap();
+        let state = clear_new(&cfg, 42).expect("CLEAR state should initialize with valid config");
         assert_eq!(state.input_dim, 8);
         assert_eq!(state.output_dim, 4);
         assert_eq!(state.n_tasks, 0);
@@ -976,9 +976,10 @@ mod tests {
     #[test]
     fn predict_valid_class() {
         let cfg = make_cfg(100);
-        let state = clear_new(&cfg, 1).unwrap();
+        let state = clear_new(&cfg, 1).expect("CLEAR state should initialize with valid config");
         let x = vec![0.5f64; 8];
-        let pred = clear_predict(&state, &x).unwrap();
+        let pred =
+            clear_predict(&state, &x).expect("CLEAR prediction should succeed on valid input");
         assert!(pred < 4, "prediction {pred} must be in [0,4)");
     }
 
@@ -987,7 +988,7 @@ mod tests {
     #[test]
     fn predict_wrong_dim_err() {
         let cfg = make_cfg(100);
-        let state = clear_new(&cfg, 2).unwrap();
+        let state = clear_new(&cfg, 2).expect("CLEAR state should initialize with valid config");
         assert!(clear_predict(&state, &[0.0; 5]).is_err());
     }
 
@@ -996,7 +997,7 @@ mod tests {
     #[test]
     fn encode_correct_size() {
         let cfg = make_cfg(100);
-        let state = clear_new(&cfg, 3).unwrap();
+        let state = clear_new(&cfg, 3).expect("CLEAR state should initialize with valid config");
         let x = vec![0.1f64; 8];
         let enc = clear_encode(&state, &x);
         assert_eq!(
@@ -1011,11 +1012,13 @@ mod tests {
     #[test]
     fn buffer_grows_after_fit() {
         let cfg = make_cfg(200);
-        let mut state = clear_new(&cfg, 4).unwrap();
+        let mut state =
+            clear_new(&cfg, 4).expect("CLEAR state should initialize with valid config");
         let mut rng = LcgRng::new(10);
         let (x, y) = make_xy(20, 8, 4, 100);
         assert_eq!(clear_buffer_size(&state), 0);
-        clear_fit_task(&mut state, &x, &y, 20, &mut rng).unwrap();
+        clear_fit_task(&mut state, &x, &y, 20, &mut rng)
+            .expect("CLEAR task fitting should succeed with valid data");
         assert_eq!(clear_buffer_size(&state), 20);
     }
 
@@ -1025,10 +1028,12 @@ mod tests {
     fn buffer_bounded_by_capacity() {
         let cap = 15usize;
         let cfg = make_cfg(cap);
-        let mut state = clear_new(&cfg, 5).unwrap();
+        let mut state =
+            clear_new(&cfg, 5).expect("CLEAR state should initialize with valid config");
         let mut rng = LcgRng::new(11);
         let (x, y) = make_xy(50, 8, 4, 200);
-        clear_fit_task(&mut state, &x, &y, 50, &mut rng).unwrap();
+        clear_fit_task(&mut state, &x, &y, 50, &mut rng)
+            .expect("CLEAR task fitting should succeed with valid data");
         assert_eq!(clear_buffer_size(&state), cap);
     }
 
@@ -1037,10 +1042,12 @@ mod tests {
     #[test]
     fn fit_task_finite_loss() {
         let cfg = make_cfg(100);
-        let mut state = clear_new(&cfg, 6).unwrap();
+        let mut state =
+            clear_new(&cfg, 6).expect("CLEAR state should initialize with valid config");
         let mut rng = LcgRng::new(12);
         let (x, y) = make_xy(20, 8, 4, 300);
-        let loss = clear_fit_task(&mut state, &x, &y, 20, &mut rng).unwrap();
+        let loss = clear_fit_task(&mut state, &x, &y, 20, &mut rng)
+            .expect("CLEAR task fitting should succeed with valid data");
         assert!(loss.is_finite(), "loss must be finite: {loss}");
         assert!(loss >= 0.0, "loss must be non-negative");
     }
@@ -1050,7 +1057,8 @@ mod tests {
     #[test]
     fn fit_task_empty_err() {
         let cfg = make_cfg(100);
-        let mut state = clear_new(&cfg, 7).unwrap();
+        let mut state =
+            clear_new(&cfg, 7).expect("CLEAR state should initialize with valid config");
         let mut rng = LcgRng::new(13);
         assert!(clear_fit_task(&mut state, &[], &[], 0, &mut rng).is_err());
     }
@@ -1060,14 +1068,17 @@ mod tests {
     #[test]
     fn n_tasks_increments() {
         let cfg = make_cfg(100);
-        let mut state = clear_new(&cfg, 8).unwrap();
+        let mut state =
+            clear_new(&cfg, 8).expect("CLEAR state should initialize with valid config");
         let mut rng = LcgRng::new(14);
         assert_eq!(state.n_tasks, 0);
         let (x1, y1) = make_xy(10, 8, 4, 400);
-        clear_fit_task(&mut state, &x1, &y1, 10, &mut rng).unwrap();
+        clear_fit_task(&mut state, &x1, &y1, 10, &mut rng)
+            .expect("CLEAR task fitting should succeed with valid data");
         assert_eq!(state.n_tasks, 1);
         let (x2, y2) = make_xy(10, 8, 4, 500);
-        clear_fit_task(&mut state, &x2, &y2, 10, &mut rng).unwrap();
+        clear_fit_task(&mut state, &x2, &y2, 10, &mut rng)
+            .expect("CLEAR task fitting should succeed with valid data");
         assert_eq!(state.n_tasks, 2);
     }
 
@@ -1076,14 +1087,17 @@ mod tests {
     #[test]
     fn buffer_has_samples_from_two_tasks() {
         let cfg = make_cfg(100);
-        let mut state = clear_new(&cfg, 9).unwrap();
+        let mut state =
+            clear_new(&cfg, 9).expect("CLEAR state should initialize with valid config");
         let mut rng = LcgRng::new(15);
         let x1: Vec<f64> = vec![1.0; 8 * 10];
         let y1 = vec![0usize; 10];
-        clear_fit_task(&mut state, &x1, &y1, 10, &mut rng).unwrap();
+        clear_fit_task(&mut state, &x1, &y1, 10, &mut rng)
+            .expect("CLEAR task fitting should succeed with valid data");
         let x2: Vec<f64> = vec![-1.0; 8 * 10];
         let y2 = vec![1usize; 10];
-        clear_fit_task(&mut state, &x2, &y2, 10, &mut rng).unwrap();
+        clear_fit_task(&mut state, &x2, &y2, 10, &mut rng)
+            .expect("CLEAR task fitting should succeed with valid data");
         let has_0 = state.buffer_y.contains(&0);
         let has_1 = state.buffer_y.contains(&1);
         assert!(has_0, "buffer must have label 0");
@@ -1133,7 +1147,7 @@ mod tests {
     #[test]
     fn projection_is_l2_normalized() {
         let cfg = make_cfg(100);
-        let state = clear_new(&cfg, 10).unwrap();
+        let state = clear_new(&cfg, 10).expect("CLEAR state should initialize with valid config");
         let x = vec![0.3f64; 8];
         let cache = forward(&state, &x);
         let norm: f64 = cache.z.iter().map(|&v| v * v).sum::<f64>().sqrt();
@@ -1151,7 +1165,8 @@ mod tests {
     #[test]
     fn fit_task_dim_mismatch_err() {
         let cfg = make_cfg(100);
-        let mut state = clear_new(&cfg, 11).unwrap();
+        let mut state =
+            clear_new(&cfg, 11).expect("CLEAR state should initialize with valid config");
         let mut rng = LcgRng::new(20);
         // x has wrong length: 5 instead of 8
         let x = vec![0.0f64; 5];

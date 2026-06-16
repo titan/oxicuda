@@ -239,26 +239,30 @@ mod tests {
 
     #[test]
     fn receive_block_assigns_local_id() {
-        let mut m = BlockMigrator::new(1, 4).unwrap();
+        let mut m = BlockMigrator::new(1, 4).expect("new should succeed");
         let block = BlockData::zeros(5, 2, 4, 8);
-        let local_id = m.receive_block(&req(42, 5, 0, 1), block).unwrap();
+        let local_id = m
+            .receive_block(&req(42, 5, 0, 1), block)
+            .expect("value should be present");
         assert_eq!(local_id, 0);
         assert_eq!(m.pending_count(), 1);
     }
 
     #[test]
     fn take_block_removes_from_buffer() {
-        let mut m = BlockMigrator::new(2, 4).unwrap();
+        let mut m = BlockMigrator::new(2, 4).expect("new should succeed");
         let block = BlockData::zeros(3, 1, 2, 4);
-        let lid = m.receive_block(&req(10, 3, 0, 2), block.clone()).unwrap();
-        let taken = m.take_block(lid).unwrap();
+        let lid = m
+            .receive_block(&req(10, 3, 0, 2), block.clone())
+            .expect("value should be present");
+        let taken = m.take_block(lid).expect("take_block should succeed");
         assert_eq!(taken, block);
         assert_eq!(m.pending_count(), 0);
     }
 
     #[test]
     fn wrong_destination_rank_errors() {
-        let mut m = BlockMigrator::new(2, 4).unwrap();
+        let mut m = BlockMigrator::new(2, 4).expect("new should succeed");
         let block = BlockData::zeros(0, 1, 2, 4);
         // Request says dst=3, but migrator is rank 2
         let err = m.receive_block(&req(1, 0, 0, 3), block).unwrap_err();
@@ -273,17 +277,19 @@ mod tests {
 
     #[test]
     fn stats_updated_after_receive() {
-        let mut m = BlockMigrator::new(1, 2).unwrap();
+        let mut m = BlockMigrator::new(1, 2).expect("new should succeed");
         let block = BlockData::zeros(0, 2, 4, 8); // 2*2*4*8=128 f32s = 512 bytes
-        m.receive_block(&req(1, 0, 0, 1), block.clone()).unwrap();
-        m.receive_block(&req(2, 1, 0, 1), block).unwrap();
+        m.receive_block(&req(1, 0, 0, 1), block.clone())
+            .expect("value should be present");
+        m.receive_block(&req(2, 1, 0, 1), block)
+            .expect("value should be present");
         assert_eq!(m.stats().blocks_migrated, 2);
         assert_eq!(m.stats().bytes_transferred, 1024); // 2 × 128 × 4
     }
 
     #[test]
     fn validate_target_self_errors() {
-        let m = BlockMigrator::new(1, 4).unwrap();
+        let m = BlockMigrator::new(1, 4).expect("new should succeed");
         assert!(m.validate_target(1).is_err()); // same rank
     }
 

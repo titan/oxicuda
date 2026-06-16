@@ -5,17 +5,24 @@
 //! pure Rust, zero CUDA SDK dependency.
 
 pub mod error;
+pub mod gan;
 pub mod guidance;
 pub mod handle;
 pub mod lora;
+pub mod loss;
 pub mod ptx_kernels;
 pub mod scheduler;
 pub mod score;
+pub mod solver;
 pub mod vae;
 
 /// Re-exports of the most commonly used types.
 pub mod prelude {
     pub use crate::error::{GenError, GenResult};
+    pub use crate::gan::{
+        AliasFreeOps, MappingNetwork, StyleGan3Config, StyleGan3Generator, SynthesisLayer,
+        kaiser_lowpass_fir, leaky_relu,
+    };
     pub use crate::guidance::{
         AdaptiveCfgPolicy, AdaptiveCfgScheduler, CfgConfig, CfgGuidance, PerpNegGuidance,
     };
@@ -24,22 +31,29 @@ pub mod prelude {
         DoraAdapter, DoraConfig, LoraConfig, LoraLinear, LoraModel, merge_lora, unmerge_lora,
         verify_merge_roundtrip,
     };
+    pub use crate::loss::{DdpmLoss, DdpmLossConfig, DdpmLossType};
     pub use crate::ptx_kernels::{
         cfg_combine_ptx, ddpm_step_ptx, f32_hex, flow_velocity_ptx, lora_apply_ptx,
         timestep_embed_ptx, vae_kl_loss_ptx,
     };
     pub use crate::scheduler::{
         BetaSchedule, BetaScheduleType, DdimScheduler, DdpmScheduler, DpmOrder, DpmSolverScheduler,
-        FlowMatchingPath, FlowMatchingScheduler, InterpolantConfig, InterpolantKind, RectifiedFlow,
-        RectifiedFlowConfig, StochasticInterpolant, VPrediction, VPredictionConfig,
+        FlowMatchingPath, FlowMatchingScheduler, InterpolantConfig, InterpolantKind, KarrasSigmas,
+        RectifiedFlow, RectifiedFlowConfig, StochasticInterpolant, VPrediction, VPredictionConfig,
+        sample_euler, sample_euler_ancestral, sample_heun,
     };
     pub use crate::score::{
-        CrossAttentionBlock, FourierEmbedding, SelfAttentionBlock, SinusoidalEmbedding,
-        UNetResBlock,
+        CrossAttentionBlock, FourierEmbedding, RopeSelfAttention, RotaryEmbedding,
+        SelfAttentionBlock, SinusoidalEmbedding, UNetResBlock,
+    };
+    pub use crate::solver::{
+        CfmConfig, ConditionalFlowMatching, DpmAlgorithm, DpmSolverPp, DpmSolverPpConfig,
+        PndmConfig, PndmSolver, UniPc, UniPcConfig, UniPcOrder,
     };
     pub use crate::vae::{
-        Decoder, DecoderConfig, DecoderWeights, Encoder, EncoderConfig, EncoderWeights,
-        GaussianLatent, VqCodebook,
+        Decoder, DecoderConfig, DecoderWeights, EmaCodebook, EmaCodebookConfig, Encoder,
+        EncoderConfig, EncoderWeights, GaussianLatent, VaeEncoder, VaeEncoderConfig, VqCodebook,
+        VqCodebookEma, VqVae2, VqVae2Config,
     };
 }
 
@@ -75,12 +89,15 @@ mod tests {
 
     #[test]
     fn e2e_ddpm_forward_reverse_consistency() {
-        let sched = DdpmScheduler::new(1000).unwrap();
+        let sched = DdpmScheduler::new(1000)
+            .expect("DDPM scheduler with 1000 timesteps should construct without error");
         let mut rng = make_rng();
         let x0 = randn(&mut rng, 64);
         let noise = randn(&mut rng, 64);
         let t = 100;
-        let x_t = sched.add_noise(&x0, &noise, t).unwrap();
+        let x_t = sched
+            .add_noise(&x0, &noise, t)
+            .expect("add_noise at valid timestep t=100 should succeed");
         assert_eq!(x_t.len(), x0.len());
         let diff: f32 = x0
             .iter()
@@ -89,21 +106,29 @@ mod tests {
             .fold(0.0, f32::max);
         assert!(diff > 1e-4, "x_t should differ from x_0: diff={diff}");
         let step_noise = randn(&mut rng, 64);
-        let x_prev = sched.step(&noise, &x_t, t, &step_noise).unwrap();
+        let x_prev = sched
+            .step(&noise, &x_t, t, &step_noise)
+            .expect("DDPM step at valid timestep t=100 should succeed");
         assert_eq!(x_prev.len(), 64);
         assert!(x_prev.iter().all(|v| v.is_finite()));
     }
 
     #[test]
     fn e2e_ddim_deterministic_at_eta_zero() {
-        let sched = DdimScheduler::new(1000, 10, 0.0).unwrap();
+        let sched = DdimScheduler::new(1000, 10, 0.0).expect(
+            "DDIM scheduler with 1000 timesteps, 10 steps, eta=0.0 should construct without error",
+        );
         let mut rng = make_rng();
         let eps = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
         let noise1 = randn(&mut rng, 32);
         let noise2 = randn(&mut rng, 32);
-        let out1 = sched.step(&eps, &x_t, 0, &noise1).unwrap();
-        let out2 = sched.step(&eps, &x_t, 0, &noise2).unwrap();
+        let out1 = sched
+            .step(&eps, &x_t, 0, &noise1)
+            .expect("DDIM step with noise1 at valid timestep index 0 should succeed");
+        let out2 = sched
+            .step(&eps, &x_t, 0, &noise2)
+            .expect("step should succeed");
         let max_diff: f32 = out1
             .iter()
             .zip(&out2)
@@ -117,11 +142,14 @@ mod tests {
 
     #[test]
     fn e2e_dpm_solver_step_shape() {
-        let sched = DpmSolverScheduler::new(1000, 20, DpmOrder::Second).unwrap();
+        let sched =
+            DpmSolverScheduler::new(1000, 20, DpmOrder::Second).expect("new should succeed");
         let mut rng = make_rng();
         let model_out = randn(&mut rng, 48);
         let x_t = randn(&mut rng, 48);
-        let out = sched.step(&model_out, None, &x_t, 0).unwrap();
+        let out = sched
+            .step(&model_out, None, &x_t, 0)
+            .expect("step should succeed");
         assert_eq!(out.len(), 48);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -131,11 +159,15 @@ mod tests {
         let sched = FlowMatchingScheduler::new(50);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 5.0, 6.0];
-        let at_zero = sched.interpolate(&x0, &x1, 0.0).unwrap();
+        let at_zero = sched
+            .interpolate(&x0, &x1, 0.0)
+            .expect("interpolate should succeed");
         for (&a, &b) in at_zero.iter().zip(&x0) {
             assert!((a - b).abs() < 1e-5, "t=0 should give x0: {a} vs {b}");
         }
-        let at_one = sched.interpolate(&x0, &x1, 1.0).unwrap();
+        let at_one = sched
+            .interpolate(&x0, &x1, 1.0)
+            .expect("interpolate should succeed");
         for (&a, &b) in at_one.iter().zip(&x1) {
             assert!((a - b).abs() < 1e-5, "t=1 should give x1: {a} vs {b}");
         }
@@ -143,11 +175,11 @@ mod tests {
 
     #[test]
     fn e2e_cfg_scale_one_is_uncond() {
-        let config = CfgConfig::new(1.0).unwrap();
+        let config = CfgConfig::new(1.0).expect("new should succeed");
         let guide = CfgGuidance::new(config);
         let cond = vec![2.0_f32, 3.0, 4.0];
         let uncond = vec![1.0_f32, 1.0, 1.0];
-        let out = guide.apply(&cond, &uncond).unwrap();
+        let out = guide.apply(&cond, &uncond).expect("apply should succeed");
         // scale=1: out = uncond + 1*(cond - uncond) = cond
         for (&o, &c) in out.iter().zip(&cond) {
             assert!((o - c).abs() < 1e-5, "scale=1 should give cond: {o} vs {c}");
@@ -156,12 +188,12 @@ mod tests {
 
     #[test]
     fn e2e_lora_zero_b_is_identity() {
-        let config = LoraConfig::new(4, 4.0).unwrap();
+        let config = LoraConfig::new(4, 4.0).expect("new should succeed");
         let mut rng = make_rng();
-        let lora = LoraLinear::new(8, 16, &config, &mut rng).unwrap();
+        let lora = LoraLinear::new(8, 16, &config, &mut rng).expect("new should succeed");
         let x = randn(&mut rng, 8);
         let base = randn(&mut rng, 16);
-        let out = lora.forward(&x, &base, 1).unwrap();
+        let out = lora.forward(&x, &base, 1).expect("forward should succeed");
         for (&o, &b) in out.iter().zip(&base) {
             assert!(
                 (o - b).abs() < 1e-5,
@@ -172,8 +204,8 @@ mod tests {
 
     #[test]
     fn e2e_vae_kl_zero_for_standard_normal() {
-        let latent = GaussianLatent::standard_normal(128).unwrap();
-        let kl = latent.kl_loss().unwrap();
+        let latent = GaussianLatent::standard_normal(128).expect("standard_normal should succeed");
+        let kl = latent.kl_loss().expect("kl_loss should succeed");
         assert!(kl.abs() < 1e-4, "KL for standard normal should be ~0: {kl}");
     }
 
@@ -185,15 +217,16 @@ mod tests {
         for i in 0..n_codes {
             embeddings[i * embed_dim + i] = 1.0;
         }
-        let cb = VqCodebook::from_embeddings(embeddings, n_codes, embed_dim).unwrap();
+        let cb = VqCodebook::from_embeddings(embeddings, n_codes, embed_dim)
+            .expect("from_embeddings should succeed");
         let z = vec![0.0_f32, 0.1, 0.9, 0.0];
-        let (_, idx) = cb.quantize(&z).unwrap();
+        let (_, idx) = cb.quantize(&z).expect("quantize should succeed");
         assert_eq!(idx[0], 2, "should map to code 2, got {}", idx[0]);
     }
 
     #[test]
     fn e2e_sinusoidal_embed_dimensions() {
-        let emb = SinusoidalEmbedding::new(128).unwrap();
+        let emb = SinusoidalEmbedding::new(128).expect("new should succeed");
         let out = emb.embed_timestep(500.0);
         assert_eq!(out.len(), 128);
         assert!(
@@ -231,7 +264,7 @@ mod tests {
 
     #[test]
     fn e2e_beta_schedule_chain() {
-        let sched = BetaSchedule::linear(1000, 0.0001, 0.02).unwrap();
+        let sched = BetaSchedule::linear(1000, 0.0001, 0.02).expect("linear should succeed");
         assert_eq!(sched.num_steps(), 1000);
         assert!(sched.sqrt_alphas_bar()[0] > 0.99);
         assert!(sched.sqrt_alphas_bar()[999] < 0.2);

@@ -290,7 +290,8 @@ mod tests {
 
     #[test]
     fn rr_equals_one_yields_e_one() {
-        let r = EValue::from_risk_ratio(1.0, 0.5, 2.0, &EValueConfig::default()).unwrap();
+        let r = EValue::from_risk_ratio(1.0, 0.5, 2.0, &EValueConfig::default())
+            .expect("value should be present");
         assert!(approx(r.e_value_point, 1.0, 1e-12));
         // CI crosses null.
         assert!(approx(r.e_value_ci, 1.0, 1e-12));
@@ -300,14 +301,16 @@ mod tests {
     #[test]
     fn rr_two_yields_e_two_plus_sqrt_two() {
         let expected = 2.0 + 2.0_f64.sqrt();
-        let r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default()).unwrap();
+        let r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default())
+            .expect("value should be present");
         assert!(approx(r.e_value_point, expected, 1e-9));
     }
 
     #[test]
     fn rr_half_yields_same_as_rr_two() {
         let expected = 2.0 + 2.0_f64.sqrt();
-        let r = EValue::from_risk_ratio(0.5, 0.3, 0.8, &EValueConfig::default()).unwrap();
+        let r = EValue::from_risk_ratio(0.5, 0.3, 0.8, &EValueConfig::default())
+            .expect("value should be present");
         // 1/0.5 = 2, so same numeric E-value.
         assert!(approx(r.e_value_point, expected, 1e-9));
     }
@@ -321,20 +324,23 @@ mod tests {
 
     #[test]
     fn ci_crossing_one_yields_one_for_ci() {
-        let r = EValue::from_risk_ratio(2.0, 0.5, 5.0, &EValueConfig::default()).unwrap();
+        let r = EValue::from_risk_ratio(2.0, 0.5, 5.0, &EValueConfig::default())
+            .expect("value should be present");
         assert!(approx(r.e_value_ci, 1.0, 1e-12));
     }
 
     #[test]
     fn ci_fully_above_one() {
-        let r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default()).unwrap();
+        let r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default())
+            .expect("value should be present");
         let expected = 1.5_f64 + (1.5_f64 * 0.5).sqrt();
         assert!(approx(r.e_value_ci, expected, 1e-9));
     }
 
     #[test]
     fn ci_fully_below_one() {
-        let r = EValue::from_risk_ratio(0.5, 0.3, 0.8, &EValueConfig::default()).unwrap();
+        let r = EValue::from_risk_ratio(0.5, 0.3, 0.8, &EValueConfig::default())
+            .expect("value should be present");
         let flipped: f64 = 1.0 / 0.8;
         let expected = flipped + (flipped * (flipped - 1.0)).sqrt();
         assert!(approx(r.e_value_ci, expected, 1e-9));
@@ -349,8 +355,10 @@ mod tests {
     #[test]
     fn or_rare_equivalent_to_rr() {
         let cfg_rare = EValueConfig { rare_outcome: true };
-        let or_r = EValue::from_odds_ratio(2.0, 1.5, 3.0, 0.01, &cfg_rare).unwrap();
-        let rr_r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default()).unwrap();
+        let or_r = EValue::from_odds_ratio(2.0, 1.5, 3.0, 0.01, &cfg_rare)
+            .expect("from_odds_ratio should succeed");
+        let rr_r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default())
+            .expect("value should be present");
         assert!(approx(or_r.e_value_point, rr_r.e_value_point, 1e-9));
         assert_eq!(or_r.effect_type, EffectType::OddsRatio);
     }
@@ -360,8 +368,10 @@ mod tests {
         let cfg_dense = EValueConfig {
             rare_outcome: false,
         };
-        let or_r = EValue::from_odds_ratio(3.0, 2.0, 4.0, 0.5, &cfg_dense).unwrap();
-        let rr_r = EValue::from_risk_ratio(3.0, 2.0, 4.0, &EValueConfig::default()).unwrap();
+        let or_r = EValue::from_odds_ratio(3.0, 2.0, 4.0, 0.5, &cfg_dense)
+            .expect("from_odds_ratio should succeed");
+        let rr_r = EValue::from_risk_ratio(3.0, 2.0, 4.0, &EValueConfig::default())
+            .expect("value should be present");
         // Non-rare conversion attenuates the effective RR away from OR,
         // hence the E-value should be smaller than for the equivalent RR.
         assert!(or_r.e_value_point < rr_r.e_value_point);
@@ -377,16 +387,20 @@ mod tests {
 
     #[test]
     fn hr_rare_outcome_close_to_rr() {
-        let hr_r = EValue::from_hazard_ratio(2.0, 1.5, 3.0, 0.01).unwrap();
-        let rr_r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default()).unwrap();
+        let hr_r = EValue::from_hazard_ratio(2.0, 1.5, 3.0, 0.01)
+            .expect("from_hazard_ratio should succeed");
+        let rr_r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default())
+            .expect("value should be present");
         assert!(approx(hr_r.e_value_point, rr_r.e_value_point, 1e-9));
         assert_eq!(hr_r.effect_type, EffectType::HazardRatio);
     }
 
     #[test]
     fn hr_non_rare_differs() {
-        let hr_r = EValue::from_hazard_ratio(2.0, 1.5, 3.0, 0.5).unwrap();
-        let rr_r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default()).unwrap();
+        let hr_r = EValue::from_hazard_ratio(2.0, 1.5, 3.0, 0.5)
+            .expect("from_hazard_ratio should succeed");
+        let rr_r = EValue::from_risk_ratio(2.0, 1.5, 3.0, &EValueConfig::default())
+            .expect("value should be present");
         assert!((hr_r.e_value_point - rr_r.e_value_point).abs() > 1e-3);
     }
 
@@ -402,7 +416,8 @@ mod tests {
 
     #[test]
     fn rd_positive_with_baseline_0_1() {
-        let r = EValue::from_risk_difference(0.1, 0.05, 0.15, 0.1).unwrap();
+        let r = EValue::from_risk_difference(0.1, 0.05, 0.15, 0.1)
+            .expect("from_risk_difference should succeed");
         // RR = (0.1 + 0.1) / 0.1 = 2.0
         let expected = 2.0 + 2.0_f64.sqrt();
         assert!(approx(r.e_value_point, expected, 1e-9));
@@ -419,13 +434,13 @@ mod tests {
     fn e_value_monotone_in_rr_distance_from_one() {
         let cfg = EValueConfig::default();
         let small = EValue::from_risk_ratio(1.5, 1.2, 1.8, &cfg)
-            .unwrap()
+            .expect("value should be present")
             .e_value_point;
         let mid = EValue::from_risk_ratio(2.0, 1.5, 2.5, &cfg)
-            .unwrap()
+            .expect("value should be present")
             .e_value_point;
         let large = EValue::from_risk_ratio(4.0, 3.0, 5.0, &cfg)
-            .unwrap()
+            .expect("value should be present")
             .e_value_point;
         assert!(small < mid && mid < large);
     }

@@ -101,7 +101,7 @@ fn main() -> PrivacyResult<()> {
 
 ## Status
 
-**Alpha** -- 13,029 SLoC, 530 passing tests. API may evolve before v1.0.
+**Alpha** -- 16,590 SLoC, 696 passing tests. API may evolve before v1.0.
 
 ## License
 

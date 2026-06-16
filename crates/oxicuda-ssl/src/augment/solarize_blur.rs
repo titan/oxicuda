@@ -446,7 +446,8 @@ mod tests {
         // Uniform image: sum should be unchanged (no energy loss).
         let (c, h, w) = (1, 32, 32);
         let pixels = vec![0.5_f32; c * h * w];
-        let blurred = gaussian_blur_chw(&pixels, c, h, w, 1.0).unwrap();
+        let blurred =
+            gaussian_blur_chw(&pixels, c, h, w, 1.0).expect("gaussian_blur_chw should succeed");
         let orig_sum: f32 = pixels.iter().sum();
         let blur_sum: f32 = blurred.iter().sum();
         // With clamp-to-edge the sums are exactly equal for a constant image.
@@ -460,7 +461,8 @@ mod tests {
     fn gaussian_blur_shape_preserved() {
         let (c, h, w) = (3, 16, 24);
         let pixels = vec![0.3_f32; c * h * w];
-        let out = gaussian_blur_chw(&pixels, c, h, w, 0.8).unwrap();
+        let out =
+            gaussian_blur_chw(&pixels, c, h, w, 0.8).expect("gaussian_blur_chw should succeed");
         assert_eq!(out.len(), c * h * w);
     }
 
@@ -470,7 +472,8 @@ mod tests {
         let (c, h, w) = (1, 8, 8);
         let mut rng = LcgRng::new(42);
         let pixels: Vec<f32> = (0..c * h * w).map(|_| rng.next_f32()).collect();
-        let out = gaussian_blur_chw(&pixels, c, h, w, 1e-5).unwrap();
+        let out =
+            gaussian_blur_chw(&pixels, c, h, w, 1e-5).expect("gaussian_blur_chw should succeed");
         for (a, b) in pixels.iter().zip(out.iter()) {
             assert!((a - b).abs() < 1e-4, "a={a} b={b}");
         }
@@ -490,7 +493,8 @@ mod tests {
             })
             .collect();
         let orig_var = variance(&pixels);
-        let blurred = gaussian_blur_chw(&pixels, c, h, w, 2.0).unwrap();
+        let blurred =
+            gaussian_blur_chw(&pixels, c, h, w, 2.0).expect("gaussian_blur_chw should succeed");
         let blur_var = variance(&blurred);
         assert!(
             blur_var < orig_var,
@@ -529,7 +533,8 @@ mod tests {
                 *p = (ch as f32 + 1.0) * 0.25;
             }
         }
-        let out = gaussian_blur_chw(&pixels, c, h, w, 1.5).unwrap();
+        let out =
+            gaussian_blur_chw(&pixels, c, h, w, 1.5).expect("gaussian_blur_chw should succeed");
         for ch in 0..c {
             let expected_val = (ch as f32 + 1.0) * 0.25;
             for &v in &out[ch * plane..(ch + 1) * plane] {
@@ -548,7 +553,7 @@ mod tests {
         // Pixel 0.3 with threshold 0.5 → stays 0.3.
         // Shape [C=1, H=4, W=4] flattened: 16 pixels.
         let pixels = vec![0.3_f32; 16];
-        let out = solarize(&pixels, 1, 4, 4, 0.5).unwrap();
+        let out = solarize(&pixels, 1, 4, 4, 0.5).expect("solarize should succeed");
         for &v in &out {
             assert!((v - 0.3).abs() < 1e-6, "v={v}");
         }
@@ -559,7 +564,7 @@ mod tests {
         // Pixel 0.8 with threshold 0.5 → 1.0 - 0.8 = 0.2.
         // Shape [C=1, H=4, W=4] flattened: 16 pixels.
         let pixels = vec![0.8_f32; 16];
-        let out = solarize(&pixels, 1, 4, 4, 0.5).unwrap();
+        let out = solarize(&pixels, 1, 4, 4, 0.5).expect("solarize should succeed");
         for &v in &out {
             assert!((v - 0.2).abs() < 1e-6, "v={v}");
         }
@@ -571,7 +576,7 @@ mod tests {
         let threshold = 0.5_f32;
         // Shape [C=1, H=4, W=4] flattened: 16 pixels.
         let pixels = vec![threshold; 16];
-        let out = solarize(&pixels, 1, 4, 4, threshold).unwrap();
+        let out = solarize(&pixels, 1, 4, 4, threshold).expect("solarize should succeed");
         for &v in &out {
             assert!((v - (1.0 - threshold)).abs() < 1e-6, "v={v}");
         }
@@ -581,7 +586,7 @@ mod tests {
     fn solarize_preserves_shape() {
         let (c, h, w) = (3, 8, 12);
         let pixels = vec![0.6_f32; c * h * w];
-        let out = solarize(&pixels, c, h, w, 0.5).unwrap();
+        let out = solarize(&pixels, c, h, w, 0.5).expect("solarize should succeed");
         assert_eq!(out.len(), c * h * w);
     }
 
@@ -590,7 +595,8 @@ mod tests {
         // With probability 0 the image is always returned unchanged.
         let pixels: Vec<f32> = (0..64).map(|i| i as f32 / 64.0).collect();
         let mut rng = LcgRng::new(99);
-        let out = random_solarize(&pixels, 1, 8, 8, 0.5, 0.0, &mut rng).unwrap();
+        let out = random_solarize(&pixels, 1, 8, 8, 0.5, 0.0, &mut rng)
+            .expect("random_solarize should succeed");
         assert_eq!(out, pixels);
     }
 
@@ -599,8 +605,9 @@ mod tests {
         // With probability 1 the image is always fully solarized.
         let pixels: Vec<f32> = (0..64).map(|i| i as f32 / 64.0).collect();
         let mut rng = LcgRng::new(7);
-        let out = random_solarize(&pixels, 1, 8, 8, 0.5, 1.0, &mut rng).unwrap();
-        let expected = solarize(&pixels, 1, 8, 8, 0.5).unwrap();
+        let out = random_solarize(&pixels, 1, 8, 8, 0.5, 1.0, &mut rng)
+            .expect("random_solarize should succeed");
+        let expected = solarize(&pixels, 1, 8, 8, 0.5).expect("solarize should succeed");
         assert_eq!(out, expected);
     }
 
@@ -610,7 +617,8 @@ mod tests {
     fn add_gaussian_noise_output_in_range() {
         let pixels = vec![0.5_f32; 3 * 16 * 16];
         let mut rng = LcgRng::new(123);
-        let out = add_gaussian_noise(&pixels, 0.2, &mut rng).unwrap();
+        let out =
+            add_gaussian_noise(&pixels, 0.2, &mut rng).expect("add_gaussian_noise should succeed");
         for &v in &out {
             assert!((0.0..=1.0).contains(&v), "out-of-range pixel: {v}");
         }
@@ -621,7 +629,8 @@ mod tests {
         // Shape [C=1, H=32, W=32] flattened: 1024 pixels.
         let pixels = vec![0.5_f32; 1024];
         let mut rng = LcgRng::new(55);
-        let out = add_gaussian_noise(&pixels, 0.1, &mut rng).unwrap();
+        let out =
+            add_gaussian_noise(&pixels, 0.1, &mut rng).expect("add_gaussian_noise should succeed");
         // With std_dev 0.1, it is astronomically unlikely that all pixels are
         // unchanged, so at least one should differ.
         let changed = pixels
@@ -637,7 +646,8 @@ mod tests {
         // std_dev = 0.0 → noise term is 0 → output equals input.
         let pixels = vec![0.4_f32; 64];
         let mut rng = LcgRng::new(11);
-        let out = add_gaussian_noise(&pixels, 0.0, &mut rng).unwrap();
+        let out =
+            add_gaussian_noise(&pixels, 0.0, &mut rng).expect("add_gaussian_noise should succeed");
         for (a, b) in pixels.iter().zip(out.iter()) {
             assert!((a - b).abs() < 1e-7, "a={a} b={b}");
         }
@@ -659,7 +669,8 @@ mod tests {
         let pixels = vec![0.5_f32; c * h * w];
         let cfg = SimClrBlurSolarConfig::default();
         let mut rng = LcgRng::new(42);
-        let out = simclr_blur_solar(&pixels, c, h, w, &cfg, &mut rng).unwrap();
+        let out = simclr_blur_solar(&pixels, c, h, w, &cfg, &mut rng)
+            .expect("simclr_blur_solar should succeed");
         assert_eq!(out.len(), c * h * w);
     }
 
@@ -676,7 +687,8 @@ mod tests {
             solar_prob: 1.0,
         };
         let mut rng = LcgRng::new(77);
-        let out = simclr_blur_solar(&pixels, c, h, w, &cfg, &mut rng).unwrap();
+        let out = simclr_blur_solar(&pixels, c, h, w, &cfg, &mut rng)
+            .expect("simclr_blur_solar should succeed");
         assert_eq!(out.len(), pixels.len());
         // The output must differ from the original because we blur then solarize.
         let identical = pixels
@@ -701,7 +713,8 @@ mod tests {
             solar_prob: 0.0,
         };
         let mut rng = LcgRng::new(3);
-        let out = simclr_blur_solar(&pixels, c, h, w, &cfg, &mut rng).unwrap();
+        let out = simclr_blur_solar(&pixels, c, h, w, &cfg, &mut rng)
+            .expect("simclr_blur_solar should succeed");
         assert_eq!(out, pixels);
     }
 

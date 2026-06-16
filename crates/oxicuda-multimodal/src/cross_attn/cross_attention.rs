@@ -5,6 +5,7 @@
 //! split across `n_heads` independent attention heads.
 
 use crate::error::{MmResult, MultiModalError};
+use crate::handle::LcgRng;
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -101,6 +102,29 @@ impl CrossAttnWeights {
             w_k: w.clone(),
             w_v: w.clone(),
             w_o: w,
+        }
+    }
+
+    /// Create weights drawn from a deterministic Gaussian with the standard
+    /// transformer init scale `1/√d_model`. Used by the VLM / grounding
+    /// modules that need non-trivial (input-sensitive) attention.
+    #[must_use]
+    pub fn random(cfg: &CrossAttnConfig, rng: &mut LcgRng) -> Self {
+        let sz = cfg.d_model * cfg.d_model;
+        let scale = 1.0_f32 / (cfg.d_model as f32).sqrt();
+        let gen_mat = |rng: &mut LcgRng| {
+            let mut v = vec![0.0_f32; sz];
+            rng.fill_normal(&mut v);
+            for x in v.iter_mut() {
+                *x *= scale;
+            }
+            v
+        };
+        Self {
+            w_q: gen_mat(rng),
+            w_k: gen_mat(rng),
+            w_v: gen_mat(rng),
+            w_o: gen_mat(rng),
         }
     }
 }
@@ -304,7 +328,7 @@ mod tests {
 
     #[test]
     fn cross_attn_config_new_ok() {
-        let cfg = CrossAttnConfig::new(4, 32, 0.1).unwrap();
+        let cfg = CrossAttnConfig::new(4, 32, 0.1).expect("new should succeed");
         assert_eq!(cfg.d_k, 8);
         assert_eq!(cfg.d_v, 8);
     }
@@ -328,7 +352,9 @@ mod tests {
         let key = vec![0.3_f32; kv_len * d];
         let value = vec![0.2_f32; kv_len * d];
 
-        let out = attn.forward(&query, &key, &value, q_len, kv_len).unwrap();
+        let out = attn
+            .forward(&query, &key, &value, q_len, kv_len)
+            .expect("forward should succeed");
         assert_eq!(out.len(), q_len * d);
     }
 
@@ -353,7 +379,9 @@ mod tests {
             }
         }
         // Expected output: uniform average over rows [0,1,2,3] = 1.5 * identity
-        let out = attn.forward(&query, &key, &value, q_len, kv_len).unwrap();
+        let out = attn
+            .forward(&query, &key, &value, q_len, kv_len)
+            .expect("forward should succeed");
         // With identity output projection the output equals the attention-weighted V
         // Through the output projection (identity), each dim should be the average value.
         assert_eq!(out.len(), q_len * d);
@@ -401,7 +429,7 @@ mod tests {
         // A = [[1,0],[0,1]] × W = [[2,3],[4,5]] → [[2,3],[4,5]]
         let a = vec![1.0_f32, 0.0, 0.0, 1.0];
         let w = vec![2.0_f32, 3.0, 4.0, 5.0];
-        let out = matmul_seq(&a, &w, 2, 2, 2).unwrap();
+        let out = matmul_seq(&a, &w, 2, 2, 2).expect("matmul_seq should succeed");
         assert!((out[0] - 2.0).abs() < 1e-6);
         assert!((out[1] - 3.0).abs() < 1e-6);
         assert!((out[2] - 4.0).abs() < 1e-6);
@@ -410,7 +438,7 @@ mod tests {
 
     #[test]
     fn cross_attn_output_finite() {
-        let cfg = CrossAttnConfig::new(2, 8, 0.0).unwrap();
+        let cfg = CrossAttnConfig::new(2, 8, 0.0).expect("new should succeed");
         let d = cfg.d_model;
         let mut weights = CrossAttnWeights::zeros(&cfg);
         // Small random-ish values
@@ -429,7 +457,9 @@ mod tests {
         let attn = CrossAttention::with_weights(cfg, weights);
         let q = vec![0.3_f32; 4 * d];
         let kv = vec![0.2_f32; 6 * d];
-        let out = attn.forward(&q, &kv, &kv, 4, 6).unwrap();
+        let out = attn
+            .forward(&q, &kv, &kv, 4, 6)
+            .expect("forward should succeed");
         assert_eq!(out.len(), 4 * d);
         assert!(out.iter().all(|v| v.is_finite()));
     }

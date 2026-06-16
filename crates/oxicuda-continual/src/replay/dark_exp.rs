@@ -194,7 +194,8 @@ mod tests {
         let current = vec![1.0_f32, 0.5, -0.5];
         let stored = vec![0.8_f32, 0.6, -0.3];
         let cfg = DerConfig::default();
-        let loss = der_loss(&current, &stored, 0, 3, &cfg).unwrap();
+        let loss = der_loss(&current, &stored, 0, 3, &cfg)
+            .expect("DER loss should compute with valid logits");
         assert!(loss.is_finite(), "DER loss should be finite, got {loss}");
         assert!(loss >= 0.0, "DER loss should be non-negative");
     }
@@ -208,8 +209,10 @@ mod tests {
             alpha: 1.0,
             beta: 0.0, // only MSE term
         };
-        let loss_close = der_loss(&close, &stored, 0, 3, &cfg).unwrap();
-        let loss_far = der_loss(&far, &stored, 0, 3, &cfg).unwrap();
+        let loss_close = der_loss(&close, &stored, 0, 3, &cfg)
+            .expect("DER loss should compute with valid logits");
+        let loss_far =
+            der_loss(&far, &stored, 0, 3, &cfg).expect("DER loss should compute with valid logits");
         assert!(
             loss_close < loss_far,
             "MSE loss should decrease when logits approach stored (close={loss_close}, far={loss_far})"
@@ -223,7 +226,8 @@ mod tests {
             alpha: 1.0,
             beta: 0.0,
         };
-        let loss = der_loss(&logits, &logits, 0, 3, &cfg).unwrap();
+        let loss = der_loss(&logits, &logits, 0, 3, &cfg)
+            .expect("DER loss should compute with valid logits");
         // MSE = 0, so loss = alpha * 0 + beta * CE = 0
         assert!(loss.abs() < 1e-6, "MSE should be 0 for identical logits");
     }
@@ -231,7 +235,7 @@ mod tests {
     #[test]
     fn der_add_reservoir_bounded() {
         let mut rng = LcgRng::new(42);
-        let mut buf = DerBuffer::new(10).unwrap();
+        let mut buf = DerBuffer::new(10).expect("DER buffer should initialize with valid capacity");
         for i in 0..50_usize {
             der_add(
                 &mut buf,

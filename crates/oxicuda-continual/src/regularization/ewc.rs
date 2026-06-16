@@ -187,7 +187,8 @@ mod tests {
         let mut reg = EwcRegularizer::new();
         add_task(&mut reg, params.clone(), fisher);
         let cfg = EwcConfig::default();
-        let loss = ewc_loss(&params, &reg, &cfg).unwrap();
+        let loss = ewc_loss(&params, &reg, &cfg)
+            .expect("EWC loss should compute at anchor with valid params and reg");
         assert!(
             loss.abs() < 1e-6,
             "EWC loss should be 0 at anchor, got {loss}"
@@ -204,7 +205,8 @@ mod tests {
         add_task(&mut reg, anchor, fisher);
         let perturbed = vec![2.0_f32, 3.0, 4.0, 5.0];
         let cfg = EwcConfig::default();
-        let loss = ewc_loss(&perturbed, &reg, &cfg).unwrap();
+        let loss = ewc_loss(&perturbed, &reg, &cfg)
+            .expect("EWC loss should compute with valid params and reg");
         assert!(loss > 0.0, "EWC loss should be > 0 after perturbation");
     }
 
@@ -225,8 +227,8 @@ mod tests {
             lambda: 2.0,
             n_tasks: 5,
         };
-        let l1 = ewc_loss(&params, &reg, &cfg1).unwrap();
-        let l2 = ewc_loss(&params, &reg, &cfg2).unwrap();
+        let l1 = ewc_loss(&params, &reg, &cfg1).expect("EWC loss should compute with lambda=1.0");
+        let l2 = ewc_loss(&params, &reg, &cfg2).expect("EWC loss should compute with lambda=2.0");
         assert!(
             (l2 - 2.0 * l1).abs() < 1e-5,
             "EWC loss should scale linearly with lambda"
@@ -237,7 +239,8 @@ mod tests {
     fn fisher_entries_non_negative() {
         let grads = vec![1.0_f32, -2.0, 0.5, -0.5, 3.0, -1.5, 0.0, 0.0];
         let n_samples = 2;
-        let fisher = compute_fisher_empirical(&grads, n_samples).unwrap();
+        let fisher = compute_fisher_empirical(&grads, n_samples)
+            .expect("Fisher matrix should compute from valid gradients");
         for &f in &fisher.params {
             assert!(f >= 0.0, "Fisher entry must be non-negative, got {f}");
         }
@@ -247,7 +250,8 @@ mod tests {
     fn fisher_empirical_known_values() {
         // Single sample: F_i = g_i^2
         let grads = vec![2.0_f32, 3.0];
-        let fisher = compute_fisher_empirical(&grads, 1).unwrap();
+        let fisher = compute_fisher_empirical(&grads, 1)
+            .expect("Fisher matrix should compute from single-sample gradients");
         assert!((fisher.params[0] - 4.0).abs() < 1e-6);
         assert!((fisher.params[1] - 9.0).abs() < 1e-6);
     }
@@ -256,7 +260,8 @@ mod tests {
     fn fisher_empirical_two_samples_averages() {
         // F_i = (g1^2 + g2^2) / 2
         let grads = vec![2.0_f32, 0.0, 0.0, 4.0];
-        let fisher = compute_fisher_empirical(&grads, 2).unwrap();
+        let fisher = compute_fisher_empirical(&grads, 2)
+            .expect("Fisher matrix should compute from two-sample gradients and average correctly");
         // param 0: (4 + 0) / 2 = 2.0
         // param 1: (0 + 16) / 2 = 8.0
         assert!((fisher.params[0] - 2.0).abs() < 1e-6);
@@ -282,7 +287,8 @@ mod tests {
             lambda: 1.0,
             n_tasks: 10,
         };
-        let loss = ewc_loss(&params, &reg, &cfg).unwrap();
+        let loss = ewc_loss(&params, &reg, &cfg)
+            .expect("EWC loss should compute with two registered tasks");
         // Task1: 0.5*1.0*(0.5-0)^2 * 4 = 0.5
         // Task2: 0.5*1.0*(0.5-1)^2 * 4 = 0.5
         // Total ≈ 1.0
@@ -294,7 +300,8 @@ mod tests {
         let reg = EwcRegularizer::new();
         let params = vec![1.0_f32, 2.0, 3.0];
         let cfg = EwcConfig::default();
-        let loss = ewc_loss(&params, &reg, &cfg).unwrap();
+        let loss = ewc_loss(&params, &reg, &cfg)
+            .expect("EWC loss should compute with empty regularizer and return zero");
         assert_eq!(loss, 0.0);
     }
 

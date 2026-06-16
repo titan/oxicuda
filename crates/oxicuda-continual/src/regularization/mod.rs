@@ -4,8 +4,11 @@
 //! terms to the loss that penalize changes to important parameters.
 
 pub mod clear_replay;
+pub mod clser;
+pub mod dualprompt;
 pub mod ewc;
 pub mod gradient_compression;
+pub mod l2p;
 pub mod lwf;
 pub mod mas;
 pub mod meta_learning;
@@ -42,3 +45,12 @@ pub use gradient_compression::{
     GradCompConfig, GradCompState, GradMemory, grad_comp_fit_task, grad_comp_n_memories,
     grad_comp_new, grad_comp_predict,
 };
+
+// ─── L2P (Learning to Prompt) re-exports ─────────────────────────────────────
+pub use l2p::{ContRng, L2p, L2pConfig};
+
+// ─── CLS-ER re-exports ───────────────────────────────────────────────────────
+pub use clser::{ClserConfig, ClserState, clser_consistency_grad, clser_consistency_loss};
+
+// ─── DualPrompt re-exports ───────────────────────────────────────────────────
+pub use dualprompt::{DualPrompt, DualPromptConfig};

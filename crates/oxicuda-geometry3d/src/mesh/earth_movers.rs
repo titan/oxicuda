@@ -165,7 +165,8 @@ mod tests {
     fn emd_self_near_zero() {
         let pts: Vec<f32> = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0];
         let cfg = default_cfg();
-        let d = earth_movers_distance(&pts, 3, &pts, 3, &cfg).unwrap();
+        let d = earth_movers_distance(&pts, 3, &pts, 3, &cfg)
+            .expect("earth_movers_distance should succeed");
         // With entropy regularization, self-distance should be small but may not be exactly 0
         assert!(
             d >= 0.0 && d.is_finite(),
@@ -178,7 +179,8 @@ mod tests {
         let a: Vec<f32> = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         let b: Vec<f32> = vec![0.5, 0.0, 0.0, 2.0, 0.0, 0.0];
         let cfg = default_cfg();
-        let d = earth_movers_distance(&a, 2, &b, 2, &cfg).unwrap();
+        let d = earth_movers_distance(&a, 2, &b, 2, &cfg)
+            .expect("earth_movers_distance should succeed");
         assert!(d >= 0.0);
     }
 
@@ -202,8 +204,10 @@ mod tests {
         let b_near: Vec<f32> = vec![0.1, 0.0, 0.0];
         let b_far: Vec<f32> = vec![5.0, 0.0, 0.0];
         let cfg = default_cfg();
-        let d_near = earth_movers_distance(&a, 1, &b_near, 1, &cfg).unwrap();
-        let d_far = earth_movers_distance(&a, 1, &b_far, 1, &cfg).unwrap();
+        let d_near = earth_movers_distance(&a, 1, &b_near, 1, &cfg)
+            .expect("earth_movers_distance should succeed");
+        let d_far = earth_movers_distance(&a, 1, &b_far, 1, &cfg)
+            .expect("earth_movers_distance should succeed");
         assert!(d_far > d_near, "EMD should increase with separation");
     }
 }

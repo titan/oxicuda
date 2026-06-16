@@ -277,15 +277,15 @@ mod tests {
                 ep: 1,
             },
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     #[test]
     fn assign_to_least_loaded() {
         let h = handle_world(4);
-        let mut part = CachePartition::new(h, &[10, 20, 5, 15], 0.2).unwrap();
+        let mut part = CachePartition::new(h, &[10, 20, 5, 15], 0.2).expect("new should succeed");
         // Least loaded is rank 1 (most free blocks)
-        let r = part.assign(42, 3).unwrap();
+        let r = part.assign(42, 3).expect("assign should succeed");
         assert_eq!(r, 1);
         assert_eq!(part.stats()[1].free_blocks, 17);
     }
@@ -293,26 +293,26 @@ mod tests {
     #[test]
     fn release_returns_blocks() {
         let h = handle_world(2);
-        let mut part = CachePartition::new(h, &[10, 10], 0.2).unwrap();
-        part.assign(1, 4).unwrap();
-        part.release(1).unwrap();
+        let mut part = CachePartition::new(h, &[10, 10], 0.2).expect("new should succeed");
+        part.assign(1, 4).expect("assign should succeed");
+        part.release(1).expect("release should succeed");
         assert_eq!(part.stats()[0].free_blocks, 10);
     }
 
     #[test]
     fn grow_allocates_extra_blocks() {
         let h = handle_world(2);
-        let mut part = CachePartition::new(h, &[20, 20], 0.2).unwrap();
-        part.assign(99, 5).unwrap();
-        part.grow(99, 3).unwrap();
-        let own = part.ownership(99).unwrap();
+        let mut part = CachePartition::new(h, &[20, 20], 0.2).expect("new should succeed");
+        part.assign(99, 5).expect("assign should succeed");
+        part.grow(99, 3).expect("grow should succeed");
+        let own = part.ownership(99).expect("ownership should succeed");
         assert_eq!(own.n_blocks, 8);
     }
 
     #[test]
     fn pool_exhausted_error() {
         let h = handle_world(2);
-        let mut part = CachePartition::new(h, &[3, 3], 0.2).unwrap();
+        let mut part = CachePartition::new(h, &[3, 3], 0.2).expect("new should succeed");
         let err = part.assign(1, 5).unwrap_err();
         assert!(matches!(
             err,
@@ -324,8 +324,8 @@ mod tests {
     fn rebalance_suggests_migration() {
         let h = handle_world(2);
         // Rank 0: 10 total, 1 free (90% utilization); rank 1: 10 total, 9 free
-        let mut part = CachePartition::new(h, &[10, 10], 0.1).unwrap();
-        part.assign(1, 9).unwrap(); // → rank 1 (most free)
+        let mut part = CachePartition::new(h, &[10, 10], 0.1).expect("new should succeed");
+        part.assign(1, 9).expect("assign should succeed"); // → rank 1 (most free)
         // Now manually skew: assign small seq to same rank with low threshold
         // The suggestion should migrate seq 1 from rank 1 to rank 0... wait,
         // rank 1 has 1 free, rank 0 has 10 free → from=rank1 to=rank0
@@ -339,12 +339,21 @@ mod tests {
     #[test]
     fn apply_migration_updates_ownership() {
         let h = handle_world(2);
-        let mut part = CachePartition::new(h, &[10, 10], 0.1).unwrap();
-        part.assign(77, 4).unwrap(); // → rank 1 (or 0, both equal, rank 1 is first max)
+        let mut part = CachePartition::new(h, &[10, 10], 0.1).expect("new should succeed");
+        part.assign(77, 4).expect("assign should succeed"); // → rank 1 (or 0, both equal, rank 1 is first max)
         // Determine where it went
-        let owner = part.ownership(77).unwrap().owner_rank;
+        let owner = part
+            .ownership(77)
+            .expect("ownership should succeed")
+            .owner_rank;
         let other = 1 - owner;
-        part.apply_migration(77, owner, other).unwrap();
-        assert_eq!(part.ownership(77).unwrap().owner_rank, other);
+        part.apply_migration(77, owner, other)
+            .expect("apply_migration should succeed");
+        assert_eq!(
+            part.ownership(77)
+                .expect("ownership should succeed")
+                .owner_rank,
+            other
+        );
     }
 }

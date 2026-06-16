@@ -6,9 +6,9 @@ Pure Rust Spiking Neural Network primitives covering classical neuron models, su
 
 ## Implementation Status
 
-**Actual: 6,644 SLoC (42 files)**
+**Actual: 17,606 SLoC (74 files)**
 
-Current implementation covers the classical spiking ML stack: LIF / IF / Izhikevich / AdEx / Poisson neurons; five surrogate-gradient families; BPTT / STBP / SLAYER training; pair-STDP, triplet-STDP, reward-modulated STDP plasticity; ANN→SNN rate conversion with threshold balancing; rate / TTFS / phase / Poisson input encodings; spiking linear / conv / pool / recurrent layers; Liquid State Machine reservoir; and analytical spike-train metrics (firing rate, ISI, CV, van Rossum, Victor-Purpura, sync index).
+Current implementation covers the classical spiking ML stack: LIF / IF / Izhikevich / AdEx / Poisson neurons; five surrogate-gradient families; BPTT / STBP / SLAYER training; pair-STDP, triplet-STDP, reward-modulated STDP plasticity; ANN→SNN rate conversion with threshold balancing; rate / TTFS / phase / Poisson input encodings; spiking linear / conv / pool / recurrent layers; Liquid State Machine reservoir; and analytical spike-train metrics (firing rate, ISI, CV, van Rossum, Victor-Purpura, sync index, neuronal-avalanche criticality, entropy / mutual information, population-vector decoding, spike-triggered average / covariance).
 
 ### Completed [x]
 
@@ -17,7 +17,7 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 - [x] `error.rs` — `SnnError` enum + `SnnResult<T>` alias
 - [x] `handle.rs` — `SmVersion`, `LcgRng` (MMIX 64-bit + Box-Muller), `SnnHandle`
 - [x] `ptx_kernels.rs` — 7 GPU kernels × 6 SM versions (75 / 80 / 86 / 89 / 90 / 100)
-- [x] `e2e_tests.rs` — 8 cross-module integration tests
+- [x] `e2e_tests.rs` — 11 cross-module integration tests
 
 #### Neuron Models (neuron/)
 - [x] `neuron/lif.rs` — `LifConfig {tau_m, v_th, v_rest, dt, reset:ResetMode}`, `LifState {v}`, `beta() = exp(−dt/τ_m)`, `lif_step` with Hard / Soft reset
@@ -64,6 +64,9 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 
 #### Analytical Metrics (metrics/)
 - [x] `metrics/metrics.rs` — `firing_rate`, `isi`, `cv_isi`, `van_rossum_distance` (exp-filter L²), `victor_purpura_distance` (DP recurrence), `sync_index` (peak normalised cross-correlation)
+- [x] `metrics/avalanche.rs` — `detect_avalanches` (Beggs & Plenz 2003 coarse-grained population raster), `branching_parameter` / `branching_parameter_global`, `powerlaw_mle_exponent` (discrete Clauset-Shalizi-Newman MLE)
+- [x] `metrics/information.rs` — `spike_train_entropy`, `mutual_information` (word-binned joint histogram, `MiCorrection::{None, MillerMadow}`)
+- [x] `metrics/decoding.rs` — `population_vector` (Georgopoulos vector sum), `cosine_tuning_rate`, `spike_triggered_average` (window-major), `spike_triggered_covariance` (sample covariance)
 
 #### GPU PTX Kernels
 - [x] `lif_step_ptx` — LIF discrete-time step with Hard / Soft reset
@@ -86,16 +89,16 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 - [x] Adaptive-threshold LIF (ALIF) with learnable adaptive threshold (`neuron/alif.rs` -- Bellec et al. 2018)
 - [x] Heterogeneous LIF (per-neuron `tau_m` / `v_th`) for population diversity (`neuron/het_lif.rs`)
 - [x] Conductance-based synapses (CUBA / COBA variants)
-- [ ] Multi-compartment neuron models (Hodgkin-Huxley, two-compartment Pinsky-Rinzel)
-- [ ] Backpropagation Through Spike-Time (DECOLLE, e-prop) for online learning
+- [x] Multi-compartment neuron models (Hodgkin-Huxley, two-compartment Pinsky-Rinzel) (`neuron/hodgkin_huxley.rs` -- full HH with RK4 voltage integration + Pinsky-Rinzel 1994 CA3 soma/dendrite model: `hh_step`/`hh_run`/`pr_step`)
+- [x] Backpropagation Through Spike-Time (DECOLLE, e-prop) for online learning (`training/eprop.rs` -- Bellec et al. 2020 e-prop eligibility traces + Kaiser et al. 2020 DECOLLE local readout)
 - [ ] Learnable surrogate gradients (parametric `α(t)`)
 - [ ] Spatio-temporal Backpropagation with Random Feedback Alignment
-- [ ] STDP-based homeostatic plasticity (BCM, Oja, intrinsic plasticity)
+- [~] STDP-based homeostatic plasticity (BCM, Oja, intrinsic plasticity) (`plasticity/homeostatic.rs` -- BCM sliding-threshold + Oja Hebbian-PCA done; intrinsic plasticity still pending)
 - [ ] Reward-modulated triplet STDP with eligibility kernels
 - [ ] Local learning rules with three-factor neuromodulation
 - [ ] ANN→SNN conversion with bias absorption and BatchNorm folding
 - [ ] Quantisation-aware SNN training (INT8 / FP8 weight + spike)
-- [ ] Population coding for output (rate-decode + winner-take-all)
+- [x] Population coding for output (rate-decode + winner-take-all)
 
 #### P1 — Spiking Layer Coverage
 - [ ] Spiking transposed convolution (deconv) for spike-based generative models
@@ -118,17 +121,20 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 
 #### P2 — Reservoir / LSM
 - [x] Echo State Network (ESN) with leaky integrator units
+- [x] Dendritic computation model (`neuron/dendritic.rs`) — Poirazi 2003 Neuron: multi-compartment nonlinear dendritic integration with sigmoid dendritic sub-unit followed by somatic integration; `DendriticNeuron`
+- [ ] Eligibility trace consolidation (`training/eligibility_consolidation.rs`) — Zenke 2021: three-factor eligibility-trace synaptic tags + neuromodulatory consolidation signal for spike-timing-dependent plasticity with delay; `EligibilityConsolidation`
+- [x] Temporal contrast encoding (`encoder/temporal_contrast.rs`) — Brandli 2014: event-camera-inspired temporal-contrast spike encoder with threshold-crossing hysteresis for asynchronous frame encoding; `TemporalContrastEncoder`
 - [ ] Adaptive spectral-radius scheduling during training
 - [ ] Multi-reservoir hierarchical LSM
 - [ ] Online ridge-regression readout training
 - [ ] Force-learning readout (FORCE-trained LSM)
 
 #### P2 — Metrics and Analysis
-- [ ] Spike-triggered average / covariance analysis
-- [ ] Population vector decoding
+- [x] Spike-triggered average / covariance analysis (`metrics/decoding.rs` -- STA window-major + STC sample covariance, de Boer & Kuyper 1968 / Schwartz et al. 2006)
+- [x] Population vector decoding (`metrics/decoding.rs` -- Georgopoulos et al. 1986 vector sum + cosine tuning curve)
 - [ ] Time-resolved firing-rate estimation via Kernel Density
-- [ ] Mutual information between spike trains
-- [ ] Avalanche statistics (criticality, branching parameter)
+- [x] Mutual information between spike trains (`metrics/information.rs` -- word-binned joint histogram MI with optional Miller-Madow correction)
+- [x] Avalanche statistics (criticality, branching parameter) (`metrics/avalanche.rs` -- Beggs & Plenz 2003 detection, per/global branching parameter, discrete CSN power-law MLE)
 
 ## Dependencies
 
@@ -142,7 +148,7 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 
 ## Quality Status
 
-- Tests: 144 passing (unit + 8 e2e integration tests in `e2e_tests.rs`)
+- Tests: 577 passing (unit + 11 e2e integration tests in `e2e_tests.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches
@@ -217,7 +223,7 @@ Spiking-neural-network kernels exhibit two regimes: dense (every neuron updated 
 - [ ] Multi-time-constant LIF for temporal multiplexing
 
 ### Coverage Gaps vs Literature
-- [ ] Brette and Gerstner LIF variations (alpha-function synapses, refractory periods)
+- [x] Brette and Gerstner LIF variations (alpha-function synapses, refractory periods)
 - [ ] Spike-Timing-Dependent Long-Term Potentiation / Depression with metaplasticity
 - [ ] Spike-Timing-Dependent Heterosynaptic Plasticity
 - [ ] STDP-driven self-organising maps (Kohonen-style)

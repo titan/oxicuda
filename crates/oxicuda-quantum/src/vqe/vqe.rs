@@ -86,7 +86,8 @@ mod tests {
         ham.add_term(1.0, vec![PauliOp::Z, PauliOp::Z]);
         let mut rng = LcgRng::new(42);
         let opt = VqeOptimizer::new(ans, ham, &mut rng);
-        let e = opt.energy(&opt.params.clone()).unwrap();
+        let e = opt.energy(&opt.params.clone())
+            .expect("energy evaluation on a freshly constructed optimizer with valid Hamiltonian cannot fail");
         assert!(e.is_finite(), "energy={e}");
     }
 }

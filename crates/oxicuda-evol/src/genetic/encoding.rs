@@ -23,7 +23,7 @@ use crate::{EvolError, EvolResult, handle::LcgRng};
 /// # Example
 /// ```
 /// use oxicuda_evol::GrayEncoder;
-/// let enc = GrayEncoder::new(8).unwrap();
+/// let enc = GrayEncoder::new(8).expect("new should succeed");
 /// let gray = enc.encode(42);
 /// assert_eq!(enc.decode(&gray), 42);
 /// ```
@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn test_gray_encoder_encode_decode_roundtrip_8bit() {
-        let enc = GrayEncoder::new(8).unwrap();
+        let enc = GrayEncoder::new(8).expect("new should succeed");
         for v in 0u64..=255 {
             let gray = enc.encode(v);
             assert_eq!(gray.len(), 8);
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_gray_encoder_adjacent_values_differ_by_one_bit() {
-        let enc = GrayEncoder::new(8).unwrap();
+        let enc = GrayEncoder::new(8).expect("new should succeed");
         for v in 0u64..255 {
             let g1 = enc.encode(v);
             let g2 = enc.encode(v + 1);
@@ -514,25 +514,29 @@ mod tests {
 
     #[test]
     fn test_gray_encoder_encode_zero_is_all_false() {
-        let enc = GrayEncoder::new(4).unwrap();
+        let enc = GrayEncoder::new(4).expect("new should succeed");
         let gray = enc.encode(0);
         assert!(gray.iter().all(|&b| !b));
     }
 
     #[test]
     fn test_gray_encoder_to_float_lb_ub_range() {
-        let enc = GrayEncoder::new(8).unwrap();
+        let enc = GrayEncoder::new(8).expect("new should succeed");
         let gray_min = enc.encode(0);
         let gray_max = enc.encode(255);
-        let f_min = enc.to_float(&gray_min, -1.0, 1.0).unwrap();
-        let f_max = enc.to_float(&gray_max, -1.0, 1.0).unwrap();
+        let f_min = enc
+            .to_float(&gray_min, -1.0, 1.0)
+            .expect("to_float should succeed");
+        let f_max = enc
+            .to_float(&gray_max, -1.0, 1.0)
+            .expect("to_float should succeed");
         assert!((f_min - (-1.0)).abs() < 1e-9);
         assert!((f_max - 1.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_gray_encoder_to_float_invalid_bounds_errors() {
-        let enc = GrayEncoder::new(4).unwrap();
+        let enc = GrayEncoder::new(4).expect("new should succeed");
         let gray = enc.encode(5);
         assert!(enc.to_float(&gray, 1.0, 1.0).is_err());
         assert!(enc.to_float(&gray, 2.0, 1.0).is_err());
@@ -541,7 +545,7 @@ mod tests {
     #[test]
     fn test_gray_encoder_mask_overflow() {
         // Encoding a value larger than max should mask to n_bits.
-        let enc = GrayEncoder::new(4).unwrap();
+        let enc = GrayEncoder::new(4).expect("new should succeed");
         // 16 masked to 4 bits == 0.
         let gray = enc.encode(16);
         assert_eq!(enc.decode(&gray), 0);
@@ -555,7 +559,7 @@ mod tests {
         let pa: Vec<usize> = (0..8).collect();
         let pb: Vec<usize> = vec![3, 7, 2, 1, 4, 0, 5, 6];
         for _ in 0..20 {
-            let child = pmx_crossover(&pa, &pb, &mut rng).unwrap();
+            let child = pmx_crossover(&pa, &pb, &mut rng).expect("pmx_crossover should succeed");
             assert!(is_valid_permutation(&child), "PMX child invalid: {child:?}");
         }
     }
@@ -583,7 +587,7 @@ mod tests {
         let pa: Vec<usize> = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let pb: Vec<usize> = vec![7, 6, 5, 4, 3, 2, 1, 0];
         for _ in 0..20 {
-            let child = ox_crossover(&pa, &pb, &mut rng).unwrap();
+            let child = ox_crossover(&pa, &pb, &mut rng).expect("ox_crossover should succeed");
             assert!(is_valid_permutation(&child), "OX child invalid: {child:?}");
         }
     }
@@ -594,7 +598,7 @@ mod tests {
         let mut rng = LcgRng::new(7);
         let pa: Vec<usize> = vec![0, 1, 2, 3, 4, 5, 6];
         let pb: Vec<usize> = vec![6, 5, 4, 3, 2, 1, 0];
-        let child = ox_crossover(&pa, &pb, &mut rng).unwrap();
+        let child = ox_crossover(&pa, &pb, &mut rng).expect("ox_crossover should succeed");
         assert!(is_valid_permutation(&child));
     }
 
@@ -612,7 +616,7 @@ mod tests {
     fn test_cx_crossover_produces_valid_permutation() {
         let pa: Vec<usize> = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let pb: Vec<usize> = vec![3, 7, 2, 1, 4, 0, 5, 6];
-        let child = cx_crossover(&pa, &pb).unwrap();
+        let child = cx_crossover(&pa, &pb).expect("cx_crossover should succeed");
         assert!(is_valid_permutation(&child), "CX child invalid: {child:?}");
     }
 
@@ -621,7 +625,7 @@ mod tests {
         // Each gene in child must come from parent_a or parent_b at the same position.
         let pa: Vec<usize> = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let pb: Vec<usize> = vec![4, 5, 6, 7, 0, 1, 2, 3];
-        let child = cx_crossover(&pa, &pb).unwrap();
+        let child = cx_crossover(&pa, &pb).expect("cx_crossover should succeed");
         for (i, &v) in child.iter().enumerate() {
             assert!(v == pa[i] || v == pb[i], "pos {i}: {v} not in parents");
         }
@@ -631,7 +635,7 @@ mod tests {
     fn test_cx_crossover_identity_parents_yields_identity() {
         let pa: Vec<usize> = vec![0, 1, 2, 3, 4];
         let pb = pa.clone();
-        let child = cx_crossover(&pa, &pb).unwrap();
+        let child = cx_crossover(&pa, &pb).expect("cx_crossover should succeed");
         assert_eq!(child, pa);
     }
 
@@ -646,7 +650,7 @@ mod tests {
     fn test_cx_crossover_single_element() {
         let pa = vec![0];
         let pb = vec![0];
-        let child = cx_crossover(&pa, &pb).unwrap();
+        let child = cx_crossover(&pa, &pb).expect("cx_crossover should succeed");
         assert_eq!(child, vec![0]);
     }
 
@@ -657,7 +661,7 @@ mod tests {
         let mut rng = LcgRng::new(55);
         let mut perm: Vec<usize> = (0..10).collect();
         for _ in 0..30 {
-            inversion_mutation(&mut perm, &mut rng).unwrap();
+            inversion_mutation(&mut perm, &mut rng).expect("inversion_mutation should succeed");
             assert!(is_valid_permutation(&perm), "inversion broke permutation");
         }
     }
@@ -673,7 +677,7 @@ mod tests {
     fn test_inversion_mutation_single_element_is_noop() {
         let mut rng = LcgRng::new(1);
         let mut perm = vec![0usize];
-        inversion_mutation(&mut perm, &mut rng).unwrap();
+        inversion_mutation(&mut perm, &mut rng).expect("inversion_mutation should succeed");
         assert_eq!(perm, vec![0]);
     }
 
@@ -691,7 +695,7 @@ mod tests {
         ];
         let tour = vec![0, 2, 1, 3]; // sub-optimal
         let original_cost = tour_cost(&tour, &cost);
-        let improved = two_opt_improve(&tour, &cost).unwrap();
+        let improved = two_opt_improve(&tour, &cost).expect("two_opt_improve should succeed");
         let improved_cost = tour_cost(&improved, &cost);
         assert!(
             improved_cost <= original_cost + 1e-10,
@@ -711,7 +715,7 @@ mod tests {
         ];
         let tour = vec![0, 1, 2, 3]; // already optimal for this metric
         let original_cost = tour_cost(&tour, &cost);
-        let improved = two_opt_improve(&tour, &cost).unwrap();
+        let improved = two_opt_improve(&tour, &cost).expect("two_opt_improve should succeed");
         let improved_cost = tour_cost(&improved, &cost);
         assert!(improved_cost <= original_cost + 1e-10);
     }
@@ -739,7 +743,7 @@ mod tests {
             vec![10.0, 4.0, 8.0, 0.0],
         ];
         let tour = vec![0, 3, 1, 2];
-        let improved = two_opt_improve(&tour, &cost).unwrap();
+        let improved = two_opt_improve(&tour, &cost).expect("two_opt_improve should succeed");
         assert!(is_valid_permutation(&improved));
     }
 }

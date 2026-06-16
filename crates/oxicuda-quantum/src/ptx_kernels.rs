@@ -720,6 +720,139 @@ DONE:
     )
 }
 
+/// Radix-2 Fourier butterfly kernel with a phase twiddle (one QFT stage).
+///
+/// For each amplitude pair `(x0, x1)` selected by `qubit` (mask), computes the
+/// twiddled Cooley-Tukey butterfly
+///
+/// ```text
+/// w  = e^{iθ} = cos θ + i sin θ
+/// y0 = (x0 + w·x1) / √2
+/// y1 = (x0 − w·x1) / √2
+/// ```
+///
+/// The pair-index reconstruction prologue mirrors `statevec_apply_1q`, and the
+/// complex multiply `w·x1` reuses the cos/sin polynomial-twiddle pattern from
+/// `trotter_step`.
+pub fn qft_butterfly_ptx(sm: u32) -> String {
+    let header = ptx_header(sm);
+    let inv_sqrt2_hex = format!("0F{:08X}", (std::f32::consts::FRAC_1_SQRT_2).to_bits());
+    format!(
+        r#"{header}
+// qft_butterfly: y0 = (x0 + w*x1)/sqrt(2), y1 = (x0 - w*x1)/sqrt(2), w = exp(i*theta)
+// Parameters: amp_re *f32, amp_im *f32, mask u32, theta f32, n_pairs u32
+// inv_sqrt2 = {inv_sqrt2_hex}
+.visible .entry qft_butterfly(
+    .param .u64 param_amp_re,
+    .param .u64 param_amp_im,
+    .param .u32 param_mask,
+    .param .f32 param_theta,
+    .param .u32 param_n_pairs
+)
+{{
+    .reg .u32 %r<16>;
+    .reg .u64 %rd<8>;
+    .reg .f32 %f<32>;
+    .reg .pred %p0;
+
+    // tid = blockIdx.x * blockDim.x + threadIdx.x
+    mov.u32 %r0, %ctaid.x;
+    mov.u32 %r1, %ntid.x;
+    mov.u32 %r2, %tid.x;
+    mad.lo.u32 %r3, %r0, %r1, %r2;
+
+    // stride loop guard
+    ld.param.u32 %r4, [param_n_pairs];
+    setp.ge.u32 %p0, %r3, %r4;
+    @%p0 bra DONE;
+
+    ld.param.u32 %r5, [param_mask];
+
+    // i0 = (tid & ~mask) << 1 | (tid & (mask - 1))  (insert a 0 bit at the qubit slot)
+    not.b32 %r6, %r5;
+    and.b32 %r7, %r3, %r6;
+    shl.b32 %r7, %r7, 1;
+    sub.u32 %r8, %r5, 1;
+    and.b32 %r9, %r3, %r8;
+    or.b32 %r10, %r7, %r9;
+
+    // i1 = i0 | mask
+    or.b32 %r11, %r10, %r5;
+
+    // load base pointers
+    ld.param.u64 %rd0, [param_amp_re];
+    ld.param.u64 %rd1, [param_amp_im];
+
+    // byte offsets: i0*4, i1*4
+    mul.lo.u32 %r12, %r10, 4;
+    mul.lo.u32 %r13, %r11, 4;
+    cvt.u64.u32 %rd2, %r12;
+    cvt.u64.u32 %rd3, %r13;
+
+    add.u64 %rd4, %rd0, %rd2;   // &re[i0]
+    add.u64 %rd5, %rd0, %rd3;   // &re[i1]
+    add.u64 %rd6, %rd1, %rd2;   // &im[i0]
+    add.u64 %rd7, %rd1, %rd3;   // &im[i1]
+
+    // x0 = amp[i0], x1 = amp[i1]
+    ld.global.f32 %f0, [%rd4];   // x0.re
+    ld.global.f32 %f1, [%rd6];   // x0.im
+    ld.global.f32 %f2, [%rd5];   // x1.re
+    ld.global.f32 %f3, [%rd7];   // x1.im
+
+    // twiddle w = cos(theta) + i sin(theta) via polynomial approximation
+    ld.param.f32 %f4, [param_theta];
+    mul.f32 %f5, %f4, %f4;             // x^2
+    mul.f32 %f6, %f5, %f5;             // x^4
+    mov.f32 %f7, 0F3F800000;           // 1.0
+    mov.f32 %f8, 0F3E000000;           // 0.5
+    mov.f32 %f9, 0F3B888889;           // 1/24
+    mul.f32 %f10, %f5, %f8;
+    sub.f32 %f10, %f7, %f10;
+    mul.f32 %f11, %f6, %f9;
+    add.f32 %f10, %f10, %f11;          // cos(theta)
+    mov.f32 %f8, 0F3E2AAAAB;           // 1/6
+    mul.f32 %f11, %f5, %f4;            // x^3
+    mul.f32 %f11, %f11, %f8;
+    sub.f32 %f11, %f4, %f11;           // sin(theta)
+
+    // wx = w * x1 = (cos + i sin)(x1.re + i x1.im)
+    // re(wx) = cos*x1re - sin*x1im ; im(wx) = cos*x1im + sin*x1re
+    mul.f32 %f12, %f10, %f2;
+    mul.f32 %f13, %f11, %f3;
+    sub.f32 %f14, %f12, %f13;          // re(wx)
+    mul.f32 %f12, %f10, %f3;
+    mul.f32 %f13, %f11, %f2;
+    add.f32 %f15, %f12, %f13;          // im(wx)
+
+    // load 1/sqrt(2)
+    mov.f32 %f16, {inv_sqrt2_hex};
+
+    // y0 = (x0 + wx) / sqrt(2)
+    add.f32 %f17, %f0, %f14;
+    mul.f32 %f17, %f17, %f16;          // y0.re
+    add.f32 %f18, %f1, %f15;
+    mul.f32 %f18, %f18, %f16;          // y0.im
+
+    // y1 = (x0 - wx) / sqrt(2)
+    sub.f32 %f19, %f0, %f14;
+    mul.f32 %f19, %f19, %f16;          // y1.re
+    sub.f32 %f20, %f1, %f15;
+    mul.f32 %f20, %f20, %f16;          // y1.im
+
+    // store results
+    st.global.f32 [%rd4], %f17;
+    st.global.f32 [%rd6], %f18;
+    st.global.f32 [%rd5], %f19;
+    st.global.f32 [%rd7], %f20;
+
+DONE:
+    ret;
+}}
+"#
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,6 +867,7 @@ mod tests {
             assert!(!partial_trace_ptx(sm).is_empty(), "sm={sm}");
             assert!(!trotter_step_ptx(sm).is_empty(), "sm={sm}");
             assert!(!measure_prob_ptx(sm).is_empty(), "sm={sm}");
+            assert!(!qft_butterfly_ptx(sm).is_empty(), "sm={sm}");
         }
     }
 

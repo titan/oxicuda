@@ -93,7 +93,9 @@ mod tests {
         let mut idx = FlatIndex::new(3);
         idx.add(&[1.0, 2.0, 3.0]);
         idx.add(&[4.0, 5.0, 6.0]);
-        let res = idx.search_l2(&[1.0, 2.0, 3.0], 1).unwrap();
+        let res = idx
+            .search_l2(&[1.0, 2.0, 3.0], 1)
+            .expect("flat L2 search should succeed");
         assert_eq!(res[0].0, 0);
         assert!(res[0].1.abs() < 1e-6);
     }

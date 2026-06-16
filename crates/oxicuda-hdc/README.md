@@ -83,7 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Status
 
-**Alpha** — 5,725 SLoC, 214 passing tests. API may evolve before v1.0.
+**Alpha** — 10,405 SLoC, 407 passing tests. API may evolve before v1.0.
 
 ## License
 

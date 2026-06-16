@@ -5,6 +5,7 @@ pub mod autoencoder;
 pub mod dagmm;
 pub mod diffusion_anomaly;
 pub mod mem_ae;
+pub mod norm_flow;
 pub mod pca_anomaly;
 pub mod self_supervised;
 pub mod vae_anomaly;
@@ -15,4 +16,7 @@ pub use anogan::{
 pub use diffusion_anomaly::{
     DiffusionAnomalyConfig, DiffusionAnomalyFit, diffusion_anomaly_fit, diffusion_anomaly_predict,
     diffusion_anomaly_score,
+};
+pub use norm_flow::{
+    NormFlowConfig, NormFlowFit, norm_flow_fit, norm_flow_predict, norm_flow_score,
 };

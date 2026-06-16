@@ -34,10 +34,10 @@
 //!
 //! let mut params = vec![{
 //!     let mut p = ParamTensor::new(vec![1.0f32; 4], "w");
-//!     p.set_grad(vec![0.1f32; 4]).unwrap();
+//!     p.set_grad(vec![0.1f32; 4]).expect("set_grad should succeed");
 //!     p
 //! }];
-//! zero.step(&mut params).unwrap();
+//! zero.step(&mut params).expect("step should succeed");
 //! ```
 
 use crate::error::{TrainError, TrainResult};

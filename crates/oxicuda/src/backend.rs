@@ -48,7 +48,7 @@ mod ptx_ops;
 ///
 /// let mut backend = CudaBackend::new();
 /// assert!(!backend.is_initialized());
-/// backend.init().unwrap();
+/// backend.init().expect("init should succeed");
 /// assert!(backend.is_initialized());
 /// assert_eq!(backend.name(), "cuda");
 /// ```

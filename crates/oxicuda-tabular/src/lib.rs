@@ -2,48 +2,80 @@
 //!
 //! Tabular deep learning primitives for OxiCUDA.
 //!
-//! Covers TabNet, FT-Transformer, SAINT, NODE, sparsemax, entmax-1.5,
-//! quantile / standard / min-max normalisation, and evaluation metrics.
+//! Covers TabNet, FT-Transformer, SAINT, NODE, GBDT, Random Forest, Extra
+//! Trees, sparsemax, entmax-1.5, quantile / standard / min-max normalisation,
+//! Weight-of-Evidence encoding, and evaluation metrics.
 
 pub mod attention;
+pub mod calibration;
 pub mod conformal;
 pub mod danet;
 pub mod deepgbm;
+pub mod diffusion;
 pub mod error;
+pub mod feature_select;
+pub mod gan;
 pub mod handle;
 pub mod metrics;
+mod nn;
 pub mod preprocess;
 pub mod ptx_kernels;
 pub mod transformer;
 pub mod tree;
+pub mod vae;
 
 /// Convenience re-exports for common types and functions.
 pub mod prelude {
     pub use crate::attention::saint::{SaintConfig, SaintLayer};
     pub use crate::attention::sparsemax::{entmax15, sparsemax, sparsemax_batch};
     pub use crate::attention::tabnet::{BatchNorm1d, TabNetConfig, TabNetLayer, glu};
+    pub use crate::calibration::isotonic::IsotonicCalibrator;
+    pub use crate::conformal::aps_conformal::{ApsConformal, ApsConformalConfig};
     pub use crate::conformal::split_conformal::{
         ClassifierScore, ConformalConfig, ConformalizedQuantileRegressor, SplitConformalClassifier,
         SplitConformalRegressor, empirical_quantile,
     };
     pub use crate::danet::{AbstractLayer, Danet, DanetConfig};
     pub use crate::deepgbm::{DeepGbm, DeepGbmConfig};
+    pub use crate::diffusion::tabddpm::{TabDdpm, TabDdpmConfig};
     pub use crate::error::{TabularError, TabularResult};
+    pub use crate::feature_select::stg::{StgConfig, StgModel};
+    pub use crate::gan::ctgan::{
+        ColumnModes, ConditionalSampler, CtGan, CtganConfig, ModeNormalizer,
+    };
     pub use crate::handle::{LcgRng, SmVersion, TabularHandle};
     pub use crate::metrics::tabular_metrics::{
         ClassificationMetrics, auc_roc, binary_accuracy, compute_binary_metrics, mae,
         multiclass_accuracy, rmse,
     };
+    pub use crate::preprocess::augment::{
+        CutMixConfig, MixupConfig, cutmix_batch, cutmix_pair, mixup_batch, mixup_pair,
+    };
+    pub use crate::preprocess::concept_drift::{
+        AdwinTabular, AdwinTabularConfig, DriftStatus, KsDriftDetector, PageHinkleyTabular,
+        PageHinkleyTabularConfig,
+    };
     pub use crate::preprocess::embed::FeatureEmbedder;
     pub use crate::preprocess::normalize::{
         MinMaxNormalizer, QuantileNormalizer, StandardNormalizer,
     };
+    pub use crate::preprocess::quantile_feat::{
+        QuantileDist, QuantileTransformer, probit, std_normal_cdf,
+    };
+    pub use crate::preprocess::target_encode::{TargetEncoder, TargetEncoderConfig};
+    pub use crate::preprocess::woe::{WoeEncoder, information_value};
     pub use crate::ptx_kernels::{
         auc_roc_ptx, f32_hex, feature_tokenize_ptx, intersample_attn_ptx, node_tree_eval_ptx,
         quantile_norm_ptx, sparsemax_ptx, tabnet_step_attn_ptx,
     };
     pub use crate::transformer::ft_transformer::{FeatureTokenizer, FtConfig, FtTransformer};
+    pub use crate::transformer::ft_transformer_v2::{
+        FtTransformer as FtTransformerV2, FtTransformerConfig as FtTransformerV2Config,
+    };
+    pub use crate::tree::extra_trees::{ExtraTrees, ExtraTreesConfig};
     pub use crate::tree::node::{NodeConfig, NodeEnsemble, NodeTree};
+    pub use crate::tree::random_forest::{ForestTask, RandomForest, RandomForestConfig};
+    pub use crate::vae::tvae::{Tvae, TvaeConfig, kl_divergence_standard};
 }
 
 // ─── End-to-end tests ─────────────────────────────────────────────────────────
@@ -62,7 +94,7 @@ mod e2e_tests {
             &[100.0, 0.0, 0.0, 0.0],
         ];
         for &z in inputs {
-            let out = sparsemax(z).unwrap();
+            let out = sparsemax(z).expect("sparsemax should succeed");
             let s: f32 = out.iter().sum();
             assert!((s - 1.0).abs() < 1e-5, "sum={s} for input {z:?}");
         }
@@ -73,7 +105,7 @@ mod e2e_tests {
     fn e2e_sparsemax_sparse_for_dominated() {
         // Large first element should produce near-one-hot output
         let z = [50.0_f32, 0.0, 0.0, 0.0];
-        let out = sparsemax(&z).unwrap();
+        let out = sparsemax(&z).expect("sparsemax should succeed");
         assert!((out[0] - 1.0).abs() < 1e-5, "expected one-hot, got {out:?}");
         assert!(out[1..].iter().all(|&v| v < 1e-5));
     }
@@ -87,7 +119,7 @@ mod e2e_tests {
             &[1.0, 2.0, 3.0, 4.0],
         ];
         for &z in inputs {
-            let out = entmax15(z).unwrap();
+            let out = entmax15(z).expect("entmax15 should succeed");
             let s: f32 = out.iter().sum();
             assert!((s - 1.0).abs() < 1e-2, "sum={s} for input {z:?}");
         }
@@ -98,7 +130,7 @@ mod e2e_tests {
     fn e2e_glu_halves_dim() {
         for input_dim in [4, 8, 16, 32] {
             let x = vec![0.5_f32; input_dim];
-            let out = glu(&x).unwrap();
+            let out = glu(&x).expect("glu should succeed");
             assert_eq!(out.len(), input_dim / 2, "input_dim={input_dim}");
         }
     }
@@ -116,9 +148,9 @@ mod e2e_tests {
             gamma: 1.5,
             n_classes,
         };
-        let layer = TabNetLayer::new(cfg, &mut rng).unwrap();
+        let layer = TabNetLayer::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.3_f32; 16];
-        let (logits, _masks) = layer.forward(&x).unwrap();
+        let (logits, _masks) = layer.forward(&x).expect("forward should succeed");
         assert_eq!(logits.len(), n_classes);
     }
 
@@ -136,9 +168,9 @@ mod e2e_tests {
             gamma: 1.3,
             n_classes: 2,
         };
-        let layer = TabNetLayer::new(cfg, &mut rng).unwrap();
+        let layer = TabNetLayer::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.1_f32; n_features];
-        let (_, masks) = layer.forward(&x).unwrap();
+        let (_, masks) = layer.forward(&x).expect("forward should succeed");
         assert_eq!(masks.len(), n_steps * n_features);
         assert!(
             masks.iter().all(|&v| v >= -1e-6),
@@ -160,8 +192,10 @@ mod e2e_tests {
             dropout_rate: 0.0,
             n_classes: 3,
         };
-        let model = FtTransformer::new(cfg, &mut rng).unwrap();
-        let logits = model.forward(&[0.1, 0.2, 0.3, 0.4], &[1, 0]).unwrap();
+        let model = FtTransformer::new(cfg, &mut rng).expect("new should succeed");
+        let logits = model
+            .forward(&[0.1, 0.2, 0.3, 0.4], &[1, 0])
+            .expect("forward should succeed");
         assert_eq!(logits.len(), 3);
         assert!(
             logits.iter().all(|v| v.is_finite()),
@@ -177,7 +211,9 @@ mod e2e_tests {
         let embed_dim = 16;
         let mut rng = LcgRng::new(99);
         let tok = FeatureTokenizer::new(n_cont, &cat_sizes, embed_dim, &mut rng);
-        let tokens = tok.tokenize(&[0.1, 0.2, 0.3, 0.4], &[2, 1, 7]).unwrap();
+        let tokens = tok
+            .tokenize(&[0.1, 0.2, 0.3, 0.4], &[2, 1, 7])
+            .expect("tokenize should succeed");
         assert_eq!(
             tokens.len(),
             (n_cont + cat_sizes.len()) * embed_dim,
@@ -197,9 +233,9 @@ mod e2e_tests {
             input_dim: 16,
             output_dim,
         };
-        let ensemble = NodeEnsemble::new(cfg, &mut rng).unwrap();
+        let ensemble = NodeEnsemble::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32; 16];
-        let out = ensemble.forward(&x).unwrap();
+        let out = ensemble.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), output_dim);
     }
 
@@ -212,8 +248,8 @@ mod e2e_tests {
         let mut data = vec![0.0_f32; n_samples * n_features];
         rng.fill_normal_scaled(&mut data, 2.0);
 
-        let (norm, transformed) =
-            QuantileNormalizer::fit_transform(&data, n_samples, n_features).unwrap();
+        let (norm, transformed) = QuantileNormalizer::fit_transform(&data, n_samples, n_features)
+            .expect("fit_transform should succeed");
         assert!(
             transformed.iter().all(|&v| (0.0_f32..=1.0).contains(&v)),
             "transformed values must lie in [0, 1]"
@@ -221,7 +257,7 @@ mod e2e_tests {
 
         // New sample should also be in range when within training distribution
         let row: Vec<f32> = data[0..n_features].to_vec();
-        let t = norm.transform(&row).unwrap();
+        let t = norm.transform(&row).expect("transform should succeed");
         assert!(t.iter().all(|&v| (0.0_f32..=1.0).contains(&v)));
     }
 
@@ -230,14 +266,54 @@ mod e2e_tests {
     fn e2e_auc_roc_perfect() {
         let scores = vec![0.95_f32, 0.87, 0.80, 0.30, 0.20, 0.10];
         let labels = vec![1u32, 1, 1, 0, 0, 0];
-        let auc = auc_roc(&scores, &labels).unwrap();
+        let auc = auc_roc(&scores, &labels).expect("auc_roc should succeed");
         assert!(
             (auc - 1.0).abs() < 1e-5,
             "perfect predictor should have AUC=1, got {auc}"
         );
     }
 
-    // ── 12. All 7 × 6 PTX kernel × SM-version combinations valid ─────────────
+    // ── 12. e2e target encoder binary task ───────────────────────────────────
+    #[test]
+    fn e2e_target_encoder_binary_task() {
+        let x_cat = vec![0_usize, 0, 1, 1, 0, 1]; // 6 samples, 1 categorical feature
+        let y = vec![0.0_f32, 0.0, 1.0, 1.0, 0.0, 1.0];
+        let cfg = TargetEncoderConfig {
+            k: 0.0,
+            min_count: 1,
+        };
+        let enc = TargetEncoder::fit(&x_cat, &y, 6, 1, cfg).expect("fit should succeed");
+        let encoded = enc.transform(&x_cat, 6).expect("transform should succeed");
+        assert!((encoded[0] - 0.0_f32).abs() < 1e-5, "cat=0 → mean(y)=0");
+        assert!((encoded[2] - 1.0_f32).abs() < 1e-5, "cat=1 → mean(y)=1");
+    }
+
+    // ── 13. e2e APS conformal coverage ───────────────────────────────────────
+    #[test]
+    fn e2e_aps_conformal_coverage() {
+        // 3-class problem, 50 cal samples with near-perfect predictor
+        let n_cal = 50_usize;
+        let n_classes = 3_usize;
+        // Perfect predictor: probs[true_class] = 0.9, others = 0.05
+        let mut cal_probs = vec![0.0_f32; n_cal * n_classes];
+        let mut cal_labels = vec![0_usize; n_cal];
+        for i in 0..n_cal {
+            let label = i % n_classes;
+            cal_labels[i] = label;
+            for c in 0..n_classes {
+                cal_probs[i * n_classes + c] = if c == label { 0.9 } else { 0.05 };
+            }
+        }
+        let cfg = ApsConformalConfig { alpha: 0.1 };
+        let aps = ApsConformal::calibrate(&cal_probs, &cal_labels, n_cal, n_classes, cfg)
+            .expect("calibrate should succeed");
+        let cov = aps
+            .coverage_rate(&cal_probs, &cal_labels, n_cal, n_classes)
+            .expect("value should be present");
+        assert!(cov >= 0.89, "coverage ≥ 1-alpha on cal set, got {cov}");
+    }
+
+    // ── 14. All 7 × 6 PTX kernel × SM-version combinations valid ─────────────
     #[test]
     #[allow(clippy::type_complexity)]
     fn e2e_ptx_kernels_all_sm_versions() {

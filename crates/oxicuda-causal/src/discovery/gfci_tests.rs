@@ -54,7 +54,8 @@ fn test_gfci_chain_no_bidirected() {
         cols[1].push(y);
         cols[2].push(z);
     }
-    let pag = Gfci::discover(&cols, &GfciConfig::default()).unwrap();
+    let pag =
+        Gfci::discover(&cols, &GfciConfig::default()).expect("chain GFCI discovery should succeed");
     assert!(pag.adj_pub(0, 1));
     assert!(pag.adj_pub(1, 2));
     assert_eq!(count_bidirected(&pag), 0);
@@ -74,7 +75,8 @@ fn test_gfci_latent_confounder_keeps_edge() {
         cols[0].push(x);
         cols[1].push(y);
     }
-    let pag = Gfci::discover(&cols, &GfciConfig::default()).unwrap();
+    let pag = Gfci::discover(&cols, &GfciConfig::default())
+        .expect("latent-confounder GFCI discovery should succeed");
     assert!(pag.adj_pub(0, 1));
 }
 
@@ -89,7 +91,8 @@ fn test_gfci_empty_data_errors() {
 #[test]
 fn test_gfci_single_variable_empty_pag() {
     let one: Vec<Vec<f64>> = vec![vec![1.0, 2.0, 3.0, 4.0]];
-    let pag = Gfci::discover(&one, &GfciConfig::default()).unwrap();
+    let pag = Gfci::discover(&one, &GfciConfig::default())
+        .expect("single-variable GFCI discovery should succeed");
     assert_eq!(pag.n_vars, 1);
     assert_eq!(count_edges(&pag), 0);
 }
@@ -100,7 +103,8 @@ fn test_gfci_two_independent_vars_no_edge() {
     let n = 400_usize;
     let mut rng = LcgRng::new(91);
     let cols = gen_normal_matrix(&mut rng, n, 2);
-    let pag = Gfci::discover(&cols, &GfciConfig::default()).unwrap();
+    let pag = Gfci::discover(&cols, &GfciConfig::default())
+        .expect("two-independent-vars GFCI discovery should succeed");
     assert_eq!(count_edges(&pag), 0);
 }
 
@@ -119,8 +123,10 @@ fn test_gfci_deterministic() {
         cols[2].push(z);
     }
     let cfg = GfciConfig::default();
-    let p1 = Gfci::discover(&cols, &cfg).unwrap();
-    let p2 = Gfci::discover(&cols, &cfg).unwrap();
+    let p1 =
+        Gfci::discover(&cols, &cfg).expect("first deterministic GFCI discovery should succeed");
+    let p2 =
+        Gfci::discover(&cols, &cfg).expect("second deterministic GFCI discovery should succeed");
     for i in 0..3 {
         for j in 0..3 {
             assert_eq!(p1.adj_pub(i, j), p2.adj_pub(i, j));
@@ -147,8 +153,8 @@ fn test_gfci_idempotent_repeated_calls() {
         cols[3].push(w);
     }
     let cfg = GfciConfig::default();
-    let a = Gfci::discover(&cols, &cfg).unwrap();
-    let b = Gfci::discover(&cols, &cfg).unwrap();
+    let a = Gfci::discover(&cols, &cfg).expect("first idempotent GFCI discovery should succeed");
+    let b = Gfci::discover(&cols, &cfg).expect("second idempotent GFCI discovery should succeed");
     assert_eq!(a.n_vars, b.n_vars);
     for i in 0..a.n_vars {
         for j in 0..a.n_vars {
@@ -220,7 +226,8 @@ fn test_gfci_zero_orient_passes_succeeds() {
         max_orient_passes: 0,
         ..GfciConfig::default()
     };
-    let pag = Gfci::discover(&cols, &cfg).unwrap();
+    let pag =
+        Gfci::discover(&cols, &cfg).expect("zero-orient-passes GFCI discovery should succeed");
     assert!(pag.adj_pub(0, 1));
     assert!(pag.adj_pub(2, 1));
 }
@@ -239,7 +246,8 @@ fn test_gfci_star_graph_recovers() {
         cols[2].push(center + 0.1 * rng.next_normal() as f64);
         cols[3].push(center + 0.1 * rng.next_normal() as f64);
     }
-    let pag = Gfci::discover(&cols, &GfciConfig::default()).unwrap();
+    let pag = Gfci::discover(&cols, &GfciConfig::default())
+        .expect("star-graph GFCI discovery should succeed");
     assert!(pag.adj_pub(0, 1));
     assert!(pag.adj_pub(0, 2));
     assert!(pag.adj_pub(0, 3));
@@ -261,7 +269,8 @@ fn test_gfci_five_var_chain_majority_recovered() {
             prev = next;
         }
     }
-    let pag = Gfci::discover(&cols, &GfciConfig::default()).unwrap();
+    let pag = Gfci::discover(&cols, &GfciConfig::default())
+        .expect("five-var chain GFCI discovery should succeed");
     let mut consecutive = 0_usize;
     for j in 0..4 {
         if pag.adj_pub(j, j + 1) {
@@ -279,8 +288,8 @@ fn test_gfci_reproducible_independent_calls() {
     let mut rng = LcgRng::new(8);
     let cols = gen_normal_matrix(&mut rng, n, 4);
     let cfg = GfciConfig::default();
-    let a = Gfci::discover(&cols, &cfg).unwrap();
-    let b = Gfci::discover(&cols, &cfg).unwrap();
+    let a = Gfci::discover(&cols, &cfg).expect("first reproducible GFCI discovery should succeed");
+    let b = Gfci::discover(&cols, &cfg).expect("second reproducible GFCI discovery should succeed");
     assert_eq!(count_edges(&a), count_edges(&b));
     for i in 0..a.n_vars {
         for j in 0..a.n_vars {
@@ -324,7 +333,8 @@ fn test_gfci_alternate_bic_penalty_runs() {
         bic_penalty: 2.0,
         ..GfciConfig::default()
     };
-    let pag = Gfci::discover(&cols, &cfg).unwrap();
+    let pag =
+        Gfci::discover(&cols, &cfg).expect("alternate BIC penalty GFCI discovery should succeed");
     assert!(pag.n_vars == 3);
     // With heavier penalty the skeleton can only shrink, never grow.
     let total = count_edges(&pag);

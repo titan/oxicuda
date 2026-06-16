@@ -321,7 +321,7 @@ mod tests {
     }
 
     fn make_grid() -> PlenoxelGrid {
-        PlenoxelGrid::new(default_cfg()).unwrap()
+        PlenoxelGrid::new(default_cfg()).expect("value should be present")
     }
 
     /// Normalised coordinate of voxel index `i` along an axis with `res` voxels.
@@ -339,7 +339,10 @@ mod tests {
             [0.33, -0.5, 0.7],
             [1.0, 1.0, 1.0],
         ] {
-            assert_eq!(g.query_density(xyz).unwrap(), 0.0);
+            assert_eq!(
+                g.query_density(xyz).expect("query_density should succeed"),
+                0.0
+            );
         }
     }
 
@@ -348,7 +351,8 @@ mod tests {
         let mut g = make_grid();
         let n = 3 * g.n_sh_per_channel();
         let sh = vec![0.0_f32; n];
-        g.set_voxel(2, 1, 3, 0.75, &sh).unwrap();
+        g.set_voxel(2, 1, 3, 0.75, &sh)
+            .expect("set_voxel should succeed");
         // The exact voxel center maps to the integer grid point (2,1,3).
         let res = g.config().resolution;
         let bmin = g.config().bounds_min;
@@ -358,7 +362,9 @@ mod tests {
             voxel_coord(1, res, bmin[1], bmax[1]),
             voxel_coord(3, res, bmin[2], bmax[2]),
         ];
-        let d = g.trilinear_density(xyz).unwrap();
+        let d = g
+            .trilinear_density(xyz)
+            .expect("trilinear_density should succeed");
         assert!((d - 0.75).abs() < 1e-4, "got {d}");
     }
 
@@ -366,8 +372,14 @@ mod tests {
     fn voxel_index_formula() {
         let g = make_grid();
         let res = g.config().resolution;
-        assert_eq!(g.voxel_index(1, 2, 3).unwrap(), (res + 2) * res + 3);
-        assert_eq!(g.voxel_index(0, 0, 0).unwrap(), 0);
+        assert_eq!(
+            g.voxel_index(1, 2, 3).expect("voxel_index should succeed"),
+            (res + 2) * res + 3
+        );
+        assert_eq!(
+            g.voxel_index(0, 0, 0).expect("voxel_index should succeed"),
+            0
+        );
     }
 
     #[test]
@@ -376,8 +388,10 @@ mod tests {
         let n = 3 * g.n_sh_per_channel();
         let sh = vec![0.0_f32; n];
         // Two adjacent voxels along i with densities 1.0 and 3.0.
-        g.set_voxel(1, 1, 1, 1.0, &sh).unwrap();
-        g.set_voxel(2, 1, 1, 3.0, &sh).unwrap();
+        g.set_voxel(1, 1, 1, 1.0, &sh)
+            .expect("set_voxel should succeed");
+        g.set_voxel(2, 1, 1, 3.0, &sh)
+            .expect("set_voxel should succeed");
         let res = g.config().resolution;
         let bmin = g.config().bounds_min;
         let bmax = g.config().bounds_max;
@@ -389,14 +403,18 @@ mod tests {
             voxel_coord(1, res, bmin[1], bmax[1]),
             voxel_coord(1, res, bmin[2], bmax[2]),
         ];
-        let d = g.trilinear_density(xyz).unwrap();
+        let d = g
+            .trilinear_density(xyz)
+            .expect("trilinear_density should succeed");
         assert!((d - 2.0).abs() < 1e-4, "expected 2.0, got {d}");
     }
 
     #[test]
     fn trilinear_sh_length() {
         let g = make_grid();
-        let sh = g.trilinear_sh([0.1, 0.2, 0.3]).unwrap();
+        let sh = g
+            .trilinear_sh([0.1, 0.2, 0.3])
+            .expect("trilinear_sh should succeed");
         assert_eq!(sh.len(), 3 * g.n_sh_per_channel());
     }
 
@@ -412,11 +430,14 @@ mod tests {
         for i in 0..g.config().resolution {
             for j in 0..g.config().resolution {
                 for k in 0..g.config().resolution {
-                    g.set_voxel(i, j, k, 1.0, &sh).unwrap();
+                    g.set_voxel(i, j, k, 1.0, &sh)
+                        .expect("set_voxel should succeed");
                 }
             }
         }
-        let c = g.query_color([0.1, 0.2, 0.3], [0.0, 0.0, 1.0]).unwrap();
+        let c = g
+            .query_color([0.1, 0.2, 0.3], [0.0, 0.0, 1.0])
+            .expect("query_color should succeed");
         assert_eq!(c.len(), 3);
         for &v in &c {
             assert!((0.0..=1.0).contains(&v), "colour {v} out of [0,1]");
@@ -435,7 +456,7 @@ mod tests {
             bounds_min: [0.0, 0.0, 0.0],
             bounds_max: [1.0, 1.0, 1.0],
         };
-        let g2 = PlenoxelGrid::new(cfg2).unwrap();
+        let g2 = PlenoxelGrid::new(cfg2).expect("new should succeed");
         assert_eq!(g2.n_sh_per_channel(), 16);
     }
 
@@ -461,12 +482,17 @@ mod tests {
         let n = 3 * g.n_sh_per_channel();
         let sh = vec![0.0_f32; n];
         let last = g.config().resolution - 1;
-        g.set_voxel(last, last, last, 2.0, &sh).unwrap();
+        g.set_voxel(last, last, last, 2.0, &sh)
+            .expect("set_voxel should succeed");
         // Far beyond bounds clamps to the (last,last,last) corner voxel.
-        let far = g.trilinear_density([100.0, 100.0, 100.0]).unwrap();
+        let far = g
+            .trilinear_density([100.0, 100.0, 100.0])
+            .expect("trilinear_density should succeed");
         assert!((far - 2.0).abs() < 1e-4, "got {far}");
         // Negative extreme must not panic either.
-        let _ = g.query_density([-100.0, -100.0, -100.0]).unwrap();
+        let _ = g
+            .query_density([-100.0, -100.0, -100.0])
+            .expect("query_density should succeed");
     }
 
     #[test]
@@ -474,9 +500,14 @@ mod tests {
         let mut g = make_grid();
         let n = 3 * g.n_sh_per_channel();
         let sh = vec![0.2_f32; n];
-        g.set_voxel(1, 1, 1, 0.5, &sh).unwrap();
-        let a = g.query_color([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]).unwrap();
-        let b = g.query_color([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]).unwrap();
+        g.set_voxel(1, 1, 1, 0.5, &sh)
+            .expect("set_voxel should succeed");
+        let a = g
+            .query_color([0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+            .expect("query_color should succeed");
+        let b = g
+            .query_color([0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+            .expect("query_color should succeed");
         assert_eq!(a, b);
     }
 
@@ -492,14 +523,18 @@ mod tests {
         for i in 0..g.config().resolution {
             for j in 0..g.config().resolution {
                 for k in 0..g.config().resolution {
-                    g.set_voxel(i, j, k, 1.0, &sh).unwrap();
+                    g.set_voxel(i, j, k, 1.0, &sh)
+                        .expect("set_voxel should succeed");
                 }
             }
         }
-        let basis = ShEncoder::sh_basis(0.0, 0.0, 1.0, g.config().sh_degree).unwrap();
+        let basis = ShEncoder::sh_basis(0.0, 0.0, 1.0, g.config().sh_degree)
+            .expect("value should be present");
         let expected_pre_sigmoid = 2.0_f32 * basis[0];
         let expected = sigmoid(expected_pre_sigmoid);
-        let c = g.query_color([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]).unwrap();
+        let c = g
+            .query_color([0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+            .expect("query_color should succeed");
         assert!(
             (c[0] - expected).abs() < 1e-4,
             "got {}, want {expected}",
@@ -512,8 +547,11 @@ mod tests {
         let mut g = make_grid();
         let n = 3 * g.n_sh_per_channel();
         let sh = vec![0.0_f32; n];
-        g.set_voxel(0, 0, 0, 1.5, &sh).unwrap();
-        let d = g.query_density([-1.0, -1.0, -1.0]).unwrap();
+        g.set_voxel(0, 0, 0, 1.5, &sh)
+            .expect("set_voxel should succeed");
+        let d = g
+            .query_density([-1.0, -1.0, -1.0])
+            .expect("query_density should succeed");
         assert!((d - 1.5).abs() < 1e-4, "got {d}");
     }
 
@@ -550,11 +588,17 @@ mod tests {
         let mut g = make_grid();
         let n = 3 * g.n_sh_per_channel();
         let sh = vec![0.0_f32; n];
-        g.set_voxel(0, 0, 0, 4.0, &sh).unwrap();
-        g.set_voxel(3, 3, 3, 0.0, &sh).unwrap();
+        g.set_voxel(0, 0, 0, 4.0, &sh)
+            .expect("set_voxel should succeed");
+        g.set_voxel(3, 3, 3, 0.0, &sh)
+            .expect("set_voxel should succeed");
         // Point near the dense corner should read higher than the far corner.
-        let near_dense = g.query_density([-0.9, -0.9, -0.9]).unwrap();
-        let near_empty = g.query_density([0.9, 0.9, 0.9]).unwrap();
+        let near_dense = g
+            .query_density([-0.9, -0.9, -0.9])
+            .expect("query_density should succeed");
+        let near_empty = g
+            .query_density([0.9, 0.9, 0.9])
+            .expect("query_density should succeed");
         assert!(
             near_dense > near_empty,
             "near={near_dense} should exceed far={near_empty}"

@@ -565,7 +565,7 @@ mod tests {
         for i in 0..n {
             w[i * n + i] = 1.0;
         }
-        LinearLayer::new(w, vec![0.0_f32; n], n, n).unwrap()
+        LinearLayer::new(w, vec![0.0_f32; n], n, n).expect("new should succeed")
     }
 
     // ── relu_linear_bounds ────────────────────────────────────────────────────
@@ -622,7 +622,8 @@ mod tests {
             lower: vec![-1.0, 0.5, -2.0],
             upper: vec![1.0, 0.7, 2.0],
         };
-        let out = CrownVerifier::propagate_linear(&layer, &bounds).unwrap();
+        let out = CrownVerifier::propagate_linear(&layer, &bounds)
+            .expect("propagate_linear should succeed");
         for i in 0..3 {
             assert!(approx_eq(out.lower[i], bounds.lower[i], 1e-6));
             assert!(approx_eq(out.upper[i], bounds.upper[i], 1e-6));
@@ -632,12 +633,13 @@ mod tests {
     #[test]
     fn propagate_linear_negative_weight_swaps() {
         // y = -x: lo_y = -hi_x, hi_y = -lo_x
-        let layer = LinearLayer::new(vec![-1.0_f32], vec![0.0], 1, 1).unwrap();
+        let layer = LinearLayer::new(vec![-1.0_f32], vec![0.0], 1, 1).expect("new should succeed");
         let bounds = NeuronBound {
             lower: vec![-1.0],
             upper: vec![2.0],
         };
-        let out = CrownVerifier::propagate_linear(&layer, &bounds).unwrap();
+        let out = CrownVerifier::propagate_linear(&layer, &bounds)
+            .expect("propagate_linear should succeed");
         assert!(approx_eq(out.lower[0], -2.0, 1e-6));
         assert!(approx_eq(out.upper[0], 1.0, 1e-6));
     }
@@ -645,12 +647,13 @@ mod tests {
     #[test]
     fn propagate_linear_with_bias() {
         // y = 2*x + 1: lo = 2*(-1)+1 = -1, hi = 2*2+1 = 5
-        let layer = LinearLayer::new(vec![2.0_f32], vec![1.0], 1, 1).unwrap();
+        let layer = LinearLayer::new(vec![2.0_f32], vec![1.0], 1, 1).expect("new should succeed");
         let bounds = NeuronBound {
             lower: vec![-1.0],
             upper: vec![2.0],
         };
-        let out = CrownVerifier::propagate_linear(&layer, &bounds).unwrap();
+        let out = CrownVerifier::propagate_linear(&layer, &bounds)
+            .expect("propagate_linear should succeed");
         assert!(approx_eq(out.lower[0], -1.0, 1e-6));
         assert!(approx_eq(out.upper[0], 5.0, 1e-6));
     }
@@ -697,7 +700,8 @@ mod tests {
             eps: 0.1,
             ..Default::default()
         };
-        let bounds = CrownVerifier::crown_bound_propagation(&x0, &[layer], &cfg).unwrap();
+        let bounds = CrownVerifier::crown_bound_propagation(&x0, &[layer], &cfg)
+            .expect("crown_bound_propagation should succeed");
         assert_eq!(bounds.len(), 1);
         // Identity layer: output bounds = input bounds = [-0.1, 0.1] per dim
         for i in 0..4 {
@@ -716,7 +720,8 @@ mod tests {
             eps: 0.5,
             ..Default::default()
         };
-        let bounds = CrownVerifier::crown_bound_propagation(&x0, &[layer1, layer2], &cfg).unwrap();
+        let bounds = CrownVerifier::crown_bound_propagation(&x0, &[layer1, layer2], &cfg)
+            .expect("crown_bound_propagation should succeed");
         assert_eq!(bounds.len(), 2);
         // All bounds must satisfy lower <= upper
         for layer_bound in &bounds {
@@ -756,18 +761,18 @@ mod tests {
         // Multi-layer with positive/negative weights; verify invariant throughout
         let w1 = vec![1.0_f32, -2.0, 0.5, 1.5]; // 2×2
         let b1 = vec![0.1_f32, -0.1];
-        let layer1 = LinearLayer::new(w1, b1, 2, 2).unwrap();
+        let layer1 = LinearLayer::new(w1, b1, 2, 2).expect("new should succeed");
         let w2 = vec![-1.0_f32, 0.5, 2.0, -1.5]; // 2×2
         let b2 = vec![0.0_f32, 0.0];
-        let layer2 = LinearLayer::new(w2, b2, 2, 2).unwrap();
+        let layer2 = LinearLayer::new(w2, b2, 2, 2).expect("new should succeed");
 
         let x0 = vec![0.5_f32, -0.5];
         let cfg = CrownConfig {
             eps: 0.2,
             ..Default::default()
         };
-        let all_bounds =
-            CrownVerifier::crown_bound_propagation(&x0, &[layer1, layer2], &cfg).unwrap();
+        let all_bounds = CrownVerifier::crown_bound_propagation(&x0, &[layer1, layer2], &cfg)
+            .expect("crown_bound_propagation should succeed");
         for layer_bound in &all_bounds {
             for i in 0..layer_bound.len() {
                 assert!(
@@ -789,7 +794,7 @@ mod tests {
         // Use a "classifier" that strongly prefers class 0
         let w = vec![10.0_f32, 0.0, 0.0, 1.0]; // 2×2: out0 = 10*in0, out1 = in1
         let b = vec![0.0_f32, 0.0];
-        let layer = LinearLayer::new(w, b, 2, 2).unwrap();
+        let layer = LinearLayer::new(w, b, 2, 2).expect("new should succeed");
         let x0 = vec![1.0_f32, 0.0];
         let cfg = CrownConfig {
             eps: 0.001,
@@ -800,7 +805,8 @@ mod tests {
         // out1 bounds: [0*(1-0.001), 0*(1+0.001)] (using x0[1]=0)
         //           = [-0.001, 0.001]
         // lower[0]=9.99 > upper[1]=0.001 → robust
-        let r = CrownVerifier::certified_radius(&x0, 0, &[layer], &cfg).unwrap();
+        let r = CrownVerifier::certified_radius(&x0, 0, &[layer], &cfg)
+            .expect("certified_radius should succeed");
         assert!(approx_eq(r, cfg.eps, 1e-7));
     }
 
@@ -816,7 +822,8 @@ mod tests {
             eps: 1.0,
             ..Default::default()
         };
-        let r = CrownVerifier::certified_radius(&x0, 0, &[layer], &cfg).unwrap();
+        let r = CrownVerifier::certified_radius(&x0, 0, &[layer], &cfg)
+            .expect("certified_radius should succeed");
         assert!(approx_eq(r, 0.0, 1e-7));
     }
 
@@ -827,7 +834,7 @@ mod tests {
         let layer1 = identity_layer(4);
         let w2 = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // 2×4 → 2 classes
         let b2 = vec![0.0_f32, 0.0];
-        let layer2 = LinearLayer::new(w2, b2, 4, 2).unwrap();
+        let layer2 = LinearLayer::new(w2, b2, 4, 2).expect("new should succeed");
 
         let x0 = vec![1.0_f32, 0.5, 0.2, -0.3];
         let cfg = CrownConfig {
@@ -835,7 +842,8 @@ mod tests {
             alpha_lr: 0.1,
             eps: 0.1,
         };
-        let alpha_bound = CrownVerifier::optimize_alpha(&x0, 0, &[layer1, layer2], &cfg).unwrap();
+        let alpha_bound = CrownVerifier::optimize_alpha(&x0, 0, &[layer1, layer2], &cfg)
+            .expect("optimize_alpha should succeed");
         for &a in &alpha_bound.alpha {
             assert!((0.0..=1.0).contains(&a), "alpha={a} out of [0,1]");
         }
@@ -846,14 +854,15 @@ mod tests {
         let layer1 = identity_layer(3);
         let w2 = vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0]; // 2×3
         let b2 = vec![0.0_f32, 0.0];
-        let layer2 = LinearLayer::new(w2, b2, 3, 2).unwrap();
+        let layer2 = LinearLayer::new(w2, b2, 3, 2).expect("new should succeed");
 
         let x0 = vec![0.5_f32; 3];
         let cfg = CrownConfig {
             n_alpha_steps: 0,
             ..Default::default()
         };
-        let alpha_bound = CrownVerifier::optimize_alpha(&x0, 0, &[layer1, layer2], &cfg).unwrap();
+        let alpha_bound = CrownVerifier::optimize_alpha(&x0, 0, &[layer1, layer2], &cfg)
+            .expect("optimize_alpha should succeed");
         for &a in &alpha_bound.alpha {
             assert!(approx_eq(a, 0.5, 1e-7));
         }
@@ -900,7 +909,7 @@ mod tests {
         let layer1 = identity_layer(4);
         let w2 = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // 2×4
         let b2 = vec![0.1_f32, -0.1];
-        let layer2 = LinearLayer::new(w2, b2, 4, 2).unwrap();
+        let layer2 = LinearLayer::new(w2, b2, 4, 2).expect("new should succeed");
         let x0 = vec![0.5_f32, 0.3, 0.2, 0.1];
         let cfg = CrownConfig {
             n_alpha_steps: 5,
@@ -913,7 +922,7 @@ mod tests {
             "alpha-CROWN with 5 steps failed: {:?}",
             result
         );
-        let alpha = result.unwrap().alpha;
+        let alpha = result.expect("result should be present").alpha;
         assert_eq!(alpha.len(), 4);
         for &a in &alpha {
             assert!((0.0..=1.0).contains(&a));

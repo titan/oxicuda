@@ -628,7 +628,7 @@ mod tests {
             grid_y: 4,
             grid_z: 4,
         };
-        Fno3d::new(cfg, &mut rng).unwrap()
+        Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed")
     }
 
     #[test]
@@ -638,7 +638,9 @@ mod tests {
         let cout = m.cfg.out_channels;
         let voxels = m.cfg.grid_x * m.cfg.grid_y * m.cfg.grid_z;
         let input = vec![0.1_f32; cin * voxels];
-        let output = m.forward(&input).unwrap();
+        let output = m
+            .forward(&input)
+            .expect("Fno3d forward pass should succeed");
         assert_eq!(output.len(), cout * voxels);
     }
 
@@ -655,7 +657,8 @@ mod tests {
             grid_y: 6,
             grid_z: 4,
         };
-        let m = Fno3d::new(cfg, &mut rng).unwrap();
+        let m =
+            Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed");
         // 2*3*2 = 12 modes; 12 * 3 * 4 = 144 complex weights → 288 reals
         // Residual: 4*3 = 12 weights + 4 bias = 16
         let expected = 288 + 16;
@@ -676,8 +679,12 @@ mod tests {
             real.push((f * 0.13).sin());
             imag.push((f * 0.07).cos() * 0.5);
         }
-        let (fr, fi) = m.dft_3d(&real, &imag).unwrap();
-        let (rr, ri) = m.idft_3d(&fr, &fi).unwrap();
+        let (fr, fi) = m
+            .dft_3d(&real, &imag)
+            .expect("3D DFT should succeed for valid input");
+        let (rr, ri) = m
+            .idft_3d(&fr, &fi)
+            .expect("3D IDFT should succeed after forward DFT");
         for i in 0..total {
             assert!(
                 (rr[i] - real[i]).abs() < 1e-3,
@@ -707,7 +714,8 @@ mod tests {
             grid_y: 3,
             grid_z: 3,
         };
-        let mut m = Fno3d::new(cfg, &mut rng).unwrap();
+        let mut m =
+            Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed");
         m.zero_spectral();
         m.residual_identity();
 
@@ -717,7 +725,9 @@ mod tests {
         for i in 0..(cin * voxels) {
             input.push(((i as f32) * 0.3).sin());
         }
-        let output = m.forward(&input).unwrap();
+        let output = m
+            .forward(&input)
+            .expect("Fno3d forward pass should succeed");
         for i in 0..(cin * voxels) {
             assert!(
                 (output[i] - input[i]).abs() < 1e-5,
@@ -736,8 +746,8 @@ mod tests {
         let a = vec![0.1_f32; cin * voxels];
         let mut b = a.clone();
         b[3] += 1.0;
-        let oa = m.forward(&a).unwrap();
-        let ob = m.forward(&b).unwrap();
+        let oa = m.forward(&a).expect("Fno3d forward pass should succeed");
+        let ob = m.forward(&b).expect("Fno3d forward pass should succeed");
         let mut diff = 0.0_f32;
         for (x, y) in oa.iter().zip(ob.iter()) {
             diff += (x - y).abs();
@@ -755,8 +765,12 @@ mod tests {
         let cin = m1.cfg.in_channels;
         let voxels = m1.cfg.grid_x * m1.cfg.grid_y * m1.cfg.grid_z;
         let input: Vec<f32> = (0..(cin * voxels)).map(|i| (i as f32) * 0.01).collect();
-        let o1 = m1.forward(&input).unwrap();
-        let o2 = m2.forward(&input).unwrap();
+        let o1 = m1
+            .forward(&input)
+            .expect("Fno3d forward pass should be deterministic");
+        let o2 = m2
+            .forward(&input)
+            .expect("Fno3d forward pass should be deterministic");
         for i in 0..o1.len() {
             assert!(
                 (o1[i] - o2[i]).abs() < 1e-8,
@@ -785,7 +799,8 @@ mod tests {
             grid_y: 4,
             grid_z: 4,
         };
-        let mut m = Fno3d::new(cfg, &mut rng).unwrap();
+        let mut m =
+            Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed");
         m.zero_residual();
 
         let nx = m.cfg.grid_x;
@@ -801,7 +816,9 @@ mod tests {
                 }
             }
         }
-        let output = m.forward(&input).unwrap();
+        let output = m
+            .forward(&input)
+            .expect("Fno3d forward pass should succeed");
         for &v in &output {
             assert!(
                 v.abs() < 1e-4,
@@ -826,7 +843,8 @@ mod tests {
             grid_y: 4,
             grid_z: 4,
         };
-        let mut m = Fno3d::new(cfg, &mut rng).unwrap();
+        let mut m =
+            Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed");
         m.zero_spectral();
         m.residual_identity();
 
@@ -843,7 +861,9 @@ mod tests {
                 }
             }
         }
-        let output = m.forward(&input).unwrap();
+        let output = m
+            .forward(&input)
+            .expect("Fno3d forward pass should succeed");
         for i in 0..voxels {
             assert!(
                 (output[i] - input[i]).abs() < 1e-5,
@@ -871,14 +891,17 @@ mod tests {
             grid_y: 4,
             grid_z: 4,
         };
-        let mut m = Fno3d::new(cfg, &mut rng).unwrap();
+        let mut m =
+            Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed");
         m.spectral_identity();
         m.zero_residual();
 
         let voxels = m.cfg.grid_x * m.cfg.grid_y * m.cfg.grid_z;
         let input: Vec<f32> = (0..voxels).map(|i| 0.1_f32 + (i as f32) * 0.05).collect();
         let mean = input.iter().sum::<f32>() / (voxels as f32);
-        let output = m.forward(&input).unwrap();
+        let output = m
+            .forward(&input)
+            .expect("Fno3d forward pass should succeed");
         for (i, &v) in output.iter().enumerate() {
             assert!(
                 (v - mean).abs() < 1e-4,
@@ -976,9 +999,12 @@ mod tests {
             grid_y: 2,
             grid_z: 2,
         };
-        let m = Fno3d::new(cfg, &mut rng).unwrap();
+        let m =
+            Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed");
         let input: Vec<f32> = (0..8).map(|i| (i as f32) * 0.1).collect();
-        let output = m.forward(&input).unwrap();
+        let output = m
+            .forward(&input)
+            .expect("Fno3d forward pass should succeed");
         assert_eq!(output.len(), 8);
         assert!(output.iter().all(|v| v.is_finite()));
     }
@@ -991,7 +1017,9 @@ mod tests {
         let input: Vec<f32> = (0..(cin * voxels))
             .map(|i| ((i as f32) * 0.2).sin())
             .collect();
-        let output = m.forward(&input).unwrap();
+        let output = m
+            .forward(&input)
+            .expect("Fno3d forward pass should succeed");
         assert!(output.iter().all(|v| v.is_finite()));
     }
 
@@ -1011,7 +1039,8 @@ mod tests {
             grid_y: 4,
             grid_z: 4,
         };
-        let mut m = Fno3d::new(cfg, &mut rng).unwrap();
+        let mut m =
+            Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed");
         m.zero_residual();
 
         let voxels = m.cfg.grid_x * m.cfg.grid_y * m.cfg.grid_z;
@@ -1020,10 +1049,14 @@ mod tests {
         let sum: Vec<f32> = a.iter().zip(b.iter()).map(|(x, y)| x + y).collect();
         let scaled: Vec<f32> = a.iter().map(|x| x * 2.5).collect();
 
-        let oa = m.forward(&a).unwrap();
-        let ob = m.forward(&b).unwrap();
-        let osum = m.forward(&sum).unwrap();
-        let oscaled = m.forward(&scaled).unwrap();
+        let oa = m.forward(&a).expect("Fno3d forward pass should succeed");
+        let ob = m.forward(&b).expect("Fno3d forward pass should succeed");
+        let osum = m
+            .forward(&sum)
+            .expect("Fno3d forward on sum of inputs should succeed");
+        let oscaled = m
+            .forward(&scaled)
+            .expect("Fno3d forward on scaled input should succeed");
 
         for i in 0..voxels {
             let lhs = osum[i];
@@ -1057,7 +1090,9 @@ mod tests {
         let c = 1.5_f32;
         let real = vec![c; total];
         let imag = vec![0.0_f32; total];
-        let (fr, fi) = m.dft_3d(&real, &imag).unwrap();
+        let (fr, fi) = m
+            .dft_3d(&real, &imag)
+            .expect("3D DFT should succeed for valid input");
         let dc = c * total as f32;
         assert!((fr[0] - dc).abs() < 1e-3, "DC bin = sum, got {}", fr[0]);
         assert!(fi[0].abs() < 1e-3);
@@ -1088,10 +1123,13 @@ mod tests {
             grid_y: 4,
             grid_z: 4,
         };
-        let m = Fno3d::new(cfg, &mut rng).unwrap();
+        let m =
+            Fno3d::new(cfg, &mut rng).expect("Fno3d construction with valid params should succeed");
         let voxels = 64;
         let input = vec![0.2_f32; 3 * voxels];
-        let output = m.forward(&input).unwrap();
+        let output = m
+            .forward(&input)
+            .expect("Fno3d forward pass should succeed");
         assert_eq!(output.len(), 5 * voxels);
         assert!(output.iter().all(|v| v.is_finite()));
     }
@@ -1102,7 +1140,9 @@ mod tests {
         let total = m.cfg.grid_x * m.cfg.grid_y * m.cfg.grid_z;
         let real = vec![0.5_f32; total];
         let imag = vec![0.0_f32; total];
-        let (fr, fi) = m.dft_3d(&real, &imag).unwrap();
+        let (fr, fi) = m
+            .dft_3d(&real, &imag)
+            .expect("3D DFT should succeed for valid input");
         assert_eq!(fr.len(), total);
         assert_eq!(fi.len(), total);
     }

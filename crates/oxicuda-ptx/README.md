@@ -93,7 +93,7 @@ text generation.
 
 | Version | Date       | Tests        |
 |---------|------------|--------------|
-| 0.1.5   | 2026-05-01 | 928 passing  |
+| 0.2.0   | 2026-06-16 | 934 passing  |
 | 0.1.4   | 2026-04-18 | 916 passing  |
 
 ## License

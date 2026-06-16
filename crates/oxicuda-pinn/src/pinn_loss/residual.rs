@@ -52,14 +52,16 @@ mod tests {
     #[test]
     fn zero_residuals_zero_loss() {
         let r = vec![0.0_f32; 10];
-        let loss = pde_residual_loss(&r).unwrap();
+        let loss = pde_residual_loss(&r)
+            .expect("residual loss computation should succeed for all-zero residuals");
         assert_eq!(loss, 0.0);
     }
 
     #[test]
     fn constant_residuals_mse() {
         let r = vec![2.0_f32; 4]; // MSE = 4.0
-        let loss = pde_residual_loss(&r).unwrap();
+        let loss = pde_residual_loss(&r)
+            .expect("residual loss computation should succeed for constant residuals");
         assert!(
             (loss - 4.0).abs() < 1e-6,
             "MSE of [2,2,2,2] = 4, got {loss}"
@@ -69,14 +71,16 @@ mod tests {
     #[test]
     fn mixed_residuals_mse() {
         let r = vec![1.0_f32, -1.0, 2.0, -2.0]; // MSE = (1+1+4+4)/4 = 2.5
-        let loss = pde_residual_loss(&r).unwrap();
+        let loss = pde_residual_loss(&r)
+            .expect("residual loss computation should succeed for mixed residuals");
         assert!((loss - 2.5).abs() < 1e-6);
     }
 
     #[test]
     fn single_residual() {
         let r = vec![3.0_f32];
-        let loss = pde_residual_loss(&r).unwrap();
+        let loss = pde_residual_loss(&r)
+            .expect("residual loss computation should succeed for single residual");
         assert!((loss - 9.0).abs() < 1e-6);
     }
 
@@ -89,7 +93,8 @@ mod tests {
     #[test]
     fn compute_residuals_correct_shape() {
         let pts = vec![0.0_f32, 1.0, 2.0, 3.0]; // n=2, d=2
-        let res = compute_residuals(&pts, 2, 2, |p| p[0] + p[1]).unwrap();
+        let res = compute_residuals(&pts, 2, 2, |p| p[0] + p[1])
+            .expect("residual computation should succeed for valid points and matching dimensions");
         assert_eq!(res.len(), 2);
         assert!((res[0] - 1.0).abs() < 1e-6);
         assert!((res[1] - 5.0).abs() < 1e-6);
@@ -98,7 +103,9 @@ mod tests {
     #[test]
     fn compute_residuals_zero_fn() {
         let pts = vec![1.0_f32; 10];
-        let res = compute_residuals(&pts, 5, 2, |_| 0.0).unwrap();
+        let res = compute_residuals(&pts, 5, 2, |_| 0.0).expect(
+            "residual computation should succeed for zero residual function with valid inputs",
+        );
         assert!(res.iter().all(|&r| r == 0.0));
     }
 

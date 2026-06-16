@@ -7,7 +7,7 @@ SPIR-V compute shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/
 
 ## Implementation Status
 
-- **Actual SLoC:** ~6,639 across 22 files
+- **Actual SLoC:** ~5,116 across 22 files
 - **Tests:** 86 passing
 - **Status:** Full memory + compute backend via in-house SPIR-V builder, multi-queue async, pipeline cache
 - **Targets:** Vendor-agnostic (NVIDIA / AMD / Intel / Mesa lavapipe), Vulkan 1.2+
@@ -68,6 +68,10 @@ SPIR-V compute shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/
 - [ ] Validation layer integration toggle (`VK_LAYER_KHRONOS_validation`) gated behind `validation` feature
 
 #### P2 -- Nice-to-Have
+- [ ] `pipeline/vulkan_memory_model.rs` — Vulkan Memory Model explicit acquire-release barriers (Vulkan 1.2 core): emit `OpLoad` / `OpStore` with `MakeAvailable` / `MakeVisible` semantics replacing current global `vkCmdPipelineBarrier`; `VulkanMemModel`
+- [ ] `spirv/subgroup_size_control.rs` — `VK_EXT_subgroup_size_control` subgroup-size negotiation (2020): declare fixed `SubgroupSize` at pipeline creation (32 NVIDIA/Intel, 32/64 AMD) for vendor-optimal warp reductions; `SubgroupSizeController`
+- [ ] `spirv/performance_query.rs` — `VK_KHR_performance_query` kernel-level GPU timestamps (2020): query pool with `VK_QUERY_TYPE_PERFORMANCE_QUERY_KHR` for per-dispatch GPU cycle counts; `PerformanceQueryPool`
+- [ ] `memory/descriptor_buffer.rs` — `VK_EXT_descriptor_buffer` bindless descriptor sets (Vulkan 2023): embed descriptor data directly in device memory for ultra-low-overhead large-model weight binding; `DescriptorBuffer`
 - [ ] `VK_EXT_mesh_shader` compute-mesh interop (graphics+compute pipelines) -- not used for ML workloads
 - [ ] Ray-query (`VK_KHR_ray_query`) for compute shaders -- enables BVH-based sparse op layouts (research)
 - [ ] `VK_KHR_video_*` integration as out-of-scope: explicitly excluded

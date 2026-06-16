@@ -10,6 +10,10 @@
 
 pub mod aes_ctr;
 pub mod mrg32k3a;
+pub mod pcg;
 pub mod philox;
 pub mod philox_optimized;
 pub mod xorwow;
+pub mod xoshiro256ss;
+pub use pcg::Pcg32;
+pub use xoshiro256ss::Xoshiro256ss;

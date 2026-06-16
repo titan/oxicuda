@@ -262,7 +262,8 @@ mod tests {
     use super::*;
 
     fn default_loss() -> ConservativeLoss {
-        ConservativeLoss::new(ConservativeConfig::default()).unwrap()
+        ConservativeLoss::new(ConservativeConfig::default())
+            .expect("ConservativeLoss construction with default config should succeed")
     }
 
     // ── construction ──────────────────────────────────────────────────────────
@@ -309,9 +310,11 @@ mod tests {
             n_quadrature: 32,
             weight: 1.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with valid params should succeed");
         let u = |_x: f32, _t: f32| 1.0_f32;
-        let v = l.integrate_u_space(0.0, 1.0, 0.0, &u).unwrap();
+        let v = l
+            .integrate_u_space(0.0, 1.0, 0.0, &u)
+            .expect("space integration over valid bounds should succeed");
         assert!((v - 1.0).abs() < 1e-5, "∫1 over [0,1] = 1, got {v}");
     }
 
@@ -321,9 +324,11 @@ mod tests {
             n_quadrature: 64,
             weight: 1.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with valid params should succeed");
         let u = |x: f32, _t: f32| x;
-        let v = l.integrate_u_space(0.0, 1.0, 0.0, &u).unwrap();
+        let v = l
+            .integrate_u_space(0.0, 1.0, 0.0, &u)
+            .expect("space integration over valid bounds should succeed");
         assert!(
             (v - 0.5).abs() < 1e-5,
             "∫x dx over [0,1] = 1/2 (trapezoid is exact for linear), got {v}"
@@ -348,10 +353,12 @@ mod tests {
             n_quadrature: 16,
             weight: 1.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with valid params should succeed");
         let c = 2.3_f32;
         let f = |_x: f32, _t: f32| c;
-        let v = l.integrate_flux_time(0.0, 0.0, 1.5, &f).unwrap();
+        let v = l
+            .integrate_flux_time(0.0, 0.0, 1.5, &f)
+            .expect("flux time integration over valid bounds should succeed");
         let expected = c * (1.5 - 0.0);
         assert!(
             (v - expected).abs() < 1e-4,
@@ -379,7 +386,7 @@ mod tests {
             n_quadrature: 128,
             weight: 1.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with valid params should succeed");
         let u = |x: f32, t: f32| (x - t).cos();
         let f = |x: f32, t: f32| (x - t).cos();
         let sub = SubdomainBox {
@@ -388,7 +395,9 @@ mod tests {
             t_1: 0.0,
             t_2: 0.5,
         };
-        let r = l.subdomain_residual(&sub, &u, &f).unwrap();
+        let r = l
+            .subdomain_residual(&sub, &u, &f)
+            .expect("conservation law computation should succeed for advection conserved solution");
         assert!(r < 1e-3, "Conserved solution → residual² ≈ 0; got {r}");
     }
 
@@ -405,7 +414,9 @@ mod tests {
             t_1: 0.0,
             t_2: 0.5,
         };
-        let r = l.subdomain_residual(&sub, &u, &f).unwrap();
+        let r = l
+            .subdomain_residual(&sub, &u, &f)
+            .expect("subdomain residual computation should succeed for non-conserved solution");
         assert!(r > 1e-4, "Non-conserved solution: residual² > 0, got {r}");
     }
 
@@ -442,7 +453,7 @@ mod tests {
             n_quadrature: 32,
             weight: w,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with weight=2.5 and n_quadrature=32 should succeed");
         let u = |x: f32, t: f32| x * t;
         let f = |_x: f32, _t: f32| 0.0_f32;
         let s1 = SubdomainBox {
@@ -457,9 +468,15 @@ mod tests {
             t_1: 0.1,
             t_2: 0.6,
         };
-        let r1 = l.subdomain_residual(&s1, &u, &f).unwrap();
-        let r2 = l.subdomain_residual(&s2, &u, &f).unwrap();
-        let tot = l.total_loss(&[s1, s2], &u, &f).unwrap();
+        let r1 = l
+            .subdomain_residual(&s1, &u, &f)
+            .expect("subdomain residual computation for first box should succeed");
+        let r2 = l
+            .subdomain_residual(&s2, &u, &f)
+            .expect("subdomain residual computation for second box should succeed");
+        let tot = l
+            .total_loss(&[s1, s2], &u, &f)
+            .expect("total loss computation for two subdomains should succeed");
         let expected = w * (r1 + r2);
         assert!(
             (tot - expected).abs() < 1e-3,
@@ -473,7 +490,7 @@ mod tests {
             n_quadrature: 16,
             weight: 0.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with weight=0.0 should succeed");
         let u = |x: f32, t: f32| (x * t).sin();
         let f = |x: f32, _t: f32| x;
         let sub = SubdomainBox {
@@ -482,7 +499,9 @@ mod tests {
             t_1: 0.0,
             t_2: 1.0,
         };
-        let tot = l.total_loss(&[sub], &u, &f).unwrap();
+        let tot = l
+            .total_loss(&[sub], &u, &f)
+            .expect("total loss computation with zero weight should succeed");
         assert!(tot.abs() < 1e-7, "weight = 0 → total = 0, got {tot}");
     }
 
@@ -502,7 +521,7 @@ mod tests {
             n_quadrature: 32,
             weight: w,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with weight=0.7 and n_quadrature=32 should succeed");
         let u = |x: f32, t: f32| x + t;
         let f = |_x: f32, _t: f32| 0.0_f32;
         let sub = SubdomainBox {
@@ -511,8 +530,12 @@ mod tests {
             t_1: 0.0,
             t_2: 0.5,
         };
-        let r = l.subdomain_residual(&sub, &u, &f).unwrap();
-        let tot = l.total_loss(&[sub], &u, &f).unwrap();
+        let r = l
+            .subdomain_residual(&sub, &u, &f)
+            .expect("subdomain residual computation should succeed for valid input");
+        let tot = l
+            .total_loss(&[sub], &u, &f)
+            .expect("total loss computation for single subdomain should succeed");
         assert!(
             (tot - w * r).abs() < 1e-4,
             "Single-box total = w · r²; got {tot} vs {}",
@@ -533,8 +556,12 @@ mod tests {
             t_1: 0.0,
             t_2: 0.4,
         };
-        let a = l.total_loss(&[sub], &u, &f).unwrap();
-        let b = l.total_loss(&[sub], &u, &f).unwrap();
+        let a = l
+            .total_loss(&[sub], &u, &f)
+            .expect("total loss computation should succeed for determinism check (first call)");
+        let b = l
+            .total_loss(&[sub], &u, &f)
+            .expect("total loss computation should succeed for determinism check (second call)");
         assert!((a - b).abs() < 1e-9, "deterministic: {a} vs {b}");
     }
 
@@ -554,14 +581,18 @@ mod tests {
             n_quadrature: 4,
             weight: 1.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with n_quadrature=4 should succeed");
         let fine = ConservativeLoss::new(ConservativeConfig {
             n_quadrature: 256,
             weight: 1.0,
         })
-        .unwrap();
-        let r_coarse = coarse.subdomain_residual(&sub, &u, &f).unwrap();
-        let r_fine = fine.subdomain_residual(&sub, &u, &f).unwrap();
+        .expect("ConservativeLoss construction with n_quadrature=256 should succeed");
+        let r_coarse = coarse
+            .subdomain_residual(&sub, &u, &f)
+            .expect("subdomain residual computation with coarse quadrature should succeed");
+        let r_fine = fine
+            .subdomain_residual(&sub, &u, &f)
+            .expect("subdomain residual computation with fine quadrature should succeed");
         assert!(
             r_fine <= r_coarse + 1e-6,
             "Finer quadrature should not increase residual: fine={r_fine} > coarse={r_coarse}"
@@ -582,7 +613,7 @@ mod tests {
             n_quadrature: 32,
             weight: 1.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with n_quadrature=32 should succeed");
         let u = |_x: f32, t: f32| t;
         let f = |_x: f32, _t: f32| 0.0_f32;
         let sub = SubdomainBox {
@@ -591,7 +622,9 @@ mod tests {
             t_1: 0.0,
             t_2: 0.5,
         };
-        let r = l.subdomain_residual(&sub, &u, &f).unwrap();
+        let r = l
+            .subdomain_residual(&sub, &u, &f)
+            .expect("subdomain residual computation with zero flux should succeed");
         assert!(
             (r - 0.25).abs() < 1e-4,
             "F=0 residual = (Δ∫u)² = (0.5)² = 0.25; got {r}"
@@ -607,9 +640,11 @@ mod tests {
             n_quadrature: 2,
             weight: 1.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with minimum n_quadrature=2 should succeed");
         let u = |x: f32, _t: f32| x;
-        let v = l.integrate_u_space(0.0, 2.0, 0.0, &u).unwrap();
+        let v = l
+            .integrate_u_space(0.0, 2.0, 0.0, &u)
+            .expect("space integration with minimum quadrature nodes should succeed");
         assert!(
             (v - 2.0).abs() < 1e-5,
             "Trapezoid (n=2) on linear u: exact ∫x dx [0,2] = 2; got {v}"
@@ -623,9 +658,11 @@ mod tests {
             n_quadrature: 200,
             weight: 1.0,
         })
-        .unwrap();
+        .expect("ConservativeLoss construction with n_quadrature=200 should succeed");
         let u = |x: f32, _t: f32| x * x;
-        let v = l.integrate_u_space(0.0, 1.0, 0.0, &u).unwrap();
+        let v = l
+            .integrate_u_space(0.0, 1.0, 0.0, &u)
+            .expect("space integration for quadratic function should succeed");
         assert!((v - 1.0_f32 / 3.0).abs() < 1e-3, "∫x² dx ≈ 1/3; got {v}");
     }
 
@@ -635,7 +672,9 @@ mod tests {
             n_quadrature: 17,
             weight: 0.42,
         })
-        .unwrap();
+        .expect(
+            "ConservativeLoss construction with n_quadrature=17 and weight=0.42 should succeed",
+        );
         let c = l.config();
         assert_eq!(c.n_quadrature, 17);
         assert!((c.weight - 0.42).abs() < 1e-7);

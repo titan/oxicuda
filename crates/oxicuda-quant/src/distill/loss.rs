@@ -187,7 +187,7 @@ mod tests {
         let logits = vec![1.0_f32, 2.0, 3.0];
         let loss = DistilLoss::kl_divergence(1.0)
             .compute(&logits, &logits)
-            .unwrap();
+            .expect("value should be present");
         assert!(loss.abs() < 1e-4, "KL(P‖P) should be ~0, got {loss}");
     }
 
@@ -197,7 +197,7 @@ mod tests {
         let student = vec![3.0_f32, 2.0, 1.0]; // reversed
         let loss = DistilLoss::kl_divergence(1.0)
             .compute(&teacher, &student)
-            .unwrap();
+            .expect("value should be present");
         assert!(
             loss > 0.0,
             "KL(P‖Q) with different distributions should be > 0"
@@ -211,10 +211,10 @@ mod tests {
         let student = vec![0.0_f32, 1.0, 2.0];
         let loss_t1 = DistilLoss::kl_divergence(1.0)
             .compute(&teacher, &student)
-            .unwrap();
+            .expect("value should be present");
         let loss_t4 = DistilLoss::kl_divergence(4.0)
             .compute(&teacher, &student)
-            .unwrap();
+            .expect("value should be present");
         // At higher T, logits are compressed → less KL (before τ² scaling)
         assert!(
             loss_t1 != loss_t4,
@@ -225,7 +225,9 @@ mod tests {
     #[test]
     fn mse_zero_when_identical() {
         let x = vec![1.0_f32, 2.0, 3.0];
-        let loss = DistilLoss::mse().compute(&x, &x).unwrap();
+        let loss = DistilLoss::mse()
+            .compute(&x, &x)
+            .expect("compute should succeed");
         assert_abs_diff_eq!(loss, 0.0, epsilon = 1e-7);
     }
 
@@ -233,14 +235,18 @@ mod tests {
     fn mse_correct() {
         let teacher = vec![0.0_f32, 0.0];
         let student = vec![1.0_f32, 1.0];
-        let loss = DistilLoss::mse().compute(&teacher, &student).unwrap();
+        let loss = DistilLoss::mse()
+            .compute(&teacher, &student)
+            .expect("compute should succeed");
         assert_abs_diff_eq!(loss, 1.0, epsilon = 1e-6);
     }
 
     #[test]
     fn cosine_zero_when_identical() {
         let x = vec![1.0_f32, 2.0, 3.0];
-        let loss = DistilLoss::cosine().compute(&x, &x).unwrap();
+        let loss = DistilLoss::cosine()
+            .compute(&x, &x)
+            .expect("compute should succeed");
         assert!(
             loss.abs() < 1e-5,
             "cosine distance between equal vectors = 0, got {loss}"
@@ -251,7 +257,9 @@ mod tests {
     fn cosine_two_when_opposite() {
         let a = vec![1.0_f32, 0.0];
         let b = vec![-1.0_f32, 0.0];
-        let loss = DistilLoss::cosine().compute(&a, &b).unwrap();
+        let loss = DistilLoss::cosine()
+            .compute(&a, &b)
+            .expect("compute should succeed");
         // 1 - (-1) = 2
         assert_abs_diff_eq!(loss, 2.0, epsilon = 1e-5);
     }
@@ -262,7 +270,7 @@ mod tests {
         let student = vec![1.5_f32, 1.5];
         let loss = DistilLoss::combined(0.5, 0.5, 1.0)
             .compute(&teacher, &student)
-            .unwrap();
+            .expect("value should be present");
         assert!(loss >= 0.0, "combined loss must be non-negative");
     }
 

@@ -393,8 +393,10 @@ mod tests {
     #[test]
     fn attention_score_is_finite() {
         let mut rng = make_rng();
-        let model = Kgat::new(default_cfg(), &mut rng).unwrap();
-        let s = model.attention_score(0, 0, 1).unwrap();
+        let model = Kgat::new(default_cfg(), &mut rng).expect("value should be present");
+        let s = model
+            .attention_score(0, 0, 1)
+            .expect("attention_score should succeed");
         assert!(s.is_finite(), "score must be finite, got {s}");
     }
 
@@ -402,9 +404,11 @@ mod tests {
     fn propagate_output_length() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         let triples = vec![(0, 0, 1), (0, 1, 2), (1, 0, 3), (2, 1, 4)];
-        let out = model.propagate(&model.entity_emb, &triples).unwrap();
+        let out = model
+            .propagate(&model.entity_emb, &triples)
+            .expect("propagate should succeed");
         assert_eq!(out.len(), cfg.n_entities * cfg.embed_dim);
     }
 
@@ -412,10 +416,12 @@ mod tests {
     fn isolated_entity_zero_row() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         // Entity 5 has no outgoing edges → its propagated row is zero.
         let triples = vec![(0, 0, 1), (0, 1, 2), (1, 0, 3)];
-        let out = model.propagate(&model.entity_emb, &triples).unwrap();
+        let out = model
+            .propagate(&model.entity_emb, &triples)
+            .expect("propagate should succeed");
         let d = cfg.embed_dim;
         let row = &out[5 * d..6 * d];
         for &v in row {
@@ -429,9 +435,11 @@ mod tests {
         // 1.0 — the head's new row must equal the tail embedding exactly.
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         let triples = vec![(0, 0, 1)];
-        let out = model.propagate(&model.entity_emb, &triples).unwrap();
+        let out = model
+            .propagate(&model.entity_emb, &triples)
+            .expect("propagate should succeed");
         let d = cfg.embed_dim;
         let head_row = &out[0..d];
         let tail_row = &model.entity_emb[d..2 * d];
@@ -447,9 +455,9 @@ mod tests {
     fn forward_output_length() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         let triples = vec![(0, 0, 1), (0, 1, 2), (1, 0, 3), (2, 1, 4), (3, 2, 5)];
-        let out = model.forward(&triples).unwrap();
+        let out = model.forward(&triples).expect("forward should succeed");
         assert_eq!(
             out.len(),
             cfg.n_entities * cfg.embed_dim * (cfg.n_layers + 1)
@@ -460,10 +468,10 @@ mod tests {
     fn score_returns_finite() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         let triples = vec![(0, 0, 1), (0, 1, 2), (1, 0, 3), (2, 1, 4)];
-        let concat = model.forward(&triples).unwrap();
-        let s = model.score(0, 1, &concat).unwrap();
+        let concat = model.forward(&triples).expect("forward should succeed");
+        let s = model.score(0, 1, &concat).expect("score should succeed");
         assert!(s.is_finite(), "score must be finite, got {s}");
     }
 
@@ -471,11 +479,11 @@ mod tests {
     fn deterministic_given_seed() {
         let mut rng_a = LcgRng::new(13);
         let mut rng_b = LcgRng::new(13);
-        let model_a = Kgat::new(default_cfg(), &mut rng_a).unwrap();
-        let model_b = Kgat::new(default_cfg(), &mut rng_b).unwrap();
+        let model_a = Kgat::new(default_cfg(), &mut rng_a).expect("value should be present");
+        let model_b = Kgat::new(default_cfg(), &mut rng_b).expect("value should be present");
         let triples = vec![(0, 0, 1), (0, 1, 2), (1, 0, 3)];
-        let out_a = model_a.forward(&triples).unwrap();
-        let out_b = model_b.forward(&triples).unwrap();
+        let out_a = model_a.forward(&triples).expect("forward should succeed");
+        let out_b = model_b.forward(&triples).expect("forward should succeed");
         assert_eq!(out_a.len(), out_b.len());
         for (a, b) in out_a.iter().zip(out_b.iter()) {
             assert!((a - b).abs() < 1e-6, "same seed must yield same output");
@@ -485,9 +493,13 @@ mod tests {
     #[test]
     fn changing_relation_changes_attention() {
         let mut rng = make_rng();
-        let model = Kgat::new(default_cfg(), &mut rng).unwrap();
-        let s0 = model.attention_score(0, 0, 1).unwrap();
-        let s1 = model.attention_score(0, 1, 1).unwrap();
+        let model = Kgat::new(default_cfg(), &mut rng).expect("value should be present");
+        let s0 = model
+            .attention_score(0, 0, 1)
+            .expect("attention_score should succeed");
+        let s1 = model
+            .attention_score(0, 1, 1)
+            .expect("attention_score should succeed");
         assert!(
             (s0 - s1).abs() > 1e-7,
             "different relations should yield different scores (got {s0}, {s1})"
@@ -501,9 +513,11 @@ mod tests {
         // row must remain zero.
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         let triples = vec![(0, 0, 1)];
-        let out = model.propagate(&model.entity_emb, &triples).unwrap();
+        let out = model
+            .propagate(&model.entity_emb, &triples)
+            .expect("propagate should succeed");
         let d = cfg.embed_dim;
         let tail_row = &out[d..2 * d];
         for &v in tail_row {
@@ -517,7 +531,7 @@ mod tests {
     #[test]
     fn err_triple_head_out_of_range() {
         let mut rng = make_rng();
-        let model = Kgat::new(default_cfg(), &mut rng).unwrap();
+        let model = Kgat::new(default_cfg(), &mut rng).expect("value should be present");
         assert!(matches!(
             model.attention_score(999, 0, 1),
             Err(RecsysError::ItemOutOfBounds { .. })
@@ -527,7 +541,7 @@ mod tests {
     #[test]
     fn err_triple_relation_out_of_range() {
         let mut rng = make_rng();
-        let model = Kgat::new(default_cfg(), &mut rng).unwrap();
+        let model = Kgat::new(default_cfg(), &mut rng).expect("value should be present");
         assert!(matches!(
             model.attention_score(0, 999, 1),
             Err(RecsysError::ItemOutOfBounds { .. })
@@ -537,7 +551,7 @@ mod tests {
     #[test]
     fn err_triple_tail_out_of_range() {
         let mut rng = make_rng();
-        let model = Kgat::new(default_cfg(), &mut rng).unwrap();
+        let model = Kgat::new(default_cfg(), &mut rng).expect("value should be present");
         let triples = vec![(0, 0, 999)];
         assert!(matches!(
             model.propagate(&model.entity_emb, &triples),
@@ -609,7 +623,7 @@ mod tests {
     fn n_params_positive_and_matches_closed_form() {
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         let n = model.n_params();
         let d = cfg.embed_dim;
         let expected = cfg.n_entities * d + cfg.n_relations * d + cfg.n_layers * d * d;
@@ -633,11 +647,11 @@ mod tests {
             n_relations: 2,
             n_layers: 1,
         };
-        let model_two = Kgat::new(cfg_two, &mut rng_two).unwrap();
-        let model_one = Kgat::new(cfg_one, &mut rng_one).unwrap();
+        let model_two = Kgat::new(cfg_two, &mut rng_two).expect("new should succeed");
+        let model_one = Kgat::new(cfg_one, &mut rng_one).expect("new should succeed");
         let triples = vec![(0, 0, 1), (1, 0, 2), (2, 1, 3), (3, 1, 4)];
-        let out_two = model_two.forward(&triples).unwrap();
-        let out_one = model_one.forward(&triples).unwrap();
+        let out_two = model_two.forward(&triples).expect("forward should succeed");
+        let out_one = model_one.forward(&triples).expect("forward should succeed");
         // The first (n_layers=1) blocks of out_two should differ from out_one
         // when interpreted as a per-entity slice — at minimum, the lengths
         // are different so the representations are inequivalent.
@@ -666,7 +680,7 @@ mod tests {
             n_relations: 3,
             n_layers: 1,
         };
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         let d = cfg.embed_dim;
         // Replace all tail rows referenced below with the ones-vector.
         let mut embeddings = model.entity_emb.clone();
@@ -676,7 +690,9 @@ mod tests {
             }
         }
         let triples = vec![(0, 0, 1), (0, 1, 2), (0, 2, 3)];
-        let out = model.propagate(&embeddings, &triples).unwrap();
+        let out = model
+            .propagate(&embeddings, &triples)
+            .expect("propagate should succeed");
         let head_row = &out[0..d];
         for &v in head_row {
             assert!(
@@ -692,12 +708,16 @@ mod tests {
         // row (because the softmax weights depend on the relation embedding).
         let mut rng = make_rng();
         let cfg = default_cfg();
-        let model = Kgat::new(cfg.clone(), &mut rng).unwrap();
+        let model = Kgat::new(cfg.clone(), &mut rng).expect("value should be present");
         let d = cfg.embed_dim;
         let triples_a = vec![(0, 0, 1), (0, 0, 2)];
         let triples_b = vec![(0, 1, 1), (0, 2, 2)];
-        let out_a = model.propagate(&model.entity_emb, &triples_a).unwrap();
-        let out_b = model.propagate(&model.entity_emb, &triples_b).unwrap();
+        let out_a = model
+            .propagate(&model.entity_emb, &triples_a)
+            .expect("propagate should succeed");
+        let out_b = model
+            .propagate(&model.entity_emb, &triples_b)
+            .expect("propagate should succeed");
         let diff: f32 = out_a[0..d]
             .iter()
             .zip(out_b[0..d].iter())
@@ -712,7 +732,7 @@ mod tests {
     #[test]
     fn err_concat_wrong_length_in_score() {
         let mut rng = make_rng();
-        let model = Kgat::new(default_cfg(), &mut rng).unwrap();
+        let model = Kgat::new(default_cfg(), &mut rng).expect("value should be present");
         let bad = vec![0.0_f32; 3];
         assert!(matches!(
             model.score(0, 1, &bad),
@@ -723,7 +743,7 @@ mod tests {
     #[test]
     fn err_propagate_embeddings_wrong_length() {
         let mut rng = make_rng();
-        let model = Kgat::new(default_cfg(), &mut rng).unwrap();
+        let model = Kgat::new(default_cfg(), &mut rng).expect("value should be present");
         let bad = vec![0.0_f32; 7];
         let triples = vec![(0, 0, 1)];
         assert!(matches!(

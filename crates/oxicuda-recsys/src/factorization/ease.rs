@@ -416,7 +416,7 @@ mod tests {
     fn ease_fit_small() {
         let x = small_interactions();
         let cfg = default_cfg(3, 3);
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         assert_eq!(model.weights.len(), 9);
     }
 
@@ -424,7 +424,7 @@ mod tests {
     fn ease_weights_diagonal_zero() {
         let x = small_interactions();
         let cfg = default_cfg(3, 3);
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         let n = 3;
         for i in 0..n {
             assert_eq!(model.weights[i * n + i], 0.0, "W[{i},{i}] should be 0");
@@ -442,7 +442,7 @@ mod tests {
             lambda: 10.0,
             ..EaseConfig::default()
         };
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         assert_eq!(model.weights.len(), n_items * n_items);
     }
 
@@ -452,9 +452,9 @@ mod tests {
     fn ease_predict_shape() {
         let x = small_interactions();
         let cfg = default_cfg(3, 3);
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         let user_row = vec![1.0, 0.0, 0.0];
-        let scores = model.predict(&user_row).unwrap();
+        let scores = model.predict(&user_row).expect("predict should succeed");
         assert_eq!(scores.len(), 3);
     }
 
@@ -462,8 +462,10 @@ mod tests {
     fn ease_predict_batch_shape() {
         let x = small_interactions();
         let cfg = default_cfg(3, 3);
-        let model = Ease::fit(&x, cfg).unwrap();
-        let scores = model.predict_batch(&x, 3).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
+        let scores = model
+            .predict_batch(&x, 3)
+            .expect("predict_batch should succeed");
         assert_eq!(scores.len(), 9);
     }
 
@@ -473,9 +475,11 @@ mod tests {
     fn ease_recommend_top_k_length() {
         let x = small_interactions();
         let cfg = default_cfg(3, 3);
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         let user_row = vec![1.0, 0.0, 0.0];
-        let recs = model.recommend_top_k(&user_row, 2, false).unwrap();
+        let recs = model
+            .recommend_top_k(&user_row, 2, false)
+            .expect("recommend_top_k should succeed");
         assert_eq!(recs.len(), 2);
     }
 
@@ -483,10 +487,12 @@ mod tests {
     fn ease_recommend_excludes_interacted() {
         let x = small_interactions();
         let cfg = default_cfg(3, 3);
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         // User has interacted with items 0 and 1
         let user_row = vec![1.0, 1.0, 0.0];
-        let recs = model.recommend_top_k(&user_row, 1, true).unwrap();
+        let recs = model
+            .recommend_top_k(&user_row, 1, true)
+            .expect("recommend_top_k should succeed");
         for &idx in &recs {
             assert!(
                 user_row[idx] == 0.0,
@@ -499,10 +505,12 @@ mod tests {
     fn ease_recommend_not_excluding() {
         let x = small_interactions();
         let cfg = default_cfg(3, 3);
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         // All candidates considered — length should still be k
         let user_row = vec![1.0, 1.0, 0.0];
-        let recs = model.recommend_top_k(&user_row, 3, false).unwrap();
+        let recs = model
+            .recommend_top_k(&user_row, 3, false)
+            .expect("recommend_top_k should succeed");
         assert_eq!(recs.len(), 3);
     }
 
@@ -517,7 +525,7 @@ mod tests {
             lambda: 1_000_000.0,
             ..EaseConfig::default()
         };
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         for (i, &w) in model.weights.iter().enumerate() {
             // Skip diagonal
             if i % 4 == 0 {
@@ -539,7 +547,7 @@ mod tests {
             lambda: 1.0,
             ..EaseConfig::default()
         };
-        let model = Ease::fit(&x, cfg).unwrap();
+        let model = Ease::fit(&x, cfg).expect("fit should succeed");
         let max_off_diag = model
             .weights
             .iter()
@@ -596,7 +604,7 @@ mod tests {
         let mut a: Vec<f32> = (0..n * n)
             .map(|k| if k % (n + 1) == 0 { scale } else { 0.0 })
             .collect();
-        Ease::cholesky(&mut a, n).unwrap();
+        Ease::cholesky(&mut a, n).expect("cholesky should succeed");
         for i in 0..n {
             let diag = a[i * n + i];
             assert!(
@@ -628,7 +636,7 @@ mod tests {
         let lambda = 500.0;
         let gram = Ease::compute_gram(&x, 3, 3, lambda);
         let gram_orig = gram.clone();
-        let g_inv = Ease::invert_via_cholesky(gram, 3).unwrap();
+        let g_inv = Ease::invert_via_cholesky(gram, 3).expect("invert_via_cholesky should succeed");
 
         // Check G * G_inv ≈ I
         let n = 3;
@@ -659,8 +667,8 @@ mod tests {
             lambda_l1: 0.0,
             ..EaseConfig::default()
         };
-        let ease = Ease::fit(&x, cfg_ease).unwrap();
-        let easer = Ease::fit(&x, cfg_easer).unwrap();
+        let ease = Ease::fit(&x, cfg_ease).expect("fit should succeed");
+        let easer = Ease::fit(&x, cfg_easer).expect("fit should succeed");
 
         for (i, (&w_e, &w_r)) in ease.weights.iter().zip(easer.weights.iter()).enumerate() {
             assert!(
@@ -682,8 +690,8 @@ mod tests {
             l1_iter: 100,
             l1_tol: 1e-6,
         };
-        let ease = Ease::fit(&x, cfg_ease).unwrap();
-        let easer = Ease::fit(&x, cfg_easer).unwrap();
+        let ease = Ease::fit(&x, cfg_ease).expect("fit should succeed");
+        let easer = Ease::fit(&x, cfg_easer).expect("fit should succeed");
 
         let ease_sum: f32 = ease.weights.iter().map(|w| w.abs()).sum();
         let easer_sum: f32 = easer.weights.iter().map(|w| w.abs()).sum();

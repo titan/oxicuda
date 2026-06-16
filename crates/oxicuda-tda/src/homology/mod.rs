@@ -3,9 +3,11 @@
 pub mod boundary;
 pub mod cohomology;
 pub mod cohomology_z;
+pub mod multi_parameter;
 pub mod persistent;
 pub mod reduction;
 pub mod twist;
+pub mod zigzag;
 
 pub use boundary::BoundaryMatrix;
 pub use cohomology::{
@@ -13,6 +15,12 @@ pub use cohomology::{
     persistent_cohomology, reduce_coboundary_matrix, verify_cohomology_homology_agreement,
 };
 pub use cohomology_z::{CohomologyZ, CohomologyZConfig, CohomologyZResult};
+pub use multi_parameter::{
+    BiFiltration, BigradedSimplex, HilbertFunction, MultiParameterPersistence,
+};
 pub use persistent::{PersistencePair, extract_persistence_pairs};
 pub use reduction::reduce_boundary_matrix;
 pub use twist::{TwistConfig, TwistReduction, TwistResult};
+pub use zigzag::{
+    ZigzagArrow, ZigzagBar, ZigzagBarcode, ZigzagComplex, ZigzagInput, zigzag_persistence,
+};

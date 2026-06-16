@@ -293,7 +293,7 @@ mod tests {
         let l2 = LayerSpec::new(OpKind::AvgPool3x3, 4, 4, 8, 8);
         lut.insert(&l1, 0.001);
         lut.insert(&l2, 0.0001);
-        let total = lut.predict(&[l1, l2]).unwrap();
+        let total = lut.predict(&[l1, l2]).expect("predict should succeed");
         assert!((total - 0.0011).abs() < 1e-6);
     }
 
@@ -320,16 +320,16 @@ mod tests {
         let mut mlp = LatencyMlp::new(in_dim, 16, &mut rng);
         // Synthetic samples with target = 1.0
         let layer = LayerSpec::new(OpKind::Identity, 4, 4, 8, 8);
-        let f = ArchFeatures::from_layers(&[layer]).unwrap();
+        let f = ArchFeatures::from_layers(&[layer]).expect("from_layers should succeed");
         let samples = vec![(f.data.clone(), 1.0_f32); 16];
-        let loss0 = mlp.fit(&samples, 1, 1e-4).unwrap();
-        let loss1 = mlp.fit(&samples, 200, 1e-4).unwrap();
+        let loss0 = mlp.fit(&samples, 1, 1e-4).expect("fit should succeed");
+        let loss1 = mlp.fit(&samples, 200, 1e-4).expect("fit should succeed");
         assert!(
             loss1 <= loss0 + 1e-3,
             "loss did not decrease: {loss0} -> {loss1}"
         );
         assert!(mlp.fitted);
-        let pred = mlp.predict(&[layer]).unwrap();
+        let pred = mlp.predict(&[layer]).expect("predict should succeed");
         assert!(pred.is_finite());
     }
 

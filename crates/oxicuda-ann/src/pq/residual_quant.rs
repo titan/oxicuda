@@ -376,11 +376,11 @@ mod tests {
 
         let cfg = default_cfg(dim, 1, k);
         let mut rng2 = LcgRng::new(13);
-        let cb = train(&samples, cfg, &mut rng2).unwrap();
+        let cb = train(&samples, cfg, &mut rng2).expect("training should succeed");
         assert_eq!(cb.stages.len(), 1);
 
         // re-derive assignments
-        let codes = encode(&samples, &cb).unwrap();
+        let codes = encode(&samples, &cb).expect("encode should succeed");
         let assigns = &codes.codes[0];
 
         // each centroid = mean of its assigned samples
@@ -412,16 +412,18 @@ mod tests {
         let cfg2 = default_cfg(dim, 2, k);
 
         let mut rng1 = LcgRng::new(99);
-        let cb1 = train(&samples, cfg1, &mut rng1).unwrap();
-        let codes1 = encode(&samples, &cb1).unwrap();
-        let dec1 = decode(&codes1, &cb1).unwrap();
-        let mse1 = reconstruction_error(&samples, &dec1).unwrap();
+        let cb1 = train(&samples, cfg1, &mut rng1).expect("training should succeed");
+        let codes1 = encode(&samples, &cb1).expect("encode should succeed");
+        let dec1 = decode(&codes1, &cb1).expect("decode should succeed");
+        let mse1 =
+            reconstruction_error(&samples, &dec1).expect("reconstruction error should succeed");
 
         let mut rng2 = LcgRng::new(99);
-        let cb2 = train(&samples, cfg2, &mut rng2).unwrap();
-        let codes2 = encode(&samples, &cb2).unwrap();
-        let dec2 = decode(&codes2, &cb2).unwrap();
-        let mse2 = reconstruction_error(&samples, &dec2).unwrap();
+        let cb2 = train(&samples, cfg2, &mut rng2).expect("training should succeed");
+        let codes2 = encode(&samples, &cb2).expect("encode should succeed");
+        let dec2 = decode(&codes2, &cb2).expect("decode should succeed");
+        let mse2 =
+            reconstruction_error(&samples, &dec2).expect("reconstruction error should succeed");
 
         assert!(
             mse2 <= mse1 + 1e-6,
@@ -438,9 +440,9 @@ mod tests {
         let k = 4;
         let samples = gauss_samples(n, dim, &mut rng);
         let cfg = default_cfg(dim, 2, k);
-        let cb = train(&samples, cfg, &mut rng).unwrap();
-        let codes = encode(&samples, &cb).unwrap();
-        let dec = decode(&codes, &cb).unwrap();
+        let cb = train(&samples, cfg, &mut rng).expect("training should succeed");
+        let codes = encode(&samples, &cb).expect("encode should succeed");
+        let dec = decode(&codes, &cb).expect("decode should succeed");
         assert_eq!(dec.len(), samples.len());
     }
 
@@ -454,12 +456,12 @@ mod tests {
         let cfg = default_cfg(dim, 3, 4);
 
         let mut a = LcgRng::new(33);
-        let cba = train(&samples, cfg, &mut a).unwrap();
-        let codes_a = encode(&samples, &cba).unwrap();
+        let cba = train(&samples, cfg, &mut a).expect("training should succeed");
+        let codes_a = encode(&samples, &cba).expect("encode should succeed");
 
         let mut b = LcgRng::new(33);
-        let cbb = train(&samples, cfg, &mut b).unwrap();
-        let codes_b = encode(&samples, &cbb).unwrap();
+        let cbb = train(&samples, cfg, &mut b).expect("training should succeed");
+        let codes_b = encode(&samples, &cbb).expect("encode should succeed");
 
         for s in 0..cba.stages.len() {
             for (ai, bi) in cba.stages[s].iter().zip(cbb.stages[s].iter()) {
@@ -478,8 +480,8 @@ mod tests {
         let samples = gauss_samples(n, dim, &mut rng);
         let cfg = default_cfg(dim, 1, 1);
         let mut rng2 = LcgRng::new(2);
-        let cb = train(&samples, cfg, &mut rng2).unwrap();
-        let codes = encode(&samples, &cb).unwrap();
+        let cb = train(&samples, cfg, &mut rng2).expect("training should succeed");
+        let codes = encode(&samples, &cb).expect("encode should succeed");
         for &c in &codes.codes[0] {
             assert_eq!(c, 0);
         }
@@ -499,8 +501,8 @@ mod tests {
         let k = 7;
         let samples = gauss_samples(n, dim, &mut rng);
         let cfg = default_cfg(dim, 3, k);
-        let cb = train(&samples, cfg, &mut rng).unwrap();
-        let codes = encode(&samples, &cb).unwrap();
+        let cb = train(&samples, cfg, &mut rng).expect("training should succeed");
+        let codes = encode(&samples, &cb).expect("encode should succeed");
         for stage_row in &codes.codes {
             assert_eq!(stage_row.len(), n);
             for &c in stage_row {
@@ -520,8 +522,8 @@ mod tests {
         let samples = gauss_samples(n, dim, &mut rng);
         let cfg = default_cfg(dim, 2, k);
         let mut rng2 = LcgRng::new(5);
-        let cb = train(&samples, cfg, &mut rng2).unwrap();
-        let codes = encode(&samples, &cb).unwrap();
+        let cb = train(&samples, cfg, &mut rng2).expect("training should succeed");
+        let codes = encode(&samples, &cb).expect("encode should succeed");
 
         // reconstruct what residual fed each stage by greedily subtracting prior centroids
         let mut residual = samples.clone();
@@ -574,10 +576,11 @@ mod tests {
         for m in 1..=4 {
             let cfg = default_cfg(dim, m, 8);
             let mut rng = LcgRng::new(123);
-            let cb = train(&samples, cfg, &mut rng).unwrap();
-            let codes = encode(&samples, &cb).unwrap();
-            let dec = decode(&codes, &cb).unwrap();
-            let mse = reconstruction_error(&samples, &dec).unwrap();
+            let cb = train(&samples, cfg, &mut rng).expect("training should succeed");
+            let codes = encode(&samples, &cb).expect("encode should succeed");
+            let dec = decode(&codes, &cb).expect("decode should succeed");
+            let mse =
+                reconstruction_error(&samples, &dec).expect("reconstruction error should succeed");
             assert!(
                 mse <= prev + 1e-5,
                 "m={m} mse={mse} prev={prev} should be non-increasing"
@@ -638,7 +641,7 @@ mod tests {
         let dim = 2;
         let samples = gauss_samples(n, dim, &mut rng);
         let cfg = default_cfg(dim, 3, 2);
-        let cb = train(&samples, cfg, &mut rng).unwrap();
+        let cb = train(&samples, cfg, &mut rng).expect("training should succeed");
         let bogus = RqCodes {
             codes: vec![vec![0u32; n], vec![0u32; n]], // 2 stages but cb has 3
             n_samples: n,
@@ -655,7 +658,7 @@ mod tests {
         let dim = 2;
         let samples = gauss_samples(n, dim, &mut rng);
         let cfg = default_cfg(dim, 2, 2);
-        let cb = train(&samples, cfg, &mut rng).unwrap();
+        let cb = train(&samples, cfg, &mut rng).expect("training should succeed");
         let bogus = RqCodes {
             codes: vec![vec![0u32; n], vec![0u32; n - 1]],
             n_samples: n,
@@ -692,10 +695,11 @@ mod tests {
         let samples = gauss_samples(n, dim, &mut rng);
         // K=8, M=2 → 64 effective code combinations; trivially expressive.
         let cfg = default_cfg(dim, 2, 8);
-        let cb = train(&samples, cfg, &mut rng).unwrap();
-        let codes = encode(&samples, &cb).unwrap();
-        let dec = decode(&codes, &cb).unwrap();
-        let mse = reconstruction_error(&samples, &dec).unwrap();
+        let cb = train(&samples, cfg, &mut rng).expect("training should succeed");
+        let codes = encode(&samples, &cb).expect("encode should succeed");
+        let dec = decode(&codes, &cb).expect("decode should succeed");
+        let mse =
+            reconstruction_error(&samples, &dec).expect("reconstruction error should succeed");
         // We can't assert exact zero (greedy stage encoding) but should be small.
         assert!(mse < 1.0, "mse={mse}");
     }

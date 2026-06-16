@@ -463,7 +463,7 @@ mod tests {
         let tau = 1.5_f64;
         let (x, t, y) = make_constant_effect(n, d, tau, true, 314_159);
         let cfg = RLearnerConfig::default();
-        let r = r_learner(&x, n, d, &y, &t, &cfg).unwrap();
+        let r = r_learner(&x, n, d, &y, &t, &cfg).expect("r_learner should succeed");
         assert_eq!(r.cate.len(), n);
         assert!(
             (r.ate - tau).abs() < 0.30,
@@ -473,7 +473,7 @@ mod tests {
         );
         // Median CATE should also be close to tau.
         let mut sorted = r.cate.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).expect("partial_cmp should succeed"));
         let median = sorted[n / 2];
         assert!((median - tau).abs() < 0.5, "median CATE = {median}");
     }
@@ -485,7 +485,7 @@ mod tests {
         let tau = 1.5_f64;
         let (x, t, y) = make_constant_effect(n, d, tau, false, 271_828);
         let cfg = RLearnerConfig::default();
-        let r = r_learner(&x, n, d, &y, &t, &cfg).unwrap();
+        let r = r_learner(&x, n, d, &y, &t, &cfg).expect("r_learner should succeed");
         assert!(
             (r.ate - tau).abs() < 0.20,
             "continuous T ATE far from tau: got {} expected ~{}",
@@ -500,7 +500,7 @@ mod tests {
         let d = 2;
         let (x, t, y) = make_constant_effect(n, d, 0.8, true, 1001);
         let cfg = RLearnerConfig::default();
-        let r = r_learner(&x, n, d, &y, &t, &cfg).unwrap();
+        let r = r_learner(&x, n, d, &y, &t, &cfg).expect("r_learner should succeed");
         let mean: f64 = r.cate.iter().sum::<f64>() / n as f64;
         assert!((mean - r.ate).abs() < 1e-12);
     }
@@ -511,8 +511,8 @@ mod tests {
         let d = 3;
         let (x, t, y) = make_constant_effect(n, d, 1.0, true, 7);
         let cfg = RLearnerConfig::default();
-        let r1 = r_learner(&x, n, d, &y, &t, &cfg).unwrap();
-        let r2 = r_learner(&x, n, d, &y, &t, &cfg).unwrap();
+        let r1 = r_learner(&x, n, d, &y, &t, &cfg).expect("r_learner should succeed");
+        let r2 = r_learner(&x, n, d, &y, &t, &cfg).expect("r_learner should succeed");
         assert_eq!(r1.cate, r2.cate);
         assert_eq!(r1.g_hat, r2.g_hat);
         assert_eq!(r1.m_hat, r2.m_hat);
@@ -534,7 +534,7 @@ mod tests {
             n_folds: 2,
             ..RLearnerConfig::default()
         };
-        let r = r_learner(&x, n, d, &y, &t, &cfg).unwrap();
+        let r = r_learner(&x, n, d, &y, &t, &cfg).expect("r_learner should succeed");
 
         // Fit the same ridge on ALL the data and compare.
         let dp1 = d + 1;
@@ -545,7 +545,8 @@ mod tests {
             }
             x_aug[i * dp1 + d] = 1.0;
         }
-        let beta_full = ridge_solve(&x_aug, &y, n, dp1, cfg.ridge_g).unwrap();
+        let beta_full =
+            ridge_solve(&x_aug, &y, n, dp1, cfg.ridge_g).expect("ridge_solve should succeed");
         let mut g_full = vec![0.0_f64; n];
         for i in 0..n {
             let mut s = beta_full[d];
@@ -583,8 +584,8 @@ mod tests {
             n_folds: 5,
             ..RLearnerConfig::default()
         };
-        let r2 = r_learner(&x, n, d, &y, &t, &cfg2).unwrap();
-        let r5 = r_learner(&x, n, d, &y, &t, &cfg5).unwrap();
+        let r2 = r_learner(&x, n, d, &y, &t, &cfg2).expect("r_learner should succeed");
+        let r5 = r_learner(&x, n, d, &y, &t, &cfg5).expect("r_learner should succeed");
         // Both should land near tau within a generous tolerance.
         assert!(
             (r2.ate - tau).abs() < 0.3,
@@ -608,7 +609,7 @@ mod tests {
         let d = 2;
         let (x, t, y) = make_constant_effect(n, d, 0.7, true, 1212);
         let cfg = RLearnerConfig::default();
-        let r = r_learner(&x, n, d, &y, &t, &cfg).unwrap();
+        let r = r_learner(&x, n, d, &y, &t, &cfg).expect("r_learner should succeed");
         assert_eq!(r.cate.len(), n);
         assert_eq!(r.g_hat.len(), n);
         assert_eq!(r.m_hat.len(), n);
@@ -624,7 +625,7 @@ mod tests {
         let tau = 1.5_f64;
         let (x, t, y) = make_constant_effect(n, d, tau, true, 31415);
         let cfg = RLearnerConfig::default();
-        let r = r_learner(&x, n, d, &y, &t, &cfg).unwrap();
+        let r = r_learner(&x, n, d, &y, &t, &cfg).expect("r_learner should succeed");
         assert!(
             (r.ate - tau).abs() < 0.10,
             "large-n ATE = {} (expected ~{tau})",

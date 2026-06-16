@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn test_config_new_valid() {
-        let cfg = SmsEmoaConfig::new(10, 50, 2, vec![2.0, 2.0]).unwrap();
+        let cfg = SmsEmoaConfig::new(10, 50, 2, vec![2.0, 2.0]).expect("new should succeed");
         assert_eq!(cfg.n_pop, 10);
         assert_eq!(cfg.n_obj, 2);
         assert_eq!(cfg.ref_point.len(), 2);
@@ -558,7 +558,7 @@ mod tests {
             seed: 1,
         };
         let bounds = vec![(0.0f64, 1.0f64); 5];
-        let state = sms_emoa_run(zdt1, 5, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(zdt1, 5, &bounds, &cfg).expect("sms_emoa_run should succeed");
         assert_eq!(state.population.len(), 20);
         assert_eq!(state.objectives.len(), 20);
     }
@@ -575,7 +575,8 @@ mod tests {
             seed: 2,
         };
         let bounds = vec![(0.0, 1.0); 3];
-        let state = sms_emoa_run(biobjective_sphere, 3, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(biobjective_sphere, 3, &bounds, &cfg)
+            .expect("sms_emoa_run should succeed");
         assert_eq!(state.generation, 30);
     }
 
@@ -593,7 +594,7 @@ mod tests {
             seed: 3,
         };
         let bounds = vec![(0.0, 1.0); 5];
-        let state = sms_emoa_run(zdt1, 5, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(zdt1, 5, &bounds, &cfg).expect("sms_emoa_run should succeed");
         for obj in &state.objectives {
             for &v in obj {
                 assert!(v.is_finite(), "objective value is not finite: {v}");
@@ -613,7 +614,8 @@ mod tests {
             seed: 4,
         };
         let bounds = vec![(0.0, 1.0); 4];
-        let state = sms_emoa_run(biobjective_sphere, 4, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(biobjective_sphere, 4, &bounds, &cfg)
+            .expect("sms_emoa_run should succeed");
         assert_eq!(state.population.len(), 10);
         assert_eq!(state.generation, 0);
     }
@@ -632,7 +634,7 @@ mod tests {
             seed: 5,
         };
         let bounds = vec![(0.0, 1.0); 5];
-        let state = sms_emoa_run(zdt1, 5, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(zdt1, 5, &bounds, &cfg).expect("sms_emoa_run should succeed");
         let front = sms_emoa_pareto_front(&state);
 
         // Verify non-domination within the returned front
@@ -661,7 +663,8 @@ mod tests {
             seed: 6,
         };
         let bounds = vec![(0.0, 1.0); 4];
-        let state = sms_emoa_run(biobjective_sphere, 4, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(biobjective_sphere, 4, &bounds, &cfg)
+            .expect("sms_emoa_run should succeed");
         let front = sms_emoa_pareto_front(&state);
         assert!(!front.is_empty());
     }
@@ -722,7 +725,8 @@ mod tests {
             seed: 42,
         };
         let bounds = vec![(0.0, 1.0); 1];
-        let state = sms_emoa_run(biobjective_sphere, 1, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(biobjective_sphere, 1, &bounds, &cfg)
+            .expect("sms_emoa_run should succeed");
 
         // All objectives should be within [0, 2] on this problem
         for obj in &state.objectives {
@@ -745,7 +749,7 @@ mod tests {
             seed: 77,
         };
         let bounds = vec![(0.0, 1.0); 3];
-        let state = sms_emoa_run(triobj, 3, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(triobj, 3, &bounds, &cfg).expect("sms_emoa_run should succeed");
         assert_eq!(state.population.len(), cfg.n_pop);
     }
 
@@ -761,7 +765,7 @@ mod tests {
             seed: 88,
         };
         let bounds = vec![(0.0, 1.0); 3];
-        let state = sms_emoa_run(triobj, 3, &bounds, &cfg).unwrap();
+        let state = sms_emoa_run(triobj, 3, &bounds, &cfg).expect("sms_emoa_run should succeed");
         for obj in &state.objectives {
             for &v in obj {
                 assert!(v.is_finite());
@@ -773,14 +777,14 @@ mod tests {
 
     #[test]
     fn test_bounds_mismatch_error() {
-        let cfg = SmsEmoaConfig::new(10, 10, 2, vec![2.0, 2.0]).unwrap();
+        let cfg = SmsEmoaConfig::new(10, 10, 2, vec![2.0, 2.0]).expect("new should succeed");
         // n_var = 5 but bounds has 3 entries
         assert!(sms_emoa_run(zdt1, 5, &[(0.0, 1.0); 3], &cfg).is_err());
     }
 
     #[test]
     fn test_zero_n_var_error() {
-        let cfg = SmsEmoaConfig::new(10, 10, 2, vec![2.0, 2.0]).unwrap();
+        let cfg = SmsEmoaConfig::new(10, 10, 2, vec![2.0, 2.0]).expect("new should succeed");
         let bounds: Vec<(f64, f64)> = Vec::new();
         assert!(sms_emoa_run(|_: &[f64]| vec![0.0, 0.0], 0, &bounds, &cfg).is_err());
     }

@@ -308,10 +308,10 @@ mod tests {
     fn loss_positive() {
         let feat_dim = 8usize;
         let mut rng = make_rng();
-        let bank = CrdMemoryBank::new(10, feat_dim, &mut rng).unwrap();
+        let bank = CrdMemoryBank::new(10, feat_dim, &mut rng).expect("new should succeed");
         let anchor = unit_vec((0..feat_dim).map(|i| i as f32 * 0.1).collect());
-        let loss =
-            CrdMultiLoss::nce_loss_from_bank(&anchor, &[0], &[1, 2, 3], &bank, 0.07).unwrap();
+        let loss = CrdMultiLoss::nce_loss_from_bank(&anchor, &[0], &[1, 2, 3], &bank, 0.07)
+            .expect("nce_loss_from_bank should succeed");
         assert!(loss >= 0.0, "NCE loss must be >= 0, got {loss}");
         assert!(loss.is_finite(), "NCE loss must be finite");
     }
@@ -325,7 +325,8 @@ mod tests {
         let pos = unit_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
         let neg = unit_vec(vec![0.0_f32, 1.0, 0.0, 0.0]);
         let anchor = unit_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
-        let loss = CrdMultiLoss::nce_loss(&anchor, &pos, 1, &neg, 1, 0.07).unwrap();
+        let loss = CrdMultiLoss::nce_loss(&anchor, &pos, 1, &neg, 1, 0.07)
+            .expect("nce_loss should succeed");
         // anchor == pos → high sim → small positive loss
         assert!(loss.is_finite());
         assert!(loss >= 0.0);
@@ -346,7 +347,8 @@ mod tests {
         let anchor = unit_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
         let pos = anchor.clone();
         let neg = unit_vec(vec![0.0_f32, 1.0, 0.0, 0.0]);
-        let loss = CrdMultiLoss::nce_loss(&anchor, &pos, 1, &neg, 1, 0.07).unwrap();
+        let loss = CrdMultiLoss::nce_loss(&anchor, &pos, 1, &neg, 1, 0.07)
+            .expect("nce_loss should succeed");
         // dot(anchor, neg) = 0, dot(anchor, pos) = 1
         // loss ≈ -1/τ + log(exp(1/τ) + exp(0)) = log(1 + exp(-1/τ))
         assert!(loss >= 0.0 && loss.is_finite());
@@ -363,13 +365,13 @@ mod tests {
     fn loss_increases_with_more_negatives() {
         let mut rng = make_rng();
         let feat_dim = 16usize;
-        let bank = CrdMemoryBank::new(50, feat_dim, &mut rng).unwrap();
-        let anchor = bank.lookup(0).unwrap().to_vec();
-        let loss_few =
-            CrdMultiLoss::nce_loss_from_bank(&anchor, &[0], &[1, 2], &bank, 0.07).unwrap();
+        let bank = CrdMemoryBank::new(50, feat_dim, &mut rng).expect("new should succeed");
+        let anchor = bank.lookup(0).expect("lookup should succeed").to_vec();
+        let loss_few = CrdMultiLoss::nce_loss_from_bank(&anchor, &[0], &[1, 2], &bank, 0.07)
+            .expect("nce_loss_from_bank should succeed");
         let loss_more =
             CrdMultiLoss::nce_loss_from_bank(&anchor, &[0], &[1, 2, 3, 4, 5, 6, 7, 8], &bank, 0.07)
-                .unwrap();
+                .expect("value should be present");
         // More negatives → larger denominator → larger loss
         assert!(
             loss_more >= loss_few,
@@ -387,8 +389,10 @@ mod tests {
         let neg_flat: Vec<f32> = (0..feat_dim).map(|i| -(i as f32)).collect();
         let neg = unit_vec(neg_flat);
 
-        let loss_cold = CrdMultiLoss::nce_loss(&anchor, &pos, 1, &neg, 1, 0.1).unwrap();
-        let loss_warm = CrdMultiLoss::nce_loss(&anchor, &pos, 1, &neg, 1, 1.0).unwrap();
+        let loss_cold = CrdMultiLoss::nce_loss(&anchor, &pos, 1, &neg, 1, 0.1)
+            .expect("nce_loss should succeed");
+        let loss_warm = CrdMultiLoss::nce_loss(&anchor, &pos, 1, &neg, 1, 1.0)
+            .expect("nce_loss should succeed");
         // Different temperatures produce different loss values
         assert!(
             (loss_cold - loss_warm).abs() > 1e-4,
@@ -425,9 +429,9 @@ mod tests {
     #[test]
     fn bank_init_unit_norm() {
         let mut rng = make_rng();
-        let bank = CrdMemoryBank::new(20, 8, &mut rng).unwrap();
+        let bank = CrdMemoryBank::new(20, 8, &mut rng).expect("new should succeed");
         for i in 0..bank.n_samples {
-            let row = bank.lookup(i).unwrap();
+            let row = bank.lookup(i).expect("lookup should succeed");
             let norm: f32 = row.iter().map(|&v| v * v).sum::<f32>().sqrt();
             assert!(
                 (norm - 1.0).abs() < 1e-5,
@@ -442,8 +446,8 @@ mod tests {
     fn bank_lookup_valid() {
         let mut rng = make_rng();
         let feat_dim = 16usize;
-        let bank = CrdMemoryBank::new(5, feat_dim, &mut rng).unwrap();
-        let slice = bank.lookup(0).unwrap();
+        let bank = CrdMemoryBank::new(5, feat_dim, &mut rng).expect("new should succeed");
+        let slice = bank.lookup(0).expect("lookup should succeed");
         assert_eq!(slice.len(), feat_dim);
     }
 
@@ -452,7 +456,7 @@ mod tests {
     #[test]
     fn bank_lookup_oob() {
         let mut rng = make_rng();
-        let bank = CrdMemoryBank::new(5, 8, &mut rng).unwrap();
+        let bank = CrdMemoryBank::new(5, 8, &mut rng).expect("new should succeed");
         let result = bank.lookup(5); // index == n_samples → OOB
         assert!(
             matches!(result, Err(DistillError::DimensionMismatch { .. })),
@@ -466,11 +470,12 @@ mod tests {
     fn bank_update_normalizes() {
         let mut rng = make_rng();
         let feat_dim = 8usize;
-        let mut bank = CrdMemoryBank::new(5, feat_dim, &mut rng).unwrap();
+        let mut bank = CrdMemoryBank::new(5, feat_dim, &mut rng).expect("new should succeed");
         // Update with a non-unit vector
         let new_feat: Vec<f32> = vec![5.0_f32; feat_dim];
-        bank.update(0, &new_feat, 0.5).unwrap();
-        let row = bank.lookup(0).unwrap();
+        bank.update(0, &new_feat, 0.5)
+            .expect("update should succeed");
+        let row = bank.lookup(0).expect("lookup should succeed");
         let norm: f32 = row.iter().map(|&v| v * v).sum::<f32>().sqrt();
         assert!(
             (norm - 1.0).abs() < 1e-5,
@@ -484,12 +489,13 @@ mod tests {
     fn bank_update_momentum() {
         let mut rng = make_rng();
         let feat_dim = 8usize;
-        let mut bank = CrdMemoryBank::new(5, feat_dim, &mut rng).unwrap();
-        let original = bank.lookup(0).unwrap().to_vec();
+        let mut bank = CrdMemoryBank::new(5, feat_dim, &mut rng).expect("new should succeed");
+        let original = bank.lookup(0).expect("lookup should succeed").to_vec();
         // With momentum=1.0, EMA = 1.0*old + 0.0*new = old (then renormalized = old)
         let new_feat = vec![0.1_f32; feat_dim]; // different direction
-        bank.update(0, &new_feat, 1.0).unwrap();
-        let updated = bank.lookup(0).unwrap();
+        bank.update(0, &new_feat, 1.0)
+            .expect("update should succeed");
+        let updated = bank.lookup(0).expect("lookup should succeed");
         for (a, &b) in original.iter().zip(updated.iter()) {
             assert!(
                 (a - b).abs() < 1e-5,
@@ -503,8 +509,10 @@ mod tests {
     #[test]
     fn sample_negatives_count() {
         let mut rng = make_rng();
-        let bank = CrdMemoryBank::new(100, 8, &mut rng).unwrap();
-        let negs = bank.sample_negatives(&[0], 10, &mut rng).unwrap();
+        let bank = CrdMemoryBank::new(100, 8, &mut rng).expect("new should succeed");
+        let negs = bank
+            .sample_negatives(&[0], 10, &mut rng)
+            .expect("sample_negatives should succeed");
         assert_eq!(negs.len(), 10, "should return exactly 10 negatives");
     }
 
@@ -513,9 +521,11 @@ mod tests {
     #[test]
     fn sample_negatives_excludes() {
         let mut rng = make_rng();
-        let bank = CrdMemoryBank::new(50, 8, &mut rng).unwrap();
+        let bank = CrdMemoryBank::new(50, 8, &mut rng).expect("new should succeed");
         let exclude = vec![0usize, 1, 2, 3];
-        let negs = bank.sample_negatives(&exclude, 5, &mut rng).unwrap();
+        let negs = bank
+            .sample_negatives(&exclude, 5, &mut rng)
+            .expect("sample_negatives should succeed");
         for &ni in &negs {
             assert!(
                 !exclude.contains(&ni),
@@ -530,8 +540,8 @@ mod tests {
     fn nce_from_bank_runs() {
         let mut rng = make_rng();
         let feat_dim = 16usize;
-        let bank = CrdMemoryBank::new(20, feat_dim, &mut rng).unwrap();
-        let anchor = bank.lookup(0).unwrap().to_vec();
+        let bank = CrdMemoryBank::new(20, feat_dim, &mut rng).expect("new should succeed");
+        let anchor = bank.lookup(0).expect("lookup should succeed").to_vec();
         let result = CrdMultiLoss::nce_loss_from_bank(
             &anchor,
             &[1, 2],    // 2 positives
@@ -544,7 +554,7 @@ mod tests {
             "nce_loss_from_bank should succeed: {:?}",
             result.err()
         );
-        assert!(result.unwrap().is_finite());
+        assert!(result.expect("result should be present").is_finite());
     }
 
     // ── 16. empty_anchor_err ─────────────────────────────────────────────────
@@ -581,7 +591,7 @@ mod tests {
     fn insufficient_negatives_err() {
         let mut rng = make_rng();
         // Bank of 7 samples, exclude 5, request 5 → only 2 valid → error
-        let bank = CrdMemoryBank::new(7, 8, &mut rng).unwrap();
+        let bank = CrdMemoryBank::new(7, 8, &mut rng).expect("new should succeed");
         let exclude: Vec<usize> = (0..5).collect(); // excludes 0..5, leaves 5,6
         let result = bank.sample_negatives(&exclude, 5, &mut rng);
         assert!(

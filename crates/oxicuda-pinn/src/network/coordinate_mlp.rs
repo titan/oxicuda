@@ -117,14 +117,16 @@ mod tests {
 
     #[test]
     fn encode_length() {
-        let ffn = make_ffn(2, 8, 1.0).unwrap();
+        let ffn = make_ffn(2, 8, 1.0)
+            .expect("FourierFeatureNetwork construction with valid config should succeed");
         let enc = ffn.encode(&[0.3, 0.7]);
         assert_eq!(enc.len(), 16, "Encoded length should be 2 * n_fourier = 16");
     }
 
     #[test]
     fn encode_sin_cos_bounded() {
-        let ffn = make_ffn(1, 4, 1.0).unwrap();
+        let ffn = make_ffn(1, 4, 1.0)
+            .expect("FourierFeatureNetwork construction with valid config should succeed");
         let enc = ffn.encode(&[0.5]);
         for v in &enc {
             assert!(v.abs() <= 1.0 + 1e-5, "sin/cos must be in [-1,1], got {v}");
@@ -133,24 +135,31 @@ mod tests {
 
     #[test]
     fn forward_shape() {
-        let ffn = make_ffn(2, 16, 5.0).unwrap();
-        let out = ffn.forward(&[0.3, 0.7]).unwrap();
+        let ffn = make_ffn(2, 16, 5.0)
+            .expect("FourierFeatureNetwork construction with valid config should succeed");
+        let out = ffn
+            .forward(&[0.3, 0.7])
+            .expect("forward pass should succeed for valid input");
         assert_eq!(out.len(), 1);
     }
 
     #[test]
     fn forward_finite() {
-        let ffn = make_ffn(1, 8, 1.0).unwrap();
+        let ffn = make_ffn(1, 8, 1.0)
+            .expect("FourierFeatureNetwork construction with valid config should succeed");
         for i in 0..10 {
             let x = i as f32 * 0.1;
-            let out = ffn.forward(&[x]).unwrap();
+            let out = ffn
+                .forward(&[x])
+                .expect("forward pass should succeed for valid input");
             assert!(out[0].is_finite(), "Output not finite at x={x}");
         }
     }
 
     #[test]
     fn forward_dim_mismatch_error() {
-        let ffn = make_ffn(2, 8, 1.0).unwrap();
+        let ffn = make_ffn(2, 8, 1.0)
+            .expect("FourierFeatureNetwork construction with valid config should succeed");
         let result = ffn.forward(&[0.5]); // expects 2 inputs
         assert!(result.is_err());
     }

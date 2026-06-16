@@ -101,7 +101,8 @@ mod tests {
         };
         let s = vec![1.0_f32, 0.5, 0.0];
         let t = vec![0.9_f32, 0.6, 0.1];
-        let loss = progressive_distill_step(&s, &t, &cfg).unwrap();
+        let loss = progressive_distill_step(&s, &t, &cfg)
+            .expect("progressive_distill_step should succeed");
         assert!(loss.is_finite() && loss >= 0.0);
     }
 }

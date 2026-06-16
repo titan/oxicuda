@@ -253,7 +253,7 @@ mod tests {
     fn zero_interaction_matrix() {
         let x = vec![0.0_f32; 4 * 4];
         let cfg = small_cfg(4, 4);
-        let model = SlimModel::fit(&x, cfg).unwrap();
+        let model = SlimModel::fit(&x, cfg).expect("fit should succeed");
         for &w in &model.weights {
             assert_eq!(w, 0.0, "all weights should be zero for zero interactions");
         }
@@ -269,7 +269,7 @@ mod tests {
             x[i * n + i] = 1.0;
         }
         let cfg = small_cfg(n, n);
-        let model = SlimModel::fit(&x, cfg).unwrap();
+        let model = SlimModel::fit(&x, cfg).expect("fit should succeed");
         for i in 0..n {
             assert_eq!(model.weights[i * n + i], 0.0, "diagonal must be 0");
         }
@@ -298,7 +298,7 @@ mod tests {
     fn weights_non_negative() {
         let x = small_interactions();
         let cfg = small_cfg(3, 3);
-        let model = SlimModel::fit(&x, cfg).unwrap();
+        let model = SlimModel::fit(&x, cfg).expect("fit should succeed");
         for (idx, &w) in model.weights.iter().enumerate() {
             assert!(w >= 0.0, "weight at {idx} is negative: {w}");
         }
@@ -308,7 +308,7 @@ mod tests {
     fn diagonal_always_zero() {
         let x = small_interactions();
         let cfg = small_cfg(3, 3);
-        let model = SlimModel::fit(&x, cfg).unwrap();
+        let model = SlimModel::fit(&x, cfg).expect("fit should succeed");
         let n = 3;
         for i in 0..n {
             assert_eq!(model.weights[i * n + i], 0.0, "W[{i},{i}] must be 0");
@@ -319,9 +319,9 @@ mod tests {
     fn predict_output_length() {
         let x = small_interactions();
         let cfg = small_cfg(3, 3);
-        let model = SlimModel::fit(&x, cfg).unwrap();
+        let model = SlimModel::fit(&x, cfg).expect("fit should succeed");
         let history = vec![1.0, 0.0, 0.0];
-        let scores = model.predict(&history).unwrap();
+        let scores = model.predict(&history).expect("predict should succeed");
         assert_eq!(scores.len(), 3);
     }
 
@@ -329,9 +329,11 @@ mod tests {
     fn recommend_k_items() {
         let x = small_interactions();
         let cfg = small_cfg(3, 3);
-        let model = SlimModel::fit(&x, cfg).unwrap();
+        let model = SlimModel::fit(&x, cfg).expect("fit should succeed");
         let history = vec![1.0, 0.0, 0.0];
-        let recs = model.recommend(&history, 2).unwrap();
+        let recs = model
+            .recommend(&history, 2)
+            .expect("recommend should succeed");
         assert_eq!(recs.len(), 2);
     }
 
@@ -339,9 +341,11 @@ mod tests {
     fn recommend_excludes_seen() {
         let x = small_interactions();
         let cfg = small_cfg(3, 3);
-        let model = SlimModel::fit(&x, cfg).unwrap();
+        let model = SlimModel::fit(&x, cfg).expect("fit should succeed");
         let history = vec![1.0, 0.0, 0.0];
-        let recs = model.recommend(&history, 2).unwrap();
+        let recs = model
+            .recommend(&history, 2)
+            .expect("recommend should succeed");
         for &idx in &recs {
             assert!(
                 history[idx] == 0.0,
@@ -362,7 +366,7 @@ mod tests {
             max_iter: 10,
             tol: 1e-4,
         };
-        let model = SlimModel::fit(&x, cfg).unwrap();
+        let model = SlimModel::fit(&x, cfg).expect("fit should succeed");
         assert_eq!(model.weights.len(), 1);
         assert_eq!(model.weights[0], 0.0);
     }
@@ -383,7 +387,7 @@ mod tests {
             max_iter: 200,
             tol: 1e-5,
         };
-        let model_high = SlimModel::fit(&x, cfg_high).unwrap();
+        let model_high = SlimModel::fit(&x, cfg_high).expect("fit should succeed");
         let nnz_high = model_high.weights.iter().filter(|&&w| w > 0.0).count();
         assert_eq!(
             nnz_high, 0,
@@ -415,8 +419,8 @@ mod tests {
             max_iter: 200,
             tol: 1e-6,
         };
-        let model_high = SlimModel::fit(&x, cfg_high).unwrap();
-        let model_low = SlimModel::fit(&x, cfg_low).unwrap();
+        let model_high = SlimModel::fit(&x, cfg_high).expect("fit should succeed");
+        let model_low = SlimModel::fit(&x, cfg_low).expect("fit should succeed");
         let nnz_high = model_high.weights.iter().filter(|&&w| w > 0.0).count();
         let nnz_low = model_low.weights.iter().filter(|&&w| w > 0.0).count();
         assert!(

@@ -143,7 +143,9 @@ mod tests {
 
     #[test]
     fn zero_state_norm_is_one() {
-        let sv = StateVector::new_zero_state(3).unwrap();
+        let sv = StateVector::new_zero_state(3).expect(
+            "new_zero_state(3) cannot fail: 3 qubits is strictly within the valid range 1..=30",
+        );
         let n = sv.norm_sq();
         assert!((n - 1.0).abs() < 1e-6, "norm={n}");
     }

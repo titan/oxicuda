@@ -281,7 +281,8 @@ mod tests {
             activation: Activation::Tanh,
             omega_0: 1.0,
         };
-        let _mlp = Mlp::new(cfg, &mut rng).unwrap();
+        let _mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
     }
 
     #[test]
@@ -292,8 +293,11 @@ mod tests {
             activation: Activation::Tanh,
             omega_0: 1.0,
         };
-        let mlp = Mlp::new(cfg, &mut rng).unwrap();
-        let out = mlp.forward(&[0.3, 0.7]).unwrap();
+        let mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
+        let out = mlp
+            .forward(&[0.3, 0.7])
+            .expect("forward pass should succeed for valid input");
         assert_eq!(out.len(), 1);
     }
 
@@ -306,10 +310,13 @@ mod tests {
             activation: Activation::Tanh,
             omega_0: 1.0,
         };
-        let mlp = Mlp::new(cfg, &mut rng).unwrap();
+        let mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
         for i in 0..10 {
             let x = i as f32 * 0.1;
-            let out = mlp.forward(&[x]).unwrap();
+            let out = mlp
+                .forward(&[x])
+                .expect("forward pass should succeed for valid input");
             assert!(out[0].is_finite(), "Tanh MLP output not finite at x={x}");
         }
     }
@@ -322,8 +329,11 @@ mod tests {
             activation: Activation::Relu,
             omega_0: 1.0,
         };
-        let mlp = Mlp::new(cfg, &mut rng).unwrap();
-        let out = mlp.forward(&[1.0, -1.0, 0.5]).unwrap();
+        let mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
+        let out = mlp
+            .forward(&[1.0, -1.0, 0.5])
+            .expect("forward pass should succeed for valid input");
         assert!(
             out.iter().all(|v| v.is_finite()),
             "ReLU MLP output not finite"
@@ -338,15 +348,19 @@ mod tests {
             activation: Activation::Gelu,
             omega_0: 1.0,
         };
-        let mlp = Mlp::new(cfg, &mut rng).unwrap();
-        let out = mlp.forward(&[0.5, -0.5]).unwrap();
+        let mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
+        let out = mlp
+            .forward(&[0.5, -0.5])
+            .expect("forward pass should succeed for valid input");
         assert!(out[0].is_finite());
     }
 
     #[test]
     fn siren_init_weights_in_range() {
         let mut rng = LcgRng::new(6);
-        let mlp = Mlp::siren_init(vec![2, 32, 32, 1], 30.0, &mut rng).unwrap();
+        let mlp = Mlp::siren_init(vec![2, 32, 32, 1], 30.0, &mut rng)
+            .expect("SIREN initialization with valid config should succeed");
         let d_in = 2;
         // First layer weights in [-1/d_in, 1/d_in]
         for &w in &mlp.weights()[0] {
@@ -360,10 +374,13 @@ mod tests {
     #[test]
     fn siren_forward_finite() {
         let mut rng = LcgRng::new(7);
-        let mlp = Mlp::siren_init(vec![1, 16, 1], 30.0, &mut rng).unwrap();
+        let mlp = Mlp::siren_init(vec![1, 16, 1], 30.0, &mut rng)
+            .expect("SIREN initialization with valid config should succeed");
         for i in 0..10 {
             let x = i as f32 * 0.1;
-            let out = mlp.forward(&[x]).unwrap();
+            let out = mlp
+                .forward(&[x])
+                .expect("forward pass should succeed for valid input");
             assert!(out[0].is_finite(), "SIREN output not finite at x={x}");
         }
     }
@@ -376,8 +393,11 @@ mod tests {
             activation: Activation::Sin,
             omega_0: 1.0,
         };
-        let mlp = Mlp::new(cfg, &mut rng).unwrap();
-        let out = mlp.forward(&[0.5]).unwrap();
+        let mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
+        let out = mlp
+            .forward(&[0.5])
+            .expect("forward pass should succeed for valid input");
         assert!(out[0].is_finite());
     }
 
@@ -389,11 +409,14 @@ mod tests {
             activation: Activation::Tanh,
             omega_0: 1.0,
         };
-        let mlp = Mlp::new(cfg, &mut rng).unwrap();
+        let mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
         let mut tape = Tape::new();
         let x0 = tape.variable(0.3);
         let x1 = tape.variable(0.7);
-        let out_vars = mlp.grad_input(&mut tape, &[x0, x1]).unwrap();
+        let out_vars = mlp
+            .grad_input(&mut tape, &[x0, x1])
+            .expect("tape-based gradient computation should succeed");
         assert_eq!(out_vars.len(), 1);
     }
 
@@ -405,7 +428,8 @@ mod tests {
             activation: Activation::Tanh,
             omega_0: 1.0,
         };
-        let mut mlp = Mlp::new(cfg, &mut rng).unwrap();
+        let mut mlp =
+            Mlp::new(cfg, &mut rng).expect("MLP construction with valid config should succeed");
         let w_before = mlp.weights()[0][0];
         let grad_w: Vec<Vec<f32>> = mlp
             .weights()

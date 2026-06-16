@@ -16,9 +16,10 @@ fn default_cfg(in_f: usize, out_f: usize, rank: usize, alpha: f64) -> LoHaConfig
 #[test]
 fn initial_forward_is_zero_with_zero_b() {
     let cfg = default_cfg(6, 4, 2, 4.0);
-    let adapter = LoHaAdapter::new(cfg, 7).unwrap();
+    let adapter =
+        LoHaAdapter::new(cfg, 7).expect("LoHaAdapter::new should succeed with valid config");
     let x: Vec<f64> = (0..6).map(|i| i as f64 - 2.5).collect();
-    let y = adapter.forward(&x).unwrap();
+    let y = adapter.forward(&x).expect("LoHa forward should succeed");
     assert_eq!(y.len(), 4);
     for &v in &y {
         assert!(v.abs() < 1e-15, "expected zero output, got {v}");
@@ -28,8 +29,9 @@ fn initial_forward_is_zero_with_zero_b() {
 #[test]
 fn a_factors_reproducible_by_seed() {
     let cfg = default_cfg(8, 5, 3, 6.0);
-    let a = LoHaAdapter::new(cfg.clone(), 42).unwrap();
-    let b = LoHaAdapter::new(cfg, 42).unwrap();
+    let a = LoHaAdapter::new(cfg.clone(), 42)
+        .expect("LoHaAdapter::new should succeed with valid config");
+    let b = LoHaAdapter::new(cfg, 42).expect("LoHaAdapter::new should succeed with valid config");
     assert_eq!(a.a1, b.a1);
     assert_eq!(a.a2, b.a2);
     assert_eq!(a.b1, b.b1);
@@ -39,7 +41,8 @@ fn a_factors_reproducible_by_seed() {
 #[test]
 fn a1_and_a2_differ_within_same_seed() {
     let cfg = default_cfg(8, 5, 3, 6.0);
-    let adapter = LoHaAdapter::new(cfg, 17).unwrap();
+    let adapter =
+        LoHaAdapter::new(cfg, 17).expect("LoHaAdapter::new should succeed with valid config");
     let diff: f64 = adapter
         .a1
         .iter()
@@ -52,7 +55,8 @@ fn a1_and_a2_differ_within_same_seed() {
 #[test]
 fn forward_dimensions_correct() {
     let cfg = default_cfg(7, 9, 3, 6.0);
-    let mut adapter = LoHaAdapter::new(cfg, 11).unwrap();
+    let mut adapter =
+        LoHaAdapter::new(cfg, 11).expect("LoHaAdapter::new should succeed with valid config");
     for (i, b) in adapter.b1.iter_mut().enumerate() {
         *b = 0.05 * (i as f64 + 1.0);
     }
@@ -60,17 +64,20 @@ fn forward_dimensions_correct() {
         *b = 0.03 * (i as f64 + 2.0);
     }
     let x = vec![1.0_f64; 7];
-    let y = adapter.forward(&x).unwrap();
+    let y = adapter.forward(&x).expect("LoHa forward should succeed");
     assert_eq!(y.len(), 9);
 }
 
 #[test]
 fn backward_grad_shapes_correct() {
     let cfg = default_cfg(5, 4, 2, 4.0);
-    let adapter = LoHaAdapter::new(cfg, 3).unwrap();
+    let adapter =
+        LoHaAdapter::new(cfg, 3).expect("LoHaAdapter::new should succeed with valid config");
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3];
     let grad_y = vec![0.1_f64, -0.2, 0.3, 0.4];
-    let (da1, db1, da2, db2) = adapter.backward(&x, &grad_y).unwrap();
+    let (da1, db1, da2, db2) = adapter
+        .backward(&x, &grad_y)
+        .expect("LoHa backward should succeed");
     assert_eq!(da1.len(), 2 * 5);
     assert_eq!(db1.len(), 4 * 2);
     assert_eq!(da2.len(), 2 * 5);
@@ -79,7 +86,7 @@ fn backward_grad_shapes_correct() {
 
 fn loss_at(a: &LoHaAdapter, x: &[f64], gy: &[f64]) -> f64 {
     gy.iter()
-        .zip(a.forward(x).unwrap().iter())
+        .zip(a.forward(x).expect("LoHa forward should succeed").iter())
         .map(|(g, y)| g * y)
         .sum()
 }
@@ -111,7 +118,8 @@ fn check_fd(
 #[test]
 fn backward_matches_finite_differences() {
     let cfg = default_cfg(4, 3, 2, 4.0);
-    let mut adapter = LoHaAdapter::new(cfg, 99).unwrap();
+    let mut adapter =
+        LoHaAdapter::new(cfg, 99).expect("LoHaAdapter::new should succeed with valid config");
     for (i, b) in adapter.b1.iter_mut().enumerate() {
         *b = 0.1 * (i as f64 + 1.0);
     }
@@ -120,7 +128,9 @@ fn backward_matches_finite_differences() {
     }
     let x = vec![0.5_f64, -1.0, 0.25, 0.75];
     let gy = vec![1.0_f64, -0.5, 0.25];
-    let (da1, db1, da2, db2) = adapter.backward(&x, &gy).unwrap();
+    let (da1, db1, da2, db2) = adapter
+        .backward(&x, &gy)
+        .expect("LoHa backward should succeed");
     check_fd(&mut adapter, &x, &gy, |a| &mut a.a1, &da1, "a1");
     check_fd(&mut adapter, &x, &gy, |a| &mut a.b1, &db1, "b1");
     check_fd(&mut adapter, &x, &gy, |a| &mut a.a2, &da2, "a2");
@@ -129,7 +139,8 @@ fn backward_matches_finite_differences() {
 
 #[test]
 fn sgd_reduces_loss_on_small_fit() {
-    let mut adapter = LoHaAdapter::new(default_cfg(6, 4, 2, 4.0), 21).unwrap();
+    let mut adapter = LoHaAdapter::new(default_cfg(6, 4, 2, 4.0), 21)
+        .expect("LoHaAdapter::new should succeed with valid config");
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3, 0.75];
     // Both Hadamard branches need non-zero starting B so each receives gradient signal.
     for (i, b) in adapter.b1.iter_mut().enumerate() {
@@ -146,11 +157,11 @@ fn sgd_reduces_loss_on_small_fit() {
         for (i, b) in probe.b2.iter_mut().enumerate() {
             *b += 0.3 * (i as f64 + 1.0);
         }
-        probe.forward(&x).unwrap()
+        probe.forward(&x).expect("LoHa forward should succeed")
     };
     let mse = |a: &LoHaAdapter| -> f64 {
         a.forward(&x)
-            .unwrap()
+            .expect("LoHa forward should succeed")
             .iter()
             .zip(target.iter())
             .map(|(p, q)| (p - q).powi(2))
@@ -158,10 +169,14 @@ fn sgd_reduces_loss_on_small_fit() {
     };
     let initial = mse(&adapter);
     for _ in 0..200 {
-        let y = adapter.forward(&x).unwrap();
+        let y = adapter.forward(&x).expect("LoHa forward should succeed");
         let gy: Vec<f64> = y.iter().zip(target.iter()).map(|(p, q)| p - q).collect();
-        let (da1, db1, da2, db2) = adapter.backward(&x, &gy).unwrap();
-        adapter.apply_grads(&da1, &db1, &da2, &db2, 0.02).unwrap();
+        let (da1, db1, da2, db2) = adapter
+            .backward(&x, &gy)
+            .expect("LoHa backward should succeed");
+        adapter
+            .apply_grads(&da1, &db1, &da2, &db2, 0.02)
+            .expect("LoHa apply_grads should succeed");
     }
     let final_loss = mse(&adapter);
     assert!(
@@ -172,7 +187,8 @@ fn sgd_reduces_loss_on_small_fit() {
 
 #[test]
 fn alpha_zero_produces_zero_forward() {
-    let mut adapter = LoHaAdapter::new(default_cfg(5, 4, 2, 0.0), 77).unwrap();
+    let mut adapter = LoHaAdapter::new(default_cfg(5, 4, 2, 0.0), 77)
+        .expect("LoHaAdapter::new should succeed with valid config");
     for (i, b) in adapter.b1.iter_mut().enumerate() {
         *b = 0.1 * (i as f64 + 1.0);
     }
@@ -180,7 +196,7 @@ fn alpha_zero_produces_zero_forward() {
         *b = 0.07 * (i as f64 + 1.0);
     }
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3];
-    let y = adapter.forward(&x).unwrap();
+    let y = adapter.forward(&x).expect("LoHa forward should succeed");
     for &v in &y {
         assert!(v.abs() < 1e-15, "α=0 must zero out adapter, got {v}");
     }
@@ -204,7 +220,8 @@ fn invalid_configs_rejected() {
 
 #[test]
 fn dim_mismatch_in_forward_and_backward_rejected() {
-    let adapter = LoHaAdapter::new(default_cfg(5, 3, 2, 2.0), 0).unwrap();
+    let adapter = LoHaAdapter::new(default_cfg(5, 3, 2, 2.0), 0)
+        .expect("LoHaAdapter::new should succeed with valid config");
     assert!(matches!(
         adapter.forward(&[1.0_f64, 2.0, 3.0]),
         Err(PeftError::DimensionMismatch { .. })
@@ -221,7 +238,8 @@ fn dim_mismatch_in_forward_and_backward_rejected() {
 
 #[test]
 fn apply_grads_dim_mismatch_rejected() {
-    let mut adapter = LoHaAdapter::new(default_cfg(5, 3, 2, 2.0), 0).unwrap();
+    let mut adapter = LoHaAdapter::new(default_cfg(5, 3, 2, 2.0), 0)
+        .expect("LoHaAdapter::new should succeed with valid config");
     let good_a = vec![0.0_f64; 2 * 5];
     let good_b = vec![0.0_f64; 3 * 2];
     let bad_a = vec![0.0_f64; 5];
@@ -246,8 +264,10 @@ fn apply_grads_dim_mismatch_rejected() {
 
 #[test]
 fn scale_alpha_over_rank_applied() {
-    let mut a1 = LoHaAdapter::new(default_cfg(5, 3, 2, 4.0), 33).unwrap();
-    let mut a2 = LoHaAdapter::new(default_cfg(5, 3, 2, 8.0), 33).unwrap();
+    let mut a1 = LoHaAdapter::new(default_cfg(5, 3, 2, 4.0), 33)
+        .expect("LoHaAdapter::new should succeed with valid config");
+    let mut a2 = LoHaAdapter::new(default_cfg(5, 3, 2, 8.0), 33)
+        .expect("LoHaAdapter::new should succeed with valid config");
     let b_seed: Vec<f64> = (0..a1.b1.len()).map(|i| 0.05 * (i as f64 + 1.0)).collect();
     a1.b1.copy_from_slice(&b_seed);
     a2.b1.copy_from_slice(&b_seed);
@@ -255,8 +275,8 @@ fn scale_alpha_over_rank_applied() {
     a1.b2.copy_from_slice(&b_seed2);
     a2.b2.copy_from_slice(&b_seed2);
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3];
-    let y1 = a1.forward(&x).unwrap();
-    let y2 = a2.forward(&x).unwrap();
+    let y1 = a1.forward(&x).expect("LoHa forward should succeed");
+    let y2 = a2.forward(&x).expect("LoHa forward should succeed");
     for (v1, v2) in y1.iter().zip(y2.iter()) {
         assert!((2.0 * v1 - v2).abs() < 1e-12, "α doubled → y doubled");
     }
@@ -266,7 +286,8 @@ fn scale_alpha_over_rank_applied() {
 
 #[test]
 fn zero_input_yields_zero_output() {
-    let mut adapter = LoHaAdapter::new(default_cfg(5, 4, 2, 4.0), 13).unwrap();
+    let mut adapter = LoHaAdapter::new(default_cfg(5, 4, 2, 4.0), 13)
+        .expect("LoHaAdapter::new should succeed with valid config");
     for (i, b) in adapter.b1.iter_mut().enumerate() {
         *b = 0.1 * (i as f64 + 1.0);
     }
@@ -274,7 +295,7 @@ fn zero_input_yields_zero_output() {
         *b = 0.07 * (i as f64 + 2.0);
     }
     let x = vec![0.0_f64; 5];
-    let y = adapter.forward(&x).unwrap();
+    let y = adapter.forward(&x).expect("LoHa forward should succeed");
     for &v in &y {
         assert!(v.abs() < 1e-15, "zero x must yield zero y, got {v}");
     }
@@ -282,7 +303,8 @@ fn zero_input_yields_zero_output() {
 
 #[test]
 fn multiple_forward_calls_dont_mutate_state() {
-    let mut adapter = LoHaAdapter::new(default_cfg(6, 5, 3, 6.0), 13).unwrap();
+    let mut adapter = LoHaAdapter::new(default_cfg(6, 5, 3, 6.0), 13)
+        .expect("LoHaAdapter::new should succeed with valid config");
     for (i, b) in adapter.b1.iter_mut().enumerate() {
         *b = 0.1 * (i as f64 + 1.0);
     }
@@ -294,9 +316,9 @@ fn multiple_forward_calls_dont_mutate_state() {
     let snap_a2 = adapter.a2.clone();
     let snap_b2 = adapter.b2.clone();
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3, 0.75];
-    let _ = adapter.forward(&x).unwrap();
-    let _ = adapter.forward(&x).unwrap();
-    let _ = adapter.forward(&x).unwrap();
+    let _ = adapter.forward(&x).expect("LoHa forward should succeed");
+    let _ = adapter.forward(&x).expect("LoHa forward should succeed");
+    let _ = adapter.forward(&x).expect("LoHa forward should succeed");
     assert_eq!(adapter.a1, snap_a1);
     assert_eq!(adapter.b1, snap_b1);
     assert_eq!(adapter.a2, snap_a2);
@@ -305,6 +327,7 @@ fn multiple_forward_calls_dont_mutate_state() {
 
 #[test]
 fn n_trainable_counts_all_four_factors() {
-    let adapter = LoHaAdapter::new(default_cfg(8, 12, 4, 8.0), 0).unwrap();
+    let adapter = LoHaAdapter::new(default_cfg(8, 12, 4, 8.0), 0)
+        .expect("LoHaAdapter::new should succeed with valid config");
     assert_eq!(adapter.n_trainable(), 2 * 4 * (8 + 12));
 }

@@ -6,7 +6,7 @@ GPU-accelerated reinforcement learning primitives: experience replay buffers, po
 
 ## Implementation Status
 
-**Actual: 6,731 SLoC across 29 files (includes Markdown doc-comments) / 4,652 pure Rust SLoC**
+**Actual: 11,280 SLoC across 50 files (includes Markdown doc-comments) / 4,652 pure Rust SLoC**
 
 First-class GPU-ready RL library implementing every major modern algorithm from DQN to SAC/TD3/PPO,
 including prioritized experience replay (PER), n-step returns, GAE, V-trace, Retrace,
@@ -96,6 +96,10 @@ observation/reward normalization, and a vectorized environment abstraction.
 - [x] OU-noise + clipped Gaussian exploration (`policy/deterministic.rs`)
 - [x] (P2) Distributional RL (C51, QR-DQN) value losses -- no current implementation
 - [ ] (P2) Apex / R2D2 distributed actor-learner pattern -- requires Vol.12 collective integration
+- [x] (P2) DreamerV3 world-model RL (`world_model/dreamer_v3.rs`) — Hafner 2023: RSSM recurrent state-space model with symlog encoding, KL balancing, two-hot critic targets; `DreamerV3`
+- [x] (P2) Decision Transformer (`policy/decision_transformer.rs`) — Chen 2021 NeurIPS: offline RL via causal Transformer conditioned on return-to-go + state + action; `DecisionTransformer`
+- [x] (P2) Discrete SAC with Gumbel-Softmax (`loss/discrete_sac.rs`) — Christodoulou 2019: SAC extended to discrete action spaces; temperature auto-tuning via target entropy H_target=-|A|; `DiscreteSacLoss`
+- [ ] (P2) Plan2Explore unsupervised exploration (`policy/plan2explore.rs`) — Sekar 2020: ensemble disagreement intrinsic reward + one-step world-model disagreement maximisation; `Plan2Explore`
 
 ## Dependencies
 
@@ -109,7 +113,7 @@ observation/reward normalization, and a vectorized environment abstraction.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![warn(missing_docs)]`)
-- Tests: 165 passing (root TODO.md count)
+- Tests: 425 passing (root TODO.md count)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime

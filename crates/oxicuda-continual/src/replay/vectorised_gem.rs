@@ -218,7 +218,8 @@ mod tests {
         let g = vec![1.0_f64, 0.0, 0.0];
         let mem = vec![vec![1.0_f64, 0.0, 0.0]];
         let cfg = VectorisedGemConfig::default();
-        let result = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let result = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         for (a, b) in g.iter().zip(result.iter()) {
             assert!((a - b).abs() < 1e-12);
         }
@@ -233,7 +234,8 @@ mod tests {
             vec![0.0_f64, 0.0, 1.0],
         ];
         let cfg = VectorisedGemConfig::default();
-        let g_proj = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let g_proj = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         assert!(constraints_satisfied(&g_proj, &mem, cfg.margin));
     }
 
@@ -246,7 +248,8 @@ mod tests {
             max_iter: 200,
             ..Default::default()
         };
-        let g_proj = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let g_proj = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         assert!(g_proj[0].abs() < 1e-6, "got {}", g_proj[0]);
         assert!(g_proj[1].abs() < 1e-6);
     }
@@ -265,8 +268,10 @@ mod tests {
             ..Default::default()
         };
 
-        let g0 = vectorised_gem_project(&g, &mem, &cfg0).unwrap();
-        let gl = vectorised_gem_project(&g, &mem, &cfg_large).unwrap();
+        let g0 = vectorised_gem_project(&g, &mem, &cfg0)
+            .expect("vectorised GEM projection should succeed with valid inputs");
+        let gl = vectorised_gem_project(&g, &mem, &cfg_large)
+            .expect("vectorised GEM projection should succeed with valid inputs");
 
         let dot0 = dot_f64(&g0, &mem[0]);
         let dotl = dot_f64(&gl, &mem[0]);
@@ -284,7 +289,8 @@ mod tests {
             max_iter: 500,
             use_line_search: true,
         };
-        let g_proj = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let g_proj = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         assert!(
             g_proj[0].abs() < 1e-6,
             "x-component should vanish, got {}",
@@ -302,7 +308,8 @@ mod tests {
         let g = vec![1.0_f64, 1.0, 1.0];
         let mem = vec![vec![0.0_f64, 0.0, 1.0]];
         let cfg = VectorisedGemConfig::default();
-        let g_proj = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let g_proj = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         for (a, b) in g.iter().zip(g_proj.iter()) {
             assert!((a - b).abs() < 1e-12);
         }
@@ -318,7 +325,8 @@ mod tests {
             max_iter: 500,
             use_line_search: true,
         };
-        let g_proj = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let g_proj = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         assert!(g_proj[0].abs() < 1e-6, "got {}", g_proj[0]);
         assert!(constraints_satisfied(&g_proj, &mem, 0.0));
     }
@@ -338,7 +346,8 @@ mod tests {
             tol: 1e-9,
             ..Default::default()
         };
-        let g_proj = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let g_proj = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         assert!(constraints_satisfied(&g_proj, &mem, cfg.margin));
     }
 
@@ -358,8 +367,10 @@ mod tests {
             ..Default::default()
         };
 
-        let gp_loose = vectorised_gem_project(&g, &mem, &cfg_loose).unwrap();
-        let gp_tight = vectorised_gem_project(&g, &mem, &cfg_tight).unwrap();
+        let gp_loose = vectorised_gem_project(&g, &mem, &cfg_loose)
+            .expect("vectorised GEM projection should succeed with valid inputs");
+        let gp_tight = vectorised_gem_project(&g, &mem, &cfg_tight)
+            .expect("vectorised GEM projection should succeed with valid inputs");
 
         let max_viol = |gp: &[f64]| {
             mem.iter()
@@ -377,7 +388,8 @@ mod tests {
         let g = vec![1.0_f64, 2.0, 3.0];
         let mem: Vec<Vec<f64>> = vec![];
         let cfg = VectorisedGemConfig::default();
-        let result = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let result = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         assert_eq!(result, g);
     }
 
@@ -407,8 +419,10 @@ mod tests {
             ..Default::default()
         };
 
-        let gp_ls = vectorised_gem_project(&g, &mem, &cfg_ls).unwrap();
-        let gp_fixed = vectorised_gem_project(&g, &mem, &cfg_fixed).unwrap();
+        let gp_ls = vectorised_gem_project(&g, &mem, &cfg_ls)
+            .expect("vectorised GEM projection should succeed with valid inputs");
+        let gp_fixed = vectorised_gem_project(&g, &mem, &cfg_fixed)
+            .expect("vectorised GEM projection should succeed with valid inputs");
 
         assert!(constraints_satisfied(&gp_ls, &mem, 0.0));
         assert!(constraints_satisfied(&gp_fixed, &mem, 0.0));
@@ -426,7 +440,8 @@ mod tests {
         let g = vec![0.0_f64, 1.0];
         let mem = vec![vec![1.0_f64, 0.0], vec![-1.0_f64, 0.0]];
         let cfg = VectorisedGemConfig::default();
-        let g_proj = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let g_proj = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         assert!((g_proj[0] - 0.0).abs() < 1e-10);
         assert!((g_proj[1] - 1.0).abs() < 1e-10);
     }
@@ -448,7 +463,8 @@ mod tests {
             use_line_search: true,
             ..Default::default()
         };
-        let g_proj = vectorised_gem_project(&g, &mem, &cfg).unwrap();
+        let g_proj = vectorised_gem_project(&g, &mem, &cfg)
+            .expect("vectorised GEM projection should succeed with valid inputs");
         assert!(constraints_satisfied(&g_proj, &mem, cfg.margin));
     }
 

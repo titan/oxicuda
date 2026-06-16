@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn chamfer_self_distance_zero() {
         let pts = pts_from_iter(10, 1.0);
-        let cd = chamfer_distance(&pts, 10, &pts, 10).unwrap();
+        let cd = chamfer_distance(&pts, 10, &pts, 10).expect("chamfer_distance should succeed");
         assert!(cd.abs() < 1e-5, "CD(A,A) must be 0, got {cd}");
     }
 
@@ -169,7 +169,7 @@ mod tests {
     fn chamfer_nonnegative() {
         let a = pts_from_iter(5, 1.0);
         let b = pts_from_iter(8, 0.7);
-        let cd = chamfer_distance(&a, 5, &b, 8).unwrap();
+        let cd = chamfer_distance(&a, 5, &b, 8).expect("chamfer_distance should succeed");
         assert!(cd >= 0.0, "Chamfer distance must be non-negative");
     }
 
@@ -177,8 +177,8 @@ mod tests {
     fn chamfer_symmetric_equal_sizes() {
         let a: Vec<f32> = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         let b: Vec<f32> = vec![0.5, 0.0, 0.0, 1.5, 0.0, 0.0];
-        let cd_ab = chamfer_distance(&a, 2, &b, 2).unwrap();
-        let cd_ba = chamfer_distance(&b, 2, &a, 2).unwrap();
+        let cd_ab = chamfer_distance(&a, 2, &b, 2).expect("chamfer_distance should succeed");
+        let cd_ba = chamfer_distance(&b, 2, &a, 2).expect("chamfer_distance should succeed");
         assert!(
             (cd_ab - cd_ba).abs() < 1e-5,
             "Chamfer must be symmetric for equal sizes"
@@ -194,7 +194,8 @@ mod tests {
     fn chamfer_grad_shape() {
         let a: Vec<f32> = pts_from_iter(5, 1.0);
         let b: Vec<f32> = pts_from_iter(7, 0.8);
-        let (ga, gb) = chamfer_distance_grad(&a, 5, &b, 7).unwrap();
+        let (ga, gb) =
+            chamfer_distance_grad(&a, 5, &b, 7).expect("chamfer_distance_grad should succeed");
         assert_eq!(ga.len(), 5 * 3);
         assert_eq!(gb.len(), 7 * 3);
     }
@@ -203,7 +204,8 @@ mod tests {
     fn chamfer_grad_at_self_near_zero() {
         // Gradient of CD(A,A) should be near zero
         let pts: Vec<f32> = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        let (ga, gb) = chamfer_distance_grad(&pts, 3, &pts, 3).unwrap();
+        let (ga, gb) =
+            chamfer_distance_grad(&pts, 3, &pts, 3).expect("chamfer_distance_grad should succeed");
         for &v in ga.iter().chain(gb.iter()) {
             assert!(v.abs() < 1e-5, "Gradient of CD(A,A) should be ~0, got {v}");
         }
@@ -214,8 +216,8 @@ mod tests {
         let a: Vec<f32> = vec![0.0, 0.0, 0.0];
         let b_near: Vec<f32> = vec![1.0, 0.0, 0.0];
         let b_far: Vec<f32> = vec![10.0, 0.0, 0.0];
-        let cd_near = chamfer_distance(&a, 1, &b_near, 1).unwrap();
-        let cd_far = chamfer_distance(&a, 1, &b_far, 1).unwrap();
+        let cd_near = chamfer_distance(&a, 1, &b_near, 1).expect("chamfer_distance should succeed");
+        let cd_far = chamfer_distance(&a, 1, &b_far, 1).expect("chamfer_distance should succeed");
         assert!(cd_far > cd_near);
     }
 }

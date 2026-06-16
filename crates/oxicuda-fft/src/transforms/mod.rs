@@ -10,9 +10,15 @@
 //! | [`fft2d`] | 2-D FFT via row/column 1-D passes + transpose |
 //! | [`fft3d`] | 3-D FFT via three axis passes + transposes    |
 
+pub mod bluestein;
 pub mod c2c;
 pub mod c2r;
 pub mod fft2d;
 pub mod fft3d;
+pub mod goertzel;
+pub mod ntt;
+pub mod nufft_t1;
 pub mod r2c;
 pub mod real_fft;
+pub mod rfft;
+pub mod stft;

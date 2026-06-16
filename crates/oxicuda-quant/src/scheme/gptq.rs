@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn cholesky_identity_is_identity() {
         let h = eye(4);
-        let l = cholesky_lower(&h, 4).unwrap();
+        let l = cholesky_lower(&h, 4).expect("cholesky_lower should succeed");
         // L should be identity.
         for i in 0..4 {
             for j in 0..4 {
@@ -475,7 +475,9 @@ mod tests {
             .map(|i| (i as f32) / 16.0 - 1.0)
             .collect();
         let h = eye(n_cols);
-        let out = q.quantize_layer(&weights, n_rows, n_cols, &h).unwrap();
+        let out = q
+            .quantize_layer(&weights, n_rows, n_cols, &h)
+            .expect("quantize_layer should succeed");
         let mse = out.reconstruction_mse(&weights);
         assert!(mse < 1e-4, "INT8 MSE on identity Hessian too large: {mse}");
     }
@@ -490,7 +492,9 @@ mod tests {
         let n_cols = 6;
         let weights = vec![0.3_f32; n_rows * n_cols];
         let h = eye(n_cols);
-        let out = q.quantize_layer(&weights, n_rows, n_cols, &h).unwrap();
+        let out = q
+            .quantize_layer(&weights, n_rows, n_cols, &h)
+            .expect("quantize_layer should succeed");
         assert_eq!(out.quantized.len(), n_rows * n_cols);
         assert_eq!(out.scales.len(), n_cols);
         assert_eq!(out.zero_points.len(), n_cols);
@@ -514,7 +518,9 @@ mod tests {
         // Each column spans a signed range so zp fits naturally in [0, q_max].
         let weights = vec![-0.6_f32, 0.4, -0.2, 0.8, 0.6_f32, -0.4, 0.2, -0.8];
         let h = eye(n_cols);
-        let out = q.quantize_layer(&weights, n_rows, n_cols, &h).unwrap();
+        let out = q
+            .quantize_layer(&weights, n_rows, n_cols, &h)
+            .expect("quantize_layer should succeed");
         let mse = out.reconstruction_mse(&weights);
         assert!(mse < 0.05, "Asymmetric INT4 MSE too large: {mse}");
     }

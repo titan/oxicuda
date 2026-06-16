@@ -102,7 +102,7 @@ mod tests {
     fn smoke_basic_sign_step() {
         let x = vec![0.5_f32, 0.5, 0.5];
         let g = vec![1.0_f32, -1.0, 0.0];
-        let y = fgsm_attack(&x, 0.1, 0.0, 1.0, const_grad(g)).unwrap();
+        let y = fgsm_attack(&x, 0.1, 0.0, 1.0, const_grad(g)).expect("value should be present");
         assert!((y[0] - 0.6).abs() < 1e-6);
         assert!((y[1] - 0.4).abs() < 1e-6);
         assert!((y[2] - 0.5).abs() < 1e-6);
@@ -112,7 +112,7 @@ mod tests {
     fn zero_eps_returns_clamped_input() {
         let x = vec![0.2_f32, 1.5, -0.3];
         let g = vec![1.0_f32, -1.0, 0.0];
-        let y = fgsm_attack(&x, 0.0, 0.0, 1.0, const_grad(g)).unwrap();
+        let y = fgsm_attack(&x, 0.0, 0.0, 1.0, const_grad(g)).expect("value should be present");
         assert!((y[0] - 0.2).abs() < 1e-6);
         assert!((y[1] - 1.0).abs() < 1e-6);
         assert!((y[2] - 0.0).abs() < 1e-6);
@@ -129,7 +129,8 @@ mod tests {
             .zip(target.iter())
             .map(|(a, b)| 0.5 * (a - b).powi(2))
             .sum();
-        let y = fgsm_attack(&x, 0.05, -10.0, 10.0, quad_grad(target.clone())).unwrap();
+        let y = fgsm_attack(&x, 0.05, -10.0, 10.0, quad_grad(target.clone()))
+            .expect("value should be present");
         let new_loss: f32 = y
             .iter()
             .zip(target.iter())
@@ -142,7 +143,7 @@ mod tests {
     fn budget_respected_per_coordinate() {
         let x = vec![0.5_f32; 8];
         let g = vec![2.5_f32; 8]; // magnitude irrelevant — sign only
-        let y = fgsm_attack(&x, 0.07, -10.0, 10.0, const_grad(g)).unwrap();
+        let y = fgsm_attack(&x, 0.07, -10.0, 10.0, const_grad(g)).expect("value should be present");
         for v in &y {
             assert!((*v - 0.57).abs() < 1e-5);
         }

@@ -321,8 +321,8 @@ mod tests {
         // Random tall-thin U_true (m, r) and V_true (n, r) — we orthonormalize them.
         let u_raw: Vec<f64> = (0..m * r).map(|_| rng.next_normal()).collect();
         let v_raw: Vec<f64> = (0..n * r).map(|_| rng.next_normal()).collect();
-        let u_orth = qr_gram_schmidt(&u_raw, m, r).unwrap();
-        let v_orth = qr_gram_schmidt(&v_raw, n, r).unwrap();
+        let u_orth = qr_gram_schmidt(&u_raw, m, r).expect("qr_gram_schmidt should succeed");
+        let v_orth = qr_gram_schmidt(&v_raw, n, r).expect("qr_gram_schmidt should succeed");
 
         // A[i,j] = sum_c sigma[c] * u_orth[i,c] * v_orth[j,c]
         let mut a = vec![0.0f64; m * n];

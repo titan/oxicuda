@@ -825,7 +825,7 @@ mod tests {
     fn test_rnsga2_produces_non_empty_pareto_front() {
         let cfg = default_rnsga2_config();
         let mut rng = LcgRng::new(42);
-        let result = r_nsga2_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = r_nsga2_run(&cfg, zdt1, &mut rng).expect("r_nsga2_run should succeed");
         assert!(
             !result.pareto_front.is_empty(),
             "Pareto front must be non-empty"
@@ -836,7 +836,7 @@ mod tests {
     fn test_rnsga2_objectives_length_matches_pareto_front() {
         let cfg = default_rnsga2_config();
         let mut rng = LcgRng::new(7);
-        let result = r_nsga2_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = r_nsga2_run(&cfg, zdt1, &mut rng).expect("r_nsga2_run should succeed");
         assert_eq!(result.pareto_front.len(), result.objectives.len());
     }
 
@@ -844,7 +844,7 @@ mod tests {
     fn test_rnsga2_history_hv_length_equals_n_gens() {
         let cfg = default_rnsga2_config();
         let mut rng = LcgRng::new(13);
-        let result = r_nsga2_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = r_nsga2_run(&cfg, zdt1, &mut rng).expect("r_nsga2_run should succeed");
         assert_eq!(result.history_hv.len(), cfg.n_gens);
     }
 
@@ -852,7 +852,7 @@ mod tests {
     fn test_rnsga2_objectives_have_correct_dimensionality() {
         let cfg = default_rnsga2_config();
         let mut rng = LcgRng::new(21);
-        let result = r_nsga2_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = r_nsga2_run(&cfg, zdt1, &mut rng).expect("r_nsga2_run should succeed");
         for obj in &result.objectives {
             assert_eq!(obj.len(), cfg.n_obj);
         }
@@ -867,7 +867,7 @@ mod tests {
         cfg.epsilon = 0.1;
         cfg.reference_points = vec![vec![0.2, 0.8]];
         let mut rng = LcgRng::new(99);
-        let result = r_nsga2_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = r_nsga2_run(&cfg, zdt1, &mut rng).expect("r_nsga2_run should succeed");
 
         // At least some solutions should be near (0.2, 0.8) in objective space
         let ref_pt = &cfg.reference_points[0];
@@ -899,7 +899,7 @@ mod tests {
     fn test_rnsga2_single_reference_point_produces_result() {
         let cfg = default_rnsga2_config();
         let mut rng = LcgRng::new(33);
-        let result = r_nsga2_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = r_nsga2_run(&cfg, zdt1, &mut rng).expect("r_nsga2_run should succeed");
         assert!(!result.objectives.is_empty());
         // All objectives should be finite
         for obj in &result.objectives {
@@ -946,7 +946,7 @@ mod tests {
     fn test_pref_moead_solutions_objectives_length_match() {
         let cfg = default_pref_moead_config();
         let mut rng = LcgRng::new(7);
-        let result = pref_moead_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = pref_moead_run(&cfg, zdt1, &mut rng).expect("pref_moead_run should succeed");
         assert_eq!(result.solutions.len(), result.objectives.len());
     }
 
@@ -970,7 +970,7 @@ mod tests {
         cfg.epsilon_pref = PI / 2.0; // 90 degrees — very broad
         cfg.n_gens = 30;
         let mut rng = LcgRng::new(77);
-        let result = pref_moead_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = pref_moead_run(&cfg, zdt1, &mut rng).expect("pref_moead_run should succeed");
 
         // With such a wide epsilon most solutions should pass the filter
         assert!(
@@ -994,7 +994,7 @@ mod tests {
     fn test_pref_moead_returns_nonempty_results() {
         let cfg = default_pref_moead_config();
         let mut rng = LcgRng::new(123);
-        let result = pref_moead_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = pref_moead_run(&cfg, zdt1, &mut rng).expect("pref_moead_run should succeed");
         assert!(
             !result.solutions.is_empty(),
             "pref_moead must return at least one solution"
@@ -1006,7 +1006,7 @@ mod tests {
     fn test_pref_moead_objectives_are_finite() {
         let cfg = default_pref_moead_config();
         let mut rng = LcgRng::new(88);
-        let result = pref_moead_run(&cfg, zdt1, &mut rng).unwrap();
+        let result = pref_moead_run(&cfg, zdt1, &mut rng).expect("pref_moead_run should succeed");
         for obj in &result.objectives {
             for &v in obj {
                 assert!(v.is_finite(), "objective not finite: {v}");

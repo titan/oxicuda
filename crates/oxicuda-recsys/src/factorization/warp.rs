@@ -363,7 +363,7 @@ mod tests {
     fn warp_loss_empty_batch() {
         let mut rng = make_rng();
         let cfg = make_cfg(5);
-        let result = warp_loss(&[], &[], &cfg, &mut rng).unwrap();
+        let result = warp_loss(&[], &[], &cfg, &mut rng).expect("warp_loss should succeed");
         assert_eq!(result.n_violated, 0);
         assert_eq!(result.loss, 0.0);
     }
@@ -377,7 +377,8 @@ mod tests {
         // 1 user, 5 items: item 0 scores 10, rest 0
         let scores = vec![10.0_f32, 0.0, 0.0, 0.0, 0.0];
         let pos_items = vec![0usize];
-        let result = warp_loss(&scores, &pos_items, &cfg, &mut rng).unwrap();
+        let result =
+            warp_loss(&scores, &pos_items, &cfg, &mut rng).expect("warp_loss should succeed");
         assert_eq!(result.n_violated, 0, "No violation expected");
         assert_eq!(result.loss, 0.0);
     }
@@ -391,7 +392,8 @@ mod tests {
         // item 0 = pos with score 0, rest score 2
         let scores = vec![0.0_f32, 2.0, 2.0, 2.0, 2.0];
         let pos_items = vec![0usize];
-        let result = warp_loss(&scores, &pos_items, &cfg, &mut rng).unwrap();
+        let result =
+            warp_loss(&scores, &pos_items, &cfg, &mut rng).expect("warp_loss should succeed");
         assert!(result.n_violated >= 1, "Expected at least one violation");
     }
 
@@ -408,7 +410,8 @@ mod tests {
             n_neg_samples: 200,
             margin: 1.0,
         };
-        let result = warp_loss(&scores, &pos_items, &cfg, &mut rng).unwrap();
+        let result =
+            warp_loss(&scores, &pos_items, &cfg, &mut rng).expect("warp_loss should succeed");
         // rank_approx = (2-1)/1 = 1; H(1)=1.0; violation = 1-0+2=3
         let expected_loss = harmonic_number(1) * (1.0 - 0.0 + 2.0);
         assert!(
@@ -479,8 +482,8 @@ mod tests {
 
         let mut rng1 = LcgRng::new(99);
         let mut rng2 = LcgRng::new(99);
-        let r1 = warp_loss(&scores, &pos_items, &cfg, &mut rng1).unwrap();
-        let r2 = warp_loss(&scores, &pos_items, &cfg, &mut rng2).unwrap();
+        let r1 = warp_loss(&scores, &pos_items, &cfg, &mut rng1).expect("warp_loss should succeed");
+        let r2 = warp_loss(&scores, &pos_items, &cfg, &mut rng2).expect("warp_loss should succeed");
         assert_eq!(r1.loss, r2.loss, "Same seed must produce same loss");
         assert_eq!(r1.n_violated, r2.n_violated);
     }
@@ -492,7 +495,8 @@ mod tests {
         let cfg = make_cfg(n_items);
         let scores = vec![0.0_f32, 2.0, 2.0, 2.0, 2.0];
         let pos_items = vec![0usize];
-        let result = warp_loss(&scores, &pos_items, &cfg, &mut rng).unwrap();
+        let result =
+            warp_loss(&scores, &pos_items, &cfg, &mut rng).expect("warp_loss should succeed");
         if result.n_violated > 0 {
             assert!(result.avg_rank >= 0.0, "avg_rank should be ≥ 0");
         }
@@ -515,7 +519,8 @@ mod tests {
         // Item 1: low relevance (0.0) but high score (1.0)
         let scores = vec![0.0_f32, 1.0];
         let relevance = vec![1.0_f32, 0.0];
-        let lambdas = lambda_rank_weights(&scores, &relevance, 2).unwrap();
+        let lambdas = lambda_rank_weights(&scores, &relevance, 2)
+            .expect("lambda_rank_weights should succeed");
         assert!(
             lambdas[0] > 0.0,
             "High-relevance item at low rank should get positive lambda, got {}",
@@ -534,7 +539,8 @@ mod tests {
         // No pairwise violations → all lambdas should be 0.
         let scores = vec![3.0_f32, 2.0, 1.0, 0.0];
         let relevance = vec![1.0_f32, 0.8, 0.5, 0.0];
-        let lambdas = lambda_rank_weights(&scores, &relevance, 4).unwrap();
+        let lambdas = lambda_rank_weights(&scores, &relevance, 4)
+            .expect("lambda_rank_weights should succeed");
         for (i, &l) in lambdas.iter().enumerate() {
             assert!(
                 l.abs() < 1e-7,

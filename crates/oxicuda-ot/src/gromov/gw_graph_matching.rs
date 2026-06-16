@@ -526,7 +526,8 @@ mod tests {
             alpha: 0.0,
             ..default_config()
         };
-        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat_s, &feat_t, &cfg).unwrap();
+        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat_s, &feat_t, &cfg)
+            .expect("gw_graph_matching should succeed");
         // Plan must be non-negative.
         for &p in &res.plan {
             assert!(p >= -1e-9, "negative plan entry {p}");
@@ -556,7 +557,8 @@ mod tests {
             inner_max_iter: 300,
             tol: 1e-5,
         };
-        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat_s, &feat_t, &cfg).unwrap();
+        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat_s, &feat_t, &cfg)
+            .expect("gw_graph_matching should succeed");
         for &p in &res.plan {
             assert!(p >= -1e-8, "negative plan entry {p}");
         }
@@ -576,7 +578,8 @@ mod tests {
         let feat_s: Vec<Vec<f64>> = (0..n).map(|i| vec![i as f64, 0.0]).collect();
         let feat_t: Vec<Vec<f64>> = (0..n).map(|i| vec![0.0, i as f64]).collect();
         let cfg = default_config();
-        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat_s, &feat_t, &cfg).unwrap();
+        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat_s, &feat_t, &cfg)
+            .expect("gw_graph_matching should succeed");
         for &p in &res.plan {
             assert!(p >= -1e-8);
         }
@@ -664,7 +667,8 @@ mod tests {
         let c_t = c_s.clone();
         let feat: Vec<Vec<f64>> = (0..n).map(|i| vec![i as f64]).collect();
         let cfg = default_config();
-        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat, &feat, &cfg).unwrap();
+        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat, &feat, &cfg)
+            .expect("gw_graph_matching should succeed");
         let reconstructed = (1.0 - cfg.alpha) * res.feat_cost + cfg.alpha * res.gw_cost;
         assert!(
             approx(res.cost, reconstructed, 1e-8),
@@ -697,7 +701,8 @@ mod tests {
         let feat_s: Vec<Vec<f64>> = vec![vec![0.0, 0.0], vec![1.0, 0.0], vec![2.0, 0.0]];
         let feat_t: Vec<Vec<f64>> = vec![vec![0.0, 1.0], vec![0.0, 2.0], vec![0.0, 3.0]];
         let cfg = default_config();
-        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat_s, &feat_t, &cfg).unwrap();
+        let res = gw_graph_matching(&a, &b, &c_s, &c_t, &feat_s, &feat_t, &cfg)
+            .expect("gw_graph_matching should succeed");
         assert!(res.cost.is_finite());
         assert!(res.iters >= 1);
     }
@@ -730,7 +735,8 @@ mod tests {
         let c_s = sym_cost(n, |i, j| if i == j { 0.0 } else { 1.0 });
         let feat: Vec<Vec<f64>> = (0..n).map(|i| vec![i as f64]).collect();
         let cfg = default_config();
-        let res = gw_graph_matching(&a, &b, &c_s, &c_s, &feat, &feat, &cfg).unwrap();
+        let res = gw_graph_matching(&a, &b, &c_s, &c_s, &feat, &feat, &cfg)
+            .expect("gw_graph_matching should succeed");
         assert!(res.iters >= 1);
     }
 

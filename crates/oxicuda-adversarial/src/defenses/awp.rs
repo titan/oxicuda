@@ -363,7 +363,8 @@ mod tests {
     fn project_frobenius_ball_norm_equals_gamma() {
         let grad = vec![1.0_f32, 2.0, 3.0, 4.0];
         let gamma = 0.05_f32;
-        let result = AwpDefense::project_to_frobenius_ball(&grad, gamma).unwrap();
+        let result = AwpDefense::project_to_frobenius_ball(&grad, gamma)
+            .expect("project_to_frobenius_ball should succeed");
         assert!(approx_eq(result.frobenius_norm, gamma, 1e-5));
         // Verify via actual computation too
         let actual_norm = AwpDefense::frobenius_norm(&result.delta);
@@ -374,7 +375,8 @@ mod tests {
     fn project_frobenius_ball_direction_preserved() {
         let grad = vec![1.0_f32, 0.0, 0.0];
         let gamma = 0.03_f32;
-        let result = AwpDefense::project_to_frobenius_ball(&grad, gamma).unwrap();
+        let result = AwpDefense::project_to_frobenius_ball(&grad, gamma)
+            .expect("project_to_frobenius_ball should succeed");
         // Should project onto the unit vector in [1,0,0] direction scaled by gamma
         assert!(approx_eq(result.delta[0], gamma, 1e-5));
         assert!(approx_eq(result.delta[1], 0.0, 1e-7));
@@ -409,7 +411,7 @@ mod tests {
         // With zero grad the Frobenius norm of delta after projection = gamma
         // (due to the epsilon-regularised denominator); the direction is degenerate
         // but the norm must be <= gamma.
-        let result = result.unwrap();
+        let result = result.expect("result should be present");
         assert!(result.frobenius_norm <= cfg.gamma + 1e-5);
     }
 
@@ -426,7 +428,7 @@ mod tests {
         // Then projected to Frobenius ball of gamma=0.05
         let result =
             AwpDefense::find_weight_perturbation(&weights, &cfg, |w| constant_grad(w, 1.0))
-                .unwrap();
+                .expect("value should be present");
         // After projection: ||delta||_F should equal gamma
         assert!(approx_eq(result.frobenius_norm, cfg.gamma, 1e-5));
         // All components equal (equal-gradient → equal delta)
@@ -447,7 +449,7 @@ mod tests {
         };
         let result =
             AwpDefense::find_weight_perturbation(&weights, &cfg, |w| constant_grad(w, 1.0));
-        let result = result.unwrap();
+        let result = result.expect("result should be present");
         // After 3 steps the norm is still projected to gamma
         assert!(approx_eq(result.frobenius_norm, cfg.gamma, 1e-5));
     }
@@ -493,8 +495,10 @@ mod tests {
             delta: vec![0.1_f32, -0.2, 0.05, 0.3, -0.1],
             frobenius_norm: 0.01,
         };
-        let perturbed = AwpDefense::apply_perturbation(&weights, &delta).unwrap();
-        let recovered = AwpDefense::remove_perturbation(&perturbed, &delta).unwrap();
+        let perturbed = AwpDefense::apply_perturbation(&weights, &delta)
+            .expect("apply_perturbation should succeed");
+        let recovered = AwpDefense::remove_perturbation(&perturbed, &delta)
+            .expect("remove_perturbation should succeed");
         for (&r, &orig) in recovered.iter().zip(weights.iter()) {
             assert!(approx_eq(r, orig, 1e-6));
         }
@@ -546,7 +550,7 @@ mod tests {
             &cfg,
             zero_grad,
         )
-        .unwrap();
+        .expect("value should be present");
         assert!(loss.is_finite());
         assert!(loss >= 0.0);
         assert!(delta.frobenius_norm <= cfg.gamma + 1e-5);
@@ -574,7 +578,7 @@ mod tests {
             &cfg,
             zero_grad,
         )
-        .unwrap();
+        .expect("value should be present");
         // With beta=0, KL term is ignored → loss = CE(clean, label=0)
         // CE = -log(softmax([3,1,0])[0]) = -(3 - log(e^3+e^1+e^0))
         assert!(loss.is_finite() && loss >= 0.0);
@@ -646,7 +650,7 @@ mod tests {
         };
         let result =
             AwpDefense::find_weight_perturbation(&weights, &cfg, |w| constant_grad(w, 0.5))
-                .unwrap();
+                .expect("value should be present");
         assert!(result.frobenius_norm <= cfg.gamma + 1e-5);
     }
 

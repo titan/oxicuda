@@ -141,8 +141,11 @@ mod tests {
         let mut ham = Hamiltonian::new();
         ham.add_term(1.0, vec![PauliOp::Z, PauliOp::I]);
         let ts = TrotterStep::new(ham, 2);
-        let mut sv = StateVector::new_zero_state(2).unwrap();
-        ts.step_2nd(&mut sv, 0.1).unwrap();
+        let mut sv = StateVector::new_zero_state(2).expect(
+            "n_qubits=2 is always a valid qubit count, so zero-state construction cannot fail",
+        );
+        ts.step_2nd(&mut sv, 0.1)
+            .expect("Hamiltonian has a valid 2-qubit Pauli term and dt=0.1 is finite, so the second-order Trotter step cannot fail");
         let norm = sv.norm_sq();
         assert!((norm - 1.0).abs() < 1e-4, "norm={norm}");
     }

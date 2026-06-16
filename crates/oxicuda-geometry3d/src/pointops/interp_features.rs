@@ -87,7 +87,8 @@ mod tests {
         let src_xyz = vec![0.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0];
         let src_feat = vec![10.0_f32, 20.0, 30.0];
         let tgt_xyz = vec![0.0_f32, 0.0, 0.0]; // matches src[0]
-        let out = interp_features(&src_xyz, &src_feat, 3, &tgt_xyz, 1, 1).unwrap();
+        let out = interp_features(&src_xyz, &src_feat, 3, &tgt_xyz, 1, 1)
+            .expect("interp_features should succeed");
         // Should be very close to 10.0 (dominated by nearest neighbor)
         assert!(
             (out[0] - 10.0).abs() < 0.1,
@@ -106,7 +107,8 @@ mod tests {
         ];
         let src_feat = vec![0.0_f32, 10.0, 5.0];
         let tgt_xyz = vec![0.0_f32, 0.0, 0.0];
-        let out = interp_features(&src_xyz, &src_feat, 3, &tgt_xyz, 1, 1).unwrap();
+        let out = interp_features(&src_xyz, &src_feat, 3, &tgt_xyz, 1, 1)
+            .expect("interp_features should succeed");
         // Should be symmetric around 5.0
         assert!((out[0] - 5.0).abs() < 0.5, "Expected ~5.0, got {}", out[0]);
     }
@@ -120,7 +122,8 @@ mod tests {
     fn interp_empty_tgt_ok() {
         let src_xyz = vec![0.0_f32, 0.0, 0.0];
         let src_feat = vec![1.0_f32];
-        let out = interp_features(&src_xyz, &src_feat, 1, &[], 0, 1).unwrap();
+        let out = interp_features(&src_xyz, &src_feat, 1, &[], 0, 1)
+            .expect("interp_features should succeed");
         assert!(out.is_empty());
     }
 
@@ -134,7 +137,8 @@ mod tests {
         let tgt_xyz: Vec<f32> = (0..n_tgt)
             .flat_map(|i| vec![i as f32 * 0.5, 0.0, 0.0])
             .collect();
-        let out = interp_features(&src_xyz, &src_feat, n_src, &tgt_xyz, n_tgt, c).unwrap();
+        let out = interp_features(&src_xyz, &src_feat, n_src, &tgt_xyz, n_tgt, c)
+            .expect("interp_features should succeed");
         assert_eq!(out.len(), n_tgt * c);
     }
 }

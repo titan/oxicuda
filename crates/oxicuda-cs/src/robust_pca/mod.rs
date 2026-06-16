@@ -2,9 +2,11 @@
 
 pub mod godec;
 pub mod robust_pca_pcp;
+pub mod rpca_gd;
 
 pub use godec::godec;
 pub use robust_pca_pcp::robust_pca_pcp;
+pub use rpca_gd::{RpcaGd, RpcaGdConfig};
 
 /// Result of a robust-PCA decomposition.
 #[derive(Debug, Clone)]

@@ -289,7 +289,9 @@ mod tests {
     fn statevector_length_and_norm() {
         let qng = engine(3, 2);
         let params = random_params(qng.n_params(), 1);
-        let sv = qng.statevector(&params).unwrap();
+        let sv = qng
+            .statevector(&params)
+            .expect("params has exactly n_params() elements for the 3-qubit 2-depth ansatz");
         assert_eq!(sv.len(), 1 << 3);
         let norm: f32 = sv.iter().map(num_complex::Complex::norm_sqr).sum();
         assert!((norm - 1.0).abs() < 1e-4, "norm={norm}");
@@ -300,7 +302,9 @@ mod tests {
         let qng = engine(2, 2);
         let n = qng.n_params();
         let params = random_params(n, 2);
-        let f = qng.qfim(&params, 1e-2).unwrap();
+        let f = qng
+            .qfim(&params, 1e-2)
+            .expect("params has n_params() elements and eps=1e-2 is positive");
         assert_eq!(f.len(), n * n);
     }
 
@@ -309,7 +313,7 @@ mod tests {
         let qng = engine(3, 1);
         let n = qng.n_params();
         let params = random_params(n, 3);
-        let f = qng.qfim(&params, 1e-2).unwrap();
+        let f = qng.qfim(&params, 1e-2).expect("params has n_params() elements for the 3-qubit 1-depth ansatz and eps=1e-2 is positive");
         for i in 0..n {
             for j in 0..n {
                 let diff = (f[i * n + j] - f[j * n + i]).abs();
@@ -323,7 +327,7 @@ mod tests {
         let qng = engine(3, 2);
         let n = qng.n_params();
         let params = random_params(n, 4);
-        let f = qng.qfim(&params, 1e-2).unwrap();
+        let f = qng.qfim(&params, 1e-2).expect("params has n_params() elements for the 3-qubit 2-depth ansatz and eps=1e-2 is positive");
         for vseed in 0..8u64 {
             let v = random_params(n, 100 + vseed);
             let mut quad = 0.0_f32;
@@ -343,7 +347,7 @@ mod tests {
         let params = random_params(n, 5);
         let grad = random_params(n, 6);
         let cfg = QngConfig::default();
-        let next = qng.natural_gradient_step(&params, &grad, &cfg).unwrap();
+        let next = qng.natural_gradient_step(&params, &grad, &cfg).expect("params and grad both have n_params() elements and default cfg has positive eps and non-negative reg");
         assert_eq!(next.len(), n);
     }
 
@@ -358,7 +362,7 @@ mod tests {
             finite_diff_eps: 1e-2,
             regularization: 1e-2,
         };
-        let next = qng.natural_gradient_step(&params, &grad, &cfg).unwrap();
+        let next = qng.natural_gradient_step(&params, &grad, &cfg).expect("params and grad both have n_params() elements and the well-conditioned cfg has positive eps and non-negative reg");
         for (i, v) in next.iter().enumerate() {
             assert!(v.is_finite(), "param {i} not finite: {v}");
         }
@@ -379,7 +383,7 @@ mod tests {
             finite_diff_eps: 1e-2,
             regularization: reg,
         };
-        let next = qng.natural_gradient_step(&params, &grad, &cfg).unwrap();
+        let next = qng.natural_gradient_step(&params, &grad, &cfg).expect("params and grad have n_params() elements and large regularization ensures the metric is non-singular");
         for k in 0..n {
             let expected = params[k] - lr * grad[k] / reg;
             assert!(
@@ -395,11 +399,19 @@ mod tests {
         let qng = engine(3, 1);
         let n = qng.n_params();
         let params = random_params(n, 9);
-        let f1 = qng.qfim(&params, 1e-2).unwrap();
-        let f2 = qng.qfim(&params, 1e-2).unwrap();
+        let f1 = qng
+            .qfim(&params, 1e-2)
+            .expect("params has n_params() elements and eps=1e-2 is positive");
+        let f2 = qng
+            .qfim(&params, 1e-2)
+            .expect("same params and positive eps, deterministic evaluation must succeed");
         assert_eq!(f1, f2);
-        let sv1 = qng.statevector(&params).unwrap();
-        let sv2 = qng.statevector(&params).unwrap();
+        let sv1 = qng
+            .statevector(&params)
+            .expect("params has exactly n_params() elements");
+        let sv2 = qng
+            .statevector(&params)
+            .expect("same params with correct length, statevector evaluation must succeed");
         assert_eq!(sv1, sv2);
     }
 
@@ -483,7 +495,9 @@ mod tests {
         let n = qng.n_params();
         // RY(0) on every layer leaves |0⟩ unchanged.
         let params = vec![0.0_f32; n];
-        let sv = qng.statevector(&params).unwrap();
+        let sv = qng
+            .statevector(&params)
+            .expect("all-zeros params for a 1-qubit 1-depth ansatz has the right length");
         assert_eq!(sv.len(), 2);
         assert!((sv[0].re - 1.0).abs() < 1e-5, "amp0={:?}", sv[0]);
         assert!(sv[1].norm() < 1e-5, "amp1={:?}", sv[1]);
@@ -494,7 +508,7 @@ mod tests {
         let qng = engine(1, 0);
         let n = qng.n_params();
         let params = random_params(n, 11);
-        let f = qng.qfim(&params, 1e-2).unwrap();
+        let f = qng.qfim(&params, 1e-2).expect("params has n_params() elements for the 1-qubit 0-depth ansatz and eps=1e-2 is positive");
         for (k, v) in f.iter().enumerate() {
             assert!(v.is_finite(), "F[{k}] not finite: {v}");
         }
@@ -513,7 +527,7 @@ mod tests {
             finite_diff_eps: 1e-2,
             regularization: 0.5,
         };
-        let next = qng.natural_gradient_step(&params, &grad, &cfg).unwrap();
+        let next = qng.natural_gradient_step(&params, &grad, &cfg).expect("params and grad have n_params() elements and reg=0.5 ensures a well-conditioned metric");
         // step direction = next - params = -lr·δ; ⟨grad, δ⟩ should be ≥ 0 for a PSD A.
         let mut dot = 0.0_f32;
         for k in 0..n {
@@ -531,8 +545,12 @@ mod tests {
         let mut p2 = p1.clone();
         p2[0] += 0.7;
         p2[1] -= 0.5;
-        let f1 = qng.qfim(&p1, 1e-2).unwrap();
-        let f2 = qng.qfim(&p2, 1e-2).unwrap();
+        let f1 = qng.qfim(&p1, 1e-2).expect(
+            "p1 has n_params() elements for the 2-qubit 2-depth ansatz and eps=1e-2 is positive",
+        );
+        let f2 = qng
+            .qfim(&p2, 1e-2)
+            .expect("p2 has n_params() elements (modified from p1) and eps=1e-2 is positive");
         let max_diff = f1
             .iter()
             .zip(f2.iter())
@@ -547,7 +565,9 @@ mod tests {
         let n = 3;
         let a = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
         let b = vec![2.0, -3.0, 5.0];
-        let x = solve_linear_system(&a, &b, n).unwrap();
+        let x = solve_linear_system(&a, &b, n).expect(
+            "3x3 identity matrix is non-singular so the linear system is uniquely solvable",
+        );
         for k in 0..n {
             assert!((x[k] - b[k]).abs() < 1e-6, "x[{k}]={}", x[k]);
         }

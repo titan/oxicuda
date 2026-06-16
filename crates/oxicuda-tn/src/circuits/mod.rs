@@ -23,8 +23,8 @@
 //! use oxicuda_tn::circuits::{Circuit, CircuitConfig};
 //!
 //! let mut circ = Circuit::new(2);
-//! circ.h(0).unwrap();
-//! circ.cnot(0, 1).unwrap();
+//! circ.h(0).expect("h should succeed");
+//! circ.cnot(0, 1).expect("cnot should succeed");
 //!
 //! // Product state |00⟩: each site has amplitude [1, 0] for |0⟩.
 //! let mps_data = vec![vec![1.0_f64, 0.0], vec![1.0_f64, 0.0]];
@@ -33,7 +33,7 @@
 //!
 //! let (_new_data, _new_shapes) = circ
 //!     .apply_to_mps(&mps_data, &mps_shapes, &cfg)
-//!     .unwrap();
+//!     .expect("value should be present");
 //! ```
 
 pub mod gates;

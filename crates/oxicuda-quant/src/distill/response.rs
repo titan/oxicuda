@@ -168,7 +168,9 @@ mod tests {
         let d = ResponseDistiller::pure_kl(1.0);
         let logits = vec![1.0_f32, 2.0, 3.0];
         // With identical teacher/student and no hard labels, loss = 0.
-        let loss = d.compute_loss(&logits, &logits, 0).unwrap();
+        let loss = d
+            .compute_loss(&logits, &logits, 0)
+            .expect("compute_loss should succeed");
         assert!(
             loss.abs() < 1e-3,
             "pure KL with equal logits ≈ 0, got {loss}"
@@ -182,7 +184,9 @@ mod tests {
         let student = vec![0.0_f32, 0.0, 10.0]; // strongly predicts class 2
         let teacher = vec![0.0_f32, 0.0, 0.0]; // doesn't matter
         // CE = -log(softmax(student)[2]) ≈ 0 (class 2 is dominant)
-        let loss = d.compute_loss(&student, &teacher, 2).unwrap();
+        let loss = d
+            .compute_loss(&student, &teacher, 2)
+            .expect("compute_loss should succeed");
         assert!(
             loss < 0.1,
             "CE for correct confident prediction ≈ 0, got {loss}"
@@ -220,7 +224,7 @@ mod tests {
         let labels = vec![0_usize; batch_size];
         let loss = d
             .compute_batch_loss(&student, &teacher, &labels, n_classes)
-            .unwrap();
+            .expect("value should be present");
         assert_abs_diff_eq!(loss, 0.0, epsilon = 1e-5);
     }
 

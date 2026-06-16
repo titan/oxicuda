@@ -266,12 +266,13 @@ mod tests {
         let m = 1usize << p;
         let std_err = (1.04_f64 / (m as f64)).sqrt();
         for seed in [1u64, 7, 11, 99, 12345] {
-            let mut s = SlidingWindowHll::with_seed(cfg(p, u64::MAX), seed).unwrap();
+            let mut s = SlidingWindowHll::with_seed(cfg(p, u64::MAX), seed)
+                .expect("value should be present");
             let mut rng = LcgRng::new(seed);
             let n: u64 = 5_000;
             for i in 0..n {
                 let item = rng.next_u64();
-                s.add_u64(item, i).unwrap();
+                s.add_u64(item, i).expect("add_u64 should succeed");
             }
             let est = s.cardinality(n);
             let rel = (est - n as f64).abs() / n as f64;
@@ -285,15 +286,15 @@ mod tests {
 
     #[test]
     fn old_timestamps_excluded_from_window() {
-        let mut s = SlidingWindowHll::new(cfg(10, 100)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(10, 100)).expect("value should be present");
         // Insert N distinct items at timestamps 0..50 (well before now=200, window=100).
         for i in 0..200u64 {
-            s.add_u64(i, i).unwrap();
+            s.add_u64(i, i).expect("add_u64 should succeed");
         }
         // Reference: vanilla unbounded result for the full 200 inserts.
-        let mut full = SlidingWindowHll::new(cfg(10, u64::MAX)).unwrap();
+        let mut full = SlidingWindowHll::new(cfg(10, u64::MAX)).expect("value should be present");
         for i in 0..200u64 {
-            full.add_u64(i, i).unwrap();
+            full.add_u64(i, i).expect("add_u64 should succeed");
         }
         let est_full = full.cardinality(200);
         let est_window = s.cardinality(200);
@@ -306,8 +307,8 @@ mod tests {
 
     #[test]
     fn re_adding_item_with_new_timestamp_re_enters_window() {
-        let mut s = SlidingWindowHll::new(cfg(8, 10)).unwrap();
-        s.add_u64(42, 0).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(8, 10)).expect("value should be present");
+        s.add_u64(42, 0).expect("add_u64 should succeed");
         // After advancing far past the window, the item must have been evicted.
         let est_after = s.cardinality(100);
         assert!(
@@ -315,7 +316,7 @@ mod tests {
             "evicted item should not contribute: est={est_after}"
         );
         // Re-adding it with a fresh timestamp re-enters the window.
-        s.add_u64(42, 95).unwrap();
+        s.add_u64(42, 95).expect("add_u64 should succeed");
         let est_re = s.cardinality(100);
         assert!(
             est_re > 0.5,
@@ -325,12 +326,13 @@ mod tests {
 
     #[test]
     fn precision_boundary_p_eq_4() {
-        let mut s = SlidingWindowHll::new(cfg(4, u64::MAX)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(4, u64::MAX)).expect("value should be present");
         assert_eq!(s.m(), 16);
         assert_eq!(s.precision_p(), 4);
         let mut rng = LcgRng::new(1);
         for i in 0..1_000u64 {
-            s.add_u64(rng.next_u64(), i).unwrap();
+            s.add_u64(rng.next_u64(), i)
+                .expect("value should be present");
         }
         let est = s.cardinality(1_000);
         // p=4 has high standard error (~26%); just check the estimate is positive
@@ -340,7 +342,7 @@ mod tests {
 
     #[test]
     fn precision_boundary_p_eq_16() {
-        let s = SlidingWindowHll::new(cfg(16, u64::MAX)).unwrap();
+        let s = SlidingWindowHll::new(cfg(16, u64::MAX)).expect("value should be present");
         assert_eq!(s.m(), 65_536);
         assert_eq!(s.precision_p(), 16);
     }
@@ -359,10 +361,11 @@ mod tests {
 
     #[test]
     fn deque_invariant_rank_decreasing_back_to_front() {
-        let mut s = SlidingWindowHll::new(cfg(10, u64::MAX)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(10, u64::MAX)).expect("value should be present");
         let mut rng = LcgRng::new(42);
         for i in 0..5_000u64 {
-            s.add_u64(rng.next_u64(), i).unwrap();
+            s.add_u64(rng.next_u64(), i)
+                .expect("value should be present");
         }
         // Each register must satisfy: rank strictly decreasing front-to-back.
         for (idx, deque) in s.registers.iter().enumerate() {
@@ -381,10 +384,11 @@ mod tests {
 
     #[test]
     fn deque_invariant_timestamps_increasing_back() {
-        let mut s = SlidingWindowHll::new(cfg(10, u64::MAX)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(10, u64::MAX)).expect("value should be present");
         let mut rng = LcgRng::new(123);
         for i in 0..5_000u64 {
-            s.add_u64(rng.next_u64(), i).unwrap();
+            s.add_u64(rng.next_u64(), i)
+                .expect("value should be present");
         }
         for (idx, deque) in s.registers.iter().enumerate() {
             let mut prev: Option<u64> = None;
@@ -403,10 +407,11 @@ mod tests {
     #[test]
     fn eviction_monotone_no_new_adds() {
         // Time advances with no new inserts → cardinality is non-increasing.
-        let mut s = SlidingWindowHll::new(cfg(10, 100)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(10, 100)).expect("value should be present");
         let mut rng = LcgRng::new(9);
         for i in 0..500u64 {
-            s.add_u64(rng.next_u64(), i).unwrap();
+            s.add_u64(rng.next_u64(), i)
+                .expect("value should be present");
         }
         let mut prev = s.cardinality(500);
         for t in (500..2_000u64).step_by(100) {
@@ -421,9 +426,9 @@ mod tests {
 
     #[test]
     fn reset_clears_all_registers() {
-        let mut s = SlidingWindowHll::new(cfg(8, u64::MAX)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(8, u64::MAX)).expect("value should be present");
         for i in 0..1000u64 {
-            s.add_u64(i, i).unwrap();
+            s.add_u64(i, i).expect("add_u64 should succeed");
         }
         assert!(s.cardinality(1_000) > 0.0);
         s.reset();
@@ -440,23 +445,23 @@ mod tests {
     #[test]
     fn m_equals_two_pow_p() {
         for p in 4u8..=16u8 {
-            let s = SlidingWindowHll::new(cfg(p, 1)).unwrap();
+            let s = SlidingWindowHll::new(cfg(p, 1)).expect("value should be present");
             assert_eq!(s.m(), 1usize << p, "p={p}");
         }
     }
 
     #[test]
     fn deterministic_given_same_hash_inputs_and_timestamps() {
-        let mut a = SlidingWindowHll::new(cfg(10, 1_000)).unwrap();
-        let mut b = SlidingWindowHll::new(cfg(10, 1_000)).unwrap();
+        let mut a = SlidingWindowHll::new(cfg(10, 1_000)).expect("value should be present");
+        let mut b = SlidingWindowHll::new(cfg(10, 1_000)).expect("value should be present");
         let mut rng_a = LcgRng::new(2026);
         let mut rng_b = LcgRng::new(2026);
         for t in 0..2_000u64 {
             let x_a = rng_a.next_u64();
             let x_b = rng_b.next_u64();
             assert_eq!(x_a, x_b);
-            a.add_u64(x_a, t).unwrap();
-            b.add_u64(x_b, t).unwrap();
+            a.add_u64(x_a, t).expect("add_u64 should succeed");
+            b.add_u64(x_b, t).expect("add_u64 should succeed");
         }
         for query in [500u64, 1_500, 2_000, 3_000] {
             assert_eq!(a.cardinality(query), b.cardinality(query));
@@ -467,16 +472,16 @@ mod tests {
     fn alpha_m_table_matches_standard_values() {
         // Standard reference: α_16=0.673, α_32=0.697, α_64=0.709,
         // α_m = 0.7213 / (1 + 1.079/m) for m ≥ 128.
-        let s4 = SlidingWindowHll::new(cfg(4, 1)).unwrap();
+        let s4 = SlidingWindowHll::new(cfg(4, 1)).expect("value should be present");
         assert!((s4.alpha_m() - 0.673).abs() < 1e-12);
-        let s5 = SlidingWindowHll::new(cfg(5, 1)).unwrap();
+        let s5 = SlidingWindowHll::new(cfg(5, 1)).expect("value should be present");
         assert!((s5.alpha_m() - 0.697).abs() < 1e-12);
-        let s6 = SlidingWindowHll::new(cfg(6, 1)).unwrap();
+        let s6 = SlidingWindowHll::new(cfg(6, 1)).expect("value should be present");
         assert!((s6.alpha_m() - 0.709).abs() < 1e-12);
-        let s7 = SlidingWindowHll::new(cfg(7, 1)).unwrap();
+        let s7 = SlidingWindowHll::new(cfg(7, 1)).expect("value should be present");
         let expected_128 = 0.7213_f64 / (1.0 + 1.079 / 128.0);
         assert!((s7.alpha_m() - expected_128).abs() < 1e-12);
-        let s10 = SlidingWindowHll::new(cfg(10, 1)).unwrap();
+        let s10 = SlidingWindowHll::new(cfg(10, 1)).expect("value should be present");
         let expected_1024 = 0.7213_f64 / (1.0 + 1.079 / 1024.0);
         assert!((s10.alpha_m() - expected_1024).abs() < 1e-12);
     }
@@ -485,9 +490,9 @@ mod tests {
     fn linear_counting_path_triggers_at_low_load() {
         // With m=1024 and only a handful of items, raw ≤ 2.5 m and V > 0
         // so the small-range correction (linear counting) path must fire.
-        let mut s = SlidingWindowHll::new(cfg(10, u64::MAX)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(10, u64::MAX)).expect("value should be present");
         for i in 0..5u64 {
-            s.add_u64(i, i).unwrap();
+            s.add_u64(i, i).expect("add_u64 should succeed");
         }
         let est = s.cardinality(5);
         // For genuinely small load, the linear-counting estimate is much more
@@ -501,15 +506,15 @@ mod tests {
 
     #[test]
     fn window_w_accessor_returns_construction_value() {
-        let s = SlidingWindowHll::new(cfg(8, 12_345)).unwrap();
+        let s = SlidingWindowHll::new(cfg(8, 12_345)).expect("value should be present");
         assert_eq!(s.window_w(), 12_345);
-        let s2 = SlidingWindowHll::new(cfg(8, u64::MAX)).unwrap();
+        let s2 = SlidingWindowHll::new(cfg(8, u64::MAX)).expect("value should be present");
         assert_eq!(s2.window_w(), u64::MAX);
     }
 
     #[test]
     fn empty_sketch_cardinality_is_zero() {
-        let mut s = SlidingWindowHll::new(cfg(10, 100)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(10, 100)).expect("value should be present");
         let est = s.cardinality(0);
         // All registers empty → V = m, so m * ln(m / m) = 0 exactly.
         assert!(est.abs() < 1e-9, "empty cardinality must be 0, got {est}");
@@ -520,7 +525,7 @@ mod tests {
         // Insert into a fixed register with monotonically increasing ranks at
         // increasing timestamps. Each later insert should pop all earlier ones
         // from the back, leaving the deque size ≤ 1.
-        let mut s = SlidingWindowHll::new(cfg(8, u64::MAX)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(8, u64::MAX)).expect("value should be present");
         // Find a hash whose top-p bits give register 0; then construct
         // synthetic hashes with same top bits but increasing rank.
         let p = s.precision_p();
@@ -534,7 +539,8 @@ mod tests {
                 0
             };
             let hash = tail;
-            s.add_hashed(hash, k as u64).unwrap();
+            s.add_hashed(hash, k as u64)
+                .expect("add_hashed should succeed");
         }
         let deque_len = s.registers[0].len();
         // Each new insertion has rank strictly larger than the previous (k → k+1),
@@ -550,7 +556,7 @@ mod tests {
         // Insert into a fixed register with monotonically DECREASING ranks at
         // increasing timestamps. Each later entry has strictly smaller rank,
         // so they all stack at the back; deque length grows.
-        let mut s = SlidingWindowHll::new(cfg(8, u64::MAX)).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(8, u64::MAX)).expect("value should be present");
         let p = s.precision_p();
         let tail_len = 64u32 - u32::from(p);
         for k in 0..16u32 {
@@ -562,7 +568,8 @@ mod tests {
                 0
             };
             let hash = tail;
-            s.add_hashed(hash, k as u64).unwrap();
+            s.add_hashed(hash, k as u64)
+                .expect("add_hashed should succeed");
         }
         assert!(
             s.registers[0].len() >= 2,
@@ -570,7 +577,10 @@ mod tests {
             s.registers[0].len()
         );
         // Front rank must be the largest.
-        let front_rank = s.registers[0].front().map(|&(_, r)| r).unwrap();
+        let front_rank = s.registers[0]
+            .front()
+            .map(|&(_, r)| r)
+            .expect("value should be present");
         for &(_, r) in &s.registers[0] {
             assert!(r <= front_rank);
         }
@@ -579,8 +589,8 @@ mod tests {
     #[test]
     fn front_evicts_after_window_advance() {
         // Insert one item at t=0 and let time advance well beyond the window.
-        let mut s = SlidingWindowHll::new(cfg(8, 10)).unwrap();
-        s.add_u64(7, 0).unwrap();
+        let mut s = SlidingWindowHll::new(cfg(8, 10)).expect("value should be present");
+        s.add_u64(7, 0).expect("add_u64 should succeed");
         // First query inside the window: must see contribution.
         let inside = s.cardinality(5);
         assert!(inside > 0.0);
@@ -601,7 +611,7 @@ mod tests {
 
     #[test]
     fn bucket_and_rank_consistent_with_hash_layout() {
-        let s = SlidingWindowHll::new(cfg(10, u64::MAX)).unwrap();
+        let s = SlidingWindowHll::new(cfg(10, u64::MAX)).expect("value should be present");
         // A hash with all top-p bits clear → idx = 0.
         let (idx, _) = s.bucket_and_rank(0x0000_0000_0000_0001);
         assert_eq!(idx, 0);

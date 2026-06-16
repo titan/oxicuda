@@ -218,7 +218,7 @@ mod tests {
             rank,
             ParallelismConfig { tp, sp: 1, ep: 1 },
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     #[test]
@@ -235,15 +235,18 @@ mod tests {
         let shards: Vec<Vec<f32>> = (0..tp)
             .map(|rank| {
                 let h = make_handle(tp, rank);
-                let layer =
-                    ColumnLinear::from_full_weight(h, in_f, total_out, &weight, None).unwrap();
+                let layer = ColumnLinear::from_full_weight(h, in_f, total_out, &weight, None)
+                    .expect("from_full_weight should succeed");
                 let input = vec![1.0_f32, 2.0, 3.0, 4.0]; // batch=1
-                layer.local_forward(&input, 1).unwrap()
+                layer
+                    .local_forward(&input, 1)
+                    .expect("local_forward should succeed")
             })
             .collect();
 
         // All-gather
-        let out = ColumnLinear::all_gather(total_out, 1, &shards).unwrap();
+        let out =
+            ColumnLinear::all_gather(total_out, 1, &shards).expect("all_gather should succeed");
         // Identity forward should give back the input
         assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
     }
@@ -261,13 +264,16 @@ mod tests {
         let shards: Vec<Vec<f32>> = (0..tp)
             .map(|rank| {
                 let h = make_handle(tp, rank);
-                let layer =
-                    ColumnLinear::from_full_weight(h, in_f, total_out, &weight, None).unwrap();
-                layer.local_forward(&input, 2).unwrap()
+                let layer = ColumnLinear::from_full_weight(h, in_f, total_out, &weight, None)
+                    .expect("from_full_weight should succeed");
+                layer
+                    .local_forward(&input, 2)
+                    .expect("local_forward should succeed")
             })
             .collect();
 
-        let out = ColumnLinear::all_gather(total_out, 2, &shards).unwrap();
+        let out =
+            ColumnLinear::all_gather(total_out, 2, &shards).expect("all_gather should succeed");
         // Each output column = sum of in_f ones inputs = 2.0 per token
         assert_eq!(out, vec![2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]);
     }
@@ -287,12 +293,15 @@ mod tests {
                 let h = make_handle(tp, rank);
                 let layer =
                     ColumnLinear::from_full_weight(h, in_f, total_out, &weight, Some(&bias))
-                        .unwrap();
-                layer.local_forward(&input, 1).unwrap()
+                        .expect("value should be present");
+                layer
+                    .local_forward(&input, 1)
+                    .expect("local_forward should succeed")
             })
             .collect();
 
-        let out = ColumnLinear::all_gather(total_out, 1, &shards).unwrap();
+        let out =
+            ColumnLinear::all_gather(total_out, 1, &shards).expect("all_gather should succeed");
         assert_eq!(out, vec![10.0, 20.0]);
     }
 

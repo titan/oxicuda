@@ -250,7 +250,9 @@ mod tests {
         let mwt = Mwt::new(cfg, &mut rng);
         let n = 16;
         let input = vec![0.5_f32; n];
-        let output = mwt.forward(&input, n).unwrap();
+        let output = mwt
+            .forward(&input, n)
+            .expect("MWT forward pass should produce output of length n");
         assert_eq!(output.len(), n);
     }
 
@@ -266,7 +268,9 @@ mod tests {
         let mwt = Mwt::new(cfg, &mut rng);
         let n = 16;
         let input: Vec<f32> = (0..n).map(|i| (i as f32 * 0.1).sin()).collect();
-        let output = mwt.forward(&input, n).unwrap();
+        let output = mwt
+            .forward(&input, n)
+            .expect("MWT forward pass should produce finite values");
         assert!(output.iter().all(|v| v.is_finite()));
     }
 }

@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn oml_new_initialises_correct_dims() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         assert_eq!(state.input_dim, 4);
         assert_eq!(state.hidden_dim, 8);
         assert_eq!(state.rep_dim, 4); // hidden_dim / 2
@@ -810,7 +810,7 @@ mod tests {
     #[test]
     fn oml_new_weights_in_xavier_range() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let scale = xavier_scale(cfg.input_dim, cfg.hidden_dim);
         for &w in &state.rln_w1 {
             assert!(w.abs() <= scale + 1e-9, "rln_w1 out of xavier range: {w}");
@@ -820,21 +820,22 @@ mod tests {
     #[test]
     fn oml_predict_returns_valid_class() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let x = vec![0.1_f64; 4];
         let pln_w_len = state.output_dim * state.rep_dim;
         let pln_b_len = state.output_dim;
         let mut adapted = vec![0.0_f64; pln_w_len + pln_b_len];
         adapted[..pln_w_len].copy_from_slice(&state.pln_w);
         adapted[pln_w_len..].copy_from_slice(&state.pln_b);
-        let pred = oml_predict(&state, &adapted, &x).unwrap();
+        let pred = oml_predict(&state, &adapted, &x)
+            .expect("OML prediction should succeed on valid input");
         assert!(pred < cfg.output_dim);
     }
 
     #[test]
     fn oml_meta_train_decrements_loss() {
         let cfg = make_cfg();
-        let mut state = oml_new(&cfg).unwrap();
+        let mut state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let tasks: Vec<TaskData> = (0..4).map(|i| make_task(3, 3, 4, i as u64 + 10)).collect();
         let mut rng = LcgRng::new(99);
         let loss = oml_meta_train_with_lr(
@@ -847,7 +848,7 @@ mod tests {
             cfg.n_meta_epochs,
             cfg.n_tasks_per_meta,
         )
-        .unwrap();
+        .expect("should succeed with valid test inputs");
         assert!(loss.is_finite(), "meta-train loss must be finite: {loss}");
         assert!(loss >= 0.0, "loss must be non-negative");
     }
@@ -855,11 +856,12 @@ mod tests {
     #[test]
     fn oml_adapt_returns_correct_flat_len() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let x: Vec<f64> = (0..4 * 3).map(|i| i as f64 * 0.1).collect();
         let y: Vec<usize> = vec![0, 1, 2];
         let mut rng = LcgRng::new(1);
-        let flat = oml_adapt(&state, &x, &y, 3, &mut rng).unwrap();
+        let flat = oml_adapt(&state, &x, &y, 3, &mut rng)
+            .expect("OML adaptation should succeed with valid data");
         let expected_len = state.output_dim * state.rep_dim + state.output_dim;
         assert_eq!(flat.len(), expected_len);
     }
@@ -867,18 +869,19 @@ mod tests {
     #[test]
     fn oml_adapt_weights_finite() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let x: Vec<f64> = (0..4 * 4).map(|i| i as f64 * 0.05).collect();
         let y: Vec<usize> = vec![0, 1, 2, 0];
         let mut rng = LcgRng::new(2);
-        let flat = oml_adapt(&state, &x, &y, 4, &mut rng).unwrap();
+        let flat = oml_adapt(&state, &x, &y, 4, &mut rng)
+            .expect("OML adaptation should succeed with valid data");
         assert!(flat.iter().all(|v| v.is_finite()), "adapted weights finite");
     }
 
     #[test]
     fn oml_predict_dim_mismatch_error() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let x = vec![0.0_f64; 10]; // wrong input size
         let adapted = vec![0.0_f64; state.output_dim * state.rep_dim + state.output_dim];
         let res = oml_predict(&state, &adapted, &x);
@@ -888,7 +891,7 @@ mod tests {
     #[test]
     fn oml_adapt_dim_mismatch_error() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let x = vec![0.0_f64; 10]; // wrong
         let y = vec![0_usize; 3];
         let mut rng = LcgRng::new(3);
@@ -899,7 +902,7 @@ mod tests {
     #[test]
     fn oml_meta_train_empty_tasks_error() {
         let cfg = make_cfg();
-        let mut state = oml_new(&cfg).unwrap();
+        let mut state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let mut rng = LcgRng::new(4);
         let res = oml_meta_train(&mut state, &[], &mut rng);
         assert!(res.is_err());
@@ -908,11 +911,11 @@ mod tests {
     #[test]
     fn oml_inner_step_count_increments() {
         let cfg = make_cfg();
-        let mut state = oml_new(&cfg).unwrap();
+        let mut state = oml_new(&cfg).expect("OML state should initialize with valid config");
         assert_eq!(oml_inner_step_count(&state), 0);
         let tasks: Vec<TaskData> = (0..2).map(|i| make_task(2, 2, 4, i as u64 + 5)).collect();
         let mut rng = LcgRng::new(55);
-        oml_meta_train(&mut state, &tasks, &mut rng).unwrap();
+        oml_meta_train(&mut state, &tasks, &mut rng).expect("OML meta-training should succeed");
         // 3 meta-epochs (default in oml_meta_train)
         assert_eq!(oml_inner_step_count(&state), 3);
     }
@@ -930,7 +933,7 @@ mod tests {
     #[test]
     fn oml_forward_logits_finite() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let x = vec![0.5_f64; 4];
         let (_, _, _, _, logits) =
             forward_full(&state, &state.pln_w.clone(), &state.pln_b.clone(), &x);
@@ -941,7 +944,7 @@ mod tests {
     #[test]
     fn oml_gate_output_in_zero_one() {
         let cfg = make_cfg();
-        let state = oml_new(&cfg).unwrap();
+        let state = oml_new(&cfg).expect("OML state should initialize with valid config");
         let x = vec![1.0_f64; 4];
         let (_, _, gate, _, _) =
             forward_full(&state, &state.pln_w.clone(), &state.pln_b.clone(), &x);
@@ -953,7 +956,7 @@ mod tests {
     #[test]
     fn oml_meta_train_with_lr_updates_rln() {
         let cfg = make_cfg();
-        let mut state = oml_new(&cfg).unwrap();
+        let mut state = oml_new(&cfg).expect("OML state should initialize with valid config");
         // Force positive weights so ReLU units fire and gradients propagate
         state.rln_w1.iter_mut().for_each(|w| *w = 0.1);
         state.rln_w2.iter_mut().for_each(|w| *w = 0.1);
@@ -970,7 +973,7 @@ mod tests {
             cfg.n_meta_epochs,
             cfg.n_tasks_per_meta,
         )
-        .unwrap();
+        .expect("should succeed with valid test inputs");
         // RLN weights should have changed
         let changed = rln_w1_before
             .iter()

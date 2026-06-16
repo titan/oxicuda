@@ -5,5 +5,8 @@
 
 pub mod deep_cluster;
 pub mod dino;
+pub mod dino_v2;
 pub mod ibot;
 pub mod swav;
+
+pub use dino_v2::{DinoV2, DinoV2Config};

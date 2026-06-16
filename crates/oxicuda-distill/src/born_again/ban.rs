@@ -65,7 +65,7 @@ mod tests {
     fn ban_loss_finite() {
         let s = vec![1.0_f32, 2.0, 3.0];
         let t = vec![0.8_f32, 2.2, 3.0];
-        let l = BanGeneration::ban_loss(&s, &t, 2, 4.0).unwrap();
+        let l = BanGeneration::ban_loss(&s, &t, 2, 4.0).expect("ban_loss should succeed");
         assert!(l.is_finite() && l >= 0.0);
     }
 

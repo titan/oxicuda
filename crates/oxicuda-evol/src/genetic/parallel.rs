@@ -478,7 +478,7 @@ mod tests {
     fn ms_history_length_equals_n_gens() {
         let mut rng = LcgRng::new(7);
         let cfg = ms_default_config();
-        let res = master_slave_ga(&cfg, sphere, &mut rng).unwrap();
+        let res = master_slave_ga(&cfg, sphere, &mut rng).expect("master_slave_ga should succeed");
         assert_eq!(res.history.len(), cfg.n_gens);
     }
 
@@ -486,7 +486,7 @@ mod tests {
     fn ms_genome_within_bounds() {
         let mut rng = LcgRng::new(99);
         let cfg = ms_default_config();
-        let res = master_slave_ga(&cfg, sphere, &mut rng).unwrap();
+        let res = master_slave_ga(&cfg, sphere, &mut rng).expect("master_slave_ga should succeed");
         for &gene in &res.best_genome {
             assert!(
                 gene >= cfg.lb && gene <= cfg.ub,
@@ -536,7 +536,7 @@ mod tests {
     fn ms_history_is_monotone_non_increasing() {
         let mut rng = LcgRng::new(13);
         let cfg = ms_default_config();
-        let res = master_slave_ga(&cfg, sphere, &mut rng).unwrap();
+        let res = master_slave_ga(&cfg, sphere, &mut rng).expect("master_slave_ga should succeed");
         for w in res.history.windows(2) {
             assert!(
                 w[1] <= w[0] + 1e-12,
@@ -550,8 +550,10 @@ mod tests {
     #[test]
     fn ms_seed_reproducibility() {
         let cfg = ms_default_config();
-        let res1 = master_slave_ga(&cfg, sphere, &mut LcgRng::new(77)).unwrap();
-        let res2 = master_slave_ga(&cfg, sphere, &mut LcgRng::new(77)).unwrap();
+        let res1 =
+            master_slave_ga(&cfg, sphere, &mut LcgRng::new(77)).expect("value should be present");
+        let res2 =
+            master_slave_ga(&cfg, sphere, &mut LcgRng::new(77)).expect("value should be present");
         assert_eq!(res1.best_fitness, res2.best_fitness);
         assert_eq!(res1.best_genome, res2.best_genome);
     }
@@ -597,7 +599,7 @@ mod tests {
     fn cga_grid_fitness_shape() {
         let mut rng = LcgRng::new(7);
         let cfg = cga_default_config();
-        let res = cellular_ga(&cfg, sphere, &mut rng).unwrap();
+        let res = cellular_ga(&cfg, sphere, &mut rng).expect("cellular_ga should succeed");
         assert_eq!(res.grid_fitness.len(), cfg.grid_rows);
         for row in &res.grid_fitness {
             assert_eq!(row.len(), cfg.grid_cols);
@@ -608,7 +610,7 @@ mod tests {
     fn cga_history_length_equals_n_gens() {
         let mut rng = LcgRng::new(3);
         let cfg = cga_default_config();
-        let res = cellular_ga(&cfg, sphere, &mut rng).unwrap();
+        let res = cellular_ga(&cfg, sphere, &mut rng).expect("cellular_ga should succeed");
         assert_eq!(res.history.len(), cfg.n_gens);
     }
 
@@ -616,7 +618,7 @@ mod tests {
     fn cga_genome_within_bounds() {
         let mut rng = LcgRng::new(88);
         let cfg = cga_default_config();
-        let res = cellular_ga(&cfg, sphere, &mut rng).unwrap();
+        let res = cellular_ga(&cfg, sphere, &mut rng).expect("cellular_ga should succeed");
         for &gene in &res.best_genome {
             assert!(
                 gene >= cfg.lb && gene <= cfg.ub,
@@ -639,7 +641,7 @@ mod tests {
     fn cga_best_fitness_le_grid_min() {
         let mut rng = LcgRng::new(22);
         let cfg = cga_default_config();
-        let res = cellular_ga(&cfg, sphere, &mut rng).unwrap();
+        let res = cellular_ga(&cfg, sphere, &mut rng).expect("cellular_ga should succeed");
         let grid_min = res
             .grid_fitness
             .iter()
@@ -675,8 +677,10 @@ mod tests {
     #[test]
     fn cga_seed_reproducibility() {
         let cfg = cga_default_config();
-        let res1 = cellular_ga(&cfg, sphere, &mut LcgRng::new(41)).unwrap();
-        let res2 = cellular_ga(&cfg, sphere, &mut LcgRng::new(41)).unwrap();
+        let res1 =
+            cellular_ga(&cfg, sphere, &mut LcgRng::new(41)).expect("value should be present");
+        let res2 =
+            cellular_ga(&cfg, sphere, &mut LcgRng::new(41)).expect("value should be present");
         assert_eq!(res1.best_fitness, res2.best_fitness);
         assert_eq!(res1.best_genome, res2.best_genome);
     }
@@ -685,7 +689,7 @@ mod tests {
     fn cga_history_non_increasing() {
         let mut rng = LcgRng::new(99);
         let cfg = cga_default_config();
-        let res = cellular_ga(&cfg, sphere, &mut rng).unwrap();
+        let res = cellular_ga(&cfg, sphere, &mut rng).expect("cellular_ga should succeed");
         for w in res.history.windows(2) {
             assert!(
                 w[1] <= w[0] + 1e-12,

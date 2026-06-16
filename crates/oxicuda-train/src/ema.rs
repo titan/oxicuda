@@ -39,13 +39,13 @@
 //! // Training loop
 //! for step in 0..100_u64 {
 //!     // ... update params ...
-//!     ema.update(&params).unwrap();
+//!     ema.update(&params).expect("update should succeed");
 //!     let _ = step;
 //! }
 //!
 //! // Copy EMA weights back for evaluation
 //! let mut eval_params = params.clone();
-//! ema.copy_to(&mut eval_params).unwrap();
+//! ema.copy_to(&mut eval_params).expect("copy_to should succeed");
 //! ```
 
 use crate::error::{TrainError, TrainResult};

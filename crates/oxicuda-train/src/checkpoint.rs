@@ -28,11 +28,11 @@
 //! let mut mgr = CheckpointManager::new(CheckpointPolicy::Uniform { interval: 2 });
 //!
 //! // Forward pass: register segment inputs
-//! mgr.save_input("segment_0", vec![1.0f32, 2.0, 3.0]).unwrap();
-//! mgr.save_input("segment_1", vec![4.0f32, 5.0, 6.0]).unwrap();
+//! mgr.save_input("segment_0", vec![1.0f32, 2.0, 3.0]).expect("save_input should succeed");
+//! mgr.save_input("segment_1", vec![4.0f32, 5.0, 6.0]).expect("save_input should succeed");
 //!
 //! // Backward pass: retrieve inputs for recomputation
-//! let inp = mgr.get_input("segment_0").unwrap();
+//! let inp = mgr.get_input("segment_0").expect("get_input should succeed");
 //! assert_eq!(inp[0], 1.0);
 //! ```
 

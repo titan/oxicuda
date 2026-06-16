@@ -6,7 +6,7 @@ Abstract `ComputeBackend` trait that lets higher-level crates (SciRS2, oxionnx, 
 
 ## Implementation Status
 
-**Actual: 704 SLoC across 1 file** (`src/lib.rs`)
+**Actual: 484 SLoC across 1 file** (`src/lib.rs`)
 
 The crate is intentionally tiny: it exposes only the trait, supporting enums, and an error type. Concrete implementations live in their own crates (`oxicuda` for CUDA, `oxicuda-rocm`, `oxicuda-metal`, `oxicuda-vulkan`, `oxicuda-webgpu`, `oxicuda-levelzero`). The trait is object-safe (`Box<dyn ComputeBackend>`) and `Send + Sync`, so consumers can hold a runtime-selected backend behind dynamic dispatch.
 
@@ -82,7 +82,7 @@ Zero external dependencies on purpose -- this crate is the abstract seam between
 ## Quality Status
 
 - Warnings: 0
-- Tests: 7 unit tests (trait shape + default `batched_gemm` behaviour)
+- Tests: 10 unit tests (trait shape + default `batched_gemm` behaviour)
 - unwrap() calls: 0
 - clippy: clean (pedantic + nursery); `#[allow(clippy::too_many_arguments)]` on `gemm` / `conv2d_forward` / `attention` / `batched_gemm` is intentional given the BLAS-style API
 

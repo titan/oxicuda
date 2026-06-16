@@ -22,7 +22,7 @@ Part of the [OxiCUDA](https://github.com/cool-japan/oxicuda) ecosystem — Pure 
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-oxicuda-train = "0.1.5"
+oxicuda-train = "0.2.0"
 ```
 
 ```rust
@@ -51,7 +51,7 @@ for step in 0..10_000u64 {
 
 ## Status
 
-**v0.1.5** (2026-05-01) — 167 tests passing
+**v0.2.0** (2026-06-16) — 250 tests passing
 
 ## License
 

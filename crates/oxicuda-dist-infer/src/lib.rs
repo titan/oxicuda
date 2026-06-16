@@ -62,13 +62,17 @@ pub mod distributed_cache;
 pub mod error;
 pub mod expert_parallel;
 pub mod handle;
+pub mod parallel;
 pub mod ptx_kernels;
+pub mod quantisation;
 pub mod router;
 pub mod sequence_parallel;
+pub mod speculative;
 pub mod tensor_parallel;
 
 pub use error::{DistInferError, DistInferResult};
 pub use handle::{DistInferHandle, ParallelismConfig, RankCoordinates, SmVersion};
+pub use speculative::{DistInferRng, MedusaConfig, MedusaHeads};
 
 // ─── Integration Tests ───────────────────────────────────────────────────────
 
@@ -93,7 +97,7 @@ mod tests {
             rank,
             ParallelismConfig { tp, sp: 1, ep: 1 },
         )
-        .unwrap()
+        .expect("value should be present")
     }
     fn sp_handle(sp: usize, rank: usize) -> DistInferHandle {
         DistInferHandle::new(
@@ -102,7 +106,7 @@ mod tests {
             rank,
             ParallelismConfig { tp: 1, sp, ep: 1 },
         )
-        .unwrap()
+        .expect("value should be present")
     }
     fn ep_handle(ep: usize, rank: usize) -> DistInferHandle {
         DistInferHandle::new(
@@ -111,7 +115,7 @@ mod tests {
             rank,
             ParallelismConfig { tp: 1, sp: 1, ep },
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     // ── E2E-1: TP column + row roundtrip ─────────────────────────────────────
@@ -134,11 +138,14 @@ mod tests {
         let col_shards: Vec<Vec<f32>> = (0..tp)
             .map(|r| {
                 let h = tp_handle(tp, r);
-                let l = ColumnLinear::from_full_weight(h, in_f, hidden, &col_weight, None).unwrap();
-                l.local_forward(&input, 1).unwrap()
+                let l = ColumnLinear::from_full_weight(h, in_f, hidden, &col_weight, None)
+                    .expect("from_full_weight should succeed");
+                l.local_forward(&input, 1)
+                    .expect("local_forward should succeed")
             })
             .collect();
-        let gathered = ColumnLinear::all_gather(hidden, 1, &col_shards).unwrap();
+        let gathered =
+            ColumnLinear::all_gather(hidden, 1, &col_shards).expect("all_gather should succeed");
         // Identity linear on ones input → output = [1,1,1,1,1,1,1,1]
         assert_eq!(gathered, vec![1.0_f32; hidden]);
 
@@ -149,11 +156,13 @@ mod tests {
         let row_partials: Vec<Vec<f32>> = (0..tp)
             .map(|r| {
                 let h = tp_handle(tp, r);
-                let l = RowLinear::from_full_weight(h, in_f, hidden, &row_weight, None).unwrap();
-                l.local_forward(&gathered, 1).unwrap()
+                let l = RowLinear::from_full_weight(h, in_f, hidden, &row_weight, None)
+                    .expect("from_full_weight should succeed");
+                l.local_forward(&gathered, 1)
+                    .expect("local_forward should succeed")
             })
             .collect();
-        let reduced = RowLinear::all_reduce(&row_partials).unwrap();
+        let reduced = RowLinear::all_reduce(&row_partials).expect("all_reduce should succeed");
         // Identity × ones = ones
         assert_eq!(reduced, vec![1.0_f32; in_f]);
     }
@@ -174,24 +183,26 @@ mod tests {
         let chunks: Vec<Vec<f32>> = (0..sp)
             .map(|r| {
                 let h = sp_handle(sp, r);
-                let s = SeqSplitter::new(h, total_tokens, hidden_dim).unwrap();
-                s.extract_chunk(&full_seq).unwrap()
+                let s = SeqSplitter::new(h, total_tokens, hidden_dim).expect("new should succeed");
+                s.extract_chunk(&full_seq)
+                    .expect("extract_chunk should succeed")
             })
             .collect();
-        let regathered = SeqSplitter::all_gather(total_tokens, hidden_dim, sp, &chunks).unwrap();
+        let regathered = SeqSplitter::all_gather(total_tokens, hidden_dim, sp, &chunks)
+            .expect("all_gather should succeed");
         assert_eq!(
             regathered, full_seq,
             "all-gather must reconstruct the full sequence"
         );
 
         // Run BoundaryExchange local_attention for rank 0
-        let bex =
-            BoundaryExchange::new(sp_handle(sp, 0), total_tokens, hidden_dim, n_heads).unwrap();
+        let bex = BoundaryExchange::new(sp_handle(sp, 0), total_tokens, hidden_dim, n_heads)
+            .expect("value should be present");
         let q_chunk = &chunks[0];
         let kv_full = vec![1.0_f32; total_tokens * hidden_dim]; // uniform K/V
         let out = bex
             .local_attention(q_chunk, &kv_full, &kv_full, false)
-            .unwrap();
+            .expect("value should be present");
         // Uniform softmax → output = weighted V = 1.0 everywhere
         assert_eq!(out.len(), bex.chunk_len() * hidden_dim);
         for &v in &out {
@@ -209,24 +220,26 @@ mod tests {
         let n_tokens = 4;
 
         // Route each token to top-1 expert round-robin style
-        let router = TopKRouter::new(n_experts, 1).unwrap();
+        let router = TopKRouter::new(n_experts, 1).expect("new should succeed");
         let mut logits = vec![0.0_f32; n_tokens * n_experts];
         for t in 0..n_tokens {
             logits[t * n_experts + (t % n_experts)] = 1.0;
         }
-        let plan = router.route(&logits, n_tokens).unwrap();
+        let plan = router
+            .route(&logits, n_tokens)
+            .expect("route should succeed");
 
         // Token embeddings: token t = [t as f32; hd]
         let embeddings: Vec<f32> = (0..n_tokens).flat_map(|t| vec![t as f32; hd]).collect();
 
         // Rank 0 owns experts 0,1; run identity expert (passthrough × weight ≈ 1)
         let h0 = ep_handle(ep, 0);
-        let dispatcher = ExpertDispatcher::new(h0, n_experts, hd).unwrap();
+        let dispatcher = ExpertDispatcher::new(h0, n_experts, hd).expect("new should succeed");
         let out = dispatcher
             .dispatch_and_gather(&embeddings, n_tokens, &plan, |batch| {
                 Ok(batch.tokens.clone())
             })
-            .unwrap();
+            .expect("value should be present");
 
         // Tokens 0 and 1 were routed to experts 0 and 1 (rank 0's experts).
         // After gather with weight=1, their output should equal their embedding.
@@ -258,14 +271,14 @@ mod tests {
                 ep: 1,
             },
         )
-        .unwrap();
+        .expect("value should be present");
         let blocks_per_rank = vec![100usize; ws];
-        let mut part = CachePartition::new(h, &blocks_per_rank, 0.2).unwrap();
+        let mut part = CachePartition::new(h, &blocks_per_rank, 0.2).expect("new should succeed");
 
         // Assign 8 sequences to 4 ranks
         let mut owners = Vec::new();
         for seq_id in 0..8 {
-            let rank = part.assign(seq_id, 10).unwrap();
+            let rank = part.assign(seq_id, 10).expect("assign should succeed");
             owners.push((seq_id, rank));
         }
         // Each rank should have ~2 sequences (round-robin over equal load)
@@ -279,7 +292,7 @@ mod tests {
 
         // Release all and verify blocks are returned
         for (seq_id, _) in &owners {
-            part.release(*seq_id).unwrap();
+            part.release(*seq_id).expect("release should succeed");
         }
         for r in 0..ws {
             assert_eq!(
@@ -304,7 +317,8 @@ mod tests {
             })
             .collect();
 
-        let mut router = RoutingPolicy::new(n_ranks, PolicyMode::PrefixAffinity, loads, 5).unwrap();
+        let mut router = RoutingPolicy::new(n_ranks, PolicyMode::PrefixAffinity, loads, 5)
+            .expect("new should succeed");
 
         // First request: cache miss → least-loaded (any rank), registers prefix
         let req1 = Request {
@@ -313,7 +327,7 @@ mod tests {
             max_new_tokens: 32,
             priority: 0,
         };
-        let dec1 = router.route(&req1).unwrap();
+        let dec1 = router.route(&req1).expect("route should succeed");
         assert!(!dec1.prefix_hit, "first request must be a cache miss");
 
         // Second request with same prefix → should hit the same rank
@@ -323,7 +337,7 @@ mod tests {
             max_new_tokens: 32,
             priority: 0,
         };
-        let dec2 = router.route(&req2).unwrap();
+        let dec2 = router.route(&req2).expect("route should succeed");
         assert!(
             dec2.prefix_hit,
             "second request with same prefix should hit"

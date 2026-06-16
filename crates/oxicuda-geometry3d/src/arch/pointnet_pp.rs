@@ -326,7 +326,9 @@ mod tests {
             mlp_channels: vec![8, 16],
         };
         let sa = SetAbstraction::new(cfg, 4, &mut rng);
-        let (out_xyz, out_feat) = sa.forward(&xyz, n, &feat, 4).unwrap();
+        let (out_xyz, out_feat) = sa
+            .forward(&xyz, n, &feat, 4)
+            .expect("forward should succeed");
         assert_eq!(out_xyz.len(), npoint * 3);
         assert_eq!(out_feat.len(), npoint * 16);
         assert!(out_feat.iter().all(|v| v.is_finite()));
@@ -359,7 +361,7 @@ mod tests {
         let fp = FeaturePropagation::new(c1 + c2, vec![16, 8], &mut rng);
         let out = fp
             .forward(&xyz1, n1, &feat1, c1, &xyz2, n2, &feat2, c2)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(out.len(), n2 * 8);
         assert!(out.iter().all(|v| v.is_finite()));
     }

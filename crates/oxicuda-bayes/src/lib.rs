@@ -19,18 +19,28 @@
 
 // ─── Module declarations ─────────────────────────────────────────────────────
 
+pub mod bayesopt;
 pub mod calibration;
 pub mod error;
+pub mod flow;
+pub mod gp;
 pub mod handle;
 pub mod layers;
+pub mod mc;
+pub mod mcmc;
 pub mod ptx_kernels;
+pub mod sparse;
 pub mod uncertainty;
 pub mod variational;
+pub mod vi;
 
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 /// Convenience re-exports for common Bayesian deep learning types.
 pub mod prelude {
+    pub use crate::bayesopt::bo::{
+        AcquisitionFn, BayesOptConfig, BayesOptResult, acquisition_value, bayesopt,
+    };
     pub use crate::calibration::beta::{BetaCalibConfig, BetaCalibrator};
     pub use crate::calibration::conformal::{
         ConformalClassifier, ConformalRegressor, RapsClassifier, conformal_quantile,
@@ -48,19 +58,47 @@ pub mod prelude {
     pub use crate::calibration::temperature::{TemperatureFitConfig, TemperatureScaler};
     pub use crate::calibration::vector_scaling::{ScalingMode, VectorScaler, VectorScalingConfig};
     pub use crate::error::{BayesError, BayesResult};
+    pub use crate::flow::maf::{MafFlow, MafLayer, standard_normal_log_prob_vec};
+    pub use crate::gp::deep_gp::{DeepGp, DeepGpConfig, DeepGpLayer, DeepGpLayerConfig};
+    pub use crate::gp::gpr::{
+        GprConfig, GprFit, GprKernel, gpr_fit, gpr_kernel_matrix, gpr_log_marginal_likelihood,
+        gpr_predict,
+    };
+    pub use crate::gp::sparse_gp::{
+        InducingInit, SparseGpConfig, SparseGpFit, sparse_gp_elbo, sparse_gp_fit, sparse_gp_predict,
+    };
     pub use crate::handle::{BayesHandle, LcgRng, SmVersion};
     pub use crate::layers::bayes_conv::BayesConv2d;
     pub use crate::layers::bayes_gru::{BayesGru, BayesGruConfig, BayesGruState, BayesGruWeights};
     pub use crate::layers::bayes_linear::{BayesLinear, softplus};
+    pub use crate::layers::bayes_lstm::{
+        BayesLstm, BayesLstmConfig, BayesLstmSampledWeights, BayesLstmWeights,
+    };
     pub use crate::layers::flipout::{FlipoutConv2d, FlipoutLinear};
+    pub use crate::mc::convergence_diagnostics::{
+        ConvergenceSummary, GewekeConfig, diagnose as mcmc_diagnose, geweke_z, multi_chain_ess,
+        r_hat,
+    };
+    pub use crate::mc::smc::{
+        SmcConfig, SmcState, effective_sample_size, smc_filter, smc_init, smc_mean, smc_step,
+        smc_variance, systematic_resample,
+    };
+    pub use crate::mcmc::BayesRng;
+    pub use crate::mcmc::hmc::{HmcConfig as McmcHmcConfig, HmcSampler};
+    pub use crate::mcmc::sgld::{SgldConfig, SgldSampler};
     pub use crate::ptx_kernels::{
         ece_bucket_ptx, ensemble_aggregate_ptx, f32_hex, flipout_perturb_ptx, kl_gaussian_ptx,
         local_reparam_ptx, mc_dropout_mask_ptx, temp_scale_logits_ptx,
+    };
+    pub use crate::sparse::horseshoe::{
+        HorseshoeConfig, HorseshoeFit, HorseshoeRegression, half_cauchy_log_pdf, horseshoe_log_pdf,
+        ridge_regression, shrinkage_factor,
     };
     pub use crate::uncertainty::deep_ensemble::{DeepEnsemble, EnsembleStats};
     pub use crate::uncertainty::entropy::{
         aleatoric_entropy, epistemic_entropy, mutual_information, predictive_entropy,
     };
+    pub use crate::uncertainty::evidential::{DirichletEvidence, NigEvidence, digamma, lgamma};
     pub use crate::uncertainty::functional_laplace::{FunctionalLaplace, FunctionalLaplaceConfig};
     pub use crate::uncertainty::laplace::LastLayerLaplace;
     pub use crate::uncertainty::mc_dropout::{McDropoutPredictor, mc_dropout_predict};
@@ -68,12 +106,17 @@ pub mod prelude {
     pub use crate::variational::elbo::{ElboConfig, elbo, iwae, kl_gaussian, kl_gaussian_vec};
     pub use crate::variational::flows::{PlanarFlow, RadialFlow};
     pub use crate::variational::hmc::{Hmc, HmcConfig, HmcResult, Nuts, NutsConfig, NutsResult};
+    pub use crate::variational::iaf_flow::{IafFlow, IafStep, MadeNet, standard_normal_log_prob};
     pub use crate::variational::mean_field::MeanFieldDist;
+    pub use crate::variational::nvae::{
+        NVae, NVaeConfig, NVaeOutput, apply_free_bits, kl_gaussian_diag,
+    };
     pub use crate::variational::reparam::{
         gaussian_log_prob, gaussian_sample, laplacian_log_prob, laplacian_sample,
         log_prob_gaussian_vec, sample_gaussian_vec, straight_through,
     };
     pub use crate::variational::vcl::{VclConfig, VclState};
+    pub use crate::vi::advi::{Advi, AdviConfig, AdviModel, AdviResult, Transform};
 }
 
 // ─── End-to-end integration tests ────────────────────────────────────────────
@@ -137,13 +180,20 @@ mod e2e_tests {
     fn e2e_temperature_scaling_recalibrates_overconfident_classifier() {
         let n_classes = 3;
         let (logits, labels) = synthetic_overconfident(300, n_classes, 0.7);
-        let scaler = TemperatureScaler::fit_default(&logits, &labels, n_classes).unwrap();
+        let scaler = TemperatureScaler::fit_default(&logits, &labels, n_classes)
+            .expect("fit_default should succeed");
         let probs_before = softmax_rows(&logits, n_classes);
-        let probs_after = scaler.apply(&logits, n_classes).unwrap();
-        let (c_before, ok_before) = top1_confidences(&probs_before, &labels, n_classes).unwrap();
-        let (c_after, ok_after) = top1_confidences(&probs_after, &labels, n_classes).unwrap();
-        let ece_before = expected_calibration_error(&c_before, &ok_before, 10).unwrap();
-        let ece_after = expected_calibration_error(&c_after, &ok_after, 10).unwrap();
+        let probs_after = scaler
+            .apply(&logits, n_classes)
+            .expect("apply should succeed");
+        let (c_before, ok_before) = top1_confidences(&probs_before, &labels, n_classes)
+            .expect("top1_confidences should succeed");
+        let (c_after, ok_after) = top1_confidences(&probs_after, &labels, n_classes)
+            .expect("top1_confidences should succeed");
+        let ece_before = expected_calibration_error(&c_before, &ok_before, 10)
+            .expect("expected_calibration_error should succeed");
+        let ece_after = expected_calibration_error(&c_after, &ok_after, 10)
+            .expect("expected_calibration_error should succeed");
         assert!(
             ece_after <= ece_before + 1e-4,
             "Temperature scaling should not worsen ECE (before={ece_before}, after={ece_after})"
@@ -169,7 +219,7 @@ mod e2e_tests {
             .iter()
             .map(|&p| if p > 0.5 { 1.0 } else { 0.0 })
             .collect();
-        let r = IsotonicRegressor::fit(&scores, &labels).unwrap();
+        let r = IsotonicRegressor::fit(&scores, &labels).expect("fit should succeed");
         let preds = r.predict(&scores);
         for w in preds.windows(2) {
             assert!(w[0] <= w[1] + 1e-6, "isotonic must be non-decreasing");
@@ -185,7 +235,7 @@ mod e2e_tests {
             scores.push(s);
             labels.push(if s > 0.0 { 1_u8 } else { 0_u8 });
         }
-        let p = PlattScaler::fit_default(&scores, &labels).unwrap();
+        let p = PlattScaler::fit_default(&scores, &labels).expect("fit_default should succeed");
         assert!(p.predict_one(5.0) > p.predict_one(-5.0));
     }
 
@@ -201,7 +251,7 @@ mod e2e_tests {
             let (e1, _) = r.next_normal_pair();
             Ok(vec![base[0] + 0.1 * e0, base[1] + 0.1 * e1])
         })
-        .unwrap();
+        .expect("value should be present");
         eprintln!(
             "MC Dropout mean=({:.3}, {:.3}), var=({:.4}, {:.4})",
             stats.mean[0], stats.mean[1], stats.variance[0], stats.variance[1]
@@ -225,8 +275,10 @@ mod e2e_tests {
             vec![0.05_f32, 0.9, 0.05],
             vec![0.05_f32, 0.05, 0.9],
         ];
-        let ensemble = DeepEnsemble::new(preds).unwrap();
-        let stats = ensemble.aggregate_probabilities().unwrap();
+        let ensemble = DeepEnsemble::new(preds).expect("new should succeed");
+        let stats = ensemble
+            .aggregate_probabilities()
+            .expect("aggregate_probabilities should succeed");
         // Mean is ~ uniform — very high disagreement.
         for v in &stats.mean {
             assert!((v - 1.0 / 3.0).abs() < 0.01);
@@ -240,17 +292,19 @@ mod e2e_tests {
     #[test]
     fn e2e_swag_posterior_sampling_round_trip() {
         let mut handle = BayesHandle::default_handle();
-        let mut posterior = SwagPosterior::new(4, 3).unwrap();
+        let mut posterior = SwagPosterior::new(4, 3).expect("new should succeed");
         // Inject a few SGD-like iterates around mean (1, 2, 3, 4).
         for offset in [-0.1_f32, -0.05, 0.0, 0.05, 0.1] {
             let iterate: Vec<f32> = (0..4).map(|i| (i + 1) as f32 + offset).collect();
-            posterior.update(&iterate).unwrap();
+            posterior.update(&iterate).expect("update should succeed");
         }
         // Mean should be approximately (1, 2, 3, 4).
         for (i, &m) in posterior.mean.iter().enumerate() {
             assert!((m - (i + 1) as f32).abs() < 1e-4);
         }
-        let theta = posterior.sample(handle.rng_mut()).unwrap();
+        let theta = posterior
+            .sample(handle.rng_mut())
+            .expect("value should be present");
         assert_eq!(theta.len(), 4);
         for v in theta {
             assert!(v.is_finite());
@@ -269,8 +323,11 @@ mod e2e_tests {
         let labels: Vec<u8> = (0..30)
             .map(|i| if (i as f32 - 15.0) * 0.2 > 0.0 { 1 } else { 0 })
             .collect();
-        let laplace = LastLayerLaplace::fit_binary_logistic(&map, &phi, &labels, 1.0).unwrap();
-        let p = laplace.predictive_probability(&[2.0_f32, 1.0]).unwrap();
+        let laplace = LastLayerLaplace::fit_binary_logistic(&map, &phi, &labels, 1.0)
+            .expect("fit_binary_logistic should succeed");
+        let p = laplace
+            .predictive_probability(&[2.0_f32, 1.0])
+            .expect("predictive_probability should succeed");
         assert!((0.0..=1.0).contains(&p));
     }
 
@@ -282,9 +339,10 @@ mod e2e_tests {
             0.05_f32, 0.95, // member 2
             0.5_f32, 0.5, // member 3
         ];
-        let mi = mutual_information(&samples, 2, 3).unwrap();
-        let ent = predictive_entropy(&samples, 2, 3).unwrap();
-        let aleatoric = aleatoric_entropy(&samples, 2, 3).unwrap();
+        let mi = mutual_information(&samples, 2, 3).expect("mutual_information should succeed");
+        let ent = predictive_entropy(&samples, 2, 3).expect("predictive_entropy should succeed");
+        let aleatoric =
+            aleatoric_entropy(&samples, 2, 3).expect("aleatoric_entropy should succeed");
         assert!((ent - aleatoric - mi).abs() < 1e-5);
         assert!(mi > 0.0);
     }
@@ -293,8 +351,9 @@ mod e2e_tests {
     fn e2e_brier_and_nll_agree_on_perfect_predictor() {
         let probs = vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
         let labels = vec![0_usize, 1, 2];
-        let bs = brier_score(&probs, &labels, 3).unwrap();
-        let nll = negative_log_likelihood(&probs, &labels, 3).unwrap();
+        let bs = brier_score(&probs, &labels, 3).expect("brier_score should succeed");
+        let nll = negative_log_likelihood(&probs, &labels, 3)
+            .expect("negative_log_likelihood should succeed");
         assert!(bs < 1e-5);
         assert!(nll < 1e-3);
     }
@@ -321,7 +380,7 @@ mod e2e_tests {
     fn e2e_reliability_diagram_serialises_to_json() {
         let c = vec![0.1_f32, 0.5, 0.9];
         let ok = vec![false, true, true];
-        let rd = reliability_diagram(&c, &ok, 5).unwrap();
+        let rd = reliability_diagram(&c, &ok, 5).expect("reliability_diagram should succeed");
         // Spot-check counts.
         assert_eq!(rd.bins.len(), 5);
         assert_eq!(rd.n_samples, 3);
@@ -329,7 +388,8 @@ mod e2e_tests {
         assert_eq!(total_count, 3);
         // Use the diagram for ECE.
         let ece1 = rd.ece();
-        let ece2 = expected_calibration_error(&c, &ok, 5).unwrap();
+        let ece2 = expected_calibration_error(&c, &ok, 5)
+            .expect("expected_calibration_error should succeed");
         assert!((ece1 - ece2).abs() < 1e-6);
     }
 }

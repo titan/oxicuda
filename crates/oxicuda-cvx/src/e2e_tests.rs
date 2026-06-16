@@ -4,6 +4,7 @@
 
 use crate::admm::admm_solve;
 use crate::admm::consensus_admm;
+use crate::admm::{DualDecompConfig, dual_decomp};
 use crate::augmented_lagrangian::augmented_lagrangian;
 use crate::error::CvxResult;
 use crate::gradient::{heavy_ball, nesterov_accelerated, projected_gradient};
@@ -15,8 +16,8 @@ use crate::lp::{SimplexStatus, mehrotra_predictor_corrector, primal_dual_lp, rev
 use crate::metrics::{convergence_rate, duality_gap, kkt_residual, primal_residual};
 use crate::primal_dual::chambolle_pock;
 use crate::projection::{
-    project_box, project_halfspace, project_l1_ball, project_l2_ball, project_psd_cone,
-    project_simplex, project_soc,
+    dykstra_pocs, project_box, project_halfspace, project_l1_ball, project_l2_ball,
+    project_psd_cone, project_simplex, project_soc,
 };
 use crate::prox_ops::{
     prox_elastic_net, prox_group_lasso, prox_l1, prox_l2, prox_linf, prox_nuclear, prox_tv_1d,
@@ -27,9 +28,12 @@ use crate::ptx_kernels::{
     admm_dual_update_ptx, axpy_ptx, fista_extrapolate_ptx, gradient_step_ptx, proj_l2_ball_ptx,
     simplex_proj_ptx, soft_threshold_ptx,
 };
-use crate::qp::{active_set_qp, primal_dual_qp};
+use crate::qp::{active_set_qp, mehrotra_qp, primal_dual_qp};
 use crate::sdp::sdp_interior_point;
 use crate::socp::primal_dual_socp;
+
+/// Borrowed projection/update closure used by the POCS / dual-decomposition tests.
+type ProjFn<'a> = &'a dyn Fn(&[f64]) -> CvxResult<Vec<f64>>;
 
 // 1. LP simplex on 2D `min -x-y s.t. x+y ≤ 1, x,y ≥ 0` recovers (1,0) or (0,1) with objective -1.
 #[test]
@@ -566,4 +570,119 @@ fn e2e_mat_vec_basic() {
     let x = vec![1.0_f64, 1.0];
     let y = mat_vec(&a, 2, 2, &x).expect("ok");
     assert_eq!(y, vec![3.0, 7.0]);
+}
+
+// Wave AAA+55 e2e tests
+
+// 40. Dykstra POCS: L2-ball ∩ non-negative box intersection.
+#[test]
+fn e2e_dykstra_pocs_l2_box_intersection() {
+    // Project (-2, -2) onto L2-ball(r=1) ∩ {x ≥ 0}.
+    // Expected solution is near the origin (0, 0), which is the corner of the
+    // non-negative orthant closest to the L2 ball boundary.
+    let ball_proj = |x: &[f64]| -> CvxResult<Vec<f64>> {
+        let norm: f64 = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
+        if norm <= 1.0 {
+            Ok(x.to_vec())
+        } else {
+            Ok(x.iter().map(|xi| xi / norm).collect())
+        }
+    };
+    let nn1 = |x: &[f64]| -> CvxResult<Vec<f64>> { Ok(x.iter().map(|xi| xi.max(0.0)).collect()) };
+    let nn2 = |x: &[f64]| -> CvxResult<Vec<f64>> { Ok(x.iter().map(|xi| xi.max(0.0)).collect()) };
+    let projs: Vec<ProjFn> = vec![&ball_proj, &nn1, &nn2];
+    let res = dykstra_pocs(&projs, &[-2.0_f64, -2.0], 1000, 1e-8).expect("ok");
+    // Must be in L2 ball
+    let norm: f64 = res.x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
+    assert!(norm <= 1.0 + 1e-5, "result not in L2 ball: ‖x‖={}", norm);
+    // Must be non-negative
+    assert!(res.x[0] >= -1e-6, "x[0]={} < 0", res.x[0]);
+    assert!(res.x[1] >= -1e-6, "x[1]={} < 0", res.x[1]);
+}
+
+// 41. Dykstra POCS: three halfplanes intersection.
+#[test]
+fn e2e_dykstra_pocs_three_halfplanes() {
+    // Project (5, 5) onto {x₁≤2} ∩ {x₂≤2} ∩ {x₁+x₂≤3}.
+    let h1 = |x: &[f64]| -> CvxResult<Vec<f64>> {
+        // {x1 ≤ 2}: project along a=[1,0], b=2
+        let excess = x[0] - 2.0;
+        if excess <= 0.0 {
+            Ok(x.to_vec())
+        } else {
+            Ok(vec![x[0] - excess, x[1]])
+        }
+    };
+    let h2 = |x: &[f64]| -> CvxResult<Vec<f64>> {
+        // {x2 ≤ 2}: project along a=[0,1], b=2
+        let excess = x[1] - 2.0;
+        if excess <= 0.0 {
+            Ok(x.to_vec())
+        } else {
+            Ok(vec![x[0], x[1] - excess])
+        }
+    };
+    let h3 = |x: &[f64]| -> CvxResult<Vec<f64>> {
+        // {x1+x2 ≤ 3}: project along a=[1,1], b=3, ‖a‖²=2
+        let dot = x[0] + x[1];
+        if dot <= 3.0 {
+            Ok(x.to_vec())
+        } else {
+            let scale = (dot - 3.0) / 2.0;
+            Ok(vec![x[0] - scale, x[1] - scale])
+        }
+    };
+    let projs: Vec<ProjFn> = vec![&h1, &h2, &h3];
+    let res = dykstra_pocs(&projs, &[5.0_f64, 5.0], 1000, 1e-8).expect("ok");
+    assert!(res.x[0] <= 2.0 + 1e-4, "x[0]={} violates x1≤2", res.x[0]);
+    assert!(res.x[1] <= 2.0 + 1e-4, "x[1]={} violates x2≤2", res.x[1]);
+    assert!(
+        res.x[0] + res.x[1] <= 3.0 + 1e-4,
+        "x[0]+x[1]={} violates x1+x2≤3",
+        res.x[0] + res.x[1]
+    );
+}
+
+// 42. Dual decomposition: 2-block separable quadratic coupling.
+#[test]
+fn e2e_dual_decomp_quadratic_coupling() {
+    // min ½x₁² + ½x₂²  s.t. x₁+x₂=1 → x₁=x₂=0.5
+    let a = [1.0_f64];
+    // min ½x² + λx → x* = -λ  (d/dx [½x² + λx] = x + λ = 0)
+    let f1 = |lam: &[f64]| -> CvxResult<Vec<f64>> { Ok(vec![-lam[0]]) };
+    let f2 = |lam: &[f64]| -> CvxResult<Vec<f64>> { Ok(vec![-lam[0]]) };
+    let upds: &[ProjFn] = &[&f1 as ProjFn, &f2 as ProjFn];
+    let cfg = DualDecompConfig {
+        step_size: 0.1,
+        max_iter: 3000,
+        tol: 1e-6,
+    };
+    let res = dual_decomp(&[&a[..], &a[..]], &[(1, 1), (1, 1)], &[1.0], upds, &cfg).expect("ok");
+    let sum = res.x_blocks[0][0] + res.x_blocks[1][0];
+    assert!((sum - 1.0).abs() < 1e-4, "x1+x2={} should be ≈ 1.0", sum);
+    assert!(
+        (res.x_blocks[0][0] - 0.5).abs() < 1e-3,
+        "x1={} should be ≈ 0.5",
+        res.x_blocks[0][0]
+    );
+}
+
+// 43. Mehrotra QP: 3-variable uniform solution.
+#[test]
+fn e2e_mehrotra_qp_simple_qp() {
+    // min ½(x1²+x2²+x3²) s.t. x1+x2+x3=1, x≥0 → (1/3, 1/3, 1/3)
+    let p_mat = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0_f64];
+    let q = vec![0.0_f64; 3];
+    let a = vec![1.0_f64, 1.0, 1.0];
+    let b = vec![1.0_f64];
+    let res = mehrotra_qp(&p_mat, 3, &q, &a, 1, &b, 100, 1e-7).expect("ok");
+    for (i, &xi) in res.x.iter().enumerate() {
+        assert!(
+            (xi - 1.0 / 3.0).abs() < 1e-4,
+            "x[{}]={} expected 1/3",
+            i,
+            xi
+        );
+    }
+    assert!(res.converged, "should have converged");
 }

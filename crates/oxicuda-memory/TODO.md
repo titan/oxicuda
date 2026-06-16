@@ -6,7 +6,7 @@ Type-safe GPU memory management with Rust ownership semantics. RAII-based wrappe
 
 ## Implementation Status
 
-**Actual SLoC: 4,178** across **17 files** (estimated 70K-112K for all Vol.1 combined)
+**Actual SLoC: 5,297** across **18 files** (estimated 70K-112K for all Vol.1 combined)
 
 The memory crate provides the core buffer types and copy operations that all higher-level OxiCUDA crates depend on. Current implementation covers the essential buffer types with stubs for advanced features.
 
@@ -35,6 +35,9 @@ The memory crate provides the core buffer types and copy operations that all hig
 - [x] Buffer views and reinterpret cast -- type-safe buffer reinterpretation (P1)
 - [x] Host-registered memory -- cuMemHostRegister for existing host allocations (P2)
 - [x] Memory usage query -- cuMemGetInfo (free/total VRAM) (P1)
+- [ ] Memory compression hints (`compression/compressed_buffer.rs`) -- cuMemCreate with CU_MEM_PROPERTY_COMPRESSION flag for hardware-accelerated lossless memory compression on Ampere+; `CompressedDeviceBuffer` (P1)
+- [ ] NUMA-aware host allocation (`numa/numa_buffer.rs`) -- numa_alloc_onnode / libnuma integration for host-pinned memory physically allocated on the NUMA node closest to the target GPU; `NumaBuffer` (P1)
+- [ ] Memory pressure monitoring (`pool/pressure_monitor.rs`) -- poll cuMemGetInfo periodically + configurable OOM threshold callback + eviction hook for proactive pool trim under memory pressure; `MemoryPressureMonitor` (P2)
 
 ## Dependencies
 
@@ -46,7 +49,7 @@ The memory crate provides the core buffer types and copy operations that all hig
 ## Quality Status
 
 - Warnings: 0
-- Tests: 201 passing
+- Tests: 211 passing
 - unwrap() calls: 0
 - Drop implementations log errors via tracing::warn, never panic
 

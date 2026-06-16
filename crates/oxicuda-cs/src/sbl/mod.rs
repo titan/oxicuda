@@ -1,9 +1,11 @@
 //! Sparse Bayesian Learning algorithms.
 
 pub mod fast_marginal_likelihood;
+pub mod relevance_vector;
 pub mod sparse_bayesian;
 
 pub use fast_marginal_likelihood::fast_marginal_likelihood;
+pub use relevance_vector::{Rvm, RvmConfig, RvmFit, RvmKernel, rvm_fit_design};
 pub use sparse_bayesian::sparse_bayesian;
 
 /// SBL result.

@@ -12,7 +12,7 @@ transforms. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.30).
 
 ## Implementation Status
 
-**Actual: 7,271 SLoC (36 files)** -- 189 unit tests + 12 E2E integration tests
+**Actual: 14,490 SLoC (57 files)** -- 328 unit tests + 15 E2E integration tests
 
 The crate covers the full point-cloud + 3D Gaussian splatting + classical
 geometry pipeline. CPU paths are simulation-grade for unit testing; PTX
@@ -103,6 +103,19 @@ kernels target NVIDIA SM 7.5 through SM 12.0. The crate is `forbid(unsafe_code)`
       epsilon >= 1e-3)
 - [x] `normal_estimate.rs::estimate_normals` -- per-point PCA normals via
       3 x 3 covariance smallest-eigenvector; +z orientation
+- [x] `delaunay3d.rs::tetrahedralize` / `Delaunay3d` -- incremental
+      Bowyer-Watson 3D Delaunay; f64 `orient3d` + lifted `in_sphere`
+      predicates (relative scaled eps, co-spherical treated as outside);
+      super-tetrahedron seeding; cavity re-triangulation; `circumcenter`
+      (3x3 Cramer solve), `convex_hull_faces`, `tet_volume` / `total_volume`
+- [x] `ray_triangle.rs` -- Moller-Trumbore `ray_triangle_intersect`,
+      Ericson Voronoi-region `closest_point_on_triangle`, slab
+      `ray_aabb_intersect`, and mesh reductions `ray_mesh_intersect` /
+      `closest_point_on_mesh`
+- [x] `curvature.rs::discrete_curvature` / `VertexCurvature` -- Meyer 2003
+      discrete operators: angle-defect Gaussian, cotangent Laplace-Beltrami
+      mean (mixed Voronoi/barycentric area), principal k1/k2; plus public
+      `icosphere` test-oracle mesh generator
 
 #### Gaussian Splatting (gaussian/)
 - [x] `gaussian.rs::Gaussian3d` -- wxyz quaternion, log-scale, pre-sigmoid
@@ -170,7 +183,16 @@ kernels target NVIDIA SM 7.5 through SM 12.0. The crate is `forbid(unsafe_code)`
       -- hierarchical 8-way subdivision with max_depth/max_points_per_leaf, AABB-pruned
       radius + kNN queries)
 - [x] Marching cubes mesh extraction from voxel SDF
-- [ ] Tetrahedral mesh ops (Delaunay, volume) for FEM applications
+- [x] Tetrahedral mesh ops (Delaunay, volume) for FEM applications
+      (mesh/delaunay3d.rs -- Bowyer-Watson incremental tetrahedralization with
+      robust f64 orient3d / in_sphere predicates, circumcenter + per-tet/total
+      volume, convex-hull face extraction)
+- [x] Ray/triangle + point/triangle distance queries (mesh/ray_triangle.rs --
+      Moller-Trumbore intersection, Ericson closest-point, ray-AABB slab,
+      mesh-level nearest-hit and nearest-surface-point)
+- [x] Discrete differential-geometry curvature (mesh/curvature.rs -- Meyer 2003
+      angle-defect Gaussian + cotangent-Laplacian mean + principal curvatures,
+      mixed Voronoi area; icosphere oracle generator)
 - [ ] Open3D-compatible PLY / PCD readers (Pure Rust)
 - [x] Range-image projection helpers for LiDAR data
       (transform/range_image.rs -- LiDAR-style azimuth×elevation spherical projection with per-pixel min-range; unproject inverse for round-trip)
@@ -195,7 +217,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 189 unit + 12 E2E = 201 passing
+- Tests: 328 unit + 15 E2E = 343 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - All public APIs return `Geom3dResult<T>` or `Result<T, Geom3dError>`

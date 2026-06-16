@@ -309,7 +309,8 @@ mod tests {
     const TINY: f32 = 1e-6;
 
     fn make(dim: usize, n_steps: usize, kind: InterpolantKind) -> StochasticInterpolant {
-        StochasticInterpolant::new(InterpolantConfig { dim, n_steps, kind }).unwrap()
+        StochasticInterpolant::new(InterpolantConfig { dim, n_steps, kind })
+            .expect("new should succeed")
     }
 
     #[test]
@@ -421,7 +422,9 @@ mod tests {
         let x0 = vec![1.0_f32, 2.0, 3.0, 4.0];
         let x1 = vec![10.0_f32, 11.0, 12.0, 13.0];
         let z = vec![100.0_f32, 200.0, 300.0, 400.0]; // σ=0: should be ignored
-        let out = si.interpolate(&x0, &x1, &z, 0.0).unwrap();
+        let out = si
+            .interpolate(&x0, &x1, &z, 0.0)
+            .expect("interpolate should succeed");
         for (&o, &a) in out.iter().zip(&x0) {
             assert!((o - a).abs() < EPS, "{o} != {a}");
         }
@@ -433,7 +436,9 @@ mod tests {
         let x0 = vec![1.0_f32, 2.0, 3.0, 4.0];
         let x1 = vec![10.0_f32, 11.0, 12.0, 13.0];
         let z = vec![100.0_f32, 200.0, 300.0, 400.0];
-        let out = si.interpolate(&x0, &x1, &z, 1.0).unwrap();
+        let out = si
+            .interpolate(&x0, &x1, &z, 1.0)
+            .expect("interpolate should succeed");
         for (&o, &b) in out.iter().zip(&x1) {
             assert!((o - b).abs() < EPS, "{o} != {b}");
         }
@@ -445,7 +450,9 @@ mod tests {
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 7.0, 0.0];
         // α'·x0 + β'·x1 = (−1)·x0 + 1·x1 = x1 − x0.
-        let v = si.target_velocity(&x0, &x1, 0.4).unwrap();
+        let v = si
+            .target_velocity(&x0, &x1, 0.4)
+            .expect("target_velocity should succeed");
         let expected = [3.0_f32, 5.0, -3.0];
         for (&vi, &e) in v.iter().zip(&expected) {
             assert!((vi - e).abs() < EPS, "{vi} != {e}");
@@ -456,7 +463,9 @@ mod tests {
     fn sample_ode_output_length_equals_dim() {
         let si = make(7, 6, InterpolantKind::LinearFlow);
         let x_init = vec![0.5_f32; 7];
-        let out = si.sample_ode(&x_init, |x, _| x.to_vec()).unwrap();
+        let out = si
+            .sample_ode(&x_init, |x, _| x.to_vec())
+            .expect("value should be present");
         assert_eq!(out.len(), 7);
     }
 
@@ -467,8 +476,12 @@ mod tests {
         let si = make(3, 4, InterpolantKind::LinearFlow);
         let x0 = vec![0.0_f32, -1.0, 2.0];
         let x1 = vec![3.0_f32, 5.0, -2.0];
-        let v = si.target_velocity(&x0, &x1, 0.0).unwrap();
-        let out = si.sample_ode(&x0, |_, _| v.clone()).unwrap();
+        let v = si
+            .target_velocity(&x0, &x1, 0.0)
+            .expect("target_velocity should succeed");
+        let out = si
+            .sample_ode(&x0, |_, _| v.clone())
+            .expect("value should be present");
         for (&o, &b) in out.iter().zip(&x1) {
             assert!((o - b).abs() < EPS, "sample_ode {o} != {b}");
         }
@@ -478,7 +491,9 @@ mod tests {
     fn sample_ode_zero_velocity_returns_x_init() {
         let si = make(4, 10, InterpolantKind::LinearFlow);
         let x_init = vec![0.7_f32, -0.3, 1.1, 2.5];
-        let out = si.sample_ode(&x_init, |_, _| vec![0.0_f32; 4]).unwrap();
+        let out = si
+            .sample_ode(&x_init, |_, _| vec![0.0_f32; 4])
+            .expect("sample_ode should succeed");
         for (&o, &i) in out.iter().zip(&x_init) {
             assert!((o - i).abs() < EPS, "zero velocity moved x: {o} vs {i}");
         }
@@ -489,8 +504,8 @@ mod tests {
         let si = make(3, 6, InterpolantKind::LinearFlow);
         let x0 = vec![0.1_f32, 0.2, 0.3];
         let vel = |x: &[f32], t: f32| x.iter().map(|&xi| 0.5 * xi + t).collect::<Vec<_>>();
-        let a = si.sample_ode(&x0, vel).unwrap();
-        let b = si.sample_ode(&x0, vel).unwrap();
+        let a = si.sample_ode(&x0, vel).expect("sample_ode should succeed");
+        let b = si.sample_ode(&x0, vel).expect("sample_ode should succeed");
         for (&ai, &bi) in a.iter().zip(&b) {
             assert!((ai - bi).abs() < TINY, "non-deterministic: {ai} vs {bi}");
         }
@@ -645,7 +660,9 @@ mod tests {
         let x0 = vec![0.0_f32, 0.0, 0.0];
         let x1 = vec![0.0_f32, 0.0, 0.0];
         let z = vec![1.0_f32, -1.0, 0.5];
-        let out = si.interpolate(&x0, &x1, &z, 0.5).unwrap();
+        let out = si
+            .interpolate(&x0, &x1, &z, 0.5)
+            .expect("interpolate should succeed");
         for (&o, &zi) in out.iter().zip(&z) {
             assert!(
                 (o - zi).abs() < 1e-5,

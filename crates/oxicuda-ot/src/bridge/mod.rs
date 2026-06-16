@@ -21,3 +21,10 @@ pub mod tdsb;
 // ─── Re-exports ───────────────────────────────────────────────────────────────
 
 pub use tdsb::{TdsbConfig, TdsbResult, tdsb, tdsb_interpolate, tdsb_transition_plan};
+
+/// Conditional Flow Matching (Lipman 2022, Liu 2023) — simulation-free generative model.
+pub mod flow_matching;
+pub use flow_matching::{
+    CfmConfig, CfmFit, CouplingStrategy, VelocityNet, conditional_flow_matching,
+    conditional_velocity, flow_interpolate, flow_straightness,
+};

@@ -6,6 +6,7 @@
 pub mod baum_welch;
 pub mod forward_backward;
 pub mod hmm;
+pub mod posterior_decoding;
 pub mod scaling;
 pub mod semimarkov;
 pub mod variational;
@@ -14,6 +15,7 @@ pub mod viterbi;
 pub use baum_welch::{BaumWelchResult, baum_welch_discrete};
 pub use forward_backward::{ForwardBackward, forward_backward};
 pub use hmm::{HmmDiscrete, HmmGaussian, log_safe};
+pub use posterior_decoding::{PosteriorDecode, posterior_decode, posterior_path_is_feasible};
 pub use scaling::{
     ScaledBackwardResult, ScaledForwardBackwardResult, ScaledForwardResult, scaled_backward,
     scaled_baum_welch_step, scaled_forward, scaled_forward_backward, scaled_viterbi,

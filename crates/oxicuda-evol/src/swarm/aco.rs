@@ -49,6 +49,7 @@ impl AcoConfig {
 }
 
 /// ACO pheromone and distance state.
+#[derive(Debug)]
 pub struct AcoState {
     /// Pheromone matrix τ, n_cities × n_cities (row-major).
     pub pheromone: Vec<f64>,
@@ -244,5 +245,173 @@ impl AcoState {
             ));
         }
         Ok((self.best_tour.clone(), self.best_length))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a symmetric distance matrix for `n` cities arranged uniformly on the unit circle.
+    fn circle_distances(n: usize) -> Vec<f64> {
+        use std::f64::consts::PI;
+        let coords: Vec<(f64, f64)> = (0..n)
+            .map(|i| {
+                let angle = 2.0 * PI * i as f64 / n as f64;
+                (angle.cos(), angle.sin())
+            })
+            .collect();
+        let mut dist = vec![0.0_f64; n * n];
+        for i in 0..n {
+            for j in 0..n {
+                let dx = coords[i].0 - coords[j].0;
+                let dy = coords[i].1 - coords[j].1;
+                dist[i * n + j] = (dx * dx + dy * dy).sqrt();
+            }
+        }
+        dist
+    }
+
+    // ── Test 1: best_tour has exactly n_cities entries ─────────────────────
+    #[test]
+    fn output_path_len() {
+        let n = 6;
+        let cfg = AcoConfig::new(n).expect("valid cfg");
+        let mut rng = LcgRng::new(1);
+        let dist = circle_distances(n);
+        let mut state = AcoState::new(dist, &cfg, &mut rng).expect("init ok");
+        let (tour, _) = state.run(&cfg, &mut rng).expect("run ok");
+        assert_eq!(tour.len(), n, "tour length should equal n_cities");
+    }
+
+    // ── Test 2: best_tour visits all cities (sorted == 0..n) ──────────────
+    #[test]
+    fn path_visits_all_cities() {
+        let n = 5;
+        let cfg = AcoConfig::new(n).expect("valid cfg");
+        let mut rng = LcgRng::new(2);
+        let dist = circle_distances(n);
+        let mut state = AcoState::new(dist, &cfg, &mut rng).expect("init ok");
+        let (tour, _) = state.run(&cfg, &mut rng).expect("run ok");
+        let mut sorted = tour.clone();
+        sorted.sort_unstable();
+        let expected: Vec<usize> = (0..n).collect();
+        assert_eq!(sorted, expected, "tour must visit every city exactly once");
+    }
+
+    // ── Test 3: no duplicate cities in best_tour ───────────────────────────
+    #[test]
+    fn path_unique_cities() {
+        let n = 7;
+        let cfg = AcoConfig::new(n).expect("valid cfg");
+        let mut rng = LcgRng::new(3);
+        let dist = circle_distances(n);
+        let mut state = AcoState::new(dist, &cfg, &mut rng).expect("init ok");
+        let (tour, _) = state.run(&cfg, &mut rng).expect("run ok");
+        let mut seen = vec![false; n];
+        for &city in &tour {
+            assert!(!seen[city], "city {city} appears more than once");
+            seen[city] = true;
+        }
+    }
+
+    // ── Test 4: best_length is finite ─────────────────────────────────────
+    #[test]
+    fn finite_length() {
+        let n = 5;
+        let cfg = AcoConfig::new(n).expect("valid cfg");
+        let mut rng = LcgRng::new(4);
+        let dist = circle_distances(n);
+        let mut state = AcoState::new(dist, &cfg, &mut rng).expect("init ok");
+        let (_, length) = state.run(&cfg, &mut rng).expect("run ok");
+        assert!(
+            length.is_finite(),
+            "best_length must be finite, got {length}"
+        );
+    }
+
+    // ── Test 5: n_cities=1 is rejected by AcoConfig::new ──────────────────
+    #[test]
+    fn n_cities_1_rejected_by_config() {
+        let result = AcoConfig::new(1);
+        match result {
+            Err(EvolError::InvalidParameter(_)) => {}
+            other => panic!("expected InvalidParameter for 1 city, got {other:?}"),
+        }
+    }
+
+    // ── Test 6: max_iter=1 completes without error ─────────────────────────
+    #[test]
+    fn n_iter_1_works() {
+        let n = 4;
+        let mut cfg = AcoConfig::new(n).expect("valid cfg");
+        cfg.max_iter = 1;
+        let mut rng = LcgRng::new(6);
+        let dist = circle_distances(n);
+        let mut state = AcoState::new(dist, &cfg, &mut rng).expect("init ok");
+        let (tour, length) = state.run(&cfg, &mut rng).expect("single iter ok");
+        assert_eq!(tour.len(), n);
+        assert!(length.is_finite());
+    }
+
+    // ── Test 7: 2-city tour is solvable and length > 0 ────────────────────
+    #[test]
+    fn n_cities_2_works() {
+        let n = 2;
+        let cfg = AcoConfig::new(n).expect("valid cfg");
+        let mut rng = LcgRng::new(7);
+        // Simple 2-city distance: 0-0, 0-1, 1-0, 1-1 with d(0,1) = 1
+        let dist = vec![0.0, 1.0, 1.0, 0.0];
+        let mut state = AcoState::new(dist, &cfg, &mut rng).expect("init ok");
+        let (tour, length) = state.run(&cfg, &mut rng).expect("2-city ok");
+        assert_eq!(tour.len(), 2);
+        // Round-trip: city0→city1→city0 = 2.0
+        assert!(length.is_finite() && length > 0.0, "length={length}");
+    }
+
+    // ── Test 8: high evaporation rate (rho close to 1) runs without error ─
+    #[test]
+    fn rho_high_runs_ok() {
+        let n = 5;
+        let mut cfg = AcoConfig::new(n).expect("valid cfg");
+        cfg.rho = 0.99;
+        cfg.max_iter = 20;
+        let mut rng = LcgRng::new(8);
+        let dist = circle_distances(n);
+        let mut state = AcoState::new(dist, &cfg, &mut rng).expect("init ok");
+        let (tour, length) = state.run(&cfg, &mut rng).expect("high rho ok");
+        assert_eq!(tour.len(), n);
+        assert!(length.is_finite());
+    }
+
+    // ── Test 9: step() returns finite iteration-best length ───────────────
+    #[test]
+    fn step_returns_finite_iter_best() {
+        let n = 6;
+        let cfg = AcoConfig::new(n).expect("valid cfg");
+        let mut rng = LcgRng::new(9);
+        let dist = circle_distances(n);
+        let mut state = AcoState::new(dist, &cfg, &mut rng).expect("init ok");
+        let iter_best = state.step(&cfg, &mut rng).expect("step ok");
+        assert!(iter_best.is_finite(), "iter_best={iter_best}");
+    }
+
+    // ── Test 10: wrong distance matrix size yields error ──────────────────
+    #[test]
+    fn wrong_distance_matrix_size_error() {
+        let n = 4;
+        let cfg = AcoConfig::new(n).expect("valid cfg");
+        let mut rng = LcgRng::new(10);
+        // Provide too few entries
+        let dist = vec![0.0_f64; n * n - 1];
+        let result = AcoState::new(dist, &cfg, &mut rng);
+        match result {
+            Err(EvolError::PheromoneDimensionMismatch) => {}
+            other => panic!("expected PheromoneDimensionMismatch, got {other:?}"),
+        }
     }
 }

@@ -516,7 +516,7 @@ mod tests {
         let mut rng = LcgRng::new(1);
         let weights = R2D2::init_weights(16, 8, &mut rng);
         let x: Vec<f32> = (0..5 * 16).map(|_| rng.next_f32()).collect();
-        let out = R2D2::embed(&weights, &x, 5).unwrap();
+        let out = R2D2::embed(&weights, &x, 5).expect("embed should succeed");
         assert_eq!(out.len(), 5 * 8, "embed shape should be n*feat_dim");
     }
 
@@ -529,7 +529,7 @@ mod tests {
             *b = -1000.0;
         }
         let x: Vec<f32> = vec![1.0; 4];
-        let out = R2D2::embed(&weights, &x, 1).unwrap();
+        let out = R2D2::embed(&weights, &x, 1).expect("embed should succeed");
         for &v in &out {
             assert!(v >= 0.0, "ReLU should clip negatives to zero");
         }
@@ -578,7 +578,7 @@ mod tests {
             .map(|k| if k / n == k % n { 1.0_f32 } else { 0.0 })
             .collect();
         let y: Vec<f32> = phi.clone();
-        let w = R2D2::ridge_solve(&phi, &y, n, n, n, lambda).unwrap();
+        let w = R2D2::ridge_solve(&phi, &y, n, n, n, lambda).expect("ridge_solve should succeed");
         // Diagonal entries should be ≈ 1/(1+lambda)
         let expected_diag = 1.0 / (1.0 + lambda);
         for i in 0..n {
@@ -597,8 +597,10 @@ mod tests {
             .map(|k| if k / n == k % n { 1.0_f32 } else { 0.0 })
             .collect();
         let y = phi.clone();
-        let w_small = R2D2::ridge_solve(&phi, &y, n, n, n, 0.01).unwrap();
-        let w_large = R2D2::ridge_solve(&phi, &y, n, n, n, 100.0).unwrap();
+        let w_small =
+            R2D2::ridge_solve(&phi, &y, n, n, n, 0.01).expect("ridge_solve should succeed");
+        let w_large =
+            R2D2::ridge_solve(&phi, &y, n, n, n, 100.0).expect("ridge_solve should succeed");
         let norm_small: f32 = w_small.iter().map(|v| v * v).sum::<f32>().sqrt();
         let norm_large: f32 = w_large.iter().map(|v| v * v).sum::<f32>().sqrt();
         assert!(
@@ -614,7 +616,7 @@ mod tests {
         let y = vec![1.0_f32, 0.0]; // class 0
         let w = R2D2::ridge_solve(&phi, &y, 1, 4, 2, 1.0);
         assert!(w.is_ok(), "single support example should work");
-        let w = w.unwrap();
+        let w = w.expect("w should be present");
         assert!(w.iter().all(|v| v.is_finite()), "weights should be finite");
     }
 
@@ -629,7 +631,8 @@ mod tests {
             .flat_map(|c| std::iter::repeat_n(c as u32, 3))
             .collect();
         let y = R2D2::one_hot(&labels, n_way);
-        let w = R2D2::ridge_solve(&phi, &y, n_support, feat_dim, n_way, 0.1).unwrap();
+        let w = R2D2::ridge_solve(&phi, &y, n_support, feat_dim, n_way, 0.1)
+            .expect("ridge_solve should succeed");
         assert_eq!(w.len(), feat_dim * n_way);
     }
 
@@ -645,8 +648,10 @@ mod tests {
             .collect();
         let labels: Vec<u32> = (0..n as u32).collect();
         let y = R2D2::one_hot(&labels, n);
-        let w_std = R2D2::ridge_solve(&phi, &y, n, n, n, lambda).unwrap();
-        let w_wood = R2D2::ridge_solve_woodbury(&phi, &y, n, n, n, lambda).unwrap();
+        let w_std =
+            R2D2::ridge_solve(&phi, &y, n, n, n, lambda).expect("ridge_solve should succeed");
+        let w_wood = R2D2::ridge_solve_woodbury(&phi, &y, n, n, n, lambda)
+            .expect("ridge_solve_woodbury should succeed");
         for (a, b) in w_std.iter().zip(w_wood.iter()) {
             assert!(
                 (a - b).abs() < 1e-4,
@@ -664,7 +669,8 @@ mod tests {
         let phi: Vec<f32> = (0..n_support * feat_dim).map(|_| rng.next_f32()).collect();
         let labels: Vec<u32> = (0..n_way as u32).collect();
         let y = R2D2::one_hot(&labels, n_way);
-        let w = R2D2::ridge_solve_woodbury(&phi, &y, n_support, feat_dim, n_way, 0.1).unwrap();
+        let w = R2D2::ridge_solve_woodbury(&phi, &y, n_support, feat_dim, n_way, 0.1)
+            .expect("ridge_solve_woodbury should succeed");
         assert_eq!(w.len(), feat_dim * n_way);
     }
 
@@ -683,11 +689,13 @@ mod tests {
     #[test]
     fn predict_output_shape() {
         let cfg = default_config();
-        let r2d2 = R2D2::new(cfg.clone()).unwrap();
+        let r2d2 = R2D2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(99);
         let weights = R2D2::init_weights(4, cfg.feat_dim, &mut rng);
         let episode = make_episode(cfg.n_way, 2, 3, 4);
-        let scores = r2d2.predict(&weights, &episode).unwrap();
+        let scores = r2d2
+            .predict(&weights, &episode)
+            .expect("predict should succeed");
         let n_query = cfg.n_way * 3;
         assert_eq!(scores.len(), n_query * cfg.n_way, "scores shape");
     }
@@ -695,11 +703,13 @@ mod tests {
     #[test]
     fn evaluate_episode_range() {
         let cfg = default_config();
-        let r2d2 = R2D2::new(cfg.clone()).unwrap();
+        let r2d2 = R2D2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(42);
         let weights = R2D2::init_weights(4, cfg.feat_dim, &mut rng);
         let episode = make_episode(cfg.n_way, 2, 3, 4);
-        let acc = r2d2.evaluate_episode(&weights, &episode).unwrap();
+        let acc = r2d2
+            .evaluate_episode(&weights, &episode)
+            .expect("evaluate_episode should succeed");
         assert!((0.0..=1.0).contains(&acc), "accuracy must be in [0,1]");
     }
 
@@ -707,11 +717,13 @@ mod tests {
     fn one_shot_works() {
         let mut cfg = default_config();
         cfg.n_way = 2;
-        let r2d2 = R2D2::new(cfg.clone()).unwrap();
+        let r2d2 = R2D2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(7);
         let weights = R2D2::init_weights(4, cfg.feat_dim, &mut rng);
         let episode = make_episode(2, 1, 2, 4); // k_shot=1
-        let acc = r2d2.evaluate_episode(&weights, &episode).unwrap();
+        let acc = r2d2
+            .evaluate_episode(&weights, &episode)
+            .expect("evaluate_episode should succeed");
         assert!((0.0..=1.0).contains(&acc));
     }
 
@@ -719,11 +731,13 @@ mod tests {
     fn binary_n_way_works() {
         let mut cfg = default_config();
         cfg.n_way = 2;
-        let r2d2 = R2D2::new(cfg.clone()).unwrap();
+        let r2d2 = R2D2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(8);
         let weights = R2D2::init_weights(4, cfg.feat_dim, &mut rng);
         let episode = make_episode(2, 3, 2, 4);
-        let scores = r2d2.predict(&weights, &episode).unwrap();
+        let scores = r2d2
+            .predict(&weights, &episode)
+            .expect("predict should succeed");
         assert_eq!(scores.len(), 4 * 2);
     }
 
@@ -736,11 +750,13 @@ mod tests {
             lambda: 0.1,
             use_woodbury: true,
         };
-        let r2d2 = R2D2::new(cfg).unwrap();
+        let r2d2 = R2D2::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(55);
         let weights = R2D2::init_weights(4, 8, &mut rng);
         let episode = make_episode(2, 1, 2, 4);
-        let acc = r2d2.evaluate_episode(&weights, &episode).unwrap();
+        let acc = r2d2
+            .evaluate_episode(&weights, &episode)
+            .expect("evaluate_episode should succeed");
         assert!((0.0..=1.0).contains(&acc));
     }
 

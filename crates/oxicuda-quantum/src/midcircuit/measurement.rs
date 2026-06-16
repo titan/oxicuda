@@ -297,33 +297,38 @@ mod tests {
     use crate::statevec::apply_1q::apply_1q_inplace;
 
     fn bell_pair() -> StateVector {
-        let mut sv = StateVector::new_zero_state(2).unwrap();
-        apply_1q_inplace(&mut sv, 0, &gate_h()).unwrap();
-        apply_cnot(&mut sv, 0, 1).unwrap();
+        let mut sv = StateVector::new_zero_state(2).expect("2 is a valid qubit count");
+        apply_1q_inplace(&mut sv, 0, &gate_h()).expect("qubit 0 is within 2-qubit state");
+        apply_cnot(&mut sv, 0, 1).expect("qubits 0 and 1 are within 2-qubit state");
         sv
     }
 
     #[test]
     fn t01_measure_zero_gives_zero_unchanged() {
-        let mut sv = StateVector::new_zero_state(1).unwrap();
+        let mut sv = StateVector::new_zero_state(1).expect("1 is a valid qubit count");
         let before = sv.amps.clone();
         let mut rng = LcgRng::new(1);
         let mut creg = ClassicalRegister::new(1);
-        let outcome = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0).unwrap();
+        let outcome = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0)
+            .expect("qubit 0 and creg index 0 are in range");
         assert!(!outcome, "|0> must measure to 0");
         for (a, b) in sv.amps.iter().zip(before.iter()) {
             assert!((a - b).norm() < 1e-6);
         }
-        assert_eq!(creg.get(0).unwrap(), Some(false));
+        assert_eq!(
+            creg.get(0).expect("index 0 is within 1-bit register"),
+            Some(false)
+        );
     }
 
     #[test]
     fn t02_measure_plus_collapses_norm_one() {
-        let mut sv = StateVector::new_zero_state(1).unwrap();
-        apply_1q_inplace(&mut sv, 0, &gate_h()).unwrap();
+        let mut sv = StateVector::new_zero_state(1).expect("1 is a valid qubit count");
+        apply_1q_inplace(&mut sv, 0, &gate_h()).expect("qubit 0 is within 1-qubit state");
         let mut rng = LcgRng::new(5);
         let mut creg = ClassicalRegister::new(1);
-        let outcome = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0).unwrap();
+        let outcome = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0)
+            .expect("qubit 0 and creg index 0 are in range");
         // Post-measure norm == 1, and state is a basis state.
         assert!((sv.norm_sq() - 1.0).abs() < 1e-5);
         let idx = usize::from(outcome);
@@ -338,10 +343,15 @@ mod tests {
         let mut sv = bell_pair();
         let mut rng = LcgRng::new(123);
         let mut creg = ClassicalRegister::new(1);
-        let outcome = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0).unwrap();
+        let outcome = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0)
+            .expect("qubit 0 and creg index 0 are in range");
         // The partner (qubit 1) must now be deterministic and equal to outcome.
-        let p_same = sv.measure_prob(1, outcome).unwrap();
-        let p_other = sv.measure_prob(1, !outcome).unwrap();
+        let p_same = sv
+            .measure_prob(1, outcome)
+            .expect("qubit 1 is within 2-qubit Bell state");
+        let p_other = sv
+            .measure_prob(1, !outcome)
+            .expect("qubit 1 is within 2-qubit Bell state");
         assert!((p_same - 1.0).abs() < 1e-5, "p_same={p_same}");
         assert!(p_other < 1e-5, "p_other={p_other}");
     }
@@ -350,55 +360,71 @@ mod tests {
     fn t04_conditional_x_applied_when_bit_one() {
         // Teleportation-style correction toy: force qubit 0 = |1>, measure it,
         // then conditional-X on qubit 1 flips |0> -> |1>.
-        let mut sv = StateVector::new_zero_state(2).unwrap();
-        apply_1q_inplace(&mut sv, 0, &gate_x()).unwrap(); // q0 = |1>
+        let mut sv = StateVector::new_zero_state(2).expect("2 is a valid qubit count");
+        apply_1q_inplace(&mut sv, 0, &gate_x()).expect("qubit 0 is within 2-qubit state");
         let mut rng = LcgRng::new(2);
         let mut creg = ClassicalRegister::new(1);
-        let outcome = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0).unwrap();
+        let outcome = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0)
+            .expect("qubit 0 and creg index 0 are in range");
         assert!(outcome);
-        apply_if(&mut sv, &creg, &[(0, true)], &gate_x(), 1).unwrap();
+        apply_if(&mut sv, &creg, &[(0, true)], &gate_x(), 1)
+            .expect("bit 0 is measured and qubit 1 is in range");
         // q1 should now be |1>: amplitude at index 0b11 = 3.
         assert!((sv.amps[3].norm() - 1.0).abs() < 1e-5, "amps={:?}", sv.amps);
     }
 
     #[test]
     fn t05_creg_stores_outcomes() {
-        let mut sv = StateVector::new_zero_state(2).unwrap();
-        apply_1q_inplace(&mut sv, 1, &gate_x()).unwrap(); // q1 = |1>
+        let mut sv = StateVector::new_zero_state(2).expect("2 is a valid qubit count");
+        apply_1q_inplace(&mut sv, 1, &gate_x()).expect("qubit 1 is within 2-qubit state");
         let mut rng = LcgRng::new(3);
         let mut creg = ClassicalRegister::new(2);
-        let o0 = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0).unwrap();
-        let o1 = measure_and_collapse(&mut sv, 1, &mut rng, &mut creg, 1).unwrap();
-        assert_eq!(creg.get(0).unwrap(), Some(o0));
-        assert_eq!(creg.get(1).unwrap(), Some(o1));
+        let o0 = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0)
+            .expect("qubit 0 and creg index 0 are in range");
+        let o1 = measure_and_collapse(&mut sv, 1, &mut rng, &mut creg, 1)
+            .expect("qubit 1 and creg index 1 are in range");
+        assert_eq!(
+            creg.get(0).expect("index 0 is within 2-bit register"),
+            Some(o0)
+        );
+        assert_eq!(
+            creg.get(1).expect("index 1 is within 2-bit register"),
+            Some(o1)
+        );
         assert!(!o0);
         assert!(o1);
     }
 
     #[test]
     fn t06_idempotent_second_measurement() {
-        let mut sv = StateVector::new_zero_state(1).unwrap();
-        apply_1q_inplace(&mut sv, 0, &gate_h()).unwrap();
+        let mut sv = StateVector::new_zero_state(1).expect("1 is a valid qubit count");
+        apply_1q_inplace(&mut sv, 0, &gate_h()).expect("qubit 0 is within 1-qubit state");
         let mut rng = LcgRng::new(77);
         let mut creg = ClassicalRegister::new(2);
-        let first = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0).unwrap();
+        let first = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0)
+            .expect("qubit 0 and creg index 0 are in range");
         // Measuring an already-collapsed qubit yields the same bit with prob 1.
-        let p_first = sv.measure_prob(0, first).unwrap();
+        let p_first = sv
+            .measure_prob(0, first)
+            .expect("qubit 0 is within 1-qubit collapsed state");
         assert!((p_first - 1.0).abs() < 1e-5);
-        let second = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 1).unwrap();
+        let second = measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 1)
+            .expect("qubit 0 and creg index 1 are in range");
         assert_eq!(first, second);
     }
 
     #[test]
     fn t07_conditional_unmet_leaves_state_unchanged() {
-        let mut sv = StateVector::new_zero_state(2).unwrap();
+        let mut sv = StateVector::new_zero_state(2).expect("2 is a valid qubit count");
         let mut rng = LcgRng::new(9);
         let mut creg = ClassicalRegister::new(1);
         // Measure |0> ⇒ bit 0 = false.
-        measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0).unwrap();
+        measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 0)
+            .expect("qubit 0 and creg index 0 are in range");
         let before = sv.amps.clone();
         // Predicate requires bit 0 == true, which is unmet.
-        apply_if(&mut sv, &creg, &[(0, true)], &gate_x(), 1).unwrap();
+        apply_if(&mut sv, &creg, &[(0, true)], &gate_x(), 1)
+            .expect("bit 0 is measured and qubit 1 is in range");
         for (a, b) in sv.amps.iter().zip(before.iter()) {
             assert!((a - b).norm() < 1e-6);
         }
@@ -406,7 +432,7 @@ mod tests {
 
     #[test]
     fn t08_apply_if_unmeasured_bit_errors() {
-        let mut sv = StateVector::new_zero_state(2).unwrap();
+        let mut sv = StateVector::new_zero_state(2).expect("2 is a valid qubit count");
         let creg = ClassicalRegister::new(2);
         // creg bit 0 is unmeasured (None) ⇒ error.
         let res = apply_if(&mut sv, &creg, &[(0, true)], &gate_x(), 1);
@@ -415,7 +441,7 @@ mod tests {
 
     #[test]
     fn t09_out_of_range_qubit_errors() {
-        let mut sv = StateVector::new_zero_state(2).unwrap();
+        let mut sv = StateVector::new_zero_state(2).expect("2 is a valid qubit count");
         let mut rng = LcgRng::new(1);
         let mut creg = ClassicalRegister::new(1);
         assert!(measure_and_collapse(&mut sv, 9, &mut rng, &mut creg, 0).is_err());
@@ -423,7 +449,7 @@ mod tests {
 
     #[test]
     fn t10_out_of_range_creg_idx_errors() {
-        let mut sv = StateVector::new_zero_state(2).unwrap();
+        let mut sv = StateVector::new_zero_state(2).expect("2 is a valid qubit count");
         let mut rng = LcgRng::new(1);
         let mut creg = ClassicalRegister::new(1);
         assert!(measure_and_collapse(&mut sv, 0, &mut rng, &mut creg, 5).is_err());
@@ -448,17 +474,21 @@ mod tests {
             },
         ];
         let mut rng = LcgRng::new(42);
-        let (state, creg) = run(&ops, 2, &mut rng).unwrap();
-        assert_eq!(creg.get(0).unwrap(), Some(true));
+        let (state, creg) = run(&ops, 2, &mut rng).expect("valid 3-op program with 2 qubits");
+        assert_eq!(
+            creg.get(0)
+                .expect("creg index 0 is within run-computed bounds"),
+            Some(true)
+        );
         // Both qubits |1> ⇒ index 0b11 = 3.
         assert!((state.amps[3].norm() - 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn t12_measure_deterministic_forces_outcome() {
-        let mut sv = StateVector::new_zero_state(1).unwrap();
-        apply_1q_inplace(&mut sv, 0, &gate_h()).unwrap();
-        measure_deterministic(&mut sv, 0, true).unwrap();
+        let mut sv = StateVector::new_zero_state(1).expect("1 is a valid qubit count");
+        apply_1q_inplace(&mut sv, 0, &gate_h()).expect("qubit 0 is within 1-qubit state");
+        measure_deterministic(&mut sv, 0, true).expect("|+> has nonzero probability for outcome 1");
         assert!((sv.amps[1].norm() - 1.0).abs() < 1e-5);
         assert!(sv.amps[0].norm() < 1e-5);
         assert!((sv.norm_sq() - 1.0).abs() < 1e-5);
@@ -467,7 +497,7 @@ mod tests {
     #[test]
     fn t13_measure_deterministic_zero_prob_errors() {
         // |0> forced to outcome 1 has zero probability ⇒ error.
-        let mut sv = StateVector::new_zero_state(1).unwrap();
+        let mut sv = StateVector::new_zero_state(1).expect("1 is a valid qubit count");
         assert!(measure_deterministic(&mut sv, 0, true).is_err());
     }
 
@@ -476,9 +506,12 @@ mod tests {
         let mut creg = ClassicalRegister::new(3);
         assert_eq!(creg.len(), 3);
         assert!(!creg.is_empty());
-        creg.set(1, true).unwrap();
-        assert_eq!(creg.get(1).unwrap(), Some(true));
-        assert_eq!(creg.get(0).unwrap(), None);
+        creg.set(1, true).expect("index 1 is within 3-bit register");
+        assert_eq!(
+            creg.get(1).expect("index 1 is within 3-bit register"),
+            Some(true)
+        );
+        assert_eq!(creg.get(0).expect("index 0 is within 3-bit register"), None);
         assert!(creg.set(5, true).is_err());
         assert!(creg.get(5).is_err());
     }
@@ -486,24 +519,27 @@ mod tests {
     #[test]
     fn t15_apply_if_multi_bit_predicate() {
         // Two control bits; gate applies only when both are true.
-        let mut sv = StateVector::new_zero_state(1).unwrap();
+        let mut sv = StateVector::new_zero_state(1).expect("1 is a valid qubit count");
         let mut creg = ClassicalRegister::new(2);
-        creg.set(0, true).unwrap();
-        creg.set(1, false).unwrap();
+        creg.set(0, true).expect("index 0 is within 2-bit register");
+        creg.set(1, false)
+            .expect("index 1 is within 2-bit register");
         // Predicate (0,true) AND (1,true): unmet (bit 1 is false) ⇒ no-op.
-        apply_if(&mut sv, &creg, &[(0, true), (1, true)], &gate_x(), 0).unwrap();
+        apply_if(&mut sv, &creg, &[(0, true), (1, true)], &gate_x(), 0)
+            .expect("bits 0 and 1 are measured and qubit 0 is in range");
         assert!((sv.amps[0].norm() - 1.0).abs() < 1e-5);
         // Now set bit 1 true ⇒ predicate met ⇒ X flips |0> -> |1>.
-        creg.set(1, true).unwrap();
-        apply_if(&mut sv, &creg, &[(0, true), (1, true)], &gate_x(), 0).unwrap();
+        creg.set(1, true).expect("index 1 is within 2-bit register");
+        apply_if(&mut sv, &creg, &[(0, true), (1, true)], &gate_x(), 0)
+            .expect("bits 0 and 1 are measured and qubit 0 is in range");
         assert!((sv.amps[1].norm() - 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn t16_apply_if_target_out_of_range_errors() {
-        let mut sv = StateVector::new_zero_state(1).unwrap();
+        let mut sv = StateVector::new_zero_state(1).expect("1 is a valid qubit count");
         let mut creg = ClassicalRegister::new(1);
-        creg.set(0, true).unwrap();
+        creg.set(0, true).expect("index 0 is within 1-bit register");
         assert!(apply_if(&mut sv, &creg, &[(0, true)], &gate_x(), 9).is_err());
     }
 
@@ -516,12 +552,12 @@ mod tests {
             qubit: 0,
         }];
         let mut rng = LcgRng::new(11);
-        let (state, creg) = run(&ops, 1, &mut rng).unwrap();
+        let (state, creg) = run(&ops, 1, &mut rng).expect("valid gate-only program with 1 qubit");
         let inv = std::f32::consts::FRAC_1_SQRT_2;
         assert!((state.amps[0].re - inv).abs() < 1e-5);
         assert!((state.amps[1].re - inv).abs() < 1e-5);
         // Register defaults to length 1, unmeasured.
-        assert_eq!(creg.get(0).unwrap(), None);
+        assert_eq!(creg.get(0).expect("register defaults to length 1"), None);
     }
 
     #[test]

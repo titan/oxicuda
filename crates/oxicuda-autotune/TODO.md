@@ -6,7 +6,7 @@ Automatic GPU kernel parameter optimization engine. Measurement-based autotuning
 
 ## Implementation Status
 
-**Actual SLoC: 13,916** across **28 files** (estimated 32K-50K for oxicuda-autotune portion of Vol.2)
+**Actual SLoC: 15,665** across **33 files** (estimated 32K-50K for oxicuda-autotune portion of Vol.2)
 
 The autotune crate provides the optimization loop that makes OxiCUDA kernels competitive: define a search space, benchmark candidates, persist the best, and dispatch at runtime with fallback tiers.
 
@@ -41,6 +41,9 @@ The autotune crate provides the optimization loop that makes OxiCUDA kernels com
 - [x] Incremental re-tuning -- update results when hardware/driver changes detected (incremental.rs)
 
 **Intelligence (P2)**
+- [ ] Analytical cost model (`cost_model/analytical.rs`) -- roofline-model analytical predictor for GEMM tiles: arithmetic-intensity computation, memory-bandwidth-bound vs compute-bound classification, theoretical peak GFLOPS; `AnalyticalCostModel`
+- [ ] Halide-style schedule search (`schedule/halide_schedule.rs`) -- tile-size + loop-order schedule space inspired by Halide autoscheduler; split/vectorise/unroll axes with cost-model-guided pruning; `HalideScheduleSearch`
+- [ ] Persistent tuning cache with versioned schema migration (`cache/persistent_cache.rs`) -- on-disk LRU cache keyed by (kernel-hash, GPU-arch, CUDA-driver-version) distinct from the existing `export.rs` export-only path; `PersistentTuneCache`
 - [x] Transfer learning between architectures -- warm-start sm_90 tuning from sm_80 results (transfer_learning.rs)
 - [x] Problem size interpolation (interpolation.rs) -- nearest-neighbor and inverse-distance-weighted interpolation for unseen matrix sizes
 - [x] Kernel similarity detection -- reuse results for structurally similar kernels
@@ -70,7 +73,7 @@ The autotune crate provides the optimization loop that makes OxiCUDA kernels com
 ## Quality Status
 
 - Warnings: 0
-- Tests: 408 passing
+- Tests: 449 passing
 - unwrap() calls: 0
 - ResultDb uses JSON for human-readable, debuggable persistence
 

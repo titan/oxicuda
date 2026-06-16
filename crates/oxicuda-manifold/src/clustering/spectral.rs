@@ -504,7 +504,8 @@ mod tests {
     fn spectral_clustering_output_shapes() {
         let (data, n_samples, n_features) = two_blob_dataset(15, 11);
         let config = default_config();
-        let r = spectral_clustering(&data, n_samples, n_features, &config).unwrap();
+        let r = spectral_clustering(&data, n_samples, n_features, &config)
+            .expect("spectral_clustering should succeed");
 
         assert_eq!(r.labels.len(), n_samples, "labels length");
         assert_eq!(r.embedding_shape, (n_samples, config.n_components));
@@ -518,7 +519,8 @@ mod tests {
     fn spectral_clustering_labels_in_range() {
         let (data, n_samples, n_features) = two_blob_dataset(12, 17);
         let config = default_config();
-        let r = spectral_clustering(&data, n_samples, n_features, &config).unwrap();
+        let r = spectral_clustering(&data, n_samples, n_features, &config)
+            .expect("spectral_clustering should succeed");
         let k = config.n_clusters;
         for &label in &r.labels {
             assert!(label < k, "label {label} out of range [0, {k})");
@@ -532,7 +534,8 @@ mod tests {
     fn spectral_clustering_centers_shape() {
         let (data, n_samples, n_features) = two_blob_dataset(15, 23);
         let config = default_config();
-        let r = spectral_clustering(&data, n_samples, n_features, &config).unwrap();
+        let r = spectral_clustering(&data, n_samples, n_features, &config)
+            .expect("spectral_clustering should succeed");
         assert_eq!(r.center_shape, (config.n_clusters, config.n_components));
         assert_eq!(r.centers.len(), config.n_clusters * config.n_components);
     }
@@ -544,7 +547,8 @@ mod tests {
     fn spectral_clustering_inertia_positive() {
         let (data, n_samples, n_features) = two_blob_dataset(15, 31);
         let config = default_config();
-        let r = spectral_clustering(&data, n_samples, n_features, &config).unwrap();
+        let r = spectral_clustering(&data, n_samples, n_features, &config)
+            .expect("spectral_clustering should succeed");
         assert!(
             r.inertia > 0.0,
             "expected positive inertia, got {}",
@@ -599,7 +603,8 @@ mod tests {
             max_iter_kmeans: 50,
             ..default_config()
         };
-        let r = spectral_clustering(&data, n_samples, n_features, &config).unwrap();
+        let r = spectral_clustering(&data, n_samples, n_features, &config)
+            .expect("spectral_clustering should succeed");
         assert!(
             r.n_iter >= 1 && r.n_iter <= config.max_iter_kmeans,
             "n_iter={} not in [1, {}]",
@@ -648,7 +653,8 @@ mod tests {
     fn spectral_clustering_embedding_finite() {
         let (data, n_samples, n_features) = two_blob_dataset(18, 53);
         let config = default_config();
-        let r = spectral_clustering(&data, n_samples, n_features, &config).unwrap();
+        let r = spectral_clustering(&data, n_samples, n_features, &config)
+            .expect("spectral_clustering should succeed");
         for (i, &v) in r.embedding.iter().enumerate() {
             assert!(v.is_finite(), "embedding[{i}] = {v} is not finite");
         }
@@ -661,8 +667,10 @@ mod tests {
     fn spectral_clustering_deterministic() {
         let (data, n_samples, n_features) = two_blob_dataset(16, 61);
         let config = default_config();
-        let r1 = spectral_clustering(&data, n_samples, n_features, &config).unwrap();
-        let r2 = spectral_clustering(&data, n_samples, n_features, &config).unwrap();
+        let r1 = spectral_clustering(&data, n_samples, n_features, &config)
+            .expect("spectral_clustering should succeed");
+        let r2 = spectral_clustering(&data, n_samples, n_features, &config)
+            .expect("spectral_clustering should succeed");
         assert_eq!(r1.labels, r2.labels, "results must be deterministic");
         assert_eq!(r1.inertia, r2.inertia);
     }

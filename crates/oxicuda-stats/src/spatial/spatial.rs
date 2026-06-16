@@ -454,7 +454,11 @@ pub fn ripleys_k(points: &[f64], n: usize, radii: &[f64], area: f64) -> StatsRes
     // We sort radii so we can accumulate counts incrementally.
     // Create index permutation sorted by radius.
     let mut sorted_idx: Vec<usize> = (0..radii.len()).collect();
-    sorted_idx.sort_unstable_by(|&a, &b| radii[a].partial_cmp(&radii[b]).unwrap());
+    sorted_idx.sort_unstable_by(|&a, &b| {
+        radii[a]
+            .partial_cmp(&radii[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Compute all pairwise distances (i < j), then sort them.
     // n*(n-1)/2 pairs
@@ -471,7 +475,7 @@ pub fn ripleys_k(points: &[f64], n: usize, radii: &[f64], area: f64) -> StatsRes
             pair_dists.push((dx * dx + dy * dy).sqrt());
         }
     }
-    pair_dists.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    pair_dists.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     // For each sorted radius, binary-search the count of pairs ≤ d.
     // Each pair (i,j) contributes 2 to the sum Σ_{i≠j} (since both (i,j) and (j,i) counted).

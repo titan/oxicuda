@@ -12,6 +12,7 @@
 //! ├── topk/         — Misra-Gries, Space-Saving, Frequent
 //! ├── similarity/   — MinHash (Jaccard), SimHash (cosine), Weighted MinHash
 //! ├── lsh/          — Cosine LSH, Jaccard LSH (banded MinHash), generic LSH index
+//! ├── sampler/      — L0/Lp sampler (Jowhari-Sağlam-Tardos, Cormode-Firmani): uniform non-zero coordinate
 //! ├── sampling/     — Reservoir (Vitter), Weighted Reservoir (Efraimidis-Spirakis), Bernoulli, Priority
 //! ├── moment/       — AMS L2 sketch, Johnson-Lindenstrauss, Lp-norm via stable projections
 //! ├── stream/       — Welford online mean/var, exponential decay, sliding window count
@@ -35,6 +36,7 @@ pub mod metrics;
 pub mod moment;
 pub mod ptx_kernels;
 pub mod quantile;
+pub mod sampler;
 pub mod sampling;
 pub mod similarity;
 pub mod stream;

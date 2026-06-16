@@ -114,9 +114,12 @@ mod tests {
         let mut circ = QuantumCircuit::new(1);
         circ.add_gate(GateOp::H);
         circ.add_gate(GateOp::H);
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let sv = StateVector::new_zero_state(1).expect(
+            "n_qubits=1 is always a valid qubit count, so zero-state construction cannot fail",
+        );
         let mut rng = LcgRng::new(1);
-        let out = circ.exec_on_state(&sv, &mut rng).unwrap();
+        let out = circ.exec_on_state(&sv, &mut rng)
+            .expect("H·H is unitary and the 1-qubit circuit matches the 1-qubit state vector, so execution cannot fail");
         assert!(
             (out.amps[0].re - 1.0).abs() < 1e-5,
             "amp[0]={:?}",
@@ -128,7 +131,9 @@ mod tests {
     #[test]
     fn circuit_mismatch_errors() {
         let circ = QuantumCircuit::new(2);
-        let sv = StateVector::new_zero_state(3).unwrap();
+        let sv = StateVector::new_zero_state(3).expect(
+            "n_qubits=3 is always a valid qubit count, so zero-state construction cannot fail",
+        );
         let mut rng = LcgRng::new(0);
         assert!(circ.exec_on_state(&sv, &mut rng).is_err());
     }

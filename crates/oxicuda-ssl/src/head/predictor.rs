@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn predictor_shapes_correct() {
         let mut rng = LcgRng::new(0);
-        let p = PredictorHead::new(4, 8, 4, &mut rng).unwrap();
+        let p = PredictorHead::new(4, 8, 4, &mut rng).expect("new should succeed");
         assert_eq!(p.w1.len(), 8 * 4);
         assert_eq!(p.b1.len(), 8);
         assert_eq!(p.w2.len(), 4 * 8);
@@ -121,9 +121,9 @@ mod tests {
     #[test]
     fn predictor_forward_correct_dim() {
         let mut rng = LcgRng::new(0);
-        let p = PredictorHead::new(4, 8, 4, &mut rng).unwrap();
+        let p = PredictorHead::new(4, 8, 4, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32; 4];
-        let y = p.forward(&x).unwrap();
+        let y = p.forward(&x).expect("forward should succeed");
         assert_eq!(y.len(), 4);
     }
 
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn predictor_rejects_dim_mismatch() {
         let mut rng = LcgRng::new(0);
-        let p = PredictorHead::new(4, 8, 4, &mut rng).unwrap();
+        let p = PredictorHead::new(4, 8, 4, &mut rng).expect("new should succeed");
         let r = p.forward(&[0.0_f32; 5]);
         assert!(r.is_err());
     }

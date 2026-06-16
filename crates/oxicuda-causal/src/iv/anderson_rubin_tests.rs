@@ -39,7 +39,7 @@ fn test_strong_iv_recovers_beta_in_ci() {
         grid_max: 5.0,
         grid_size: 401,
     };
-    let res = AndersonRubin::test(&y, &d, &z, 2.0, &cfg).unwrap();
+    let res = AndersonRubin::test(&y, &d, &z, 2.0, &cfg).expect("test should succeed");
     assert!(
         res.p_value > 0.01,
         "p-value at true β too small: {}",
@@ -78,7 +78,8 @@ fn test_weak_iv_yields_wide_ci() {
         grid_max: 10.0,
         grid_size: 401,
     };
-    let res = AndersonRubin::confidence_set(&y, &d, &z, &cfg).unwrap();
+    let res =
+        AndersonRubin::confidence_set(&y, &d, &z, &cfg).expect("confidence_set should succeed");
     let total_width: f64 = res.conf_set.iter().map(|(lo, hi)| hi - lo).sum();
     assert!(
         total_width > 5.0,
@@ -93,8 +94,8 @@ fn test_p_value_monotone_in_null_distance() {
     let mut rng = LcgRng::new(23);
     let (y, d, z) = simulate_strong_iv(&mut rng, 400, 2.0);
     let cfg = AndersonRubinConfig::default();
-    let r_at = AndersonRubin::test(&y, &d, &z, 2.0, &cfg).unwrap();
-    let r_far = AndersonRubin::test(&y, &d, &z, 5.0, &cfg).unwrap();
+    let r_at = AndersonRubin::test(&y, &d, &z, 2.0, &cfg).expect("test should succeed");
+    let r_far = AndersonRubin::test(&y, &d, &z, 5.0, &cfg).expect("test should succeed");
     assert!(r_at.p_value > r_far.p_value, "expected p(2) > p(5)");
 }
 
@@ -104,7 +105,7 @@ fn test_q1_single_instrument() {
     let mut rng = LcgRng::new(101);
     let (y, d, z) = simulate_strong_iv(&mut rng, 300, 1.0);
     let cfg = AndersonRubinConfig::default();
-    let res = AndersonRubin::test(&y, &d, &z, 1.0, &cfg).unwrap();
+    let res = AndersonRubin::test(&y, &d, &z, 1.0, &cfg).expect("test should succeed");
     assert!(res.ar_statistic.is_finite());
     assert!((0.0..=1.0).contains(&res.p_value));
 }
@@ -136,7 +137,7 @@ fn test_q3_multi_instrument() {
         grid_max: 3.0,
         grid_size: 301,
     };
-    let res = AndersonRubin::test(&y, &d, &z, 1.0, &cfg).unwrap();
+    let res = AndersonRubin::test(&y, &d, &z, 1.0, &cfg).expect("test should succeed");
     assert!(res.p_value > 0.001);
     // Critical value for q = 3 is positive.
     assert!(res.critical_value > 0.0);
@@ -183,7 +184,8 @@ fn test_grid_spans_true_beta() {
         grid_max: 3.0,
         grid_size: 601,
     };
-    let res = AndersonRubin::confidence_set(&y, &d, &z, &cfg).unwrap();
+    let res =
+        AndersonRubin::confidence_set(&y, &d, &z, &cfg).expect("confidence_set should succeed");
     let covered = res.conf_set.iter().any(|&(lo, hi)| lo <= 1.7 && 1.7 <= hi);
     assert!(covered, "true β = 1.7 not in {:?}", res.conf_set);
 }
@@ -216,8 +218,8 @@ fn test_idempotent() {
     let mut rng = LcgRng::new(2025);
     let (y, d, z) = simulate_strong_iv(&mut rng, 200, 1.0);
     let cfg = AndersonRubinConfig::default();
-    let a = AndersonRubin::test(&y, &d, &z, 1.0, &cfg).unwrap();
-    let b = AndersonRubin::test(&y, &d, &z, 1.0, &cfg).unwrap();
+    let a = AndersonRubin::test(&y, &d, &z, 1.0, &cfg).expect("test should succeed");
+    let b = AndersonRubin::test(&y, &d, &z, 1.0, &cfg).expect("test should succeed");
     assert_eq!(a.ar_statistic, b.ar_statistic);
     assert_eq!(a.p_value, b.p_value);
     assert_eq!(a.critical_value, b.critical_value);

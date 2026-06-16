@@ -9,7 +9,10 @@
 //!
 //! ```text
 //! oxicuda-timeseries
-//! ├── decomp/       — Series decomposition (MovingAvg, SeriesDecomp)
+//! ├── decomp/       — Series decomposition (MovingAvg, SeriesDecomp, STL)
+//! ├── expsmooth/    — Holt-Winters triple smoothing + Croston intermittent demand
+//! ├── theta/        — Theta method (M3 competition winner)
+//! ├── changepoint/  — PELT / binary segmentation / CUSUM change detection
 //! ├── norm/         — Normalisation (RevIN, InstanceNorm1d)
 //! ├── patch/        — Patch extraction (PatchEmbed1d)
 //! ├── patchtst/     — PatchTST encoder (Nie et al. 2023)
@@ -18,54 +21,90 @@
 //! ├── nhits/        — NHiTS hierarchical forecaster (Challu et al. 2022)
 //! ├── itransformer/ — iTransformer (Liu et al. 2024)
 //! ├── timesnet/     — TimesNet 2-D variation model (Wu et al. 2023)
+//! ├── foundation/   — Universal forecasters (Moirai 2024, Chronos 2024)
+//! ├── multitask/    — Joint forecast + classification heads
 //! ├── error         — TsError / TsResult
 //! ├── handle        — TsHandle / LcgRng / SmVersion
 //! └── ptx_kernels   — GPU PTX kernel strings
 //! ```
 
+pub mod arima;
+pub mod changepoint;
 pub mod crossformer;
 pub mod decomp;
 pub mod dlinear;
 pub mod error;
+pub mod expsmooth;
 pub mod fedformer;
+pub mod foundation;
 pub mod handle;
 pub mod head;
+pub mod hmm;
 pub mod informer;
 pub mod itransformer;
+pub mod matprofile;
+pub mod multitask;
 pub mod nbeats;
+pub mod neural;
 pub mod nhits;
 pub mod norm;
+pub mod online;
 pub mod patch;
 pub mod patchtst;
 pub mod ptx_kernels;
 pub mod pyraformer;
 pub mod tcn;
+pub mod theta;
 pub mod timemixer;
 pub mod timesnet;
+pub mod transformer;
 
 /// Convenience re-exports for common time-series types.
 pub mod prelude {
+    pub use crate::changepoint::{
+        BinSegConfig, CusumResult, PeltConfig, binary_segmentation, cusum, pelt, segment_means,
+    };
     pub use crate::crossformer::{Crossformer, CrossformerConfig};
-    pub use crate::decomp::{DecompResult, MovingAvg, SeriesDecomp};
+    pub use crate::decomp::{
+        DecompResult, MintMethod, MintReconciler, MovingAvg, SeriesDecomp, StsConfig, StsDecomposer,
+    };
     pub use crate::dlinear::{DLinear, DLinearConfig, NLinear, NLinearConfig};
     pub use crate::error::{TsError, TsResult};
+    pub use crate::expsmooth::{
+        Croston, CrostonConfig, CrostonMethod, HoltWinters, HoltWintersConfig, Seasonality,
+    };
     pub use crate::fedformer::{Fedformer, FedformerConfig, FrequencyEnhancedBlock};
+    pub use crate::foundation::{
+        ChronosConfig, ChronosForecast, ChronosPredictor, MoiraiConfig, MoiraiForecast,
+        MoiraiForecaster,
+    };
     pub use crate::handle::{LcgRng, SmVersion, TsHandle};
     pub use crate::head::{
         DeepArConfig, DeepArHead, GaussianPrediction, LinearHead, MlpHead, QuantileConfig,
         QuantileHead, QuantilePrediction,
     };
+    pub use crate::hmm::hmm::{
+        HmmConfig, HmmDecodeResult, HmmModel, HmmObsType, hmm_decode, hmm_decode_gaussian, hmm_fit,
+        hmm_fit_gaussian, hmm_generate, hmm_log_likelihood, hmm_stationary,
+    };
     pub use crate::informer::{
         InformerBlock, InformerEncoder, InformerEncoderConfig, InformerResult, ProbSparseConfig,
     };
     pub use crate::itransformer::{ITransformer, ITransformerConfig, InvertedBlock};
+    pub use crate::matprofile::stomp::{
+        MatProfileConfig, MatProfileResult, matrix_profile, matrix_profile_ab, sliding_stats,
+        znorm_distance,
+    };
+    pub use crate::multitask::{MultiTaskConfig, MultiTaskForecaster};
     pub use crate::nbeats::{NBeats, NBeatsBlock, NBeatsBlockType, NBeatsConfig};
     pub use crate::nhits::{MultiRateSampler, NHits, NHitsBlock, NHitsConfig};
     pub use crate::norm::{InstanceNorm1d, RevIn};
+    pub use crate::online::StreamingForecaster;
     pub use crate::patch::PatchEmbed1d;
     pub use crate::patchtst::{PatchTst, PatchTstConfig};
     pub use crate::pyraformer::{Pyraformer, PyraformerConfig};
     pub use crate::tcn::{TcnBlock, TcnConfig, TcnEncoder};
+    pub use crate::theta::{Theta, ThetaConfig};
     pub use crate::timemixer::{TimeMixer, TimeMixerConfig};
     pub use crate::timesnet::{TimesBlock, TimesNet, TimesNetConfig};
 }

@@ -228,7 +228,7 @@ mod tests {
             rank,
             ParallelismConfig { tp: 1, sp: 1, ep },
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     #[test]
@@ -238,15 +238,17 @@ mod tests {
         let n_experts = 4;
         let hd = 2;
         let h0 = make_handle(ep, 0);
-        let dispatcher = ExpertDispatcher::new(h0, n_experts, hd).unwrap();
+        let dispatcher = ExpertDispatcher::new(h0, n_experts, hd).expect("new should succeed");
 
-        let router = TopKRouter::new(n_experts, 1).unwrap();
+        let router = TopKRouter::new(n_experts, 1).expect("new should succeed");
         // 2 tokens: token 0 → expert 0, token 1 → expert 2 (remote)
         let logits = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
-        let plan = router.route(&logits, 2).unwrap();
+        let plan = router.route(&logits, 2).expect("route should succeed");
 
         let embeddings = vec![1.0_f32, 2.0, 3.0, 4.0]; // [t0=[1,2], t1=[3,4]]
-        let batches = dispatcher.scatter(&embeddings, 2, &plan).unwrap();
+        let batches = dispatcher
+            .scatter(&embeddings, 2, &plan)
+            .expect("scatter should succeed");
 
         // Only token 0 → expert 0 is local; token 1 → expert 2 is remote
         assert_eq!(
@@ -265,12 +267,12 @@ mod tests {
         let n_experts = 2;
         let hd = 3;
         let h = make_handle(ep, 0);
-        let dispatcher = ExpertDispatcher::new(h, n_experts, hd).unwrap();
+        let dispatcher = ExpertDispatcher::new(h, n_experts, hd).expect("new should succeed");
 
-        let router = TopKRouter::new(n_experts, 1).unwrap();
+        let router = TopKRouter::new(n_experts, 1).expect("new should succeed");
         // 2 tokens: token 0 → expert 0, token 1 → expert 1
         let logits = vec![1.0_f32, 0.0, 0.0, 1.0];
-        let plan = router.route(&logits, 2).unwrap();
+        let plan = router.route(&logits, 2).expect("route should succeed");
 
         let embeddings: Vec<f32> = (0..2 * hd).map(|i| i as f32).collect();
 
@@ -279,7 +281,7 @@ mod tests {
                 // Identity expert: pass through tokens unchanged
                 Ok(batch.tokens.clone())
             })
-            .unwrap();
+            .expect("value should be present");
 
         // After gather with routing weights ≈ 1.0, output ≈ input
         for (i, (&o, &e)) in out.iter().zip(embeddings.iter()).enumerate() {
@@ -296,7 +298,7 @@ mod tests {
         let n_experts = 2;
         let hd = 1;
         let h = make_handle(ep, 0);
-        let dispatcher = ExpertDispatcher::new(h, n_experts, hd).unwrap();
+        let dispatcher = ExpertDispatcher::new(h, n_experts, hd).expect("new should succeed");
 
         // Manual batch for token 0 routed to expert 0 with weight 0.5
         let batch = LocalExpertBatch {
@@ -307,7 +309,9 @@ mod tests {
             token_indices: vec![0],
             weights: vec![0.5],
         };
-        let out = dispatcher.gather(&[batch], 1).unwrap();
+        let out = dispatcher
+            .gather(&[batch], 1)
+            .expect("gather should succeed");
         assert!((out[0] - 5.0).abs() < 1e-6, "0.5 * 10 = 5, got {}", out[0]);
     }
 
@@ -329,7 +333,7 @@ mod tests {
         let ep = 4;
         let n_experts = 8;
         let h2 = make_handle(ep, 2);
-        let d = ExpertDispatcher::new(h2, n_experts, 4).unwrap();
+        let d = ExpertDispatcher::new(h2, n_experts, 4).expect("new should succeed");
         // Rank 2 of 4 owns experts [4, 5]
         assert!(!d.owns_expert(3));
         assert!(d.owns_expert(4));

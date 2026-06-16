@@ -386,18 +386,20 @@ mod tests {
     #[test]
     fn senet_output_length() {
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         let embs = random_embs(4, 8, &mut rng);
-        let out = model.senet(&embs).unwrap();
+        let out = model.senet(&embs).expect("senet should succeed");
         assert_eq!(out.len(), 4 * 8);
     }
 
     #[test]
     fn senet_gates_in_unit_interval() {
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         let embs = random_embs(4, 8, &mut rng);
-        let gates = model.senet_gates(&embs).unwrap();
+        let gates = model
+            .senet_gates(&embs)
+            .expect("senet_gates should succeed");
         assert_eq!(gates.len(), 4);
         for &a in &gates {
             assert!(a.is_finite(), "gate must be finite");
@@ -409,9 +411,11 @@ mod tests {
     fn senet_gates_constant_input_in_unit_interval() {
         // A constant-input case keeps the sigmoid-bounded property explicit.
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         let embs = vec![0.5_f32; 4 * 8];
-        let gates = model.senet_gates(&embs).unwrap();
+        let gates = model
+            .senet_gates(&embs)
+            .expect("senet_gates should succeed");
         for &a in &gates {
             assert!((0.0..=1.0).contains(&a), "gate {a} not in [0,1]");
         }
@@ -423,7 +427,7 @@ mod tests {
         // embedding sets with identical per-field means must yield identical
         // gates (the excitation acts solely on the squeezed descriptor z).
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         let d = 8;
         // Field f has constant value (f + 1) → mean (f + 1).
         let mut embs_a = Vec::new();
@@ -439,8 +443,12 @@ mod tests {
                 embs_b.push(base + perturb);
             }
         }
-        let gates_a = model.senet_gates(&embs_a).unwrap();
-        let gates_b = model.senet_gates(&embs_b).unwrap();
+        let gates_a = model
+            .senet_gates(&embs_a)
+            .expect("senet_gates should succeed");
+        let gates_b = model
+            .senet_gates(&embs_b)
+            .expect("senet_gates should succeed");
         for f in 0..4 {
             assert!(
                 (gates_a[f] - gates_b[f]).abs() < 1e-5,
@@ -452,9 +460,11 @@ mod tests {
     #[test]
     fn bilinear_interaction_length() {
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         let embs = random_embs(4, 8, &mut rng);
-        let out = model.bilinear_interaction(&embs).unwrap();
+        let out = model
+            .bilinear_interaction(&embs)
+            .expect("bilinear_interaction should succeed");
         // C(4,2) = 6 pairs × embed_dim 8 = 48.
         assert_eq!(out.len(), 6 * 8);
         assert_eq!(out.len(), model.bilinear_out_dim);
@@ -470,9 +480,11 @@ mod tests {
             bilinear_type: BilinearType::FieldAll,
             dnn_hidden: vec![16],
         };
-        let model = Fibinet::new(cfg, &mut rng).unwrap();
+        let model = Fibinet::new(cfg, &mut rng).expect("new should succeed");
         let embs = random_embs(2, 8, &mut rng);
-        let out = model.bilinear_interaction(&embs).unwrap();
+        let out = model
+            .bilinear_interaction(&embs)
+            .expect("bilinear_interaction should succeed");
         // n_fields = 2 → single pair → length == embed_dim.
         assert_eq!(out.len(), 8);
     }
@@ -480,9 +492,9 @@ mod tests {
     #[test]
     fn forward_in_open_unit_interval() {
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         let embs = random_embs(4, 8, &mut rng);
-        let p = model.forward(&embs).unwrap();
+        let p = model.forward(&embs).expect("forward should succeed");
         assert!(p.is_finite(), "probability must be finite, got {p}");
         assert!(p > 0.0 && p < 1.0, "probability {p} not in (0,1)");
     }
@@ -491,20 +503,20 @@ mod tests {
     fn deterministic_given_seed() {
         let mut rng_a = LcgRng::new(11);
         let mut rng_b = LcgRng::new(11);
-        let model_a = Fibinet::new(default_cfg(), &mut rng_a).unwrap();
-        let model_b = Fibinet::new(default_cfg(), &mut rng_b).unwrap();
+        let model_a = Fibinet::new(default_cfg(), &mut rng_a).expect("value should be present");
+        let model_b = Fibinet::new(default_cfg(), &mut rng_b).expect("value should be present");
         // Build identical inputs from a fresh, independent stream.
         let mut rng_in = LcgRng::new(999);
         let embs = random_embs(4, 8, &mut rng_in);
-        let pa = model_a.forward(&embs).unwrap();
-        let pb = model_b.forward(&embs).unwrap();
+        let pa = model_a.forward(&embs).expect("forward should succeed");
+        let pb = model_b.forward(&embs).expect("forward should succeed");
         assert!((pa - pb).abs() < 1e-6, "same seed must give same output");
     }
 
     #[test]
     fn field_embs_wrong_length_errors() {
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         let embs = vec![0.1_f32; 4 * 8 - 1];
         assert!(matches!(
             model.forward(&embs),
@@ -571,7 +583,7 @@ mod tests {
     #[test]
     fn n_params_positive() {
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         assert!(model.n_params() > 0, "n_params must be > 0");
     }
 
@@ -591,11 +603,13 @@ mod tests {
                 bilinear_type: bt,
                 dnn_hidden: vec![16],
             };
-            let model = Fibinet::new(cfg, &mut rng).unwrap();
+            let model = Fibinet::new(cfg, &mut rng).expect("new should succeed");
             let embs = random_embs(4, 8, &mut rng);
-            let inter = model.bilinear_interaction(&embs).unwrap();
+            let inter = model
+                .bilinear_interaction(&embs)
+                .expect("bilinear_interaction should succeed");
             assert_eq!(inter.len(), 6 * 8, "wrong bilinear length for {bt:?}");
-            let p = model.forward(&embs).unwrap();
+            let p = model.forward(&embs).expect("forward should succeed");
             assert!(p > 0.0 && p < 1.0, "forward out of range for {bt:?}");
         }
     }
@@ -603,11 +617,11 @@ mod tests {
     #[test]
     fn changing_field_embs_changes_output() {
         let mut rng = make_rng();
-        let model = Fibinet::new(default_cfg(), &mut rng).unwrap();
+        let model = Fibinet::new(default_cfg(), &mut rng).expect("value should be present");
         let e1 = random_embs(4, 8, &mut rng);
         let e2 = random_embs(4, 8, &mut rng);
-        let p1 = model.forward(&e1).unwrap();
-        let p2 = model.forward(&e2).unwrap();
+        let p1 = model.forward(&e1).expect("forward should succeed");
+        let p2 = model.forward(&e2).expect("forward should succeed");
         assert!((p1 - p2).abs() > 1e-9, "different inputs must differ");
     }
 
@@ -621,11 +635,13 @@ mod tests {
             bilinear_type: BilinearType::FieldAll,
             dnn_hidden: vec![8],
         };
-        let model = Fibinet::new(cfg, &mut rng).unwrap();
+        let model = Fibinet::new(cfg, &mut rng).expect("new should succeed");
         assert!(model.senet_hidden >= 1, "hidden width must be >= 1");
         assert_eq!(model.senet_hidden, 1);
         let embs = random_embs(3, 8, &mut rng);
-        let gates = model.senet_gates(&embs).unwrap();
+        let gates = model
+            .senet_gates(&embs)
+            .expect("senet_gates should succeed");
         assert_eq!(gates.len(), 3);
     }
 
@@ -640,8 +656,10 @@ mod tests {
             bilinear_type: bt,
             dnn_hidden: vec![16],
         };
-        let all = Fibinet::new(base(BilinearType::FieldAll), &mut rng_a).unwrap();
-        let inter = Fibinet::new(base(BilinearType::FieldInteraction), &mut rng_b).unwrap();
+        let all = Fibinet::new(base(BilinearType::FieldAll), &mut rng_a)
+            .expect("value should be present");
+        let inter = Fibinet::new(base(BilinearType::FieldInteraction), &mut rng_b)
+            .expect("value should be present");
         assert!(
             inter.n_params() > all.n_params(),
             "FieldInteraction ({}) must have more params than FieldAll ({})",
@@ -664,9 +682,12 @@ mod tests {
         let mut ra = make_rng();
         let mut rb = make_rng();
         let mut rc = make_rng();
-        let all = Fibinet::new(cfg(BilinearType::FieldAll), &mut ra).unwrap();
-        let each = Fibinet::new(cfg(BilinearType::FieldEach), &mut rb).unwrap();
-        let inter = Fibinet::new(cfg(BilinearType::FieldInteraction), &mut rc).unwrap();
+        let all =
+            Fibinet::new(cfg(BilinearType::FieldAll), &mut ra).expect("value should be present");
+        let each =
+            Fibinet::new(cfg(BilinearType::FieldEach), &mut rb).expect("value should be present");
+        let inter = Fibinet::new(cfg(BilinearType::FieldInteraction), &mut rc)
+            .expect("value should be present");
         assert!(all.n_params() < each.n_params());
         assert!(each.n_params() < inter.n_params());
     }
@@ -681,7 +702,7 @@ mod tests {
             bilinear_type: BilinearType::FieldAll,
             dnn_hidden: vec![],
         };
-        let model_all = Fibinet::new(cfg_all, &mut rng).unwrap();
+        let model_all = Fibinet::new(cfg_all, &mut rng).expect("new should succeed");
         assert_eq!(model_all.bilinear_w.len(), 1);
 
         let mut rng2 = make_rng();
@@ -692,7 +713,7 @@ mod tests {
             bilinear_type: BilinearType::FieldEach,
             dnn_hidden: vec![],
         };
-        let model_each = Fibinet::new(cfg_each, &mut rng2).unwrap();
+        let model_each = Fibinet::new(cfg_each, &mut rng2).expect("new should succeed");
         assert_eq!(model_each.bilinear_w.len(), 4);
 
         let mut rng3 = make_rng();
@@ -703,7 +724,7 @@ mod tests {
             bilinear_type: BilinearType::FieldInteraction,
             dnn_hidden: vec![],
         };
-        let model_inter = Fibinet::new(cfg_inter, &mut rng3).unwrap();
+        let model_inter = Fibinet::new(cfg_inter, &mut rng3).expect("new should succeed");
         assert_eq!(model_inter.bilinear_w.len(), 6);
     }
 
@@ -717,10 +738,10 @@ mod tests {
             bilinear_type: BilinearType::FieldAll,
             dnn_hidden: vec![],
         };
-        let model = Fibinet::new(cfg, &mut rng).unwrap();
+        let model = Fibinet::new(cfg, &mut rng).expect("new should succeed");
         assert_eq!(model.dnn_layers.len(), 1, "empty hidden → one linear layer");
         let embs = random_embs(3, 4, &mut rng);
-        let p = model.forward(&embs).unwrap();
+        let p = model.forward(&embs).expect("forward should succeed");
         assert!(p > 0.0 && p < 1.0);
     }
 
@@ -735,12 +756,14 @@ mod tests {
             bilinear_type: BilinearType::FieldAll,
             dnn_hidden: vec![],
         };
-        let mut model = Fibinet::new(cfg, &mut rng).unwrap();
+        let mut model = Fibinet::new(cfg, &mut rng).expect("new should succeed");
         // Override W with a known matrix [[1,2],[3,4]] (row-major).
         model.bilinear_w[0] = vec![1.0, 2.0, 3.0, 4.0];
         // p_0 = [2, 3], p_1 = [5, 7].
         let embs = vec![2.0_f32, 3.0, 5.0, 7.0];
-        let out = model.bilinear_interaction(&embs).unwrap();
+        let out = model
+            .bilinear_interaction(&embs)
+            .expect("bilinear_interaction should succeed");
         // W p_1 = [1*5 + 2*7, 3*5 + 4*7] = [19, 43].
         // p_0 ∘ (W p_1) = [2*19, 3*43] = [38, 129].
         assert!((out[0] - 38.0).abs() < 1e-4);

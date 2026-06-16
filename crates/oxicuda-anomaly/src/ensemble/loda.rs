@@ -462,8 +462,12 @@ mod tests {
             [0.5, 0.5, 0.5, 0.5, 0.5],
         ];
         let all_same = queries.iter().all(|q| {
-            let sa = det_a.score(q.as_ref()).unwrap();
-            let sb = det_b.score(q.as_ref()).unwrap();
+            let sa = det_a
+                .score(q.as_ref())
+                .expect("score_a should succeed for valid fitted detector");
+            let sb = det_b
+                .score(q.as_ref())
+                .expect("score_b should succeed for valid fitted detector");
             (sa - sb).abs() < 1e-9
         });
         assert!(

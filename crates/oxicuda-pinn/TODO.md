@@ -13,7 +13,7 @@ adaptive collocation sampling (residual-adaptive / LHS / Halton). Part of
 
 ## Implementation Status
 
-**Actual: 7,388 SLoC (36 files)** -- 264 unit tests + 12 E2E integration tests
+**Actual: 18,135 SLoC (59 files)** -- 624 unit tests + 12 E2E integration tests
 
 The crate is the densest single PINN / scientific-ML library in the OxiCUDA
 ecosystem: forward + reverse AD, four ODE solvers, four neural operator
@@ -186,6 +186,8 @@ families, five PDE templates, and three adaptive samplers. The crate is
 - [x] Conservative PINN -- enforce conservation laws via integral form (pinn_loss/conservative.rs -- Liu 2020; enforce ∂_t u+∂_x F(u)=0 via INTEGRAL/flux form: residual = Δ∫u + ∫(F_R−F_L) dt over subdomain boxes; trapezoid quadrature)
 
 #### P2 -- Nice-to-Have (Advanced Features)
+- [x] hp-variational PINN (`pinn_loss/hp_variational.rs`) — Kharazmi 2021 CMAME: element-wise test functions from the hp-finite-element space; residual minimised in a Petrov-Galerkin variational formulation for improved convergence; `HpVariationalPinn`
+- [x] X-PINN extended domain decomposition (`network/xpinn.rs`) — Jagtap 2021 JSSC: partition of domain into non-overlapping subdomains with interface residual conditions enforcing continuity and flux balance; `XPinn`
 - [x] Wavelet Neural Operator (WNO) on Daubechies / biorthogonal bases (neural_op/wno.rs -- Tripura 2022; 1D Haar wavelet transform + per-level (in_channels×out_channels) channel-linear + inverse Haar reconstruction + linear residual)
 - [ ] PointFNO / Graph FNO for unstructured meshes
 - [ ] PI-DeepONet (physics-informed DeepONet) joint training
@@ -206,7 +208,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 264 unit + 12 E2E = 276 passing
+- Tests: 624 unit + 12 E2E = 636 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - All public APIs return `PinnResult<T>` or `Result<T, PinnError>`
@@ -285,7 +287,7 @@ Reference shapes (FNO and ODE integration are the hot paths):
 - [ ] Mixed-precision (bf16 storage, fp32 accumulate) variants for FNO
       and DeepONet
 - [ ] Stiff-ODE solvers (Rosenbrock, BDF) for chemistry / circuits
-- [ ] Symplectic integrators (leapfrog, Stormer-Verlet) for Hamiltonian systems
+- [x] Symplectic integrators (leapfrog, Stormer-Verlet) for Hamiltonian systems
 - [ ] Automatic differentiation of PDE residual w.r.t. inputs via `MultiDual`
       (currently CPU-only via Tape)
-- [ ] Periodic boundary helper in `BcType`
+- [x] Periodic boundary helper in `BcType`

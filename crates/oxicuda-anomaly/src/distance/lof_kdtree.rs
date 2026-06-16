@@ -322,7 +322,9 @@ pub fn lof_kd_fit(x: &[f64], n: usize, d: usize, cfg: &LofKdConfig) -> AnomalyRe
                 knn_indices[i * k + ki] = neighbours[ki].0;
                 knn_dists_flat[i * k + ki] = neighbours[ki].1;
             } else if !neighbours.is_empty() {
-                let last = neighbours.last().unwrap();
+                let last = neighbours
+                    .last()
+                    .expect("neighbours is non-empty (checked above)");
                 knn_indices[i * k + ki] = last.0;
                 knn_dists_flat[i * k + ki] = last.1;
             }
@@ -520,7 +522,7 @@ mod tests {
     fn test_lof_kd_fit_basic() {
         let data = line_data(20);
         let cfg = LofKdConfig { k: 3 };
-        let fit = lof_kd_fit(&data, 20, 1, &cfg).unwrap();
+        let fit = lof_kd_fit(&data, 20, 1, &cfg).expect("LOF kd-tree fit should succeed");
         assert_eq!(fit.n, 20);
         assert_eq!(fit.d, 1);
         assert_eq!(fit.lrd.len(), 20);
@@ -530,9 +532,10 @@ mod tests {
     fn test_lof_kd_score_length() {
         let data = line_data(20);
         let cfg = LofKdConfig { k: 3 };
-        let fit = lof_kd_fit(&data, 20, 1, &cfg).unwrap();
+        let fit = lof_kd_fit(&data, 20, 1, &cfg).expect("LOF kd-tree fit should succeed");
         let test: Vec<f64> = vec![0.5_f64, 1.0, 1.5];
-        let scores = lof_kd_score(&fit, &test, 3).unwrap();
+        let scores =
+            lof_kd_score(&fit, &test, 3).expect("lof_kd_score should succeed for valid input");
         assert_eq!(scores.len(), 3);
     }
 
@@ -540,9 +543,10 @@ mod tests {
     fn test_lof_kd_scores_finite() {
         let data = line_data(20);
         let cfg = LofKdConfig { k: 3 };
-        let fit = lof_kd_fit(&data, 20, 1, &cfg).unwrap();
+        let fit = lof_kd_fit(&data, 20, 1, &cfg).expect("LOF kd-tree fit should succeed");
         let test: Vec<f64> = vec![0.5_f64];
-        let scores = lof_kd_score(&fit, &test, 1).unwrap();
+        let scores =
+            lof_kd_score(&fit, &test, 1).expect("lof_kd_score should succeed for valid input");
         assert!(scores[0].is_finite(), "lof score not finite: {}", scores[0]);
     }
 
@@ -550,9 +554,10 @@ mod tests {
     fn test_lof_kd_scores_non_negative() {
         let data = line_data(20);
         let cfg = LofKdConfig { k: 3 };
-        let fit = lof_kd_fit(&data, 20, 1, &cfg).unwrap();
+        let fit = lof_kd_fit(&data, 20, 1, &cfg).expect("LOF kd-tree fit should succeed");
         let test: Vec<f64> = vec![0.3_f64, 0.7, 1.1];
-        let scores = lof_kd_score(&fit, &test, 3).unwrap();
+        let scores =
+            lof_kd_score(&fit, &test, 3).expect("lof_kd_score should succeed for valid input");
         for &s in &scores {
             assert!(s >= 0.0, "negative score: {s}");
         }
@@ -566,13 +571,16 @@ mod tests {
         data.push(100.0_f64);
         let n = 31_usize;
         let cfg = LofKdConfig { k: 5 };
-        let fit = lof_kd_fit(&data, n, 1, &cfg).unwrap();
+        let fit = lof_kd_fit(&data, n, 1, &cfg)
+            .expect("lof_kd_fit should succeed for valid training data");
 
         let test_normal = vec![0.15_f64]; // inside cluster
         let test_outlier = vec![200.0_f64]; // far from cluster
 
-        let s_normal = lof_kd_score(&fit, &test_normal, 1).unwrap()[0];
-        let s_outlier = lof_kd_score(&fit, &test_outlier, 1).unwrap()[0];
+        let s_normal = lof_kd_score(&fit, &test_normal, 1)
+            .expect("lof_kd_score should succeed for normal test point")[0];
+        let s_outlier = lof_kd_score(&fit, &test_outlier, 1)
+            .expect("lof_kd_score should succeed for outlier test point")[0];
 
         assert!(
             s_outlier > s_normal,
@@ -584,9 +592,10 @@ mod tests {
     fn test_lof_kd_predict_length() {
         let data = line_data(20);
         let cfg = LofKdConfig { k: 3 };
-        let fit = lof_kd_fit(&data, 20, 1, &cfg).unwrap();
+        let fit = lof_kd_fit(&data, 20, 1, &cfg).expect("LOF kd-tree fit should succeed");
         let test: Vec<f64> = vec![0.5_f64, 1.2, 2.5];
-        let preds = lof_kd_predict(&fit, &test, 3, 1.5).unwrap();
+        let preds = lof_kd_predict(&fit, &test, 3, 1.5)
+            .expect("lof_kd_predict should succeed for valid input");
         assert_eq!(preds.len(), 3);
     }
 
@@ -609,7 +618,7 @@ mod tests {
     fn test_lof_kd_dimension_mismatch_error() {
         let data = line_data(20);
         let cfg = LofKdConfig { k: 3 };
-        let fit = lof_kd_fit(&data, 20, 1, &cfg).unwrap();
+        let fit = lof_kd_fit(&data, 20, 1, &cfg).expect("LOF kd-tree fit should succeed");
         // Pass 2D test data but fit is 1D
         let bad_test = vec![0.5_f64, 0.5]; // len=2 but expected 1
         let res = lof_kd_score(&fit, &bad_test, 1);

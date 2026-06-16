@@ -408,7 +408,7 @@ mod tests {
     fn z_loss_single_token_two_experts_uniform() {
         // logits=[0,0], LSE = log(e^0 + e^0) = log(2)
         let logits = [0.0_f32, 0.0];
-        let zl = z_loss(&logits, 1, 2).unwrap();
+        let zl = z_loss(&logits, 1, 2).expect("z_loss should succeed");
         let expected = 2.0_f32.ln().powi(2);
         assert!(
             (zl - expected).abs() < 1e-5,
@@ -420,7 +420,7 @@ mod tests {
     fn z_loss_large_logits_numerically_stable() {
         // logits=[100, 0], LSE ≈ 100 (dominated by first entry)
         let logits = [100.0_f32, 0.0];
-        let zl = z_loss(&logits, 1, 2).unwrap();
+        let zl = z_loss(&logits, 1, 2).expect("z_loss should succeed");
         // LSE ≈ 100; z_loss ≈ 100² = 10000
         assert!(zl > 9000.0 && zl < 10100.0, "z_loss={zl}");
     }
@@ -432,7 +432,7 @@ mod tests {
         let n_experts = 8;
         let mut logits = vec![0.0_f32; n_tokens * n_experts];
         rng.fill_normal_scaled(&mut logits, 2.0);
-        let zl = z_loss(&logits, n_tokens, n_experts).unwrap();
+        let zl = z_loss(&logits, n_tokens, n_experts).expect("z_loss should succeed");
         assert!(zl >= 0.0, "z_loss must be >= 0, got {zl}");
         assert!(zl.is_finite(), "z_loss must be finite, got {zl}");
     }
@@ -454,7 +454,8 @@ mod tests {
         // L_lb = 2 * (1*0.5 + 0*0.5) = 2 * 0.5 = 1.0
         let assignments = vec![0_usize; 4];
         let gating_probs = vec![0.5_f32; 4 * 2]; // [4 tokens × 2 experts], all 0.5
-        let lb = load_balance_loss(&assignments, &gating_probs, 4, 2).unwrap();
+        let lb = load_balance_loss(&assignments, &gating_probs, 4, 2)
+            .expect("load_balance_loss should succeed");
         assert!((lb - 1.0).abs() < 1e-5, "load_balance_loss={lb}");
     }
 
@@ -473,7 +474,8 @@ mod tests {
         let balanced_assignments: Vec<usize> = (0..n_tokens).map(|t| t % n_experts).collect();
         let uniform_probs = vec![1.0_f32 / n_experts as f32; n_tokens * n_experts];
         let lb_balanced =
-            load_balance_loss(&balanced_assignments, &uniform_probs, n_tokens, n_experts).unwrap();
+            load_balance_loss(&balanced_assignments, &uniform_probs, n_tokens, n_experts)
+                .expect("load_balance_loss should succeed");
 
         // Imbalanced: all tokens to expert 0.
         // Gating probs: all weight on expert 0 → P_0 = 1.0, P_1..3 = 0.
@@ -488,7 +490,7 @@ mod tests {
             n_tokens,
             n_experts,
         )
-        .unwrap();
+        .expect("value should be present");
 
         assert!(
             lb_balanced < lb_imbalanced,
@@ -552,7 +554,7 @@ mod tests {
             gating: StableMoeGating::Sigmoid,
             ..StableMoeConfig::default()
         };
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let logits = [0.5_f32, -0.5, 1.0, -1.0];
         let g = router.gate(&logits);
         let total: f32 = g.iter().sum();
@@ -566,7 +568,7 @@ mod tests {
             gating: StableMoeGating::Softmax,
             ..StableMoeConfig::default()
         };
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let logits = [0.5_f32, -0.5, 1.0, -1.0];
         let g = router.gate(&logits);
         let total: f32 = g.iter().sum();
@@ -580,7 +582,7 @@ mod tests {
             gating: StableMoeGating::Sigmoid,
             ..StableMoeConfig::default()
         };
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let logits = [10.0_f32, -10.0, 0.0, 3.0];
         for &v in router.gate(&logits).iter() {
             assert!(v >= 0.0, "negative gate value: {v}");
@@ -595,7 +597,7 @@ mod tests {
             gating: StableMoeGating::Sigmoid,
             ..StableMoeConfig::default()
         };
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let logits = [1.0_f32; 4];
         let g = router.gate(&logits);
         for &v in &g {
@@ -610,7 +612,7 @@ mod tests {
     #[test]
     fn route_wrong_logits_length_returns_err() {
         let cfg = StableMoeConfig::default();
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(1);
         let logits = vec![0.0_f32; 5]; // wrong
         assert!(router.route(&logits, 3, &mut rng).is_err());
@@ -619,7 +621,7 @@ mod tests {
     #[test]
     fn route_zero_tokens_returns_err() {
         let cfg = StableMoeConfig::default();
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(2);
         assert!(router.route(&[], 0, &mut rng).is_err());
     }
@@ -634,10 +636,12 @@ mod tests {
             top_k: k,
             ..StableMoeConfig::default()
         };
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(3);
         let logits = vec![0.1_f32; n_tokens * n_e];
-        let result = router.route(&logits, n_tokens, &mut rng).unwrap();
+        let result = router
+            .route(&logits, n_tokens, &mut rng)
+            .expect("route should succeed");
         assert_eq!(result.expert_assignments.len(), n_tokens * k);
     }
 
@@ -653,10 +657,12 @@ mod tests {
             gating: StableMoeGating::Softmax,
             ..StableMoeConfig::default()
         };
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(4);
         let logits: Vec<f32> = (0..n_tokens * n_e).map(|i| (i as f32) * 0.3).collect();
-        let result = router.route(&logits, n_tokens, &mut rng).unwrap();
+        let result = router
+            .route(&logits, n_tokens, &mut rng)
+            .expect("route should succeed");
         for t in 0..n_tokens {
             let raw_gates = router.gate(&logits[t * n_e..(t + 1) * n_e]);
             let max_gate = raw_gates.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -671,12 +677,14 @@ mod tests {
     #[test]
     fn route_aux_loss_finite_and_non_negative() {
         let cfg = StableMoeConfig::default();
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(5);
         let n_tokens = 8;
         let n_e = 8;
         let logits = vec![0.5_f32; n_tokens * n_e];
-        let result = router.route(&logits, n_tokens, &mut rng).unwrap();
+        let result = router
+            .route(&logits, n_tokens, &mut rng)
+            .expect("route should succeed");
         assert!(result.aux_loss.is_finite(), "aux_loss not finite");
         assert!(result.aux_loss >= 0.0, "aux_loss < 0: {}", result.aux_loss);
     }
@@ -689,11 +697,13 @@ mod tests {
             expert_dropout: 0.0,
             ..StableMoeConfig::default()
         };
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(6);
         let n_tokens = 16;
         let logits = vec![1.0_f32; n_tokens * 4];
-        let result = router.route(&logits, n_tokens, &mut rng).unwrap();
+        let result = router
+            .route(&logits, n_tokens, &mut rng)
+            .expect("route should succeed");
         // Every assignment must be a valid expert index.
         for &a in &result.expert_assignments {
             assert!(a < 4, "invalid assignment: {a}");
@@ -710,11 +720,13 @@ mod tests {
             expert_dropout: 0.9,
             ..StableMoeConfig::default()
         };
-        let router = StableMoeRouter::new(cfg).unwrap();
+        let router = StableMoeRouter::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(7);
         let n_tokens = 32;
         let logits = vec![0.5_f32; n_tokens * 8];
-        let result = router.route(&logits, n_tokens, &mut rng).unwrap();
+        let result = router
+            .route(&logits, n_tokens, &mut rng)
+            .expect("route should succeed");
         for &a in &result.expert_assignments {
             assert!(a < 8, "invalid assignment: {a}");
         }

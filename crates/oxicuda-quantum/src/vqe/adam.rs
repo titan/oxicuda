@@ -197,26 +197,28 @@ mod tests {
     }
 
     #[test]
-    fn new_initializes_moments_to_zero() {
-        let st = VqeOptimizerState::new(vec![1.0, 2.0, 3.0], 0.01, default_adam_kind()).unwrap();
+    fn new_initializes_moments_to_zero() -> QuantumResult<()> {
+        let st = VqeOptimizerState::new(vec![1.0, 2.0, 3.0], 0.01, default_adam_kind())?;
         assert_eq!(st.m, vec![0.0, 0.0, 0.0]);
         assert_eq!(st.v, vec![0.0, 0.0, 0.0]);
         assert_eq!(st.t, 0);
         assert_eq!(st.params, vec![1.0, 2.0, 3.0]);
         assert_eq!(st.lr, 0.01);
+        Ok(())
     }
 
     #[test]
-    fn adam_step_updates_t() {
-        let mut st = VqeOptimizerState::new(vec![1.0, 2.0], 0.01, default_adam_kind()).unwrap();
-        st.step(&[0.1, -0.2]).unwrap();
+    fn adam_step_updates_t() -> QuantumResult<()> {
+        let mut st = VqeOptimizerState::new(vec![1.0, 2.0], 0.01, default_adam_kind())?;
+        st.step(&[0.1, -0.2])?;
         assert_eq!(st.t, 1);
-        st.step(&[0.1, -0.2]).unwrap();
+        st.step(&[0.1, -0.2])?;
         assert_eq!(st.t, 2);
+        Ok(())
     }
 
     #[test]
-    fn adam_moment_formulas_one_step() {
+    fn adam_moment_formulas_one_step() -> QuantumResult<()> {
         // Single Adam step: with default β1=0.9, β2=0.999, ε=1e-8, params=[0.0]
         // and gradient g=2.0, then
         //   m = 0.1·g = 0.2
@@ -224,8 +226,8 @@ mod tests {
         //   bias-correction: m̂ = m/(1-0.9) = 2.0;  v̂ = v/(1-0.999) = 4.0
         //   update = lr · m̂ / (√v̂ + ε) ≈ 0.01 · 2.0 / 2.0 = 0.01
         // Therefore the new parameter ≈ -0.01.
-        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_adam_kind()).unwrap();
-        st.step(&[2.0]).unwrap();
+        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_adam_kind())?;
+        st.step(&[2.0])?;
         assert!((st.m[0] - 0.2).abs() < 1e-6, "m={}", st.m[0]);
         assert!((st.v[0] - 0.004).abs() < 1e-6, "v={}", st.v[0]);
         assert!(
@@ -233,15 +235,16 @@ mod tests {
             "params={}",
             st.params[0]
         );
+        Ok(())
     }
 
     #[test]
-    fn rmsprop_running_average_update() {
+    fn rmsprop_running_average_update() -> QuantumResult<()> {
         // First step on RMSProp with default decay=0.9, eps=1e-8, params=[0.0], g=2.0
         //   v = 0.9·0 + 0.1·4 = 0.4
         //   step: lr · g / (√v + ε) = 0.01 · 2 / (√0.4 + 1e-8) ≈ 0.0316228
-        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_rmsprop_kind()).unwrap();
-        st.step(&[2.0]).unwrap();
+        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_rmsprop_kind())?;
+        st.step(&[2.0])?;
         assert!((st.v[0] - 0.4).abs() < 1e-6, "v={}", st.v[0]);
         let expected = -0.01 * 2.0 / (0.4_f32.sqrt() + 1e-8);
         assert!(
@@ -250,52 +253,55 @@ mod tests {
             st.params[0],
             expected
         );
+        Ok(())
     }
 
     #[test]
-    fn zero_gradient_leaves_params_unchanged() {
-        let mut st = VqeOptimizerState::new(vec![1.5, -2.0], 0.05, default_adam_kind()).unwrap();
-        st.step(&[0.0, 0.0]).unwrap();
+    fn zero_gradient_leaves_params_unchanged() -> QuantumResult<()> {
+        let mut st = VqeOptimizerState::new(vec![1.5, -2.0], 0.05, default_adam_kind())?;
+        st.step(&[0.0, 0.0])?;
         assert!((st.params[0] - 1.5).abs() < 1e-7);
         assert!((st.params[1] + 2.0).abs() < 1e-7);
 
-        let mut st2 =
-            VqeOptimizerState::new(vec![1.5, -2.0], 0.05, default_rmsprop_kind()).unwrap();
-        st2.step(&[0.0, 0.0]).unwrap();
+        let mut st2 = VqeOptimizerState::new(vec![1.5, -2.0], 0.05, default_rmsprop_kind())?;
+        st2.step(&[0.0, 0.0])?;
         assert!((st2.params[0] - 1.5).abs() < 1e-7);
         assert!((st2.params[1] + 2.0).abs() < 1e-7);
+        Ok(())
     }
 
     #[test]
-    fn positive_gradient_decreases_param() {
-        let mut st = VqeOptimizerState::new(vec![10.0], 0.1, default_adam_kind()).unwrap();
-        st.step(&[1.0]).unwrap();
+    fn positive_gradient_decreases_param() -> QuantumResult<()> {
+        let mut st = VqeOptimizerState::new(vec![10.0], 0.1, default_adam_kind())?;
+        st.step(&[1.0])?;
         assert!(st.params[0] < 10.0, "params={}", st.params[0]);
 
-        let mut st2 = VqeOptimizerState::new(vec![10.0], 0.1, default_rmsprop_kind()).unwrap();
-        st2.step(&[1.0]).unwrap();
+        let mut st2 = VqeOptimizerState::new(vec![10.0], 0.1, default_rmsprop_kind())?;
+        st2.step(&[1.0])?;
         assert!(st2.params[0] < 10.0, "params={}", st2.params[0]);
+        Ok(())
     }
 
     #[test]
-    fn adam_vs_rmsprop_differ_after_step() {
-        let mut adam = VqeOptimizerState::new(vec![0.0], 0.01, default_adam_kind()).unwrap();
-        let mut rms = VqeOptimizerState::new(vec![0.0], 0.01, default_rmsprop_kind()).unwrap();
-        adam.step(&[2.0]).unwrap();
-        rms.step(&[2.0]).unwrap();
+    fn adam_vs_rmsprop_differ_after_step() -> QuantumResult<()> {
+        let mut adam = VqeOptimizerState::new(vec![0.0], 0.01, default_adam_kind())?;
+        let mut rms = VqeOptimizerState::new(vec![0.0], 0.01, default_rmsprop_kind())?;
+        adam.step(&[2.0])?;
+        rms.step(&[2.0])?;
         assert!(
             (adam.params[0] - rms.params[0]).abs() > 1e-6,
             "Adam and RMSProp should not coincide after one step: adam={} rms={}",
             adam.params[0],
             rms.params[0]
         );
+        Ok(())
     }
 
     #[test]
-    fn reset_state_zeros_moments_and_t() {
-        let mut st = VqeOptimizerState::new(vec![1.0, 2.0], 0.01, default_adam_kind()).unwrap();
-        st.step(&[0.5, -0.3]).unwrap();
-        st.step(&[0.4, 0.2]).unwrap();
+    fn reset_state_zeros_moments_and_t() -> QuantumResult<()> {
+        let mut st = VqeOptimizerState::new(vec![1.0, 2.0], 0.01, default_adam_kind())?;
+        st.step(&[0.5, -0.3])?;
+        st.step(&[0.4, 0.2])?;
         assert!(st.t == 2);
         let params_snapshot = st.params.clone();
         st.reset_state();
@@ -304,41 +310,44 @@ mod tests {
         assert_eq!(st.t, 0);
         assert_eq!(st.params, params_snapshot);
         assert_eq!(st.lr, 0.01);
+        Ok(())
     }
 
     #[test]
-    fn adam_quadratic_descent_toward_zero() {
+    fn adam_quadratic_descent_toward_zero() -> QuantumResult<()> {
         // Minimize f(x) = ½ x²   ⇒   g = x.
-        let mut st = VqeOptimizerState::new(vec![1.0], 0.05, default_adam_kind()).unwrap();
+        let mut st = VqeOptimizerState::new(vec![1.0], 0.05, default_adam_kind())?;
         for _ in 0..400 {
             let g = st.params[0];
-            st.step(&[g]).unwrap();
+            st.step(&[g])?;
         }
         assert!(
             st.params[0].abs() < 1e-2,
             "Adam did not drive x→0: x={}",
             st.params[0]
         );
+        Ok(())
     }
 
     #[test]
-    fn rmsprop_quadratic_descent_toward_zero() {
-        let mut st = VqeOptimizerState::new(vec![1.0], 0.01, default_rmsprop_kind()).unwrap();
+    fn rmsprop_quadratic_descent_toward_zero() -> QuantumResult<()> {
+        let mut st = VqeOptimizerState::new(vec![1.0], 0.01, default_rmsprop_kind())?;
         for _ in 0..400 {
             let g = st.params[0];
-            st.step(&[g]).unwrap();
+            st.step(&[g])?;
         }
         assert!(
             st.params[0].abs() < 1e-2,
             "RMSProp did not drive x→0: x={}",
             st.params[0]
         );
+        Ok(())
     }
 
     #[test]
-    fn deterministic_given_fixed_inputs() {
-        let mut a = VqeOptimizerState::new(vec![0.5, -0.3], 0.02, default_adam_kind()).unwrap();
-        let mut b = VqeOptimizerState::new(vec![0.5, -0.3], 0.02, default_adam_kind()).unwrap();
+    fn deterministic_given_fixed_inputs() -> QuantumResult<()> {
+        let mut a = VqeOptimizerState::new(vec![0.5, -0.3], 0.02, default_adam_kind())?;
+        let mut b = VqeOptimizerState::new(vec![0.5, -0.3], 0.02, default_adam_kind())?;
         let grads: [[f32; 2]; 5] = [
             [0.1, -0.1],
             [0.2, 0.0],
@@ -347,13 +356,14 @@ mod tests {
             [-0.1, 0.2],
         ];
         for g in &grads {
-            a.step(g).unwrap();
-            b.step(g).unwrap();
+            a.step(g)?;
+            b.step(g)?;
         }
         assert_eq!(a.params, b.params);
         assert_eq!(a.m, b.m);
         assert_eq!(a.v, b.v);
         assert_eq!(a.t, b.t);
+        Ok(())
     }
 
     #[test]
@@ -465,15 +475,16 @@ mod tests {
     }
 
     #[test]
-    fn err_grad_wrong_length() {
-        let mut st = VqeOptimizerState::new(vec![1.0, 2.0], 0.01, default_adam_kind()).unwrap();
+    fn err_grad_wrong_length() -> QuantumResult<()> {
+        let mut st = VqeOptimizerState::new(vec![1.0, 2.0], 0.01, default_adam_kind())?;
         let r = st.step(&[0.1]);
         assert!(r.is_err());
         let r2 = st.step(&[0.1, 0.2, 0.3]);
         assert!(r2.is_err());
 
-        let mut st2 = VqeOptimizerState::new(vec![1.0, 2.0], 0.01, default_rmsprop_kind()).unwrap();
+        let mut st2 = VqeOptimizerState::new(vec![1.0, 2.0], 0.01, default_rmsprop_kind())?;
         assert!(st2.step(&[]).is_err());
+        Ok(())
     }
 
     #[test]
@@ -483,16 +494,16 @@ mod tests {
     }
 
     #[test]
-    fn constant_gradient_roughly_constant_step_magnitude() {
+    fn constant_gradient_roughly_constant_step_magnitude() -> QuantumResult<()> {
         // For Adam under a constant gradient g, after sufficient steps the
         // first moment converges to g and the second moment to g², so the
         // bias-corrected ratio m̂/√v̂ → ±1 and each step displaces the
         // parameter by roughly ±lr. Verify the step magnitude stabilizes.
-        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_adam_kind()).unwrap();
+        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_adam_kind())?;
         let mut prev = st.params[0];
         let mut last_delta = 0.0_f32;
         for k in 0..200 {
-            st.step(&[1.0]).unwrap();
+            st.step(&[1.0])?;
             let delta = (st.params[0] - prev).abs();
             prev = st.params[0];
             if k == 199 {
@@ -505,19 +516,20 @@ mod tests {
             last_delta > 1e-3 && last_delta < 5e-2,
             "unexpected last_delta={last_delta}"
         );
+        Ok(())
     }
 
     #[test]
-    fn default_adam_hyperparameters_work() {
+    fn default_adam_hyperparameters_work() -> QuantumResult<()> {
         // β1 = 0.9, β2 = 0.999, eps = 1e-8 -- the canonical Adam defaults.
         let kind = VqeOptKind::Adam {
             beta1: 0.9,
             beta2: 0.999,
             eps: 1e-8,
         };
-        let mut st = VqeOptimizerState::new(vec![0.0, 0.0], 0.01, kind).unwrap();
+        let mut st = VqeOptimizerState::new(vec![0.0, 0.0], 0.01, kind)?;
         for _ in 0..20 {
-            st.step(&[0.5, -0.5]).unwrap();
+            st.step(&[0.5, -0.5])?;
         }
         assert!(st.params[0].is_finite() && st.params[1].is_finite());
         assert!(
@@ -525,23 +537,25 @@ mod tests {
             "expected descent in both directions: {:?}",
             st.params
         );
+        Ok(())
     }
 
     #[test]
-    fn params_getter_borrows_state() {
-        let st = VqeOptimizerState::new(vec![1.1, 2.2, 3.3], 0.01, default_adam_kind()).unwrap();
+    fn params_getter_borrows_state() -> QuantumResult<()> {
+        let st = VqeOptimizerState::new(vec![1.1, 2.2, 3.3], 0.01, default_adam_kind())?;
         let p = st.params();
         assert_eq!(p.len(), 3);
         assert!((p[0] - 1.1).abs() < 1e-7);
         assert!((p[2] - 3.3).abs() < 1e-7);
+        Ok(())
     }
 
     #[test]
-    fn rmsprop_multi_step_v_increases_monotonically_for_constant_grad() {
-        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_rmsprop_kind()).unwrap();
+    fn rmsprop_multi_step_v_increases_monotonically_for_constant_grad() -> QuantumResult<()> {
+        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_rmsprop_kind())?;
         let mut prev_v = 0.0_f32;
         for _ in 0..10 {
-            st.step(&[1.0]).unwrap();
+            st.step(&[1.0])?;
             assert!(
                 st.v[0] > prev_v - 1e-9,
                 "RMSProp v should approach 1 from below: prev={prev_v} v={}",
@@ -552,21 +566,23 @@ mod tests {
         // After many steps with constant g=1, the moving average v → 1.
         assert!(st.v[0] > 0.5, "v did not climb high enough: {}", st.v[0]);
         assert!(st.v[0] < 1.0 + 1e-6, "v overshot: {}", st.v[0]);
+        Ok(())
     }
 
     #[test]
-    fn reset_then_step_reproduces_first_step() {
-        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_adam_kind()).unwrap();
-        st.step(&[2.0]).unwrap();
+    fn reset_then_step_reproduces_first_step() -> QuantumResult<()> {
+        let mut st = VqeOptimizerState::new(vec![0.0], 0.01, default_adam_kind())?;
+        st.step(&[2.0])?;
         let after_first = st.params[0];
 
         st.reset_state();
         st.params[0] = 0.0;
-        st.step(&[2.0]).unwrap();
+        st.step(&[2.0])?;
         assert!(
             (st.params[0] - after_first).abs() < 1e-7,
             "reset+step did not match first step: {after_first} vs {}",
             st.params[0]
         );
+        Ok(())
     }
 }

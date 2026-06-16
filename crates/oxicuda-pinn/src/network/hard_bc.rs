@@ -359,37 +359,54 @@ mod tests {
 
     #[test]
     fn b_factor_interval_zero_at_boundaries_exact() {
-        let h = HardBc::new(iv_cfg(0.0, 1.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(iv_cfg(0.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         // EXACT zero at lo and hi: (x - lo) is identically 0 at x=lo,
         // (hi - x) is identically 0 at x=hi.
-        assert_eq!(h.b_factor(&[0.0]).unwrap(), 0.0);
-        assert_eq!(h.b_factor(&[1.0]).unwrap(), 0.0);
+        assert_eq!(
+            h.b_factor(&[0.0])
+                .expect("b_factor should succeed for valid input"),
+            0.0
+        );
+        assert_eq!(
+            h.b_factor(&[1.0])
+                .expect("b_factor should succeed for valid input"),
+            0.0
+        );
     }
 
     #[test]
     fn b_factor_interval_one_at_centre() {
-        let h = HardBc::new(iv_cfg(0.0, 1.0), |_x| 0.0).unwrap();
-        let v = h.b_factor(&[0.5]).unwrap();
+        let h = HardBc::new(iv_cfg(0.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
+        let v = h
+            .b_factor(&[0.5])
+            .expect("b_factor should succeed for valid input");
         assert!((v - 1.0).abs() < 1e-6, "B(centre) = {v}, expected 1.0");
     }
 
     #[test]
     fn b_factor_interval_strictly_positive_inside() {
-        let h = HardBc::new(iv_cfg(-2.0, 3.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(iv_cfg(-2.0, 3.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         for k in 1..10 {
             let x = -2.0 + (k as f32) * 0.5;
-            let v = h.b_factor(&[x]).unwrap();
+            let v = h
+                .b_factor(&[x])
+                .expect("b_factor should succeed for valid input");
             assert!(v > 0.0, "B should be > 0 strictly inside at x={x}: got {v}");
         }
     }
 
     #[test]
     fn b_factor_rectangle_zero_at_all_four_corners_exact() {
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         let corners = [[0.0, 0.0], [1.0, 0.0], [0.0, 2.0], [1.0, 2.0]];
         for c in corners {
             assert_eq!(
-                h.b_factor(&c).unwrap(),
+                h.b_factor(&c)
+                    .expect("b_factor should succeed for valid input"),
                 0.0,
                 "B at corner {c:?} must be EXACTLY 0"
             );
@@ -398,12 +415,14 @@ mod tests {
 
     #[test]
     fn b_factor_rectangle_zero_at_edge_midpoints() {
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         // Midpoints of the four edges: one coordinate sits at lo/hi → product is 0.
         let edges = [[0.5, 0.0], [0.5, 2.0], [0.0, 1.0], [1.0, 1.0]];
         for e in edges {
             assert_eq!(
-                h.b_factor(&e).unwrap(),
+                h.b_factor(&e)
+                    .expect("b_factor should succeed for valid input"),
                 0.0,
                 "B at edge mid {e:?} must be 0"
             );
@@ -412,8 +431,11 @@ mod tests {
 
     #[test]
     fn b_factor_rectangle_one_at_centre() {
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), |_x| 0.0).unwrap();
-        let v = h.b_factor(&[0.5, 1.0]).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
+        let v = h
+            .b_factor(&[0.5, 1.0])
+            .expect("b_factor should succeed for valid input");
         // B(centre) = B_x(0.5) * B_y(1.0) = 1 * 1.
         assert!((v - 1.0).abs() < 1e-6, "B(rect centre) = {v}, expected 1.0");
     }
@@ -422,8 +444,11 @@ mod tests {
 
     #[test]
     fn b_grad_interval_zero_at_centre_by_symmetry() {
-        let h = HardBc::new(iv_cfg(-1.0, 1.0), |_x| 0.0).unwrap();
-        let g = h.b_grad(&[0.0]).unwrap();
+        let h = HardBc::new(iv_cfg(-1.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
+        let g = h
+            .b_grad(&[0.0])
+            .expect("b_grad should succeed for valid input");
         assert_eq!(g.len(), 1);
         assert!(
             g[0].abs() < 1e-6,
@@ -434,13 +459,20 @@ mod tests {
 
     #[test]
     fn b_grad_interval_matches_finite_diff() {
-        let h = HardBc::new(iv_cfg(-2.0, 3.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(iv_cfg(-2.0, 3.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         let eps = 1e-3_f32;
         for k in 1..8 {
             let x = -1.5 + (k as f32) * 0.5;
-            let analytical = h.b_grad(&[x]).unwrap()[0];
-            let bp = h.b_factor(&[x + eps]).unwrap();
-            let bm = h.b_factor(&[x - eps]).unwrap();
+            let analytical = h
+                .b_grad(&[x])
+                .expect("b_grad should succeed for valid input")[0];
+            let bp = h
+                .b_factor(&[x + eps])
+                .expect("b_factor should succeed for valid input");
+            let bm = h
+                .b_factor(&[x - eps])
+                .expect("b_factor should succeed for valid input");
             let numerical = (bp - bm) / (2.0 * eps);
             assert!(
                 (analytical - numerical).abs() < 1e-2,
@@ -451,22 +483,34 @@ mod tests {
 
     #[test]
     fn b_grad_rectangle_length_is_two() {
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), |_x| 0.0).unwrap();
-        let g = h.b_grad(&[0.3, 0.7]).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
+        let g = h
+            .b_grad(&[0.3, 0.7])
+            .expect("b_grad should succeed for valid input");
         assert_eq!(g.len(), 2);
     }
 
     #[test]
     fn b_grad_rectangle_matches_finite_diff() {
-        let h = HardBc::new(rect_cfg(0.0, 2.0, -1.0, 1.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 2.0, -1.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         let eps = 1e-3_f32;
         let pts = [[0.7, 0.0], [1.2, 0.4], [0.3, -0.6]];
         for p in pts {
-            let analytical = h.b_grad(&p).unwrap();
-            let bx_plus = h.b_factor(&[p[0] + eps, p[1]]).unwrap();
-            let bx_minus = h.b_factor(&[p[0] - eps, p[1]]).unwrap();
-            let by_plus = h.b_factor(&[p[0], p[1] + eps]).unwrap();
-            let by_minus = h.b_factor(&[p[0], p[1] - eps]).unwrap();
+            let analytical = h.b_grad(&p).expect("b_grad should succeed for valid input");
+            let bx_plus = h
+                .b_factor(&[p[0] + eps, p[1]])
+                .expect("b_factor should succeed for valid input");
+            let bx_minus = h
+                .b_factor(&[p[0] - eps, p[1]])
+                .expect("b_factor should succeed for valid input");
+            let by_plus = h
+                .b_factor(&[p[0], p[1] + eps])
+                .expect("b_factor should succeed for valid input");
+            let by_minus = h
+                .b_factor(&[p[0], p[1] - eps])
+                .expect("b_factor should succeed for valid input");
             let dx_num = (bx_plus - bx_minus) / (2.0 * eps);
             let dy_num = (by_plus - by_minus) / (2.0 * eps);
             assert!(
@@ -491,10 +535,15 @@ mod tests {
         // The defining property: û(boundary) = g(boundary) EXACTLY, no matter
         // what the network produces, no matter the network gradient.
         let g_fn = |x: &[f32]| 3.7 * x[0] + 1.1;
-        let h = HardBc::new(iv_cfg(-1.0, 2.0), g_fn).unwrap();
+        let h = HardBc::new(iv_cfg(-1.0, 2.0), g_fn)
+            .expect("HardBc construction with valid config should succeed");
         for net in [-100.0_f32, -1.0, 0.0, 1.0, 1e6] {
-            let lo_val = h.apply(&[-1.0], net).unwrap();
-            let hi_val = h.apply(&[2.0], net).unwrap();
+            let lo_val = h
+                .apply(&[-1.0], net)
+                .expect("apply should succeed for valid input");
+            let hi_val = h
+                .apply(&[2.0], net)
+                .expect("apply should succeed for valid input");
             assert_eq!(
                 lo_val,
                 g_fn(&[-1.0]),
@@ -507,11 +556,14 @@ mod tests {
     #[test]
     fn apply_at_boundary_equals_g_exactly_rectangle() {
         let g_fn = |x: &[f32]| 2.0 * x[0] - x[1] + 0.5;
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), g_fn).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 2.0), g_fn)
+            .expect("HardBc construction with valid config should succeed");
         let boundary_pts = [[0.0, 0.5], [1.0, 1.5], [0.4, 0.0], [0.7, 2.0]];
         for p in boundary_pts {
             for net in [-50.0_f32, 0.0, 7.3] {
-                let v = h.apply(&p, net).unwrap();
+                let v = h
+                    .apply(&p, net)
+                    .expect("apply should succeed for valid input");
                 assert_eq!(v, g_fn(&p), "Hard-BC violated at {p:?} for net={net}");
             }
         }
@@ -520,10 +572,13 @@ mod tests {
     #[test]
     fn apply_interior_with_zero_net_equals_g() {
         let g_fn = |x: &[f32]| (x[0] * x[0]).cos();
-        let h = HardBc::new(iv_cfg(0.0, 1.0), g_fn).unwrap();
+        let h = HardBc::new(iv_cfg(0.0, 1.0), g_fn)
+            .expect("HardBc construction with valid config should succeed");
         for k in 1..10 {
             let x = (k as f32) * 0.1;
-            let v = h.apply(&[x], 0.0).unwrap();
+            let v = h
+                .apply(&[x], 0.0)
+                .expect("apply should succeed for valid input");
             assert!(
                 (v - g_fn(&[x])).abs() < 1e-6,
                 "û(interior, net=0) should equal g; got {v} vs {}",
@@ -535,16 +590,23 @@ mod tests {
     #[test]
     fn apply_is_linear_in_net_value() {
         let g_fn = |_x: &[f32]| 0.0;
-        let h = HardBc::new(iv_cfg(0.0, 1.0), g_fn).unwrap();
+        let h = HardBc::new(iv_cfg(0.0, 1.0), g_fn)
+            .expect("HardBc construction with valid config should succeed");
         // û(x, α·N) = g + B·α·N = α · (g + B·N) only when g=0; the
         // stronger linearity statement is û(x, N_1+N_2) − g = (û(x, N_1) − g)
         // + (û(x, N_2) − g), i.e. (û − g) is linear in N.
         let x = [0.3_f32];
         let n1 = 2.5_f32;
         let n2 = -1.7_f32;
-        let v1 = h.apply(&x, n1).unwrap();
-        let v2 = h.apply(&x, n2).unwrap();
-        let v_sum = h.apply(&x, n1 + n2).unwrap();
+        let v1 = h
+            .apply(&x, n1)
+            .expect("apply should succeed for valid input");
+        let v2 = h
+            .apply(&x, n2)
+            .expect("apply should succeed for valid input");
+        let v_sum = h
+            .apply(&x, n1 + n2)
+            .expect("apply should succeed for valid input");
         assert!(
             (v_sum - (v1 + v2)).abs() < 1e-5,
             "Linearity violated: {v_sum} vs {} + {} = {}",
@@ -558,17 +620,21 @@ mod tests {
 
     #[test]
     fn apply_grad_length_equals_dim_interval() {
-        let h = HardBc::new(iv_cfg(0.0, 1.0), |_x| 0.0).unwrap();
-        let g = h.apply_grad(&[0.3], 1.2, &[0.5], &[0.0]).unwrap();
+        let h = HardBc::new(iv_cfg(0.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
+        let g = h
+            .apply_grad(&[0.3], 1.2, &[0.5], &[0.0])
+            .expect("apply_grad should succeed for valid input");
         assert_eq!(g.len(), 1);
     }
 
     #[test]
     fn apply_grad_length_equals_dim_rectangle() {
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         let g = h
             .apply_grad(&[0.3, 0.7], 1.2, &[0.4, 0.6], &[0.0, 0.0])
-            .unwrap();
+            .expect("apply_grad should succeed for valid input");
         assert_eq!(g.len(), 2);
     }
 
@@ -580,15 +646,20 @@ mod tests {
         let dg_fn = |x: f32| x.cos();
         let net_fn = |x: f32| 2.0 * x + 0.5;
         let dnet_dx = 2.0_f32;
-        let h = HardBc::new(iv_cfg(0.0, 1.0), g_fn).unwrap();
+        let h = HardBc::new(iv_cfg(0.0, 1.0), g_fn)
+            .expect("HardBc construction with valid config should succeed");
         let eps = 1e-3_f32;
         for k in 1..8 {
             let x = 0.05 + (k as f32) * 0.1;
             let analytic = h
                 .apply_grad(&[x], net_fn(x), &[dnet_dx], &[dg_fn(x)])
-                .unwrap()[0];
-            let up = h.apply(&[x + eps], net_fn(x + eps)).unwrap();
-            let dn = h.apply(&[x - eps], net_fn(x - eps)).unwrap();
+                .expect("apply_grad should succeed for valid input")[0];
+            let up = h
+                .apply(&[x + eps], net_fn(x + eps))
+                .expect("apply should succeed for valid input");
+            let dn = h
+                .apply(&[x - eps], net_fn(x - eps))
+                .expect("apply should succeed for valid input");
             let numerical = (up - dn) / (2.0 * eps);
             assert!(
                 (analytic - numerical).abs() < 5e-3,
@@ -600,7 +671,8 @@ mod tests {
     #[test]
     fn apply_grad_rectangle_matches_finite_diff_known_net() {
         let g_fn = |x: &[f32]| x[0] + 2.0 * x[1];
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), g_fn).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), g_fn)
+            .expect("HardBc construction with valid config should succeed");
         // N(x, y) = 3x − y + 0.4, ∂N/∂x = 3, ∂N/∂y = −1.
         let net_at = |x: f32, y: f32| 3.0 * x - y + 0.4;
         let eps = 1e-3_f32;
@@ -608,19 +680,19 @@ mod tests {
         for p in pts {
             let analytic = h
                 .apply_grad(&p, net_at(p[0], p[1]), &[3.0, -1.0], &[1.0, 2.0])
-                .unwrap();
+                .expect("apply_grad should succeed for valid input");
             let upx = h
                 .apply(&[p[0] + eps, p[1]], net_at(p[0] + eps, p[1]))
-                .unwrap();
+                .expect("apply should succeed for valid input");
             let dnx = h
                 .apply(&[p[0] - eps, p[1]], net_at(p[0] - eps, p[1]))
-                .unwrap();
+                .expect("apply should succeed for valid input");
             let upy = h
                 .apply(&[p[0], p[1] + eps], net_at(p[0], p[1] + eps))
-                .unwrap();
+                .expect("apply should succeed for valid input");
             let dny = h
                 .apply(&[p[0], p[1] - eps], net_at(p[0], p[1] - eps))
-                .unwrap();
+                .expect("apply should succeed for valid input");
             let dx_num = (upx - dnx) / (2.0 * eps);
             let dy_num = (upy - dny) / (2.0 * eps);
             assert!(
@@ -729,28 +801,32 @@ mod tests {
 
     #[test]
     fn err_b_factor_wrong_x_length() {
-        let h = HardBc::new(iv_cfg(0.0, 1.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(iv_cfg(0.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         let r = h.b_factor(&[0.5, 0.5]);
         assert!(matches!(r, Err(PinnError::DimensionMismatch { .. })));
     }
 
     #[test]
     fn err_apply_grad_wrong_x_length() {
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         let r = h.apply_grad(&[0.3], 1.0, &[0.0, 0.0], &[0.0, 0.0]);
         assert!(matches!(r, Err(PinnError::DimensionMismatch { .. })));
     }
 
     #[test]
     fn err_apply_grad_wrong_net_grad_length() {
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         let r = h.apply_grad(&[0.3, 0.4], 1.0, &[0.0], &[0.0, 0.0]);
         assert!(matches!(r, Err(PinnError::DimensionMismatch { .. })));
     }
 
     #[test]
     fn err_apply_grad_wrong_g_grad_length() {
-        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), |_x| 0.0).unwrap();
+        let h = HardBc::new(rect_cfg(0.0, 1.0, 0.0, 1.0), |_x| 0.0)
+            .expect("HardBc construction with valid config should succeed");
         let r = h.apply_grad(&[0.3, 0.4], 1.0, &[0.0, 0.0], &[0.0, 0.0, 0.0]);
         assert!(matches!(r, Err(PinnError::DimensionMismatch { .. })));
     }
@@ -762,13 +838,19 @@ mod tests {
         // Two independently-constructed HardBc instances with the same g_fn
         // should produce bit-identical apply results.
         let g_fn = |x: &[f32]| 0.7 * x[0] - 0.2;
-        let h_a = HardBc::new(iv_cfg(0.0, 1.0), g_fn).unwrap();
-        let h_b = HardBc::new(iv_cfg(0.0, 1.0), g_fn).unwrap();
+        let h_a = HardBc::new(iv_cfg(0.0, 1.0), g_fn)
+            .expect("HardBc construction with valid config should succeed");
+        let h_b = HardBc::new(iv_cfg(0.0, 1.0), g_fn)
+            .expect("HardBc construction with valid config should succeed");
         for k in 0..21 {
             let x = (k as f32) * 0.05;
             let net = (k as f32 - 10.0) * 0.3;
-            let a = h_a.apply(&[x], net).unwrap();
-            let b = h_b.apply(&[x], net).unwrap();
+            let a = h_a
+                .apply(&[x], net)
+                .expect("apply should succeed for valid input");
+            let b = h_b
+                .apply(&[x], net)
+                .expect("apply should succeed for valid input");
             assert_eq!(a, b);
         }
     }

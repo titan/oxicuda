@@ -90,7 +90,8 @@ mod tests {
     #[test]
     fn utilization_balanced() {
         let assignments = [0_usize, 1, 0, 1, 0, 1, 0, 1];
-        let util = compute_utilization(&assignments, 8, 2, 4).unwrap();
+        let util =
+            compute_utilization(&assignments, 8, 2, 4).expect("compute_utilization should succeed");
         assert_eq!(util.tokens_per_expert, [4, 4]);
         assert_eq!(util.overflow_count, 0);
         assert!((util.load_imbalance_ratio - 1.0).abs() < 1e-5);
@@ -99,7 +100,8 @@ mod tests {
     #[test]
     fn utilization_with_overflow() {
         let assignments = [0_usize, usize::MAX, 1, usize::MAX];
-        let util = compute_utilization(&assignments, 4, 2, 2).unwrap();
+        let util =
+            compute_utilization(&assignments, 4, 2, 2).expect("compute_utilization should succeed");
         assert_eq!(util.overflow_count, 2);
         assert_eq!(util.tokens_per_expert[0], 1);
         assert_eq!(util.tokens_per_expert[1], 1);

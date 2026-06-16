@@ -23,6 +23,7 @@ pub mod metrics;
 pub mod multiobjective;
 pub mod neuroevolution;
 pub mod ptx_kernels;
+pub mod qd;
 pub mod swarm;
 
 pub use benchmarks::bbob::{
@@ -31,6 +32,7 @@ pub use benchmarks::bbob::{
 };
 pub use error::{EvolError, EvolResult};
 pub use evolution::coevolution::{CoevolConfig, CoevolMode, CoevolResult, coevolve};
+pub use evolution::de::de_variants::{De as DeSimple, DeConfig as DeSimpleConfig, DeVariant};
 pub use evolution::island::{IslandConfig, IslandResult, Topology, island_model_run};
 pub use evolution::memetic::{Inheritance, MemeticConfig, MemeticResult, memetic_run};
 pub use genetic::encoding::{

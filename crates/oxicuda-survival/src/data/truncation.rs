@@ -886,9 +886,9 @@ mod tests {
             .iter()
             .position(|&t| (t - 5.0).abs() < 1.0e-12);
         assert!(idx1.is_some() && idx2.is_some() && idx5.is_some());
-        assert!((result.prob_mass[idx1.unwrap()] - 0.25).abs() < 1.0e-6);
-        assert!((result.prob_mass[idx2.unwrap()] - 0.50).abs() < 1.0e-6);
-        assert!((result.prob_mass[idx5.unwrap()] - 0.25).abs() < 1.0e-6);
+        assert!((result.prob_mass[idx1.expect("idx1 should be present")] - 0.25).abs() < 1.0e-6);
+        assert!((result.prob_mass[idx2.expect("idx2 should be present")] - 0.50).abs() < 1.0e-6);
+        assert!((result.prob_mass[idx5.expect("idx5 should be present")] - 0.25).abs() < 1.0e-6);
     }
 
     // -----------------------------------------------------------------------

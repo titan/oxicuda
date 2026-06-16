@@ -231,7 +231,8 @@ mod tests {
 
     fn make_layer(seed: u64) -> FlamingoGatedLayer {
         let mut rng = LcgRng::new(seed);
-        FlamingoGatedLayer::new(FlamingoGatedConfig::tiny(), &mut rng).unwrap()
+        FlamingoGatedLayer::new(FlamingoGatedConfig::tiny(), &mut rng)
+            .expect("value should be present")
     }
 
     #[test]
@@ -243,7 +244,9 @@ mod tests {
         let n_vis = 5;
         let x: Vec<f32> = (0..(n_text * d)).map(|i| (i as f32) * 0.03 - 0.5).collect();
         let vis = vec![0.7_f32; n_vis * d];
-        let out = layer.forward(&x, n_text, &vis, n_vis).unwrap();
+        let out = layer
+            .forward(&x, n_text, &vis, n_vis)
+            .expect("forward should succeed");
         assert_eq!(out, x);
     }
 
@@ -271,9 +274,13 @@ mod tests {
         let x: Vec<f32> = (0..(n_text * d)).map(|i| (i as f32) * 0.02).collect();
         let vis = vec![0.4_f32; n_vis * d];
 
-        let identity_out = layer.forward(&x, n_text, &vis, n_vis).unwrap();
+        let identity_out = layer
+            .forward(&x, n_text, &vis, n_vis)
+            .expect("forward should succeed");
         layer.set_gates(1.0, 1.0);
-        let gated_out = layer.forward(&x, n_text, &vis, n_vis).unwrap();
+        let gated_out = layer
+            .forward(&x, n_text, &vis, n_vis)
+            .expect("forward should succeed");
 
         assert_ne!(identity_out, gated_out);
     }
@@ -290,8 +297,12 @@ mod tests {
 
         let vis_a = vec![0.1_f32; n_vis * d];
         let vis_b = vec![0.9_f32; n_vis * d];
-        let out_a = layer.forward(&x, n_text, &vis_a, n_vis).unwrap();
-        let out_b = layer.forward(&x, n_text, &vis_b, n_vis).unwrap();
+        let out_a = layer
+            .forward(&x, n_text, &vis_a, n_vis)
+            .expect("forward should succeed");
+        let out_b = layer
+            .forward(&x, n_text, &vis_b, n_vis)
+            .expect("forward should succeed");
 
         assert_eq!(out_a, out_b);
     }
@@ -312,8 +323,12 @@ mod tests {
         for (i, v) in vis_b.iter_mut().enumerate() {
             *v = 0.1 + (i as f32) * 0.07;
         }
-        let out_a = layer.forward(&x, n_text, &vis_a, n_vis).unwrap();
-        let out_b = layer.forward(&x, n_text, &vis_b, n_vis).unwrap();
+        let out_a = layer
+            .forward(&x, n_text, &vis_a, n_vis)
+            .expect("forward should succeed");
+        let out_b = layer
+            .forward(&x, n_text, &vis_b, n_vis)
+            .expect("forward should succeed");
 
         let diff: f32 = out_a
             .iter()
@@ -335,7 +350,9 @@ mod tests {
         let n_vis = 3;
         let x = vec![0.2_f32; n_text * d];
         let vis = vec![0.5_f32; n_vis * d];
-        let out = layer.forward(&x, n_text, &vis, n_vis).unwrap();
+        let out = layer
+            .forward(&x, n_text, &vis, n_vis)
+            .expect("forward should succeed");
         assert_eq!(out.len(), n_text * d);
     }
 
@@ -348,8 +365,8 @@ mod tests {
         let d = a.cfg.d_model;
         let x = vec![0.15_f32; 4 * d];
         let vis = vec![0.3_f32; 5 * d];
-        let out_a = a.forward(&x, 4, &vis, 5).unwrap();
-        let out_b = b.forward(&x, 4, &vis, 5).unwrap();
+        let out_a = a.forward(&x, 4, &vis, 5).expect("forward should succeed");
+        let out_b = b.forward(&x, 4, &vis, 5).expect("forward should succeed");
         assert_eq!(out_a, out_b);
     }
 
@@ -360,7 +377,9 @@ mod tests {
         let d = layer.cfg.d_model;
         let x = vec![0.3_f32; 5 * d];
         let vis = vec![0.4_f32; 6 * d];
-        let out = layer.forward(&x, 5, &vis, 6).unwrap();
+        let out = layer
+            .forward(&x, 5, &vis, 6)
+            .expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -376,9 +395,13 @@ mod tests {
         let vis: Vec<f32> = (0..(n_vis * d)).map(|i| (i as f32) * 0.03).collect();
 
         layer.set_gates(50.0, 50.0);
-        let out_big = layer.forward(&x, n_text, &vis, n_vis).unwrap();
+        let out_big = layer
+            .forward(&x, n_text, &vis, n_vis)
+            .expect("forward should succeed");
         layer.set_gates(500.0, 500.0);
-        let out_huge = layer.forward(&x, n_text, &vis, n_vis).unwrap();
+        let out_huge = layer
+            .forward(&x, n_text, &vis, n_vis)
+            .expect("forward should succeed");
 
         let diff: f32 = out_big
             .iter()
@@ -458,11 +481,13 @@ mod tests {
             n_heads: 1,
             ffn_dim: 16,
         };
-        let mut layer = FlamingoGatedLayer::new(cfg, &mut rng).unwrap();
+        let mut layer = FlamingoGatedLayer::new(cfg, &mut rng).expect("new should succeed");
         layer.set_gates(0.5, 0.5);
         let x = vec![0.2_f32; 4 * 8];
         let vis = vec![0.3_f32; 5 * 8];
-        let out = layer.forward(&x, 4, &vis, 5).unwrap();
+        let out = layer
+            .forward(&x, 4, &vis, 5)
+            .expect("forward should succeed");
         assert_eq!(out.len(), 4 * 8);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -474,7 +499,9 @@ mod tests {
         let d = layer.cfg.d_model;
         let x = vec![0.2_f32; 4 * d];
         let vis = vec![0.3_f32; d];
-        let out = layer.forward(&x, 4, &vis, 1).unwrap();
+        let out = layer
+            .forward(&x, 4, &vis, 1)
+            .expect("forward should succeed");
         assert_eq!(out.len(), 4 * d);
         assert!(out.iter().all(|v| v.is_finite()));
     }

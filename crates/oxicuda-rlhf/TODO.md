@@ -12,7 +12,7 @@ KL penalty, adaptive KL controller, and masked SFT cross-entropy loss. Part of
 
 ## Implementation Status
 
-**Actual: 2,047 SLoC (25 files)** -- compact implementation with 12 E2E
+**Actual: 9,707 SLoC (50 files)** -- compact implementation with 12 E2E
 integration tests
 
 The crate is intentionally compact: every modern preference-alignment loss
@@ -130,10 +130,10 @@ surrogate).
 ### Future Enhancements [ ]
 
 #### P0 -- Critical (Performance-Sensitive Paths)
-- [ ] Fused DPO loss + softplus-stable BCE in a single PTX kernel
+- [x] Fused DPO loss + softplus-stable BCE in a single PTX kernel
       (currently host-side sigmoid + log)
 - [ ] Tensor-Core path for `RewardModel` MLP forward + backward
-- [ ] Fused KL-penalty + advantage computation in PPO rollout
+- [x] Fused KL-penalty + advantage computation in PPO rollout
 - [ ] Token-level GAE on GPU (currently CPU loop in `compute_advantages`)
 
 #### P1 -- Important (Feature Completeness)
@@ -148,6 +148,10 @@ surrogate).
 - [x] Process-Reward Modelling (PRM) loss for step-level rewards
 - [x] Best-of-N sampling helpers with score aggregation
       (reward/best_of_n.rs -- generate-N + reward-score + select; Max/Mean/SoftmaxWeighted/TopKMean aggregation; order-statistic expected-best-reward)
+- [x] `rlhf/grpo.rs` — GRPO (Shao 2024): Group Relative Policy Optimisation; advantages computed from group of outputs without separate value model; KL regularisation vs reference; `GrpoConfig { group_size: usize, kl_coeff: f32 }`
+- [x] `rlhf/rebel.rs` — REBEL (Gao 2024): Regression-Based RL; direct regression of reward differences onto token log-prob differences; no policy gradient variance; `RebelConfig { tau: f32 }`
+- [ ] `reward/rm_calibration.rs` — Reward model calibration (Touvron 2023): temperature scaling + margin-based reliability; isotonic regression on held-out preference pairs; `RewardModelCalibrator`
+- [ ] `rlhf/constitutional.rs` — Constitutional AI (Bai 2022): revision-based self-critique pipeline; apply critique prompt → revise → collect revised samples as SL data; `ConstitutionalReviser { principles: Vec<String> }`
 
 #### P2 -- Nice-to-Have (Advanced Features)
 - [ ] Online DPO with rejection sampling
@@ -171,7 +175,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 25 unit + 12 E2E = 37 passing (focused, high-coverage)
+- Tests: 25 unit + 12 E2E = 361 passing (focused, high-coverage)
 - unwrap() calls: 0 (production code)
 - All public APIs return `RlhfResult<T>` or `Result<T, RlhfError>`
 

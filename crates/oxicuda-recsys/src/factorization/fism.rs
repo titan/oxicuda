@@ -472,7 +472,7 @@ mod tests {
     fn new_valid_config_succeeds() {
         let mut rng = LcgRng::new(42);
         let cfg = small_cfg(10, 8);
-        let model = Fism::new(cfg, &mut rng).unwrap();
+        let model = Fism::new(cfg, &mut rng).expect("new should succeed");
         assert_eq!(model.p.len(), 10 * 8);
         assert_eq!(model.q.len(), 10 * 8);
         assert_eq!(model.b_i.len(), 10);
@@ -513,9 +513,9 @@ mod tests {
         let mut rng = LcgRng::new(3);
         let mut cfg = small_cfg(5, 4);
         cfg.n_epochs = 0;
-        let model = Fism::new(cfg, &mut rng).unwrap();
+        let model = Fism::new(cfg, &mut rng).expect("new should succeed");
         // history = [target], so H_minus = ∅ → score = b_i[target]
-        let s = model.score(&[2], 2).unwrap();
+        let s = model.score(&[2], 2).expect("score should succeed");
         assert!(
             (s - model.b_i[2]).abs() < 1e-6,
             "score = {s}, b_i[2] = {}",
@@ -526,8 +526,8 @@ mod tests {
     #[test]
     fn score_empty_history_returns_bias_only() {
         let mut rng = LcgRng::new(4);
-        let model = Fism::new(small_cfg(5, 4), &mut rng).unwrap();
-        let s = model.score(&[], 1).unwrap();
+        let model = Fism::new(small_cfg(5, 4), &mut rng).expect("value should be present");
+        let s = model.score(&[], 1).expect("score should succeed");
         assert!(
             (s - model.b_i[1]).abs() < 1e-6,
             "score = {s}, b_i[1] = {}",
@@ -538,9 +538,9 @@ mod tests {
     #[test]
     fn score_single_history_item_not_target() {
         let mut rng = LcgRng::new(5);
-        let model = Fism::new(small_cfg(5, 4), &mut rng).unwrap();
+        let model = Fism::new(small_cfg(5, 4), &mut rng).expect("value should be present");
         // history = [0], target = 1 → H_minus = [0], |H_minus|^{-0.5} = 1
-        let s = model.score(&[0], 1).unwrap();
+        let s = model.score(&[0], 1).expect("score should succeed");
         let expected = model.b_i[1] + dot(&model.p[0..4], &model.q[4..8]);
         assert!(
             (s - expected).abs() < 1e-5,
@@ -551,10 +551,10 @@ mod tests {
     #[test]
     fn score_excludes_target_from_history_correctly() {
         let mut rng = LcgRng::new(6);
-        let model = Fism::new(small_cfg(6, 4), &mut rng).unwrap();
+        let model = Fism::new(small_cfg(6, 4), &mut rng).expect("value should be present");
         // history = [0, 2, 2], target = 2 → H_minus = [0]  (2 excluded)
-        let s_with_target = model.score(&[0, 2], 2).unwrap();
-        let s_without = model.score(&[0], 2).unwrap();
+        let s_with_target = model.score(&[0, 2], 2).expect("score should succeed");
+        let s_without = model.score(&[0], 2).expect("score should succeed");
         // Both should use only item 0 as the history contributor.
         assert!(
             (s_with_target - s_without).abs() < 1e-5,
@@ -565,7 +565,7 @@ mod tests {
     #[test]
     fn score_out_of_bounds_target_returns_err() {
         let mut rng = LcgRng::new(7);
-        let model = Fism::new(small_cfg(5, 4), &mut rng).unwrap();
+        let model = Fism::new(small_cfg(5, 4), &mut rng).expect("value should be present");
         assert!(matches!(
             model.score(&[], 5),
             Err(RecsysError::ItemOutOfBounds { .. })
@@ -575,7 +575,7 @@ mod tests {
     #[test]
     fn score_history_item_out_of_bounds_returns_err() {
         let mut rng = LcgRng::new(8);
-        let model = Fism::new(small_cfg(5, 4), &mut rng).unwrap();
+        let model = Fism::new(small_cfg(5, 4), &mut rng).expect("value should be present");
         assert!(matches!(
             model.score(&[10], 0),
             Err(RecsysError::ItemOutOfBounds { .. })
@@ -588,7 +588,7 @@ mod tests {
     fn n_params_formula_correct() {
         let mut rng = LcgRng::new(9);
         let cfg = small_cfg(10, 8);
-        let model = Fism::new(cfg, &mut rng).unwrap();
+        let model = Fism::new(cfg, &mut rng).expect("new should succeed");
         // 2 * 10 * 8 + 10 = 170
         assert_eq!(model.n_params(), 170);
     }
@@ -600,9 +600,11 @@ mod tests {
         let mut rng = LcgRng::new(10);
         let mut cfg = small_cfg(5, 4);
         cfg.n_epochs = 3;
-        let mut model = Fism::new(cfg, &mut rng).unwrap();
+        let mut model = Fism::new(cfg, &mut rng).expect("new should succeed");
         let interactions = vec![vec![0usize, 1], vec![1, 2], vec![0, 2, 3]];
-        model.fit(&interactions, &mut rng).unwrap();
+        model
+            .fit(&interactions, &mut rng)
+            .expect("fit should succeed");
     }
 
     #[test]
@@ -610,15 +612,17 @@ mod tests {
         let mut rng = LcgRng::new(11);
         let mut cfg = small_cfg(6, 6);
         cfg.n_epochs = 10;
-        let mut model = Fism::new(cfg, &mut rng).unwrap();
+        let mut model = Fism::new(cfg, &mut rng).expect("new should succeed");
         let interactions = vec![vec![0, 1, 2], vec![3, 4, 5], vec![0, 3]];
-        model.fit(&interactions, &mut rng).unwrap();
+        model
+            .fit(&interactions, &mut rng)
+            .expect("fit should succeed");
     }
 
     #[test]
     fn fit_item_out_of_bounds_returns_err() {
         let mut rng = LcgRng::new(12);
-        let mut model = Fism::new(small_cfg(5, 4), &mut rng).unwrap();
+        let mut model = Fism::new(small_cfg(5, 4), &mut rng).expect("value should be present");
         let interactions = vec![vec![0, 10]]; // item 10 >= n_items=5
         assert!(matches!(
             model.fit(&interactions, &mut rng),
@@ -635,19 +639,21 @@ mod tests {
         cfg.n_epochs = 30;
         cfg.lr = 0.01;
         cfg.n_neg = 5;
-        let mut model = Fism::new(cfg, &mut rng).unwrap();
+        let mut model = Fism::new(cfg, &mut rng).expect("new should succeed");
 
         // User 0's history: items 0,1,2,3,4.
         let interactions: Vec<Vec<usize>> =
             vec![vec![0, 1, 2, 3, 4], vec![5, 6, 7], vec![0, 5, 10]];
-        model.fit(&interactions, &mut rng).unwrap();
+        model
+            .fit(&interactions, &mut rng)
+            .expect("fit should succeed");
 
         // History: [0,1,2,3] (excluding 4 as target).
         let history = vec![0usize, 1, 2, 3];
-        let s_pos = model.score(&history, 4).unwrap();
+        let s_pos = model.score(&history, 4).expect("score should succeed");
 
         // Score for a random non-history item (e.g., item 15).
-        let s_rand = model.score(&history, 15).unwrap();
+        let s_rand = model.score(&history, 15).expect("score should succeed");
 
         // The positive item need not dominate in all cases with minimal training,
         // but at least both scores should be finite.
@@ -662,10 +668,14 @@ mod tests {
         let mut rng = LcgRng::new(13);
         let mut cfg = small_cfg(8, 4);
         cfg.n_epochs = 2;
-        let mut model = Fism::new(cfg, &mut rng).unwrap();
-        model.fit(&[vec![0, 1, 2], vec![3, 4]], &mut rng).unwrap();
+        let mut model = Fism::new(cfg, &mut rng).expect("new should succeed");
+        model
+            .fit(&[vec![0, 1, 2], vec![3, 4]], &mut rng)
+            .expect("fit should succeed");
         let history = vec![0usize, 1, 2];
-        let ranked = model.rank_new_items(&history).unwrap();
+        let ranked = model
+            .rank_new_items(&history)
+            .expect("rank_new_items should succeed");
         for &item in &ranked {
             assert!(
                 !history.contains(&item),
@@ -677,12 +687,14 @@ mod tests {
     #[test]
     fn rank_new_items_count_equals_n_items_minus_history() {
         let mut rng = LcgRng::new(14);
-        let mut model = Fism::new(small_cfg(10, 4), &mut rng).unwrap();
+        let mut model = Fism::new(small_cfg(10, 4), &mut rng).expect("value should be present");
         model
             .fit(&[vec![0, 1, 2], vec![3, 4, 5]], &mut rng)
-            .unwrap();
+            .expect("value should be present");
         let history = vec![0usize, 1, 2];
-        let ranked = model.rank_new_items(&history).unwrap();
+        let ranked = model
+            .rank_new_items(&history)
+            .expect("rank_new_items should succeed");
         // n_items=10, history.len()=3 → expect 7 results.
         assert_eq!(
             ranked.len(),
@@ -697,10 +709,14 @@ mod tests {
     #[test]
     fn bpr_loss_returns_finite_value() {
         let mut rng = LcgRng::new(15);
-        let mut model = Fism::new(small_cfg(10, 4), &mut rng).unwrap();
-        model.fit(&[vec![0, 1, 2], vec![3, 4]], &mut rng).unwrap();
+        let mut model = Fism::new(small_cfg(10, 4), &mut rng).expect("value should be present");
+        model
+            .fit(&[vec![0, 1, 2], vec![3, 4]], &mut rng)
+            .expect("fit should succeed");
         let history = vec![0usize, 1];
-        let loss = model.bpr_loss(&history, 2, 7).unwrap();
+        let loss = model
+            .bpr_loss(&history, 2, 7)
+            .expect("bpr_loss should succeed");
         assert!(loss.is_finite(), "bpr_loss = {loss}");
     }
 
@@ -709,9 +725,9 @@ mod tests {
     #[test]
     fn score_single_history_item_is_target_returns_bias() {
         let mut rng = LcgRng::new(16);
-        let model = Fism::new(small_cfg(5, 4), &mut rng).unwrap();
+        let model = Fism::new(small_cfg(5, 4), &mut rng).expect("value should be present");
         // history = [3], target = 3 → H_minus empty → score = b_i[3]
-        let s = model.score(&[3], 3).unwrap();
+        let s = model.score(&[3], 3).expect("score should succeed");
         assert!(
             (s - model.b_i[3]).abs() < 1e-6,
             "expected bias only, got {s}"
@@ -721,7 +737,7 @@ mod tests {
     #[test]
     fn rank_new_items_history_out_of_bounds_returns_err() {
         let mut rng = LcgRng::new(17);
-        let model = Fism::new(small_cfg(5, 4), &mut rng).unwrap();
+        let model = Fism::new(small_cfg(5, 4), &mut rng).expect("value should be present");
         assert!(matches!(
             model.rank_new_items(&[0, 99]),
             Err(RecsysError::ItemOutOfBounds { .. })

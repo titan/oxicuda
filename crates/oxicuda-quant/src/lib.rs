@@ -21,8 +21,8 @@
 //! # use oxicuda_quant::scheme::minmax::{MinMaxQuantizer, QuantScheme, QuantGranularity};
 //! let q = MinMaxQuantizer::int8_symmetric();
 //! let data = vec![-1.0_f32, 0.0, 0.5, 1.0];
-//! let params = q.calibrate(&data).unwrap();
-//! let codes  = q.quantize(&data, &params).unwrap();
+//! let params = q.calibrate(&data).expect("calibrate should succeed");
+//! let codes  = q.quantize(&data, &params).expect("quantize should succeed");
 //! let deq    = q.dequantize(&codes, &params);
 //! ```
 

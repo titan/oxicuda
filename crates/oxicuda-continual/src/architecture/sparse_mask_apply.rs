@@ -172,7 +172,8 @@ mod tests {
 
     #[test]
     fn empty_mask_yields_empty_sparse_view() {
-        let m = SparseActiveMask::from_dense(&[], 0.0).unwrap();
+        let m = SparseActiveMask::from_dense(&[], 0.0)
+            .expect("sparse mask should construct from valid dense mask");
         assert_eq!(m.n_weights, 0);
         assert!(m.is_empty());
         assert_eq!(m.n_active(), 0);
@@ -183,7 +184,8 @@ mod tests {
     #[test]
     fn all_active_mask() {
         let dense = vec![1.0_f64; 8];
-        let m = SparseActiveMask::from_dense(&dense, 0.0).unwrap();
+        let m = SparseActiveMask::from_dense(&dense, 0.0)
+            .expect("sparse mask should construct from valid dense mask");
         assert_eq!(m.n_active(), 8);
         assert_eq!(m.active_indices, (0..8).collect::<Vec<_>>());
         assert!(m.sparsity.abs() < 1e-15);
@@ -193,7 +195,8 @@ mod tests {
     #[test]
     fn all_inactive_mask() {
         let dense = vec![0.0_f64; 8];
-        let m = SparseActiveMask::from_dense(&dense, 0.0).unwrap();
+        let m = SparseActiveMask::from_dense(&dense, 0.0)
+            .expect("sparse mask should construct from valid dense mask");
         assert_eq!(m.n_active(), 0);
         assert!((m.sparsity - 1.0).abs() < 1e-15);
         assert!(m.is_sparse_enough());
@@ -202,7 +205,8 @@ mod tests {
     #[test]
     fn threshold_filters_correctly() {
         let dense = vec![0.1_f64, 0.6, -0.4, 0.9, 0.5, -0.5];
-        let m = SparseActiveMask::from_dense(&dense, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         assert_eq!(m.active_indices, vec![1, 3]);
         assert!((m.sparsity - 4.0 / 6.0).abs() < 1e-12);
     }
@@ -219,11 +223,13 @@ mod tests {
     fn is_sparse_enough_boundary() {
         let mut dense = vec![0.0_f64; 100];
         dense[0..9].fill(1.0);
-        let m = SparseActiveMask::from_dense(&dense, 0.0).unwrap();
+        let m = SparseActiveMask::from_dense(&dense, 0.0)
+            .expect("sparse mask should construct from valid dense mask");
         assert!(m.is_sparse_enough(), "9/100 active → sparsity 0.91 > 0.9");
 
         dense[9] = 1.0;
-        let m = SparseActiveMask::from_dense(&dense, 0.0).unwrap();
+        let m = SparseActiveMask::from_dense(&dense, 0.0)
+            .expect("sparse mask should construct from valid dense mask");
         assert!(
             !m.is_sparse_enough(),
             "10/100 active → sparsity 0.9, not strictly greater"
@@ -233,35 +239,42 @@ mod tests {
     #[test]
     fn apply_zeroes_inactive_only() {
         let dense_mask = vec![1.0_f64, 0.0, 1.0, 0.0, 1.0];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let mut values = vec![10.0_f64, 20.0, 30.0, 40.0, 50.0];
-        sparse_mask_apply(&mut values, &m).unwrap();
+        sparse_mask_apply(&mut values, &m)
+            .expect("sparse mask application should succeed with matching dimensions");
         assert_eq!(values, vec![10.0, 0.0, 30.0, 0.0, 50.0]);
     }
 
     #[test]
     fn apply_all_active_is_identity_on_values() {
         let dense_mask = vec![1.0_f64; 6];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let mut values = vec![1.5_f64, -2.5, 3.5, -4.5, 5.5, -6.5];
         let copy = values.clone();
-        sparse_mask_apply(&mut values, &m).unwrap();
+        sparse_mask_apply(&mut values, &m)
+            .expect("sparse mask application should succeed with matching dimensions");
         assert_eq!(values, copy);
     }
 
     #[test]
     fn apply_all_inactive_zeroes_everything() {
         let dense_mask = vec![0.0_f64; 6];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let mut values = vec![1.0_f64; 6];
-        sparse_mask_apply(&mut values, &m).unwrap();
+        sparse_mask_apply(&mut values, &m)
+            .expect("sparse mask application should succeed with matching dimensions");
         assert!(values.iter().all(|&v| v == 0.0));
     }
 
     #[test]
     fn apply_length_mismatch_errors() {
         let dense_mask = vec![1.0_f64, 0.0, 1.0];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let mut values = vec![1.0_f64; 5];
         let err = sparse_mask_apply(&mut values, &m).unwrap_err();
         assert!(matches!(
@@ -276,16 +289,19 @@ mod tests {
     #[test]
     fn backward_zero_fills_inactive_and_keeps_active() {
         let dense_mask = vec![1.0_f64, 0.0, 1.0, 0.0, 1.0];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let upstream = vec![7.0_f64, 8.0, 9.0, 10.0, 11.0];
-        let grad = sparse_mask_backward(&upstream, &m).unwrap();
+        let grad =
+            sparse_mask_backward(&upstream, &m).expect("sparse mask backward should succeed");
         assert_eq!(grad, vec![7.0, 0.0, 9.0, 0.0, 11.0]);
     }
 
     #[test]
     fn backward_length_mismatch_errors() {
         let dense_mask = vec![1.0_f64, 0.0, 1.0];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let upstream = vec![1.0_f64; 4];
         assert!(sparse_mask_backward(&upstream, &m).is_err());
     }
@@ -293,18 +309,22 @@ mod tests {
     #[test]
     fn compact_round_trip_preserves_active_values() {
         let dense_mask = vec![1.0_f64, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let values = vec![10.0_f64, 99.0, 30.0, 99.0, 50.0, 99.0, 70.0];
-        let compact = sparse_mask_compact(&values, &m).unwrap();
+        let compact =
+            sparse_mask_compact(&values, &m).expect("sparse mask compaction should succeed");
         assert_eq!(compact, vec![10.0, 30.0, 50.0, 70.0]);
-        let scattered = sparse_mask_scatter(&compact, &m).unwrap();
+        let scattered =
+            sparse_mask_scatter(&compact, &m).expect("sparse mask scatter should succeed");
         assert_eq!(scattered, vec![10.0, 0.0, 30.0, 0.0, 50.0, 0.0, 70.0]);
     }
 
     #[test]
     fn compact_length_mismatch_errors() {
         let dense_mask = vec![1.0_f64, 0.0, 1.0];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let values = vec![1.0_f64, 2.0];
         assert!(sparse_mask_compact(&values, &m).is_err());
     }
@@ -312,7 +332,8 @@ mod tests {
     #[test]
     fn scatter_length_mismatch_errors() {
         let dense_mask = vec![1.0_f64, 0.0, 1.0];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let compact = vec![1.0_f64, 2.0, 3.0];
         let err = sparse_mask_scatter(&compact, &m).unwrap_err();
         assert!(matches!(
@@ -330,7 +351,8 @@ mod tests {
         for i in (0..1000).step_by(20) {
             dense[i] = 1.0;
         }
-        let m = SparseActiveMask::from_dense(&dense, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         assert_eq!(m.n_active(), 50);
         assert!((m.sparsity - 0.95).abs() < 1e-12);
         assert!(m.is_sparse_enough());
@@ -339,12 +361,15 @@ mod tests {
     #[test]
     fn apply_followed_by_backward_consistent_with_mul() {
         let dense_mask = vec![0.0_f64, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0];
-        let m = SparseActiveMask::from_dense(&dense_mask, 0.5).unwrap();
+        let m = SparseActiveMask::from_dense(&dense_mask, 0.5)
+            .expect("sparse mask should construct from valid dense mask");
         let original = vec![1.1_f64, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
 
         let mut applied = original.clone();
-        sparse_mask_apply(&mut applied, &m).unwrap();
-        let back = sparse_mask_backward(&original, &m).unwrap();
+        sparse_mask_apply(&mut applied, &m)
+            .expect("sparse mask application should succeed with matching dimensions");
+        let back =
+            sparse_mask_backward(&original, &m).expect("sparse mask backward should succeed");
         assert_eq!(applied, back, "for binary masks: apply == backward");
     }
 }

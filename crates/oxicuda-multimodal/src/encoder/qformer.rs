@@ -281,7 +281,7 @@ mod tests {
 
     fn make_qformer(seed: u64) -> QFormer {
         let mut rng = LcgRng::new(seed);
-        QFormer::new(QFormerConfig::tiny(), &mut rng).unwrap()
+        QFormer::new(QFormerConfig::tiny(), &mut rng).expect("value should be present")
     }
 
     #[test]
@@ -289,7 +289,7 @@ mod tests {
         let qf = make_qformer(1);
         let n_img = 5;
         let img = vec![0.1_f32; n_img * qf.cfg.d_model];
-        let out = qf.forward(&img, n_img).unwrap();
+        let out = qf.forward(&img, n_img).expect("forward should succeed");
         assert_eq!(out.len(), qf.cfg.n_query * qf.cfg.d_model);
     }
 
@@ -314,10 +314,10 @@ mod tests {
         let d = qf.cfg.d_model;
 
         let img3 = vec![0.2_f32; 3 * d];
-        let out3 = qf.forward(&img3, 3).unwrap();
+        let out3 = qf.forward(&img3, 3).expect("forward should succeed");
 
         let img7 = vec![0.2_f32; 7 * d];
-        let out7 = qf.forward(&img7, 7).unwrap();
+        let out7 = qf.forward(&img7, 7).expect("forward should succeed");
 
         assert_eq!(out3.len(), qf.cfg.n_query * d);
         assert_eq!(out7.len(), qf.cfg.n_query * d);
@@ -329,7 +329,7 @@ mod tests {
         let qf = make_qformer(5);
         let d = qf.cfg.d_model;
         let img = vec![0.3_f32; d];
-        let out = qf.forward(&img, 1).unwrap();
+        let out = qf.forward(&img, 1).expect("forward should succeed");
         assert_eq!(out.len(), qf.cfg.n_query * d);
     }
 
@@ -339,8 +339,8 @@ mod tests {
         let qf_b = make_qformer(7);
         let d = qf_a.cfg.d_model;
         let img = vec![0.15_f32; 4 * d];
-        let out_a = qf_a.forward(&img, 4).unwrap();
-        let out_b = qf_b.forward(&img, 4).unwrap();
+        let out_a = qf_a.forward(&img, 4).expect("forward should succeed");
+        let out_b = qf_b.forward(&img, 4).expect("forward should succeed");
         assert_eq!(out_a, out_b);
     }
 
@@ -349,7 +349,7 @@ mod tests {
         let qf = make_qformer(8);
         let d = qf.cfg.d_model;
         let img = vec![0.4_f32; 6 * d];
-        let out = qf.forward(&img, 6).unwrap();
+        let out = qf.forward(&img, 6).expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -387,9 +387,9 @@ mod tests {
             n_layers: 1,
             ffn_dim: 16,
         };
-        let qf = QFormer::new(cfg, &mut rng).unwrap();
+        let qf = QFormer::new(cfg, &mut rng).expect("new should succeed");
         let img = vec![0.2_f32; 5 * 8];
-        let out = qf.forward(&img, 5).unwrap();
+        let out = qf.forward(&img, 5).expect("forward should succeed");
         assert_eq!(out.len(), 3 * 8);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -404,9 +404,9 @@ mod tests {
             n_layers: 2,
             ffn_dim: 16,
         };
-        let qf = QFormer::new(cfg, &mut rng).unwrap();
+        let qf = QFormer::new(cfg, &mut rng).expect("new should succeed");
         let img = vec![0.25_f32; 4 * 8];
-        let out = qf.forward(&img, 4).unwrap();
+        let out = qf.forward(&img, 4).expect("forward should succeed");
         assert_eq!(out.len(), 4 * 8);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -422,8 +422,8 @@ mod tests {
         for (i, v) in img_b.iter_mut().enumerate() {
             *v = 0.1 + (i as f32) * 0.05;
         }
-        let out_a = qf.forward(&img_a, 5).unwrap();
-        let out_b = qf.forward(&img_b, 5).unwrap();
+        let out_a = qf.forward(&img_a, 5).expect("forward should succeed");
+        let out_b = qf.forward(&img_b, 5).expect("forward should succeed");
         let diff: f32 = out_a
             .iter()
             .zip(out_b.iter())
@@ -508,10 +508,10 @@ mod tests {
             n_layers: 4,
             ffn_dim: 16,
         };
-        let qf = QFormer::new(cfg, &mut rng).unwrap();
+        let qf = QFormer::new(cfg, &mut rng).expect("new should succeed");
         assert_eq!(qf.weights.layers.len(), 4);
         let img = vec![0.3_f32; 6 * 8];
-        let out = qf.forward(&img, 6).unwrap();
+        let out = qf.forward(&img, 6).expect("forward should succeed");
         assert_eq!(out.len(), 4 * 8);
         assert!(out.iter().all(|v| v.is_finite()));
     }

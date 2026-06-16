@@ -676,8 +676,10 @@ mod tests {
             hazard_ratio: 0.8,
             ..Default::default()
         };
-        let res_0_5 = schoenfeld_sample_size(&cfg_0_5).unwrap();
-        let res_0_8 = schoenfeld_sample_size(&cfg_0_8).unwrap();
+        let res_0_5 =
+            schoenfeld_sample_size(&cfg_0_5).expect("schoenfeld_sample_size should succeed");
+        let res_0_8 =
+            schoenfeld_sample_size(&cfg_0_8).expect("schoenfeld_sample_size should succeed");
         // HR=0.8 (small effect) needs more events than HR=0.5 (large effect)
         assert!(
             res_0_8.n_events > res_0_5.n_events,
@@ -699,8 +701,10 @@ mod tests {
             two_sided: false,
             ..cfg_two.clone()
         };
-        let res_two = schoenfeld_sample_size(&cfg_two).unwrap();
-        let res_one = schoenfeld_sample_size(&cfg_one).unwrap();
+        let res_two =
+            schoenfeld_sample_size(&cfg_two).expect("schoenfeld_sample_size should succeed");
+        let res_one =
+            schoenfeld_sample_size(&cfg_one).expect("schoenfeld_sample_size should succeed");
         assert!(
             res_one.n_events < res_two.n_events,
             "one-sided ({}) should need fewer events than two-sided ({})",
@@ -718,7 +722,7 @@ mod tests {
             power: target,
             ..Default::default()
         };
-        let res = schoenfeld_sample_size(&cfg).unwrap();
+        let res = schoenfeld_sample_size(&cfg).expect("schoenfeld_sample_size should succeed");
         let diff = (res.achieved_power - target).abs();
         assert!(
             diff < 0.02,
@@ -742,7 +746,7 @@ mod tests {
             allocation_ratio: 2.0, // 2 experimental : 1 control
             ..Default::default()
         };
-        let res = freedman_sample_size(&cfg).unwrap();
+        let res = freedman_sample_size(&cfg).expect("freedman_sample_size should succeed");
         assert!(
             res.n_arm1 > res.n_arm2,
             "arm1 ({}) should be larger than arm2 ({})",
@@ -755,7 +759,7 @@ mod tests {
     #[test]
     fn freedman_event_probs_between_0_1() {
         let cfg = FreedmanConfig::default();
-        let res = freedman_sample_size(&cfg).unwrap();
+        let res = freedman_sample_size(&cfg).expect("freedman_sample_size should succeed");
         assert!(
             res.p_event_arm1 > 0.0 && res.p_event_arm1 < 1.0,
             "p_event_arm1={:.4} out of (0,1)",
@@ -785,8 +789,12 @@ mod tests {
             follow_up_time: 5.0,
             ..base.clone()
         };
-        let n_short = freedman_sample_size(&short_fu).unwrap().n_total;
-        let n_long = freedman_sample_size(&long_fu).unwrap().n_total;
+        let n_short = freedman_sample_size(&short_fu)
+            .expect("freedman_sample_size should succeed")
+            .n_total;
+        let n_long = freedman_sample_size(&long_fu)
+            .expect("freedman_sample_size should succeed")
+            .n_total;
         assert!(
             n_long < n_short,
             "Longer follow-up (n={n_long}) should need fewer subjects than shorter (n={n_short})"
@@ -806,8 +814,12 @@ mod tests {
             hazard_ratio: 0.6,
             ..Default::default()
         };
-        let n_low = freedman_sample_size(&low_hz).unwrap().n_total;
-        let n_high = freedman_sample_size(&high_hz).unwrap().n_total;
+        let n_low = freedman_sample_size(&low_hz)
+            .expect("freedman_sample_size should succeed")
+            .n_total;
+        let n_high = freedman_sample_size(&high_hz)
+            .expect("freedman_sample_size should succeed")
+            .n_total;
         assert!(
             n_high < n_low,
             "High hazard (n={n_high}) should need fewer subjects than low hazard (n={n_low})"
@@ -826,8 +838,8 @@ mod tests {
             n_events: 400,
             ..cfg_small.clone()
         };
-        let pwr_small = power_from_events(&cfg_small).unwrap();
-        let pwr_large = power_from_events(&cfg_large).unwrap();
+        let pwr_small = power_from_events(&cfg_small).expect("power_from_events should succeed");
+        let pwr_large = power_from_events(&cfg_large).expect("power_from_events should succeed");
         assert!(
             pwr_large > pwr_small,
             "power(d=400)={pwr_large:.4} should exceed power(d=100)={pwr_small:.4}"
@@ -846,7 +858,7 @@ mod tests {
             two_sided: true,
             allocation_ratio: 1.0,
         };
-        let sch = schoenfeld_sample_size(&sch_cfg).unwrap();
+        let sch = schoenfeld_sample_size(&sch_cfg).expect("schoenfeld_sample_size should succeed");
 
         let cfg = PowerFromEventsConfig {
             hazard_ratio: 0.5,
@@ -855,7 +867,7 @@ mod tests {
             two_sided: true,
             allocation_ratio: 1.0,
         };
-        let pwr = power_from_events(&cfg).unwrap();
+        let pwr = power_from_events(&cfg).expect("power_from_events should succeed");
         assert!(
             (pwr - 0.80).abs() < 0.02,
             "power {pwr:.4} should be ≈ 0.80 for designed d={}",
@@ -891,7 +903,7 @@ mod tests {
     #[test]
     fn expected_events_simple() {
         // Equal arms, p=0.5 each, n=100 → expected events ≈ 50
-        let e = expected_events(100, 1.0, 0.5, 0.5).unwrap();
+        let e = expected_events(100, 1.0, 0.5, 0.5).expect("expected_events should succeed");
         assert!((e - 50.0).abs() < 1.0, "expected ≈ 50, got {e:.2}");
     }
 
@@ -949,7 +961,7 @@ mod tests {
         // 2:1 allocation, p_arm1=0.4, p_arm2=0.6, n=90
         // n_arm1=ceil(90*2/3)=60, n_arm2=30
         // E[d] = 60*0.4 + 30*0.6 = 24 + 18 = 42
-        let e = expected_events(90, 2.0, 0.4, 0.6).unwrap();
+        let e = expected_events(90, 2.0, 0.4, 0.6).expect("expected_events should succeed");
         assert!((e - 42.0).abs() < 1.0, "expected ≈ 42, got {e:.2}");
     }
 

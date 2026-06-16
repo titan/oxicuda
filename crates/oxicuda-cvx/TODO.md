@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,462 (63 files, including 5,420 code + 266 comments + 373 blanks; markdown 403)
-- **Tests:** 139 passing (lib + e2e_tests)
+- **Actual SLoC:** 20,511 (103 files, including 5,420 code + 266 comments + 373 blanks; markdown 403)
+- **Tests:** 616 passing (lib + e2e_tests)
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -28,6 +28,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 #### Quadratic Programming
 - [x] `qp/active_set_qp.rs` -- Active-set QP with Schur-complement KKT
 - [x] `qp/primal_dual_qp.rs` -- Primal-dual interior-point QP
+- [x] `qp/mehrotra_qp.rs` -- Mehrotra 1992 Predictor-Corrector QP: min ½xᵀPx+qᵀx s.t. Ax=b,x≥0; affine predictor (σ=0), centering σ=(μ_aff/μ)³, corrector with cross-term Δx·Δz, 0.99 fraction-to-boundary step; 9 unit tests + 2 e2e
 
 #### Cone Programs
 - [x] `socp/primal_dual_socp.rs` -- Alternating projection (cone + affine) with dual ascent over `(t, x): ||x||_2 <= t`
@@ -37,6 +38,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 #### Splitting Methods
 - [x] `admm/admm.rs` -- Vanilla x / z / u updates with over-relaxation
 - [x] `admm/consensus_admm.rs` -- Consensus ADMM for separable `f = sum f_i`
+- [x] `admm/dual_decomp.rs` -- Dual Decomposition (Boyd §7.2): dual ascent for separable min Σfᵢ(xᵢ) s.t. ΣAᵢxᵢ=b; closure-based x-updates for maximum generality; configurable step_size/max_iter/tol; 9 unit tests
 - [x] `proximal/prox_gradient.rs` -- Proximal gradient with backtracking
 - [x] `proximal/fista.rs` -- FISTA momentum `t_{k+1} = (1 + sqrt(1 + 4 t_k^2)) / 2`
 - [x] `proximal/accelerated.rs` -- Nesterov accelerated proximal gradient
@@ -61,6 +63,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 - [x] `projection/psd_cone.rs` -- Eigh + clip negative eigenvalues
 - [x] `projection/soc_cone.rs` -- Second-order cone `(t, x): ||x||_2 <= t`
 - [x] `projection/halfspace.rs` -- Affine halfspace `a^T x <= b`
+- [x] `projection/dykstra_pocs.rs` -- Dykstra 1983 POCS: projection onto convex set intersections ∩Cᵢ with Dykstra increment corrections pᵢ; convergence to nearest point (not just any point in intersection); 9 unit tests + 4 e2e
 
 #### Augmented Lagrangian
 - [x] `augmented_lagrangian/alm.rs` -- Method of multipliers for equality-constrained problems
@@ -93,19 +96,22 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 ### Future Enhancements
 
 #### P0 -- Critical
-- [ ] SCS-style operator splitting for general conic programs (LP / QP / SOCP / SDP under one solver)
+- [x] `scs/scs_solver.rs` — SCS-style unified conic solver (O'Donoghue 2021): operator splitting LP/QP/SOCP/SDP under one ADMM framework; K-cones = {non-negative, second-order, positive-semidefinite, exponential, power}; homogeneous self-dual embedding for unbounded/infeasible detection
+- [x] `dcp/expr_tree.rs` — DCP expression tree (Grant-Boyd 2008): atom library (max,min,log,exp,norm,quad_form,huber,kl_div) with curvature propagation rules; reduce to standard conic form; dispatch to SCS or primal-dual solver
 - [x] OSQP-equivalent: parametric QP with warm starts for model-predictive control (qp/osqp.rs -- Stellato 2020; ADMM on the KKT system, projection onto [l,u], over-relaxation, warm-start, primal/dual residual convergence)
-- [ ] Dual decomposition for separable problems with coupling constraints
+- [x] Dual decomposition for separable problems with coupling constraints (`admm/dual_decomp.rs` -- Boyd §7.2; dual ascent for separable min Σfᵢ(xᵢ) s.t. ΣAᵢxᵢ=b; closure-based x-updates; 9 unit tests)
 
 #### P1 -- Important
 - [x] Trust-region methods (Steihaug-Toint, Newton-TR) for unconstrained non-quadratic objectives
 - [x] Quasi-Newton: BFGS, L-BFGS (limited-memory) for large-scale smooth optimisation
 - [x] Frank-Wolfe / conditional gradient for atomic-norm constrained problems
 - [x] Bundle methods for non-smooth convex optimisation (proximal/bundle.rs -- Lemaréchal proximal-bundle; cutting-plane model + Wolfe dual simplex-projected QP master + serious/null step logic by actual-vs-predicted decrease ratio)
-- [ ] Cutting-plane methods for semi-infinite programs
+- [x] `lp/cut_plane.rs` — Cutting-plane method for semi-infinite programs: iteratively add violated constraints as cutting planes; column-generation outer loop; convergence O(1/ε²) for convex subproblems
 - [x] Inexact prox via inner conjugate gradient (for non-closed-form prox) (proximal/inexact_prox.rs -- solve prox_g(v)=argmin g(x)+ρ/2‖x−v‖² for quadratic g via inner CG on (A+ρI)x=ρv+b SPD system)
 - [x] Spectral projected gradient (SPG) with non-monotone line search (gradient/spg.rs -- Birgin 2000; Barzilai-Borwein spectral step + nonmonotone GLL line search + projection closure)
-- [ ] Interior-point method with Mehrotra correction for QP and SOCP (parity with LP path)
+- [x] Interior-point method with Mehrotra correction for QP (`qp/mehrotra_qp.rs` -- Mehrotra 1992; predictor-corrector IPM for QP with σ=(μ_aff/μ)³ and cross-term correction; 9 unit tests)
+- [ ] `qp/mehrotra_socp.rs` — Mehrotra PC for SOCP: extend QP predictor-corrector to second-order cone; Nesterov-Todd scaling; iterate (x,s,λ) with cone-projection step-length guard; parity with existing LP path
+- [x] `riemannian/riemannian_cvx.rs` — Riemannian gradient descent + retraction (Absil 2008): Riemannian gradient via orthogonal projection of Euclidean gradient; retraction via QR/SVD for Stiefel, eigen for SPD, exp map for Grassmann; geodesic Armijo line search
 
 #### P2 -- Nice-to-Have
 - [x] Newton on the dual (for problems with cheap dual function) (gradient/dual_newton.rs -- Boyd-Vandenberghe §9.5; (H(λ)+μI)Δ=∇g, reuses linalg::solve_dense, Full or Armijo-backtracking step)
@@ -113,9 +119,9 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 - [x] Coordinate descent (cyclic, random, accelerated) for separable smooth objectives
 - [x] Block-coordinate descent (BCD) for structured problems (gradient/block_coord_descent.rs -- Tseng 2001 / Beck-Tetruashvili 2013; cyclic/random sweep, exact per-block SPD solve via linalg::solve_dense or inner gradient descent, specialised quadratic API)
 - [x] Mirror descent for non-Euclidean geometries
-- [ ] Riemannian convex optimisation hooks (link with `oxicuda-manifold`)
-- [ ] Disciplined Convex Programming (DCP) front-end with operator tree
-- [ ] Differentiable convex layers (`cvxpylayers`-style differentiation through KKT)
+- [ ] `differentiable/kkt_diff.rs` — Differentiating through KKT conditions (Amos-Kolter 2017 OptNet): implicit function theorem on KKT system; dL/dθ via solve of transposed KKT with adjoint; enables cvxpylayers-style end-to-end training
+- [x] `admm/async_admm.rs` — Asynchronous ADMM (Zhang-Recht 2014): parallel block updates without global synchronisation barrier; bounded-delay convergence guarantee for separable problems
+- [x] `gradient/polyak.rs` — Polyak step-size for subgradient (Polyak 1969): αₖ=(f(xₖ)-f*)/‖gₖ‖² with f* unknown (use moving estimate); geometric convergence for strongly convex + sharp subgradient problems
 
 ## Dependencies
 
@@ -129,7 +135,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 139 passing
+- Tests: 616 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features

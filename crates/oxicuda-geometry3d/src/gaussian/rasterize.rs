@@ -176,7 +176,8 @@ mod tests {
             height: 100,
             bg_color: [0.0, 0.0, 0.0],
         };
-        let img = rasterize_gaussians(&gaussians, &projected, &cam, &cfg).unwrap();
+        let img = rasterize_gaussians(&gaussians, &projected, &cam, &cfg)
+            .expect("rasterize_gaussians should succeed");
         assert_eq!(img.len(), 100 * 100 * 3);
     }
 
@@ -188,7 +189,8 @@ mod tests {
             bg_color: [0.2, 0.4, 0.6],
         };
         let cam = default_cam();
-        let img = rasterize_gaussians(&[], &[], &cam, &cfg).unwrap();
+        let img =
+            rasterize_gaussians(&[], &[], &cam, &cfg).expect("rasterize_gaussians should succeed");
         assert!((img[0] - 0.2).abs() < 1e-5);
         assert!((img[1] - 0.4).abs() < 1e-5);
         assert!((img[2] - 0.6).abs() < 1e-5);
@@ -199,13 +201,14 @@ mod tests {
         let g = make_gaussian_at(5.0);
         let view = identity_view();
         let cam = default_cam();
-        let pg = project_gaussian(&g, &view, &cam).unwrap();
+        let pg = project_gaussian(&g, &view, &cam).expect("project_gaussian should succeed");
         let cfg = RasterConfig {
             width: 100,
             height: 100,
             bg_color: [0.0, 0.0, 0.0],
         };
-        let img = rasterize_gaussians(&[g], &[pg], &cam, &cfg).unwrap();
+        let img = rasterize_gaussians(&[g], &[pg], &cam, &cfg)
+            .expect("rasterize_gaussians should succeed");
         // Center pixel should have some contribution
         let cx = 50usize;
         let cy = 50usize;
@@ -234,13 +237,14 @@ mod tests {
         let g = make_gaussian_at(3.0);
         let view = identity_view();
         let cam = default_cam();
-        let pg = project_gaussian(&g, &view, &cam).unwrap();
+        let pg = project_gaussian(&g, &view, &cam).expect("project_gaussian should succeed");
         let cfg = RasterConfig {
             width: 50,
             height: 50,
             bg_color: [0.1, 0.1, 0.1],
         };
-        let img = rasterize_gaussians(&[g], &[pg], &cam, &cfg).unwrap();
+        let img = rasterize_gaussians(&[g], &[pg], &cam, &cfg)
+            .expect("rasterize_gaussians should succeed");
         assert!(
             img.iter().all(|v| v.is_finite()),
             "All pixels must be finite"

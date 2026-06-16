@@ -1,3 +1,14 @@
-//! Tree-based tabular models: NODE ensemble.
+//! Tree-based tabular models: NODE ensemble, Gradient Boosted Decision Trees,
+//! Random Forest, and Extremely Randomized Trees.
 
+pub mod extra_trees;
+pub mod gbdt;
 pub mod node;
+pub mod random_forest;
+
+pub use extra_trees::{ExtraNode, ExtraTree, ExtraTrees, ExtraTreesConfig};
+pub use gbdt::{
+    GbdtConfig, GbdtLoss, GbdtModel, GbdtNode, GbdtTree, gbdt_feature_importances, gbdt_fit,
+    gbdt_predict, gbdt_predict_proba,
+};
+pub use random_forest::{ForestNode, ForestTask, ForestTree, RandomForest, RandomForestConfig};

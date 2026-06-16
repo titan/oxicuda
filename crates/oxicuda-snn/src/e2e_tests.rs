@@ -588,3 +588,155 @@ fn poisson_encoded_recurrent_learning_loop_changes_weights() {
     let cv = cv_isi(&intervals);
     assert!(cv.is_finite() && cv >= 0.0, "bad CV {cv}");
 }
+
+// ---------------------------------------------------------------------------
+// Cross-module integration: neuron / encoding -> advanced metrics.
+// ---------------------------------------------------------------------------
+
+/// Drive a population of LIF neurons with a Poisson input, collect a time-major
+/// population spike buffer, and run the avalanche detector over it. Confirms the
+/// detector accepts the buffer and that every avalanche obeys the
+/// layout-consistency invariant `size == Σ bins` (the only way this can hold is
+/// if the population coarse-graining agrees with the time-major raster layout
+/// the LIF stage wrote). Wires `neuron::poisson`, `neuron::lif`, and
+/// `metrics::avalanche`.
+#[test]
+fn poisson_lif_population_avalanche_detection() {
+    use crate::handle::LcgRng;
+    use crate::metrics::avalanche::detect_avalanches;
+
+    let n = 24_usize;
+    let t_steps = 300_usize;
+    let mut rng = LcgRng::new(54321);
+    // Heterogeneous drive so the population activity is bursty (some bins busy,
+    // some quiet) — the regime where avalanches are well defined.
+    let rates: Vec<f32> = (0..n).map(|i| 0.05 + 0.02 * (i % 5) as f32).collect();
+    let mut input_spikes = vec![0.0_f32; n];
+    let mut lif_state = LifState::new(n);
+    let mut lif_out = vec![0.0_f32; n];
+    let cfg = LifConfig::default();
+
+    // Time-major population buffer: row t holds the n neuron spikes for step t.
+    let mut population = vec![0.0_f32; t_steps * n];
+    for t in 0..t_steps {
+        poisson_step(&rates, 1.0, &mut rng, &mut input_spikes).expect("poisson");
+        // Scale the Poisson input up so the LIF pool actually fires.
+        let drive: Vec<f32> = input_spikes.iter().map(|&s| s * 1.5).collect();
+        lif_step(&mut lif_state, &drive, &cfg, &mut lif_out).expect("lif");
+        population[t * n..(t + 1) * n].copy_from_slice(&lif_out);
+    }
+
+    let stats = detect_avalanches(&population, t_steps, n, 2).expect("avalanche detect");
+    for av in &stats.avalanches {
+        assert!(av.duration >= 1, "avalanche with zero duration");
+        assert!(av.size >= 1, "avalanche with zero size");
+        let bin_sum: usize = av.bins.iter().sum();
+        assert_eq!(
+            av.size, bin_sum,
+            "layout inconsistency: size {} != Σ bins {}",
+            av.size, bin_sum
+        );
+        assert_eq!(
+            av.duration,
+            av.bins.len(),
+            "duration must equal bins length"
+        );
+    }
+}
+
+/// Run a single LIF neuron under a constant supra-threshold drive, take its
+/// spike train, and confirm the information-theoretic identity `MI(X; X) = H(X)`
+/// holds numerically for the word-binned estimators, and that the value is a
+/// non-degenerate (strictly positive) entropy. Wires `neuron::lif` and
+/// `metrics::information`.
+#[test]
+fn lif_train_self_mutual_information_equals_entropy() {
+    use crate::metrics::information::{MiCorrection, mutual_information, spike_train_entropy};
+
+    let t_steps = 120_usize;
+    let cfg = LifConfig {
+        tau_m: 20.0,
+        v_th: 1.0,
+        v_rest: 0.0,
+        dt: 1.0,
+        reset: ResetMode::Hard,
+    };
+    let mut state = LifState::new(1);
+    // A current that makes the neuron fire periodically (but not every step),
+    // so the word-binned symbol distribution is non-degenerate.
+    let current = vec![0.18_f32; 1];
+    let mut spikes = vec![0.0_f32; 1];
+    let mut train = vec![0.0_f32; t_steps];
+    for (t, slot) in train.iter_mut().enumerate() {
+        lif_step(&mut state, &current, &cfg, &mut spikes).expect("lif");
+        *slot = spikes[0];
+        let _ = t;
+    }
+
+    // Word-bin parameters chosen so the bit pattern splits across symbols.
+    let bin_steps = 2_usize;
+    let word_bits = 1_usize;
+    let h = spike_train_entropy(&train, t_steps, bin_steps, word_bits).expect("entropy");
+    let mi = mutual_information(
+        &train,
+        &train,
+        t_steps,
+        bin_steps,
+        word_bits,
+        MiCorrection::None,
+    )
+    .expect("mi");
+
+    assert!(mi >= 0.0, "MI must be non-negative, got {mi}");
+    assert!(h > 0.0, "entropy degenerate (train never split): H={h}");
+    assert!(
+        (mi - h).abs() < 1e-5,
+        "self-MI {mi} should equal entropy {h}"
+    );
+}
+
+/// Build a 1-D stimulus with a temporal bump preceding each of several locked
+/// spikes and confirm the spike-triggered average peaks at the bump centre.
+/// Wires `metrics::decoding` with a hand-built spike train whose timing locks to
+/// the stimulus feature.
+#[test]
+fn locked_spikes_sta_peaks_at_bump_centre() {
+    use crate::metrics::decoding::spike_triggered_average;
+
+    let stim_dim = 1_usize;
+    let window = 7_usize;
+    // A symmetric triangular bump; its peak sits at index 3 (the centre).
+    let bump = [0.0_f32, 0.25, 0.5, 1.0, 0.5, 0.25, 0.0];
+    let repeats = 5_usize;
+    let gap = 5_usize;
+    let mut stim: Vec<f32> = Vec::new();
+    let mut spikes: Vec<f32> = Vec::new();
+    for _ in 0..repeats {
+        for (k, &b) in bump.iter().enumerate() {
+            stim.push(b);
+            // Spike on the final bump sample so its window == the bump.
+            spikes.push(if k == bump.len() - 1 { 1.0 } else { 0.0 });
+        }
+        for _ in 0..gap {
+            stim.push(0.0);
+            spikes.push(0.0);
+        }
+    }
+    let t_steps = stim.len();
+    let sta = spike_triggered_average(&stim, &spikes, t_steps, stim_dim, window).expect("sta");
+
+    // The STA must reproduce the bump and therefore peak at its centre index.
+    let mut peak_idx = 0_usize;
+    let mut peak_val = f32::NEG_INFINITY;
+    for (k, &v) in sta.iter().enumerate() {
+        if v > peak_val {
+            peak_val = v;
+            peak_idx = k;
+        }
+    }
+    assert_eq!(
+        peak_idx, 3,
+        "STA peak at {peak_idx}, expected bump centre 3"
+    );
+    assert!((peak_val - 1.0).abs() < 1e-5, "STA peak value {peak_val}");
+}

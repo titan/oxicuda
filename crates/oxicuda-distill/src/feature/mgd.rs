@@ -558,10 +558,11 @@ mod tests {
     fn loss_nonneg() {
         let mut rng = make_rng();
         let cfg = base_cfg(4, 4, 5, 6, 0.65);
-        let generator = MgdGenerator::new(4, 4, &mut rng).unwrap();
+        let generator = MgdGenerator::new(4, 4, &mut rng).expect("new should succeed");
         let student: Vec<f32> = (0..4 * 5 * 6).map(|i| (i as f32) * 0.01).collect();
         let teacher: Vec<f32> = (0..4 * 5 * 6).map(|i| (i as f32) * 0.02).collect();
-        let loss = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng).unwrap();
+        let loss = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng)
+            .expect("mgd_loss should succeed");
         assert!(loss >= 0.0 && loss.is_finite(), "loss={loss}");
     }
 
@@ -571,15 +572,17 @@ mod tests {
         let mut rng = make_rng();
         let cfg = base_cfg(3, 3, 4, 4, 0.0);
         let mut wrng = LcgRng::new(99);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let student: Vec<f32> = (0..3 * 4 * 4).map(|i| (i as f32) * 0.03 - 0.5).collect();
         let teacher: Vec<f32> = (0..3 * 4 * 4).map(|i| (i as f32) * 0.01).collect();
 
         // mask_ratio=0 → mask all ones → masked == aligned == student (C_s==C_t, no align).
-        let recon = forward_generator(&generator, &student, 4, 4).unwrap();
-        let expected = mse(&recon, &teacher).unwrap();
+        let recon = forward_generator(&generator, &student, 4, 4)
+            .expect("forward_generator should succeed");
+        let expected = mse(&recon, &teacher).expect("mse should succeed");
 
-        let loss = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng).unwrap();
+        let loss = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng)
+            .expect("mgd_loss should succeed");
         assert!(
             (loss - expected).abs() < 1e-5,
             "ratio0 loss {loss} != MSE(gen(student),teacher) {expected}"
@@ -592,15 +595,17 @@ mod tests {
         let mut rng = make_rng();
         let cfg = base_cfg(2, 2, 4, 4, 1.0);
         let mut wrng = LcgRng::new(5);
-        let generator = MgdGenerator::new(2, 2, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(2, 2, &mut wrng).expect("new should succeed");
         let student: Vec<f32> = (0..2 * 4 * 4).map(|i| (i as f32) + 1.0).collect();
         let teacher: Vec<f32> = vec![0.3_f32; 2 * 4 * 4];
 
         let zeros = vec![0.0_f32; 2 * 4 * 4];
-        let recon_zero = forward_generator(&generator, &zeros, 4, 4).unwrap();
-        let expected = mse(&recon_zero, &teacher).unwrap();
+        let recon_zero =
+            forward_generator(&generator, &zeros, 4, 4).expect("forward_generator should succeed");
+        let expected = mse(&recon_zero, &teacher).expect("mse should succeed");
 
-        let loss = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng).unwrap();
+        let loss = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng)
+            .expect("mgd_loss should succeed");
         assert!(
             (loss - expected).abs() < 1e-5,
             "ratio1 loss {loss} != MSE(gen(0),teacher) {expected}"
@@ -614,10 +619,12 @@ mod tests {
         let cfg = base_cfg(2, 2, 5, 5, 0.0);
         // w1 = identity, w2 = identity ⇒ generator is identity (ReLU only clips negatives).
         let id = identity_conv(2);
-        let generator = MgdGenerator::from_weights(None, id.clone(), id, 2, 2).unwrap();
+        let generator = MgdGenerator::from_weights(None, id.clone(), id, 2, 2)
+            .expect("value should be present");
         // Use non-negative features so ReLU is a no-op and identity holds exactly.
         let feat: Vec<f32> = (0..2 * 5 * 5).map(|i| (i as f32) * 0.1 + 0.5).collect();
-        let loss = mgd_loss(&feat, &feat, &generator, &cfg, &mut rng).unwrap();
+        let loss =
+            mgd_loss(&feat, &feat, &generator, &cfg, &mut rng).expect("mgd_loss should succeed");
         assert!(
             loss.abs() < 1e-5,
             "identity gen, s==t, ratio0 → 0, got {loss}"
@@ -630,7 +637,7 @@ mod tests {
         let mut rng = make_rng();
         let cfg = base_cfg(3, 5, 4, 4, 0.5);
         let mut wrng = LcgRng::new(17);
-        let generator = MgdGenerator::new(3, 5, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 5, &mut wrng).expect("new should succeed");
         assert!(
             generator.w_align.is_some(),
             "C_s!=C_t must create align weights"
@@ -640,16 +647,17 @@ mod tests {
         // The internal recon length must equal teacher length (C_t·H·W) or mgd_loss errs.
         let loss = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng);
         assert!(loss.is_ok(), "align path should succeed: {:?}", loss.err());
-        assert!(loss.unwrap().is_finite());
+        assert!(loss.expect("loss should be present").is_finite());
     }
 
     // ── 10. recon shape == teacher shape (forward_generator directly) ────────
     #[test]
     fn recon_shape_matches_teacher() {
         let mut wrng = LcgRng::new(3);
-        let generator = MgdGenerator::new(4, 4, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(4, 4, &mut wrng).expect("new should succeed");
         let masked: Vec<f32> = vec![0.1_f32; 4 * 6 * 7];
-        let recon = forward_generator(&generator, &masked, 6, 7).unwrap();
+        let recon =
+            forward_generator(&generator, &masked, 6, 7).expect("forward_generator should succeed");
         assert_eq!(recon.len(), 4 * 6 * 7, "recon shape must be C_t·H·W");
     }
 
@@ -661,14 +669,16 @@ mod tests {
         let mut cfg2 = cfg1.clone();
         cfg2.alpha_mgd = 3.0;
         let mut wrng = LcgRng::new(21);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let student: Vec<f32> = (0..3 * 5 * 5).map(|i| (i as f32) * 0.04).collect();
         let teacher: Vec<f32> = (0..3 * 5 * 5).map(|i| (i as f32) * 0.03).collect();
         // Use independent RNG copies seeded identically so the mask is the same.
         let mut r1 = LcgRng::new(1000);
         let mut r2 = LcgRng::new(1000);
-        let l1 = mgd_loss(&student, &teacher, &generator, &cfg1, &mut r1).unwrap();
-        let l2 = mgd_loss(&student, &teacher, &generator, &cfg2, &mut r2).unwrap();
+        let l1 = mgd_loss(&student, &teacher, &generator, &cfg1, &mut r1)
+            .expect("mgd_loss should succeed");
+        let l2 = mgd_loss(&student, &teacher, &generator, &cfg2, &mut r2)
+            .expect("mgd_loss should succeed");
         assert!(
             (l2 - 3.0 * l1).abs() < 1e-4,
             "alpha must scale: l1={l1} l2={l2}"
@@ -679,10 +689,12 @@ mod tests {
     #[test]
     fn deterministic_forward() {
         let mut wrng = LcgRng::new(8);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let masked: Vec<f32> = (0..3 * 4 * 4).map(|i| (i as f32) * 0.1).collect();
-        let a = forward_generator(&generator, &masked, 4, 4).unwrap();
-        let b = forward_generator(&generator, &masked, 4, 4).unwrap();
+        let a =
+            forward_generator(&generator, &masked, 4, 4).expect("forward_generator should succeed");
+        let b =
+            forward_generator(&generator, &masked, 4, 4).expect("forward_generator should succeed");
         assert_eq!(a, b, "generator forward must be deterministic");
     }
 
@@ -691,13 +703,15 @@ mod tests {
     fn loss_deterministic_with_seed() {
         let cfg = base_cfg(3, 3, 6, 6, 0.65);
         let mut wrng = LcgRng::new(50);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let student: Vec<f32> = (0..3 * 6 * 6).map(|i| (i as f32) * 0.02).collect();
         let teacher: Vec<f32> = (0..3 * 6 * 6).map(|i| (i as f32) * 0.025).collect();
         let mut r1 = LcgRng::new(77);
         let mut r2 = LcgRng::new(77);
-        let l1 = mgd_loss(&student, &teacher, &generator, &cfg, &mut r1).unwrap();
-        let l2 = mgd_loss(&student, &teacher, &generator, &cfg, &mut r2).unwrap();
+        let l1 = mgd_loss(&student, &teacher, &generator, &cfg, &mut r1)
+            .expect("mgd_loss should succeed");
+        let l2 = mgd_loss(&student, &teacher, &generator, &cfg, &mut r2)
+            .expect("mgd_loss should succeed");
         assert!((l1 - l2).abs() < 1e-9, "same seed → same loss: {l1} {l2}");
     }
 
@@ -706,7 +720,7 @@ mod tests {
     fn conv_same_pad_shape() {
         let id = identity_conv(2);
         let input: Vec<f32> = (0..2 * 3 * 4).map(|i| i as f32).collect();
-        let out = conv3x3_same(&input, &id, 2, 3, 4).unwrap();
+        let out = conv3x3_same(&input, &id, 2, 3, 4).expect("conv3x3_same should succeed");
         assert_eq!(out.len(), 2 * 3 * 4);
         // Identity conv must reproduce the input exactly (zero-pad doesn't matter for center tap).
         assert_eq!(out, input, "identity conv must reproduce input");
@@ -718,7 +732,7 @@ mod tests {
         let mut rng = make_rng();
         let cfg = base_cfg(3, 3, 4, 4, 0.5);
         let mut wrng = LcgRng::new(2);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let student = vec![0.0_f32; 3 * 4 * 4 - 1]; // wrong size
         let teacher = vec![0.0_f32; 3 * 4 * 4];
         let r = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng);
@@ -731,7 +745,7 @@ mod tests {
         let mut rng = make_rng();
         let cfg = base_cfg(3, 3, 4, 4, 0.5);
         let mut wrng = LcgRng::new(2);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let student = vec![0.0_f32; 3 * 4 * 4];
         let teacher = vec![0.0_f32; 3 * 4 * 4 + 5]; // wrong size
         let r = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng);
@@ -744,7 +758,7 @@ mod tests {
         let mut rng = make_rng();
         let mut cfg = base_cfg(3, 3, 4, 4, 1.5);
         let mut wrng = LcgRng::new(2);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let student = vec![0.0_f32; 3 * 4 * 4];
         let teacher = vec![0.0_f32; 3 * 4 * 4];
         let r = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng);
@@ -761,7 +775,7 @@ mod tests {
         let mut rng = make_rng();
         let cfg = base_cfg(3, 3, 4, 4, 0.5);
         let mut wrng = LcgRng::new(2);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let teacher = vec![0.0_f32; 3 * 4 * 4];
         let r = mgd_loss(&[], &teacher, &generator, &cfg, &mut rng);
         assert!(matches!(r, Err(DistillError::EmptyInput)));
@@ -773,7 +787,7 @@ mod tests {
         let mut rng = make_rng();
         let cfg = base_cfg(3, 3, 0, 4, 0.5); // height = 0
         let mut wrng = LcgRng::new(2);
-        let generator = MgdGenerator::new(3, 3, &mut wrng).unwrap();
+        let generator = MgdGenerator::new(3, 3, &mut wrng).expect("new should succeed");
         let student = vec![0.0_f32; 12];
         let teacher = vec![0.0_f32; 12];
         let r = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng);
@@ -807,7 +821,8 @@ mod tests {
         let cfg = base_cfg(2, 3, 4, 4, 0.5);
         // Construct a generator claiming C_s=2,C_t=3 but with NO align weights.
         let conv = vec![0.0_f32; 3 * 3 * 9];
-        let generator = MgdGenerator::from_weights(None, conv.clone(), conv, 2, 3).unwrap();
+        let generator = MgdGenerator::from_weights(None, conv.clone(), conv, 2, 3)
+            .expect("value should be present");
         let student = vec![0.0_f32; 2 * 4 * 4];
         let teacher = vec![0.0_f32; 3 * 4 * 4];
         let r = mgd_loss(&student, &teacher, &generator, &cfg, &mut rng);

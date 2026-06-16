@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn anisotropic_config_isotropic() {
-        let cfg = AnisotropicPqConfig::isotropic(2, 8).unwrap();
+        let cfg = AnisotropicPqConfig::isotropic(2, 8).expect("isotropic config is valid");
         assert!((cfg.weight.eta() - 1.0).abs() < 1e-6);
     }
 
@@ -586,11 +586,11 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 5;
         let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng);
         assert!(model.is_ok(), "{:?}", model.err());
-        let model = model.unwrap();
+        let model = model.expect("training should succeed");
         assert_eq!(model.codebook.m, 2);
         assert_eq!(model.codebook.ksub, 8);
         assert_eq!(model.codebook.dsub, 4);
@@ -599,7 +599,7 @@ mod tests {
     #[test]
     fn anisotropic_n_zero_error() {
         let mut rng = make_rng(2);
-        let cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         let res = AnisotropicPq::train(&[], 0, 8, &[1.0], 1, cfg, &mut rng);
         assert!(matches!(res, Err(AnnError::EmptyInput)));
     }
@@ -607,7 +607,7 @@ mod tests {
     #[test]
     fn anisotropic_dim_not_divisible_error() {
         let mut rng = make_rng(3);
-        let cfg = AnisotropicPqConfig::new(3, 4, 0.5).unwrap();
+        let cfg = AnisotropicPqConfig::new(3, 4, 0.5).expect("config parameters are valid");
         let data = vec![0.5_f32; 50 * 8]; // dim=8, m=3 → 8 % 3 ≠ 0
         let queries = vec![0.5_f32; 5 * 8];
         let res = AnisotropicPq::train(&data, 50, 8, &queries, 5, cfg, &mut rng);
@@ -617,7 +617,7 @@ mod tests {
     #[test]
     fn anisotropic_wrong_query_count_error() {
         let mut rng = make_rng(4);
-        let cfg = AnisotropicPqConfig::new(2, 4, 0.5).unwrap();
+        let cfg = AnisotropicPqConfig::new(2, 4, 0.5).expect("config parameters are valid");
         let data = vec![0.5_f32; 50 * 8];
         // n_queries = 0
         let res = AnisotropicPq::train(&data, 50, 8, &[], 0, cfg, &mut rng);
@@ -634,10 +634,11 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 5;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
         assert_eq!(codes.len(), n * model.codebook.m);
     }
 
@@ -649,11 +650,12 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 5;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
-        let decoded = model.decode(&codes, n).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
+        let decoded = model.decode(&codes, n).expect("decode should succeed");
         assert_eq!(decoded.len(), n * dim);
     }
 
@@ -665,11 +667,12 @@ mod tests {
         let n_q = 16;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 4, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 4, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 10;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let codes = model.encode(&data, n).unwrap();
-        let decoded = model.decode(&codes, n).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let codes = model.encode(&data, n).expect("encode should succeed");
+        let decoded = model.decode(&codes, n).expect("decode should succeed");
         let mse: f32 = data
             .iter()
             .zip(decoded.iter())
@@ -688,9 +691,10 @@ mod tests {
         let n_q = 8;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 5;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
         // Wrong data length for encode
         let bad = vec![0.0_f32; 3 * dim - 1];
         let res = model.encode(&bad, 3);
@@ -707,10 +711,13 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 5;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let loss = model.isotropic_loss(&data, n).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let loss = model
+            .isotropic_loss(&data, n)
+            .expect("isotropic loss should succeed");
         assert!(loss >= 0.0, "isotropic loss={loss} should be ≥ 0");
         assert!(loss.is_finite(), "loss should be finite");
     }
@@ -723,10 +730,13 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 5;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let loss = model.anisotropic_loss(&data, n, &queries, n_q).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let loss = model
+            .anisotropic_loss(&data, n, &queries, n_q)
+            .expect("anisotropic loss should succeed");
         assert!(loss >= 0.0, "anisotropic loss={loss} should be ≥ 0");
         assert!(loss.is_finite(), "loss should be finite");
     }
@@ -739,10 +749,13 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 5;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let ratio = model.loss_ratio(&data, n, &queries, n_q).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let ratio = model
+            .loss_ratio(&data, n, &queries, n_q)
+            .expect("loss ratio should succeed");
         assert!(ratio.is_finite(), "ratio={ratio} should be finite");
     }
 
@@ -754,10 +767,13 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg.n_epochs = 5;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let ratio = model.loss_ratio(&data, n, &queries, n_q).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let ratio = model
+            .loss_ratio(&data, n, &queries, n_q)
+            .expect("loss ratio should succeed");
         assert!(ratio >= 0.0, "loss ratio={ratio} should be ≥ 0");
     }
 
@@ -770,11 +786,16 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::isotropic(2, 8).unwrap();
+        let mut cfg = AnisotropicPqConfig::isotropic(2, 8).expect("isotropic config is valid");
         cfg.n_epochs = 10;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let iso = model.isotropic_loss(&data, n).unwrap();
-        let aniso = model.anisotropic_loss(&data, n, &queries, n_q).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let iso = model
+            .isotropic_loss(&data, n)
+            .expect("isotropic loss should succeed");
+        let aniso = model
+            .anisotropic_loss(&data, n, &queries, n_q)
+            .expect("anisotropic loss should succeed");
         assert!(
             (iso - aniso).abs() < 1e-5,
             "η=1: iso={iso:.6} ≠ aniso={aniso:.6}"
@@ -791,11 +812,16 @@ mod tests {
         let n_q = 10;
         let data = normal_vecs(n, dim, &mut rng);
         let queries = normal_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.0).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 8, 0.0).expect("config parameters are valid");
         cfg.n_epochs = 10;
-        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng).unwrap();
-        let iso = model.isotropic_loss(&data, n).unwrap();
-        let aniso = model.anisotropic_loss(&data, n, &queries, n_q).unwrap();
+        let model = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng)
+            .expect("training should succeed");
+        let iso = model
+            .isotropic_loss(&data, n)
+            .expect("isotropic loss should succeed");
+        let aniso = model
+            .anisotropic_loss(&data, n, &queries, n_q)
+            .expect("anisotropic loss should succeed");
         // aniso ≤ iso + tiny float tolerance
         assert!(
             aniso <= iso + 1e-5,
@@ -817,14 +843,14 @@ mod tests {
         let mut rng_a = make_rng(42);
         let mut rng_b = make_rng(42);
 
-        let mut cfg_a = AnisotropicPqConfig::new(2, 8, 0.5).unwrap();
+        let mut cfg_a = AnisotropicPqConfig::new(2, 8, 0.5).expect("config parameters are valid");
         cfg_a.n_epochs = 5;
         let cfg_b = cfg_a.clone();
 
-        let model_a =
-            AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg_a, &mut rng_a).unwrap();
-        let model_b =
-            AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg_b, &mut rng_b).unwrap();
+        let model_a = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg_a, &mut rng_a)
+            .expect("training with cfg_a should succeed");
+        let model_b = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg_b, &mut rng_b)
+            .expect("training with cfg_b should succeed");
 
         // Same seed → identical codebook
         assert_eq!(
@@ -844,7 +870,7 @@ mod tests {
         let n_q = 8;
         let data = rand_vecs(n, dim, &mut rng);
         let queries = rand_vecs(n_q, dim, &mut rng);
-        let mut cfg = AnisotropicPqConfig::new(2, 4, 0.3).unwrap();
+        let mut cfg = AnisotropicPqConfig::new(2, 4, 0.3).expect("config parameters are valid");
         cfg.n_epochs = 5;
         let res = AnisotropicPq::train(&data, n, dim, &queries, n_q, cfg, &mut rng);
         assert!(res.is_ok(), "{:?}", res.err());

@@ -548,8 +548,8 @@ mod tests {
     fn ext_iforest_score_shape() {
         let (data, n, d) = make_inliers_and_outlier(99, 4, 2);
         let cfg = ExtIforestConfig::default();
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let scores = ext_iforest_score(&model, &data, n).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let scores = ext_iforest_score(&model, &data, n).expect("ext_iforest_score should succeed");
         assert_eq!(scores.len(), n);
     }
 
@@ -564,8 +564,8 @@ mod tests {
             extension_level: usize::MAX,
             random_seed: 3,
         };
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let scores = ext_iforest_score(&model, &data, n).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let scores = ext_iforest_score(&model, &data, n).expect("ext_iforest_score should succeed");
         for (i, &s) in scores.iter().enumerate() {
             assert!(s > 0.0 && s < 1.0, "score[{i}] = {s} not in (0, 1)");
         }
@@ -584,8 +584,8 @@ mod tests {
             extension_level: usize::MAX,
             random_seed: 4,
         };
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let scores = ext_iforest_score(&model, &data, n).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let scores = ext_iforest_score(&model, &data, n).expect("ext_iforest_score should succeed");
 
         let outlier_score = scores[n_inliers]; // last point = outlier
         let inlier_mean: f64 = scores[..n_inliers].iter().sum::<f64>() / n_inliers as f64;
@@ -600,8 +600,9 @@ mod tests {
     fn ext_iforest_predict_labels() {
         let (data, n, d) = make_inliers_and_outlier(99, 4, 5);
         let cfg = ExtIforestConfig::default();
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let labels = ext_iforest_predict(&model, &data, n).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let labels =
+            ext_iforest_predict(&model, &data, n).expect("ext_iforest_predict should succeed");
         for &l in &labels {
             assert!(l == 1 || l == -1, "label={l} not in {{-1, +1}}");
         }
@@ -621,8 +622,9 @@ mod tests {
             extension_level: usize::MAX,
             random_seed: 6,
         };
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let labels = ext_iforest_predict(&model, &data, n).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let labels =
+            ext_iforest_predict(&model, &data, n).expect("ext_iforest_predict should succeed");
         let n_anomalous = labels.iter().filter(|&&l| l == -1).count();
         let frac = n_anomalous as f64 / n as f64;
         // Allow ±5% tolerance
@@ -643,8 +645,8 @@ mod tests {
             extension_level: 1,
             random_seed: 7,
         };
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let scores = ext_iforest_score(&model, &data, n).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let scores = ext_iforest_score(&model, &data, n).expect("ext_iforest_score should succeed");
         // Must still produce valid scores
         assert_eq!(scores.len(), n);
         assert!(scores.iter().all(|&s| s > 0.0 && s < 1.0));
@@ -671,8 +673,8 @@ mod tests {
             extension_level: usize::MAX,
             random_seed: 8,
         };
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let scores = ext_iforest_score(&model, &data, n).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let scores = ext_iforest_score(&model, &data, n).expect("ext_iforest_score should succeed");
         assert_eq!(scores.len(), n);
         assert!(
             scores.iter().all(|s| s.is_finite()),
@@ -692,8 +694,8 @@ mod tests {
             extension_level: usize::MAX,
             random_seed: 9,
         };
-        let model = ext_iforest_fit(&data, 1, 4, &cfg).unwrap();
-        let scores = ext_iforest_score(&model, &data, 1).unwrap();
+        let model = ext_iforest_fit(&data, 1, 4, &cfg).expect("ext_iforest_fit should succeed");
+        let scores = ext_iforest_score(&model, &data, 1).expect("ext_iforest_score should succeed");
         assert_eq!(scores.len(), 1);
         assert!(scores[0].is_finite(), "score must be finite for n=1");
     }
@@ -711,8 +713,8 @@ mod tests {
             extension_level: usize::MAX,
             random_seed: 10,
         };
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let scores = ext_iforest_score(&model, &data, n).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let scores = ext_iforest_score(&model, &data, n).expect("ext_iforest_score should succeed");
         assert_eq!(scores.len(), n);
         assert!(
             scores.iter().all(|s| s.is_finite()),
@@ -731,10 +733,10 @@ mod tests {
             extension_level: usize::MAX,
             random_seed: 11,
         };
-        let m1 = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let m2 = ext_iforest_fit(&data, n, d, &cfg).unwrap();
-        let s1 = ext_iforest_score(&m1, &data, n).unwrap();
-        let s2 = ext_iforest_score(&m2, &data, n).unwrap();
+        let m1 = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let m2 = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
+        let s1 = ext_iforest_score(&m1, &data, n).expect("ext_iforest_score should succeed");
+        let s2 = ext_iforest_score(&m2, &data, n).expect("ext_iforest_score should succeed");
         for (i, (a, b)) in s1.iter().zip(s2.iter()).enumerate() {
             assert!(
                 (a - b).abs() < 1e-12,
@@ -754,7 +756,7 @@ mod tests {
             extension_level: 999, // much larger than d=3
             random_seed: 12,
         };
-        let model = ext_iforest_fit(&data, n, d, &cfg).unwrap();
+        let model = ext_iforest_fit(&data, n, d, &cfg).expect("ext_iforest_fit should succeed");
         assert_eq!(model.config.extension_level, 3, "should be clamped to d=3");
     }
 }

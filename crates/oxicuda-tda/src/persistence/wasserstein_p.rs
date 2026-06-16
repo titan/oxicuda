@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn wasserstein_p_identical_diagrams_is_zero() {
         let d = make_diag(&[(0.0, 1.0), (0.5, 2.5), (1.0, 3.0)]);
-        let dist = wasserstein_p(&d, &d, 2.0).unwrap();
+        let dist = wasserstein_p(&d, &d, 2.0).expect("wasserstein_p should succeed");
         assert!(dist < 1e-9, "self W2 = {dist}");
     }
 
@@ -368,8 +368,8 @@ mod tests {
     fn wasserstein_p_one_self_consistent() {
         let d1 = make_diag(&[(0.0, 2.0)]);
         let d2 = make_diag(&[(0.0, 3.0)]);
-        let wp = wasserstein_p(&d1, &d2, 1.0).unwrap();
-        let w1 = wasserstein_1(&d1, &d2).unwrap();
+        let wp = wasserstein_p(&d1, &d2, 1.0).expect("wasserstein_p should succeed");
+        let w1 = wasserstein_1(&d1, &d2).expect("wasserstein_1 should succeed");
         // Both are finite, non-negative
         assert!(wp.is_finite() && wp >= 0.0);
         assert!(w1.is_finite() && w1 >= 0.0);
@@ -378,7 +378,8 @@ mod tests {
     // 3. Both diagrams empty → 0
     #[test]
     fn wasserstein_p_empty_both_is_zero() {
-        let dist = wasserstein_p(&empty_diag(), &empty_diag(), 2.0).unwrap();
+        let dist =
+            wasserstein_p(&empty_diag(), &empty_diag(), 2.0).expect("value should be present");
         assert_eq!(dist, 0.0);
     }
 
@@ -386,7 +387,7 @@ mod tests {
     #[test]
     fn wasserstein_p_one_empty() {
         let d = make_diag(&[(0.0, 2.0)]); // diagonal_dist = 1.0
-        let dist = wasserstein_p(&d, &empty_diag(), 2.0).unwrap();
+        let dist = wasserstein_p(&d, &empty_diag(), 2.0).expect("value should be present");
         // W2 = (1.0^2)^(1/2) = 1.0
         assert!((dist - 1.0).abs() < 1e-9, "W2 one-empty = {dist}");
     }
@@ -396,8 +397,8 @@ mod tests {
     fn wasserstein_p_positive() {
         let d1 = make_diag(&[(0.0, 1.0), (2.0, 4.0)]);
         let d2 = make_diag(&[(0.5, 1.5), (1.0, 3.0)]);
-        assert!(wasserstein_p(&d1, &d2, 1.5).unwrap() >= 0.0);
-        assert!(wasserstein_p(&d1, &d2, 3.0).unwrap() >= 0.0);
+        assert!(wasserstein_p(&d1, &d2, 1.5).expect("wasserstein_p should succeed") >= 0.0);
+        assert!(wasserstein_p(&d1, &d2, 3.0).expect("wasserstein_p should succeed") >= 0.0);
     }
 
     // 6. W_2 ≥ 0 and W_∞ (bottleneck) ≥ W_2 conceptually (just verify ordering property)
@@ -406,9 +407,9 @@ mod tests {
     fn wasserstein_p_increases_with_p() {
         let d1 = make_diag(&[(0.0, 4.0)]);
         let d2 = make_diag(&[(1.0, 5.0)]);
-        let w1 = wasserstein_p(&d1, &d2, 1.0).unwrap();
-        let w2 = wasserstein_p(&d1, &d2, 2.0).unwrap();
-        let w4 = wasserstein_p(&d1, &d2, 4.0).unwrap();
+        let w1 = wasserstein_p(&d1, &d2, 1.0).expect("wasserstein_p should succeed");
+        let w2 = wasserstein_p(&d1, &d2, 2.0).expect("wasserstein_p should succeed");
+        let w4 = wasserstein_p(&d1, &d2, 4.0).expect("wasserstein_p should succeed");
         // W_p is non-decreasing in p for a single matched pair
         assert!(w1 <= w2 + 1e-9, "w1={w1} w2={w2}");
         assert!(w2 <= w4 + 1e-9, "w2={w2} w4={w4}");
@@ -448,7 +449,7 @@ mod tests {
     // 11. Hungarian on empty matrix returns empty
     #[test]
     fn hungarian_empty_ok() {
-        let assignment = hungarian(&[], 0).unwrap();
+        let assignment = hungarian(&[], 0).expect("hungarian should succeed");
         assert!(assignment.is_empty());
     }
 
@@ -457,7 +458,7 @@ mod tests {
     fn hungarian_identity_match() {
         let large = 1e10_f64;
         let cost = vec![0.0, large, large, large, 0.0, large, large, large, 0.0];
-        let assignment = hungarian(&cost, 3).unwrap();
+        let assignment = hungarian(&cost, 3).expect("hungarian should succeed");
         assert_eq!(assignment, vec![0, 1, 2]);
     }
 
@@ -477,7 +478,8 @@ mod tests {
         let d1 = make_diag(&[(0.0, 1.0), (1.0, 3.0)]);
         let d2 = make_diag(&[(0.5, 2.0)]);
         let mut rng = LcgRng::new(42);
-        let sw = sliced_wasserstein(&d1, &d2, 2.0, 50, &mut rng).unwrap();
+        let sw = sliced_wasserstein(&d1, &d2, 2.0, 50, &mut rng)
+            .expect("sliced_wasserstein should succeed");
         assert!(sw.is_finite());
     }
 
@@ -486,7 +488,8 @@ mod tests {
     fn sliced_wasserstein_zero_for_identical() {
         let d = make_diag(&[(0.0, 2.0), (1.0, 4.0)]);
         let mut rng = LcgRng::new(7);
-        let sw = sliced_wasserstein(&d, &d, 2.0, 100, &mut rng).unwrap();
+        let sw = sliced_wasserstein(&d, &d, 2.0, 100, &mut rng)
+            .expect("sliced_wasserstein should succeed");
         assert!(sw < 1e-9, "SW self = {sw}");
     }
 
@@ -496,7 +499,8 @@ mod tests {
         let d1 = make_diag(&[(0.0, 4.0)]);
         let d2 = make_diag(&[(1.0, 2.0)]);
         let mut rng = LcgRng::new(99);
-        let sw = sliced_wasserstein(&d1, &d2, 2.0, 100, &mut rng).unwrap();
+        let sw = sliced_wasserstein(&d1, &d2, 2.0, 100, &mut rng)
+            .expect("sliced_wasserstein should succeed");
         assert!(sw > 0.0, "SW distinct = {sw}");
     }
 
@@ -510,7 +514,7 @@ mod tests {
     fn wasserstein_p_single_point_each() {
         let d1 = make_diag(&[(0.0, 2.0)]);
         let d2 = make_diag(&[(0.0, 4.0)]);
-        let w2 = wasserstein_p(&d1, &d2, 2.0).unwrap();
+        let w2 = wasserstein_p(&d1, &d2, 2.0).expect("wasserstein_p should succeed");
         assert!((w2 - 2.0).abs() < 1e-9, "W2 = {w2}");
     }
 
@@ -518,7 +522,7 @@ mod tests {
     #[test]
     fn hungarian_single_entry() {
         let cost = vec![7.0_f64];
-        let assignment = hungarian(&cost, 1).unwrap();
+        let assignment = hungarian(&cost, 1).expect("hungarian should succeed");
         assert_eq!(assignment, vec![0]);
     }
 }

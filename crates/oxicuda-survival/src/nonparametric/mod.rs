@@ -8,8 +8,10 @@ pub mod frailty;
 pub mod kaplan_meier;
 pub mod life_table;
 pub mod multi_state;
+pub mod multi_state_inference;
 pub mod nelson_aalen;
 pub mod net_survival;
+pub mod npsurv_bayes;
 pub mod recurrent;
 pub mod survival_function;
 pub mod survival_meta;
@@ -23,10 +25,17 @@ pub use multi_state::{
     MultiStateConfig, MultiStateFit, MultiStateObs, fit_multi_state, predict_occupation,
     predict_transition_probs,
 };
+pub use multi_state_inference::{
+    AjInference, CifInference, MultiStateData, aalen_johansen_variance, cif_with_variance,
+    transition_prob_at,
+};
 pub use nelson_aalen::{NelsonAalen, nelson_aalen_estimate};
 pub use net_survival::{
     NetSurvivalMethod, NetSurvivalResult, PopulationLifeTable, RelSurvObs, ederer_i, ederer_ii,
     net_survival_log_rank, pohar_perme,
+};
+pub use npsurv_bayes::{
+    DpSurvivalConfig, DpSurvivalPosterior, dp_predict_survival, dp_survival_posterior,
 };
 pub use recurrent::{
     AgConfig, AgFit, RecurrentGroupTest, RecurrentMcfResult, RecurrentObs, fit_andersen_gill,

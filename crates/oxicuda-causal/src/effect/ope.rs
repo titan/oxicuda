@@ -209,7 +209,8 @@ mod tests {
             q_estimates: None,
             direct_values: None,
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result = ope_evaluate(&input, f32::MAX)
+            .expect("ope_evaluate with uniform π = π₀ should succeed");
         let expected_mean = (1.0_f32 + 2.0 + 3.0 + 4.0) / 4.0;
         assert!(
             (result.ips - expected_mean).abs() < 1e-5,
@@ -229,7 +230,8 @@ mod tests {
             q_estimates: None,
             direct_values: None,
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result = ope_evaluate(&input, f32::MAX)
+            .expect("ope_evaluate with uniform π for snips test should succeed");
         let expected_mean = (2.0_f32 + 4.0 + 6.0) / 3.0;
         assert!(
             (result.snips - expected_mean).abs() < 1e-5,
@@ -242,7 +244,8 @@ mod tests {
     #[test]
     fn dr_none_when_no_q_estimates() {
         let input = uniform_input(5, 1.0);
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result =
+            ope_evaluate(&input, f32::MAX).expect("ope_evaluate with no DR inputs should succeed");
         assert!(result.dr.is_none());
     }
 
@@ -260,9 +263,12 @@ mod tests {
             q_estimates: Some(rewards), // q_i == r_i → correction = 0
             direct_values: Some(dm.clone()),
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result =
+            ope_evaluate(&input, f32::MAX).expect("ope_evaluate with DR inputs should succeed");
         let expected_dm_mean = dm.iter().sum::<f32>() / n as f32;
-        let dr = result.dr.unwrap();
+        let dr = result
+            .dr
+            .expect("DR should be computed when rewards match q estimates");
         assert!(
             (dr - expected_dm_mean).abs() < 1e-5,
             "dr={} expected={}",
@@ -282,7 +288,8 @@ mod tests {
             q_estimates: None,
             direct_values: None,
         };
-        let result_clipped = ope_evaluate(&input_no_clip, 10.0).unwrap();
+        let result_clipped = ope_evaluate(&input_no_clip, 10.0)
+            .expect("ope_evaluate with clip_max=10 should succeed");
         // With clip_max=10.0, ips ≤ 10 * mean(rewards) = 10
         assert!(
             result_clipped.ips <= 10.0 + 1e-5,
@@ -291,7 +298,8 @@ mod tests {
         );
 
         // Without clipping the weight would be 0.5/0.001 = 500
-        let result_no_clip = ope_evaluate(&input_no_clip, f32::MAX).unwrap();
+        let result_no_clip = ope_evaluate(&input_no_clip, f32::MAX)
+            .expect("ope_evaluate without clipping should succeed");
         assert!(
             result_no_clip.ips > 10.0,
             "unclipped ips={}",
@@ -308,7 +316,8 @@ mod tests {
             q_estimates: None,
             direct_values: None,
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result = ope_evaluate(&input, f32::MAX)
+            .expect("ope_evaluate with non-negative rewards should succeed");
         assert!(result.ips >= 0.0, "ips={}", result.ips);
     }
 
@@ -323,7 +332,8 @@ mod tests {
             q_estimates: None,
             direct_values: None,
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result = ope_evaluate(&input, f32::MAX)
+            .expect("ope_evaluate for snips bound test should succeed");
         assert!(result.snips.abs() <= r_max + 1e-4, "snips={}", result.snips);
     }
 
@@ -336,7 +346,8 @@ mod tests {
             q_estimates: None,
             direct_values: None,
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result =
+            ope_evaluate(&input, f32::MAX).expect("ope_evaluate with single sample should succeed");
         // w = 0.3/0.5 = 0.6, ips = 0.6 * 2.0 = 1.2
         assert!((result.ips - 1.2).abs() < 1e-5, "ips={}", result.ips);
         assert_eq!(result.ips_se, 0.0);
@@ -405,7 +416,8 @@ mod tests {
             q_estimates: None,
             direct_values: None,
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result =
+            ope_evaluate(&input, f32::MAX).expect("ope_evaluate for ips_se test should succeed");
         assert!(result.ips_se >= 0.0, "ips_se={}", result.ips_se);
     }
 
@@ -418,7 +430,8 @@ mod tests {
             q_estimates: None,
             direct_values: None,
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result =
+            ope_evaluate(&input, f32::MAX).expect("ope_evaluate for snips_se test should succeed");
         assert!(result.snips_se >= 0.0, "snips_se={}", result.snips_se);
     }
 
@@ -426,7 +439,8 @@ mod tests {
     fn clip_max_stored_in_result() {
         let input = uniform_input(4, 1.0);
         let clip = 5.0_f32;
-        let result = ope_evaluate(&input, clip).unwrap();
+        let result = ope_evaluate(&input, clip)
+            .expect("ope_evaluate with specified clip_max should succeed");
         assert!((result.clip_max - clip).abs() < 1e-10);
     }
 
@@ -440,7 +454,8 @@ mod tests {
             q_estimates: Some(vec![1.0, 2.0, 3.0, 4.0]),
             direct_values: Some(vec![1.5, 2.5, 3.5, 4.5]),
         };
-        let result = ope_evaluate(&input, f32::MAX).unwrap();
+        let result = ope_evaluate(&input, f32::MAX)
+            .expect("ope_evaluate when DR estimates provided should succeed");
         assert!(result.dr.is_some());
     }
 
@@ -453,11 +468,17 @@ mod tests {
             q_estimates: Some(vec![0.9, 1.8, -0.9, 2.7]),
             direct_values: Some(vec![1.1, 1.9, -0.8, 3.1]),
         };
-        let r1 = ope_evaluate(&input, 10.0).unwrap();
-        let r2 = ope_evaluate(&input, 10.0).unwrap();
+        let r1 = ope_evaluate(&input, 10.0)
+            .expect("first ope_evaluate for determinism test should succeed");
+        let r2 = ope_evaluate(&input, 10.0)
+            .expect("second ope_evaluate for determinism test should succeed");
         assert!((r1.ips - r2.ips).abs() < 1e-10);
         assert!((r1.snips - r2.snips).abs() < 1e-10);
-        assert!((r1.dr.unwrap() - r2.dr.unwrap()).abs() < 1e-10);
+        assert!(
+            (r1.dr.expect("r1 DR should be present") - r2.dr.expect("r2 DR should be present"))
+                .abs()
+                < 1e-10
+        );
     }
 
     #[test]
@@ -484,7 +505,7 @@ mod tests {
             direct_values: None,
         };
 
-        let result = ope_evaluate(&input, 20.0).unwrap();
+        let result = ope_evaluate(&input, 20.0).expect("ope_evaluate with large n should succeed");
         assert!(result.ips.is_finite());
         assert!(result.snips.is_finite());
         assert!(result.ips_se.is_finite());

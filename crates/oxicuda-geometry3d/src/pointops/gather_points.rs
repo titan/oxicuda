@@ -49,20 +49,20 @@ mod tests {
             5.0, 6.0, // point 2
         ];
         let idx = vec![2usize, 0, 1];
-        let out = gather_points(&feat, 3, 2, &idx).unwrap();
+        let out = gather_points(&feat, 3, 2, &idx).expect("gather_points should succeed");
         assert_eq!(out, vec![5.0, 6.0, 1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
     fn gather_empty_indices() {
         let feat = vec![1.0_f32, 2.0];
-        let out = gather_points(&feat, 1, 2, &[]).unwrap();
+        let out = gather_points(&feat, 1, 2, &[]).expect("gather_points should succeed");
         assert!(out.is_empty());
     }
 
     #[test]
     fn gather_empty_features_empty_indices() {
-        let out = gather_points(&[], 0, 3, &[]).unwrap();
+        let out = gather_points(&[], 0, 3, &[]).expect("gather_points should succeed");
         assert!(out.is_empty());
     }
 
@@ -77,7 +77,7 @@ mod tests {
     fn gather_single_channel() {
         let feat = vec![10.0_f32, 20.0, 30.0];
         let idx = vec![1usize, 2, 0];
-        let out = gather_points(&feat, 3, 1, &idx).unwrap();
+        let out = gather_points(&feat, 3, 1, &idx).expect("gather_points should succeed");
         assert_eq!(out, vec![20.0, 30.0, 10.0]);
     }
 }

@@ -72,7 +72,7 @@ impl LcgRng {
             .state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
-        (self.state >> 33) as u32
+        ((self.state >> 33) ^ self.state) as u32
     }
 
     /// Return a `f32` uniformly distributed in `[0, 1)`.

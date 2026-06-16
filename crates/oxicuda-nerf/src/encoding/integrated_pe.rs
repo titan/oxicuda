@@ -98,7 +98,7 @@ mod tests {
         };
         let mu = [0.5_f32];
         let sigma2 = [0.0_f32];
-        let ipe_out = integrated_pe(&mu, &sigma2, &cfg).unwrap();
+        let ipe_out = integrated_pe(&mu, &sigma2, &cfg).expect("integrated_pe should succeed");
 
         // Manually compute PE
         let expected: Vec<f32> = (0..2)
@@ -122,8 +122,8 @@ mod tests {
         let mu = [0.5_f32];
         let low_var = [0.0001_f32];
         let high_var = [100.0_f32];
-        let out_low = integrated_pe(&mu, &low_var, &cfg).unwrap();
-        let out_high = integrated_pe(&mu, &high_var, &cfg).unwrap();
+        let out_low = integrated_pe(&mu, &low_var, &cfg).expect("integrated_pe should succeed");
+        let out_high = integrated_pe(&mu, &high_var, &cfg).expect("integrated_pe should succeed");
 
         // High variance should attenuate higher frequencies more
         let mag_low: f32 = out_low.iter().map(|v| v * v).sum::<f32>().sqrt();

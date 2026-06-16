@@ -7,7 +7,7 @@ to cuDNN. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.4).
 
 ## Implementation Status
 
-- **Actual SLoC:** 34,711 SLoC (89 files)
+- **Actual SLoC:** 39,297 SLoC (110 files)
 - **Estimated SLoC (estimation.md):** 396K--653K (median 525K)
 - **Ratio:** ~5.8% of median estimate -- compact foundation with all major DNN primitives
 
@@ -122,6 +122,10 @@ to cuDNN. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.4).
 - [x] Fused RoPE+attention (attn/fused_rope_attn.rs) -- combine rotary embedding application with attention forward in a single kernel
 
 #### P1 -- Important (Convolution and MoE Completeness)
+- [x] `layers/mqa.rs` — Multi-Query Attention (Shazeer 2019): share K,V heads across Q heads; MHA overhead at GQA ratio 1/n_heads; fused KV cache for inference
+- [x] `layers/rwkv_layer.rs` — RWKV (Peng 2023) linear-attention layer: time-mixing WKV operator with decay + receptance gate; space-mixing FFN; O(Td) instead of O(T²d) attention
+- [x] `layers/flash_attn.rs` — FlashAttention-2 tiling algorithm (Dao 2022/2023): tile Q/K/V to SRAM, compute online softmax, avoid HBM round-trips; PTX kernel template for sm_80+ using wgmma or mma.sync
+- [x] `norm/rms_norm.rs` — RMSNorm (Zhang 2019): x/RMS(x)·γ without mean subtraction; half-precision stable; fused kernel with scaling; used in Llama/Mistral/Gemma
 - [x] FFT-based convolution (conv/fft_conv.rs) -- frequency-domain convolution for large kernel sizes (7x7+)
 - [x] 3D convolution (conv/conv3d/) -- im2col3d + GEMM, forward/backward/wgrad for volumetric data
 - [x] Deformable convolution (conv/deformable.rs) -- learnable sampling offsets (DCNv2) with bilinear interpolation, forward+backward
@@ -159,7 +163,7 @@ to cuDNN. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.4).
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 960 passing
+- Tests: 1,075 passing
 - unwrap() calls: 0 (production code)
 
 ## Performance Targets
@@ -179,8 +183,8 @@ Relaxed targets: 80% for small batch sizes, 90% for sm_75.
 
 | Metric | Estimated (estimation.md) | Actual |
 |--------|---------------------------|--------|
-| SLoC | 396K--653K (median 525K) | 31,293 SLoC |
-| Files | ~28+ subcomponents listed | 89 |
+| SLoC | 396K--653K (median 525K) | 39,297 SLoC |
+| Files | ~28+ subcomponents listed | 110 |
 | Development time | 13--22 days | Completed in Vol.3+4 batch |
 | AI generation ratio | 62% | -- |
 | Highest difficulty items | FlashAttn, Fused MoE (rated "extremely high") | Implemented |

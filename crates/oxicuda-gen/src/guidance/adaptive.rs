@@ -135,7 +135,9 @@ mod tests {
     fn constant_policy_same_scale() {
         let sched = AdaptiveCfgScheduler::new(AdaptiveCfgPolicy::Constant(5.0), 10);
         for i in 0..10 {
-            let s = sched.scale_at(i).unwrap();
+            let s = sched
+                .scale_at(i)
+                .expect("scale_at should succeed for valid step index in range 0..total_steps");
             assert!((s - 5.0).abs() < EPS, "step {i}: expected 5.0, got {s}");
         }
     }
@@ -149,8 +151,12 @@ mod tests {
             },
             10,
         );
-        let s0 = sched.scale_at(0).unwrap();
-        let s9 = sched.scale_at(9).unwrap();
+        let s0 = sched
+            .scale_at(0)
+            .expect("scale_at step 0 should succeed for linear policy boundary check");
+        let s9 = sched.scale_at(9).expect(
+            "scale_at final step 9 should succeed for 10-step linear policy boundary check",
+        );
         assert!((s0 - 7.0).abs() < EPS, "start: {s0}");
         assert!((s9 - 3.0).abs() < EPS, "end: {s9}");
     }
@@ -164,7 +170,9 @@ mod tests {
             },
             10,
         );
-        let scales: Vec<f32> = (0..10).map(|i| sched.scale_at(i).unwrap()).collect();
+        let scales: Vec<f32> = (0..10)
+            .map(|i| sched.scale_at(i).expect("scale_at should succeed"))
+            .collect();
         for w in scales.windows(2) {
             assert!(
                 w[1] <= w[0] + EPS,
@@ -184,8 +192,8 @@ mod tests {
             },
             100,
         );
-        let s0 = sched.scale_at(0).unwrap();
-        let s99 = sched.scale_at(99).unwrap();
+        let s0 = sched.scale_at(0).expect("scale_at should succeed");
+        let s99 = sched.scale_at(99).expect("scale_at should succeed");
         assert!((s0 - 8.0).abs() < EPS, "cosine start: {s0}");
         assert!((s99 - 2.0).abs() < EPS, "cosine end: {s99}");
     }
@@ -198,12 +206,12 @@ mod tests {
             },
             10,
         );
-        assert!((sched.scale_at(0).unwrap() - 7.0).abs() < EPS);
-        assert!((sched.scale_at(4).unwrap() - 7.0).abs() < EPS);
-        assert!((sched.scale_at(5).unwrap() - 3.0).abs() < EPS);
-        assert!((sched.scale_at(7).unwrap() - 3.0).abs() < EPS);
-        assert!((sched.scale_at(8).unwrap() - 1.5).abs() < EPS);
-        assert!((sched.scale_at(9).unwrap() - 1.5).abs() < EPS);
+        assert!((sched.scale_at(0).expect("scale_at should succeed") - 7.0).abs() < EPS);
+        assert!((sched.scale_at(4).expect("scale_at should succeed") - 7.0).abs() < EPS);
+        assert!((sched.scale_at(5).expect("scale_at should succeed") - 3.0).abs() < EPS);
+        assert!((sched.scale_at(7).expect("scale_at should succeed") - 3.0).abs() < EPS);
+        assert!((sched.scale_at(8).expect("scale_at should succeed") - 1.5).abs() < EPS);
+        assert!((sched.scale_at(9).expect("scale_at should succeed") - 1.5).abs() < EPS);
     }
 
     #[test]
@@ -220,14 +228,16 @@ mod tests {
         let sched = AdaptiveCfgScheduler::new(AdaptiveCfgPolicy::Constant(3.0), 10);
         let cond = vec![1.0_f32; 32];
         let uncond = vec![0.0_f32; 32];
-        let out = sched.apply_at_step(&cond, &uncond, 5).unwrap();
+        let out = sched
+            .apply_at_step(&cond, &uncond, 5)
+            .expect("apply_at_step should succeed");
         assert_eq!(out.len(), 32);
     }
 
     #[test]
     fn all_scales_count() {
         let sched = AdaptiveCfgScheduler::new(AdaptiveCfgPolicy::Constant(2.0), 20);
-        let scales = sched.all_scales().unwrap();
+        let scales = sched.all_scales().expect("all_scales should succeed");
         assert_eq!(scales.len(), 20);
     }
 
@@ -242,7 +252,7 @@ mod tests {
             10,
         );
         for i in 0..10 {
-            let s = sched.scale_at(i).unwrap();
+            let s = sched.scale_at(i).expect("scale_at should succeed");
             assert!(s >= 1.0, "scale below 1.0 at step {i}: {s}");
         }
     }

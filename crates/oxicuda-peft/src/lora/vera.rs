@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn init_shapes_match_dims() {
         let cfg = default_config(5, 7, 3);
-        let ad = VeraAdapter::new(cfg).unwrap();
+        let ad = VeraAdapter::new(cfg).expect("VeraAdapter::new should succeed with valid config");
         assert_eq!(ad.d_d.len(), 3);
         assert_eq!(ad.d_b.len(), 7);
         assert_eq!(ad.n_trainable(), 3 + 7);
@@ -362,8 +362,10 @@ mod tests {
 
     #[test]
     fn deterministic_shared_for_fixed_seed() {
-        let s1 = VeraSharedRandom::new(6, 8, 3, 42).unwrap();
-        let s2 = VeraSharedRandom::new(6, 8, 3, 42).unwrap();
+        let s1 = VeraSharedRandom::new(6, 8, 3, 42)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
+        let s2 = VeraSharedRandom::new(6, 8, 3, 42)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
         assert_eq!(s1.a, s2.a);
         assert_eq!(s1.b, s2.b);
     }
@@ -371,10 +373,13 @@ mod tests {
     #[test]
     fn forward_output_dim_equals_out_dim() {
         let cfg = default_config(6, 9, 4);
-        let shared = VeraSharedRandom::new(6, 9, 4, 11).unwrap();
-        let ad = VeraAdapter::new(cfg).unwrap();
+        let shared = VeraSharedRandom::new(6, 9, 4, 11)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
+        let ad = VeraAdapter::new(cfg).expect("VeraAdapter::new should succeed with valid config");
         let x: Vec<f64> = (0..6).map(|i| i as f64 * 0.1).collect();
-        let y = ad.forward(&shared, &x).unwrap();
+        let y = ad
+            .forward(&shared, &x)
+            .expect("forward pass should succeed with valid input");
         assert_eq!(y.len(), 9);
     }
 
@@ -389,10 +394,13 @@ mod tests {
             init_scale_b: 0.0, // zero d_b
             seed: 3,
         };
-        let shared = VeraSharedRandom::new(4, 5, 2, 3).unwrap();
-        let ad = VeraAdapter::new(cfg).unwrap();
+        let shared = VeraSharedRandom::new(4, 5, 2, 3)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
+        let ad = VeraAdapter::new(cfg).expect("VeraAdapter::new should succeed with valid config");
         let x = vec![1.0_f64, -0.5, 0.25, 2.0];
-        let y = ad.forward(&shared, &x).unwrap();
+        let y = ad
+            .forward(&shared, &x)
+            .expect("forward pass should succeed with valid input");
         for v in y {
             assert!(v.abs() < 1e-15);
         }
@@ -409,10 +417,13 @@ mod tests {
             init_scale_b: 0.5,
             seed: 13,
         };
-        let shared = VeraSharedRandom::new(4, 5, 2, 13).unwrap();
-        let ad = VeraAdapter::new(cfg).unwrap();
+        let shared = VeraSharedRandom::new(4, 5, 2, 13)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
+        let ad = VeraAdapter::new(cfg).expect("VeraAdapter::new should succeed with valid config");
         let x = vec![1.0, -1.0, 2.0, 3.0];
-        let y = ad.forward(&shared, &x).unwrap();
+        let y = ad
+            .forward(&shared, &x)
+            .expect("forward pass should succeed with valid input");
         for v in y {
             assert!(v.abs() < 1e-15);
         }
@@ -429,16 +440,17 @@ mod tests {
             init_scale_b: 0.7,
             seed: 21,
         };
-        let shared = VeraSharedRandom::new(5, 4, 2, 21).unwrap();
+        let shared = VeraSharedRandom::new(5, 4, 2, 21)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
         let x = vec![0.1, -0.2, 0.3, -0.4, 0.5];
         let y1 = VeraAdapter::new(make_cfg(1.0))
-            .unwrap()
+            .expect("VeraAdapter::new should succeed with alpha=1.0")
             .forward(&shared, &x)
-            .unwrap();
+            .expect("forward pass should succeed with valid input");
         let y2 = VeraAdapter::new(make_cfg(2.0))
-            .unwrap()
+            .expect("VeraAdapter::new should succeed with alpha=2.0")
             .forward(&shared, &x)
-            .unwrap();
+            .expect("forward pass should succeed with valid input");
         for (a, b) in y1.iter().zip(y2.iter()) {
             assert!((2.0 * a - b).abs() < 1e-12, "α=2 must double y");
         }
@@ -455,8 +467,10 @@ mod tests {
             init_scale_b: 0.4,
             seed: 99,
         };
-        let shared = VeraSharedRandom::new(4, 3, 2, 99).unwrap();
-        let mut ad = VeraAdapter::new(cfg.clone()).unwrap();
+        let shared = VeraSharedRandom::new(4, 3, 2, 99)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
+        let mut ad = VeraAdapter::new(cfg.clone())
+            .expect("VeraAdapter::new should succeed with valid config");
         // perturb d_d / d_b so we don't sit on degenerate values
         ad.d_d[0] = 0.7;
         ad.d_d[1] = -0.2;
@@ -466,16 +480,22 @@ mod tests {
         let x = vec![0.5, -0.25, 1.0, -1.5];
         // Choose a fixed grad_y; treat L(d_d, d_b) = grad_y · y(d_d, d_b)
         let grad_y = vec![1.3, -0.7, 0.45];
-        let (g_dd, g_db) = ad.backward(&shared, &x, &grad_y).unwrap();
+        let (g_dd, g_db) = ad
+            .backward(&shared, &x, &grad_y)
+            .expect("backward pass should succeed with valid input");
 
         // Finite-difference w.r.t. d_d
         let eps = 1e-6_f64;
         for (j, &g) in g_dd.iter().enumerate() {
             let saved = ad.d_d[j];
             ad.d_d[j] = saved + eps;
-            let yp = ad.forward(&shared, &x).unwrap();
+            let yp = ad
+                .forward(&shared, &x)
+                .expect("forward pass should succeed with valid input");
             ad.d_d[j] = saved - eps;
-            let ym = ad.forward(&shared, &x).unwrap();
+            let ym = ad
+                .forward(&shared, &x)
+                .expect("forward pass should succeed with valid input");
             ad.d_d[j] = saved;
             let lp: f64 = grad_y.iter().zip(yp.iter()).map(|(a, b)| a * b).sum();
             let lm: f64 = grad_y.iter().zip(ym.iter()).map(|(a, b)| a * b).sum();
@@ -486,9 +506,13 @@ mod tests {
         for (i, &g) in g_db.iter().enumerate() {
             let saved = ad.d_b[i];
             ad.d_b[i] = saved + eps;
-            let yp = ad.forward(&shared, &x).unwrap();
+            let yp = ad
+                .forward(&shared, &x)
+                .expect("forward pass should succeed with valid input");
             ad.d_b[i] = saved - eps;
-            let ym = ad.forward(&shared, &x).unwrap();
+            let ym = ad
+                .forward(&shared, &x)
+                .expect("forward pass should succeed with valid input");
             ad.d_b[i] = saved;
             let lp: f64 = grad_y.iter().zip(yp.iter()).map(|(a, b)| a * b).sum();
             let lm: f64 = grad_y.iter().zip(ym.iter()).map(|(a, b)| a * b).sum();
@@ -500,15 +524,18 @@ mod tests {
     #[test]
     fn shared_unchanged_after_forward_and_backward() {
         let cfg = default_config(4, 5, 2);
-        let shared = VeraSharedRandom::new(4, 5, 2, 99).unwrap();
+        let shared = VeraSharedRandom::new(4, 5, 2, 99)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
         let a_snap = shared.a.clone();
         let b_snap = shared.b.clone();
-        let ad = VeraAdapter::new(cfg).unwrap();
+        let ad = VeraAdapter::new(cfg).expect("VeraAdapter::new should succeed with valid config");
         let x = vec![1.0, 2.0, 3.0, 4.0];
-        let _ = ad.forward(&shared, &x).unwrap();
+        let _ = ad
+            .forward(&shared, &x)
+            .expect("forward pass should succeed with valid input");
         let _ = ad
             .backward(&shared, &x, &[0.1, 0.2, 0.3, 0.4, 0.5])
-            .unwrap();
+            .expect("backward pass should succeed with valid input");
         assert_eq!(shared.a, a_snap);
         assert_eq!(shared.b, b_snap);
     }
@@ -516,8 +543,9 @@ mod tests {
     #[test]
     fn dim_mismatch_in_forward_raises() {
         let cfg = default_config(4, 5, 2);
-        let shared = VeraSharedRandom::new(4, 5, 2, 1).unwrap();
-        let ad = VeraAdapter::new(cfg).unwrap();
+        let shared = VeraSharedRandom::new(4, 5, 2, 1)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
+        let ad = VeraAdapter::new(cfg).expect("VeraAdapter::new should succeed with valid config");
         let bad_x = vec![1.0, 2.0, 3.0]; // length 3 ≠ 4
         assert!(matches!(
             ad.forward(&shared, &bad_x),
@@ -528,8 +556,9 @@ mod tests {
     #[test]
     fn dim_mismatch_in_backward_raises() {
         let cfg = default_config(4, 5, 2);
-        let shared = VeraSharedRandom::new(4, 5, 2, 1).unwrap();
-        let ad = VeraAdapter::new(cfg).unwrap();
+        let shared = VeraSharedRandom::new(4, 5, 2, 1)
+            .expect("VeraSharedRandom::new should succeed with valid dims");
+        let ad = VeraAdapter::new(cfg).expect("VeraAdapter::new should succeed with valid config");
         let x = vec![1.0, 2.0, 3.0, 4.0];
         let bad_gy = vec![1.0, 2.0]; // wrong length
         assert!(matches!(

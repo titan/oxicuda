@@ -61,13 +61,13 @@ mod tests {
     #[test]
     fn l2_sq_zero_self() {
         let v = vec![1.0_f32, 2.0, 3.0];
-        assert_eq!(l2_sq(&v, &v).unwrap(), 0.0);
+        assert_eq!(l2_sq(&v, &v).expect("test invariant: should succeed"), 0.0);
     }
 
     #[test]
     fn l2_known() {
         let a = vec![0.0_f32, 0.0];
         let b = vec![3.0_f32, 4.0];
-        assert!((l2(&a, &b).unwrap() - 5.0).abs() < 1e-6);
+        assert!((l2(&a, &b).expect("test invariant: should succeed") - 5.0).abs() < 1e-6);
     }
 }

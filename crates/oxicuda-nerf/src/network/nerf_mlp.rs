@@ -271,7 +271,7 @@ mod tests {
             hidden_dim: 16,  // Small for test speed
         };
         let mut rng = LcgRng::new(123);
-        NerfMlp::new(cfg, &mut rng).unwrap()
+        NerfMlp::new(cfg, &mut rng).expect("new should succeed")
     }
 
     #[test]
@@ -279,7 +279,7 @@ mod tests {
         let mlp = make_test_mlp();
         let xyz = vec![0.0_f32; 24];
         let dir = vec![0.0_f32; 16];
-        let (sigma, rgb) = mlp.forward(&xyz, &dir).unwrap();
+        let (sigma, rgb) = mlp.forward(&xyz, &dir).expect("forward should succeed");
         assert!(sigma >= 0.0);
         assert!(rgb.iter().all(|&v| (0.0..=1.0).contains(&v)));
     }
@@ -289,7 +289,9 @@ mod tests {
         let mlp = make_test_mlp();
         let xyz = vec![0.1_f32; 3 * 24];
         let dir = vec![0.2_f32; 3 * 16];
-        let (sigma, rgb) = mlp.forward_batch(&xyz, &dir, 3).unwrap();
+        let (sigma, rgb) = mlp
+            .forward_batch(&xyz, &dir, 3)
+            .expect("forward_batch should succeed");
         assert_eq!(sigma.len(), 3);
         assert_eq!(rgb.len(), 9);
     }

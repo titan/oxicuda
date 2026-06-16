@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.53).
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,635 (46 files, including 5,676 code + 205 comments + 339 blanks; markdown 415)
-- **Tests:** 99 passing (lib + e2e_tests)
+- **Actual SLoC:** 26,639 (88 files, including 5,676 code + 205 comments + 339 blanks; markdown 415)
+- **Tests:** 520 passing (lib + e2e_tests)
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -38,6 +38,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.53).
 #### Local / Spectral Methods
 - [x] `local/lle.rs` -- Constrained-LS weights with sum w_ij = 1 over kNN; M = (I - W)^T (I - W); d + 1 smallest eigenvectors, drop first
 - [x] `local/mlle.rs` -- Modified LLE with multi-weight basis (Zhang-Wang 2007)
+- [x] `local/hessian_lle.rs` -- Hessian LLE (Donoho-Grimes 2003): per-point local tangent PCA + Hessian design [1 | linear | quadratic] -> orthonormalise -> Phi += H H^T -> smallest eigenvectors (drop constant), identity-covariance rescale
+- [x] `local/ltsa.rs` -- Local Tangent Space Alignment (Zhang-Zha 2005): per-point tangent basis Q_i, G_i = [1/sqrt(k) | Q_i], B += I - G_i G_i^T -> smallest nonzero eigenvectors (drop constant)
 - [x] `local/isomap.rs` -- kNN graph + Dijkstra all-pairs geodesic distance + classical MDS
 - [x] `local/laplacian_eigenmaps.rs` -- Gaussian-weight W -> normalised L_sym -> generalised eigh `L v = lambda D v` -> drop constant eigenvector
 
@@ -47,6 +49,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.53).
 #### MDS
 - [x] `mds/classical_mds.rs` -- Torgerson: B = -1/2 J D^2 J -> eigh -> U sqrt(Lambda)
 - [x] `mds/smacof.rs` -- Iterative majorisation via Guttman transform
+- [x] `mds/nonmetric_mds.rs` -- Non-metric / ordinal MDS (Kruskal 1964): classical-MDS init + PAVA isotonic regression of disparities + SMACOF Guttman step toward disparities; Stress-1 monotone non-increasing
 
 #### Neighbour Search
 - [x] `neighbor/knn_brute.rs` -- Brute force pairwise + partial sort
@@ -113,7 +116,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 99 passing
+- Tests: 520 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features
@@ -177,10 +180,14 @@ All six SM versions produce non-empty PTX strings and pass content-substring che
 ### Algorithmic Deepening
 - [ ] Barnes-Hut t-SNE quadtree currently CPU-only; lift the tree-traversal kernel to PTX with warp-cooperative descent
 - [ ] UMAP fuzzy simplicial set construction parallelised at the per-vertex level
-- [ ] Riemannian SGD with adaptive step size (Riemannian-Adam) for SPD / Stiefel
+- [x] Riemannian SGD with adaptive step size (Riemannian-Adam) for SPD / Stiefel (`optim/riemannian_adam.rs`)
 - [x] Multi-scale t-SNE / UMAP for hierarchical embeddings (preserve both micro- and macro-structure) (`umap/multiscale.rs`)
+- [ ] `riemannian/hyperbolic.rs` — Poincaré ball model (Nickel-Kiela 2017): Möbius addition u⊕v, distance d=2·arctanh(‖-u⊕v‖), exponential/logarithmic maps; Riemannian SGD with Möbius-based parallel transport; `PoincareBall { curvature: f64 }`
+- [x] `riemannian/wrapped_normal.rs` — Wrapped Normal on hyperbolic space (Nagano 2019): push Euclidean Normal through exponential map at μ; RSVI for hierarchical VAE; `HyperbolicNormal { mu, sigma, manifold: PoincareBall }`
+- [x] `embedding/umap_parametric.rs` — Parametric UMAP (Sainburg 2021): train a neural encoder to approximate UMAP embedding; new points via forward pass (no re-running umap); `ParametricUmap { encoder_dims: Vec<usize> }`
+- [x] `geodesic/heat_method.rs` — Heat method for geodesic distances (Crane 2013): solve heat equation u_t=Δu for small t, normalise gradient, solve Poisson; O(n log n) via sparse Cholesky; output ≈ geodesic from source(s)
 
 ### API Polish
 - [ ] Builder-style configuration for t-SNE (perplexity, learning rate, early exaggeration, momentum schedule)
 - [ ] Builder-style configuration for UMAP (n_neighbours, min_dist, spread, n_epochs, metric)
-- [ ] Cross-decomposition variants: CCA, PLS via the existing PCA backbone
+- [x] Cross-decomposition variants: CCA, PLS via the existing PCA backbone (`linear/cca_pls.rs`)

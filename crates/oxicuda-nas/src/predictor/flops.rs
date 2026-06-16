@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn op_cost_zero_is_free() {
         let l = LayerSpec::new(OpKind::Zero, 4, 4, 8, 8);
-        let c = op_cost(&l).unwrap();
+        let c = op_cost(&l).expect("op_cost should succeed");
         assert_eq!(c.params, 0);
         assert_eq!(c.flops, 0);
     }
@@ -142,8 +142,8 @@ mod tests {
     fn op_cost_avg_pool_proportional_to_spatial() {
         let l1 = LayerSpec::new(OpKind::AvgPool3x3, 4, 4, 8, 8);
         let l2 = LayerSpec::new(OpKind::AvgPool3x3, 4, 4, 16, 16);
-        let c1 = op_cost(&l1).unwrap();
-        let c2 = op_cost(&l2).unwrap();
+        let c1 = op_cost(&l1).expect("op_cost should succeed");
+        let c2 = op_cost(&l2).expect("op_cost should succeed");
         assert_eq!(c2.flops, 4 * c1.flops);
     }
 
@@ -154,7 +154,7 @@ mod tests {
         let h = 8;
         let w = 8;
         let l = LayerSpec::new(OpKind::SepConv3x3, cin, cout, h, w);
-        let c = op_cost(&l).unwrap();
+        let c = op_cost(&l).expect("op_cost should succeed");
         let hw = (h * w) as u64;
         let expected_dw_params = 9 * cin as u64;
         let expected_pw_params = (cin * cout) as u64;
@@ -168,8 +168,8 @@ mod tests {
     fn op_cost_sep_conv_5x5_more_expensive_than_3x3() {
         let l3 = LayerSpec::new(OpKind::SepConv3x3, 8, 8, 8, 8);
         let l5 = LayerSpec::new(OpKind::SepConv5x5, 8, 8, 8, 8);
-        let c3 = op_cost(&l3).unwrap();
-        let c5 = op_cost(&l5).unwrap();
+        let c3 = op_cost(&l3).expect("op_cost should succeed");
+        let c5 = op_cost(&l5).expect("op_cost should succeed");
         assert!(c5.flops > c3.flops);
         assert!(c5.params > c3.params);
     }
@@ -178,7 +178,10 @@ mod tests {
     fn op_cost_dil_conv_same_as_sep_conv() {
         let l_sep = LayerSpec::new(OpKind::SepConv3x3, 8, 16, 8, 8);
         let l_dil = LayerSpec::new(OpKind::DilConv3x3, 8, 16, 8, 8);
-        assert_eq!(op_cost(&l_sep).unwrap(), op_cost(&l_dil).unwrap());
+        assert_eq!(
+            op_cost(&l_sep).expect("op_cost should succeed"),
+            op_cost(&l_dil).expect("op_cost should succeed")
+        );
     }
 
     #[test]
@@ -188,11 +191,11 @@ mod tests {
             LayerSpec::new(OpKind::SepConv3x3, 16, 16, 16, 16),
             LayerSpec::new(OpKind::AvgPool3x3, 16, 16, 16, 16),
         ];
-        let total = total_cost(&layers).unwrap();
+        let total = total_cost(&layers).expect("total_cost should succeed");
         let manual = op_cost(&layers[0])
-            .unwrap()
-            .merge(op_cost(&layers[1]).unwrap())
-            .merge(op_cost(&layers[2]).unwrap());
+            .expect("value should be present")
+            .merge(op_cost(&layers[1]).expect("op_cost should succeed"))
+            .merge(op_cost(&layers[2]).expect("op_cost should succeed"));
         assert_eq!(total, manual);
     }
 

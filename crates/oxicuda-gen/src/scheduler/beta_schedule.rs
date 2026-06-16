@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn linear_schedule_monotone_increasing() {
-        let sched = BetaSchedule::linear(1000, 0.0001, 0.02).unwrap();
+        let sched = BetaSchedule::linear(1000, 0.0001, 0.02).expect("linear should succeed");
         let betas = sched.betas();
         for w in betas.windows(2) {
             assert!(w[1] >= w[0] - EPS, "not monotone: {} < {}", w[1], w[0]);
@@ -232,14 +232,14 @@ mod tests {
 
     #[test]
     fn linear_schedule_boundary_values() {
-        let sched = BetaSchedule::linear(1000, 0.0001, 0.02).unwrap();
+        let sched = BetaSchedule::linear(1000, 0.0001, 0.02).expect("linear should succeed");
         assert!((sched.betas()[0] - 0.0001).abs() < EPS);
         assert!((sched.betas()[999] - 0.02).abs() < EPS);
     }
 
     #[test]
     fn linear_schedule_alphas_sum() {
-        let sched = BetaSchedule::linear(100, 0.001, 0.01).unwrap();
+        let sched = BetaSchedule::linear(100, 0.001, 0.01).expect("linear should succeed");
         for (&a, &b) in sched.alphas().iter().zip(sched.betas()) {
             assert!((a + b - 1.0).abs() < EPS, "alpha + beta != 1");
         }
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn alphas_bar_monotone_decreasing() {
-        let sched = BetaSchedule::linear(100, 0.001, 0.02).unwrap();
+        let sched = BetaSchedule::linear(100, 0.001, 0.02).expect("linear should succeed");
         let ab = sched.alphas_bar();
         for w in ab.windows(2) {
             assert!(w[1] <= w[0] + EPS, "alphas_bar not monotone decreasing");
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn sqrt_alphas_bar_consistency() {
-        let sched = BetaSchedule::linear(100, 0.001, 0.02).unwrap();
+        let sched = BetaSchedule::linear(100, 0.001, 0.02).expect("linear should succeed");
         for (&sab, &ab) in sched.sqrt_alphas_bar().iter().zip(sched.alphas_bar()) {
             assert!((sab * sab - ab).abs() < EPS, "sqrt(ab)^2 != ab");
         }
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn sqrt_one_minus_alphas_bar_consistency() {
-        let sched = BetaSchedule::linear(100, 0.001, 0.02).unwrap();
+        let sched = BetaSchedule::linear(100, 0.001, 0.02).expect("linear should succeed");
         for (&smab, &ab) in sched
             .sqrt_one_minus_alphas_bar()
             .iter()
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn cosine_schedule_betas_in_range() {
-        let sched = BetaSchedule::cosine(1000, 0.008).unwrap();
+        let sched = BetaSchedule::cosine(1000, 0.008).expect("cosine should succeed");
         for &b in sched.betas() {
             assert!(b > 0.0 && b < 1.0, "beta out of range: {b}");
         }
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn cosine_schedule_alphas_bar_decreasing() {
-        let sched = BetaSchedule::cosine(100, 0.008).unwrap();
+        let sched = BetaSchedule::cosine(100, 0.008).expect("cosine should succeed");
         let ab = sched.alphas_bar();
         for w in ab.windows(2) {
             assert!(w[1] <= w[0] + 1e-4, "cosine alphas_bar not decreasing");
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn num_steps_matches() {
-        let sched = BetaSchedule::linear(500, 0.0001, 0.02).unwrap();
+        let sched = BetaSchedule::linear(500, 0.0001, 0.02).expect("linear should succeed");
         assert_eq!(sched.num_steps(), 500);
     }
 
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn sigmoid_schedule_valid() {
-        let sched = BetaSchedule::sigmoid(100, -3.0, 3.0, 1.0).unwrap();
+        let sched = BetaSchedule::sigmoid(100, -3.0, 3.0, 1.0).expect("sigmoid should succeed");
         assert_eq!(sched.num_steps(), 100);
         for &b in sched.betas() {
             assert!(b > 0.0 && b <= 0.999, "sigmoid beta out of range: {b}");
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn linear_single_step() {
-        let sched = BetaSchedule::linear(1, 0.01, 0.02).unwrap();
+        let sched = BetaSchedule::linear(1, 0.01, 0.02).expect("linear should succeed");
         assert_eq!(sched.num_steps(), 1);
         let b = sched.betas()[0];
         assert!(b > 0.0 && b < 1.0, "single step beta: {b}");
@@ -333,7 +333,7 @@ mod tests {
                 scale: 0.5,
             },
         )
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(sched.num_steps(), 100);
         for &b in sched.betas() {
             assert!(

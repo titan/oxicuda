@@ -9,6 +9,7 @@
 //! oxicuda-ann
 //! ├── distance/    — L2, inner product distance metrics
 //! ├── flat/        — Brute-force flat index (exact search baseline)
+//! ├── graph/       — NSG, Filtered-DiskANN search, SPANN posting-list index
 //! ├── hnsw/        — Hierarchical Navigable Small World graph (insert + search)
 //! ├── hnsw_pq      — Compressed HNSW with per-node PQ codes + ADC scoring
 //! ├── ivf/         — Inverted File Index (coarse quantizer + probing)
@@ -18,7 +19,8 @@
 //! ├── lsh/         — Random Projection LSH and MinHash
 //! ├── ngt/         — NGT/ANNG approximate neighborhood graph (incremental build + ε-greedy search)
 //! ├── pq/          — Product Quantization (train, encode, ADC)
-//! ├── quantize/    — Scalar quantization utilities
+//! ├── quantize/    — Scalar quantization + Additive Quantization (AQ)
+//! ├── rerank       — Two-stage exact re-ranking of approximate candidates
 //! ├── topk/        — Parallel top-K heap selection
 //! ├── vamana       — DiskANN in-memory Vamana graph (α-pruned RobustPrune + greedy search)
 //! ├── handle       — LcgRng (deterministic PRNG)
@@ -29,6 +31,7 @@
 pub mod distance;
 pub mod error;
 pub mod flat;
+pub mod graph;
 pub mod handle;
 pub mod hnsw;
 pub mod hnsw_pq;
@@ -41,6 +44,7 @@ pub mod ngt;
 pub mod pq;
 pub mod ptx_kernels;
 pub mod quantize;
+pub mod rerank;
 pub mod topk;
 pub mod vamana;
 
@@ -53,6 +57,7 @@ mod e2e_tests {
     use crate::hnsw::insert::hnsw_insert;
     use crate::hnsw::search::hnsw_search;
     use crate::ivf::ivf::IvfIndex;
+    use crate::ivf::{IvfAdcConfig, IvfAdcIndex};
     use crate::kmeans::kmeans::KMeans;
     use crate::knn_graph::knn_graph::KnnGraph;
     use crate::lsh::minhash::MinHash;
@@ -64,6 +69,7 @@ mod e2e_tests {
         hnsw_neighbor_eval_ptx, ip_distance_batch_ptx, ivf_assign_ptx, l2_distance_batch_ptx,
         lsh_random_proj_ptx, pq_adc_table_ptx, topk_select_ptx,
     };
+    use crate::quantize::{BinaryPq, PqFastScan};
 
     fn make_rng() -> LcgRng {
         LcgRng::new(42)
@@ -84,7 +90,9 @@ mod e2e_tests {
             idx.add(&vecs[i * dim..(i + 1) * dim]);
         }
         // Query with the 3rd vector exactly
-        let res = idx.search_l2(&vecs[3 * dim..4 * dim], 1).unwrap();
+        let res = idx
+            .search_l2(&vecs[3 * dim..4 * dim], 1)
+            .expect("search_l2 should succeed");
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].0, 3, "should find id=3");
         assert!(res[0].1.abs() < 1e-6, "dist should be ~0");
@@ -100,7 +108,9 @@ mod e2e_tests {
         for i in 0..20 {
             idx.add(&vecs[i * dim..(i + 1) * dim]);
         }
-        let res = idx.search_l2(&vecs[0..dim], 5).unwrap();
+        let res = idx
+            .search_l2(&vecs[0..dim], 5)
+            .expect("search_l2 should succeed");
         assert_eq!(res.len(), 5);
         // sorted ascending
         for w in res.windows(2) {
@@ -120,7 +130,7 @@ mod e2e_tests {
         for _ in 0..50 {
             data.push(10.0 + rng.next_f32() * 0.5);
         }
-        let km = KMeans::fit(&data, 100, 1, 2, 100, &mut rng).unwrap();
+        let km = KMeans::fit(&data, 100, 1, 2, 100, &mut rng).expect("fit should succeed");
         let c0 = km.centroids()[0];
         let c1 = km.centroids()[1];
         let lo = c0.min(c1);
@@ -140,7 +150,7 @@ mod e2e_tests {
         let data = rand_vecs(n, dim, &mut rng);
         let cb = train_pq(&data, n, dim, m, ksub, 20, &mut rng);
         assert!(cb.is_ok(), "PQ training failed: {:?}", cb.err());
-        let cb = cb.unwrap();
+        let cb = cb.expect("cb should be present");
         assert_eq!(cb.m, m);
         assert_eq!(cb.ksub, ksub);
     }
@@ -154,7 +164,7 @@ mod e2e_tests {
         let m = 2;
         let ksub = 16;
         let data = rand_vecs(n, dim, &mut rng);
-        let cb = train_pq(&data, n, dim, m, ksub, 20, &mut rng).unwrap();
+        let cb = train_pq(&data, n, dim, m, ksub, 20, &mut rng).expect("train_pq should succeed");
 
         let query = rand_vecs(1, dim, &mut rng);
         let candidate = rand_vecs(1, dim, &mut rng);
@@ -175,13 +185,13 @@ mod e2e_tests {
         let data = rand_vecs(n, dim, &mut rng);
 
         let mut idx = IvfIndex::new(n_lists, dim);
-        idx.train(&data, n, &mut rng).unwrap();
+        idx.train(&data, n, &mut rng).expect("train should succeed");
         for i in 0..n {
             idx.add(&data[i * dim..(i + 1) * dim], i);
         }
 
         let query = rand_vecs(1, dim, &mut rng);
-        let res = idx.search(&query, 5, 2).unwrap();
+        let res = idx.search(&query, 5, 2).expect("search should succeed");
         assert_eq!(res.len(), 5);
     }
 
@@ -198,12 +208,12 @@ mod e2e_tests {
 
         // Search for the 50th vector
         let query = &data[50 * dim..51 * dim];
-        let res = hnsw_search(&graph, query, 1).unwrap();
+        let res = hnsw_search(&graph, query, 1).expect("hnsw_search should succeed");
         assert!(!res.is_empty());
         // The found vector should have ~0 distance from query
         let found_id = res[0].0 as usize;
         let found_vec = &data[found_id * dim..(found_id + 1) * dim];
-        let d = l2_sq(query, found_vec).unwrap();
+        let d = l2_sq(query, found_vec).expect("l2_sq should succeed");
         assert!(d < 1e-5, "dist={d} for found_id={found_id}");
     }
 
@@ -240,7 +250,7 @@ mod e2e_tests {
                 bf.iter().take(k).map(|(i, _)| *i).collect();
 
             // HNSW search
-            let hnsw_res = hnsw_search(&graph, q, k).unwrap();
+            let hnsw_res = hnsw_search(&graph, q, k).expect("hnsw_search should succeed");
             let hits = hnsw_res
                 .iter()
                 .filter(|(id, _)| ground_truth.contains(&(*id as usize)))
@@ -308,5 +318,57 @@ mod e2e_tests {
             assert!(!lsh_random_proj_ptx(sm).is_empty(), "sm={sm}");
             assert!(!topk_select_ptx(sm).is_empty(), "sm={sm}");
         }
+    }
+
+    // Test 13: IVFADC end-to-end — train, add, search.
+    #[test]
+    fn t_ivfadc_train_add_search() {
+        let mut rng = LcgRng::new(56);
+        let n = 300;
+        let dim = 8;
+        let data: Vec<f32> = (0..n * dim).map(|_| rng.next_normal()).collect();
+        let cfg = IvfAdcConfig {
+            n_lists: 4,
+            m: 2,
+            ksub: 8,
+            n_probe: 2,
+            n_iter_coarse: 10,
+            n_iter_pq: 10,
+        };
+        let mut idx =
+            IvfAdcIndex::train(&data, n, dim, &cfg, &mut rng).expect("train should succeed");
+        for i in 0..n {
+            idx.add(&data[i * dim..(i + 1) * dim], i as u32)
+                .expect("value should be present");
+        }
+        let results = idx.search(&data[0..dim], 5).expect("search should succeed");
+        assert!(!results.is_empty());
+        assert!(
+            results.iter().any(|(id, _)| *id == 0),
+            "query itself should be in top-5"
+        );
+    }
+
+    // Test 14: BinaryPq and PQFastScan end-to-end.
+    #[test]
+    fn t_binary_pq_and_fastscan() {
+        let mut rng = LcgRng::new(57);
+        let n = 200;
+        let dim = 8;
+        let data: Vec<f32> = (0..n * dim).map(|_| rng.next_normal()).collect();
+        // Binary PQ
+        let bpq = BinaryPq::train(&data, n, dim, 4, 10, &mut rng).expect("train should succeed");
+        let bits = bpq.encode(&data[0..dim]).expect("encode should succeed");
+        assert_eq!(bits.len(), 1); // ceil(4/64) = 1
+        assert!(bpq.hamming(&bits, &bits).expect("hamming should succeed") == 0);
+        // PQFastScan
+        let fs = PqFastScan::train(&data, n, dim, 4, 10, &mut rng).expect("train should succeed");
+        let codes = fs.encode(&data[0..dim]).expect("encode should succeed");
+        assert_eq!(codes.len(), 2); // ceil(4/2) = 2
+        let lut = fs
+            .build_lut(&data[0..dim])
+            .expect("build_lut should succeed");
+        let dist = fs.adc_dist(&codes, &lut).expect("adc_dist should succeed");
+        assert!(dist.is_finite());
     }
 }

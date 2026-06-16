@@ -277,7 +277,8 @@ mod tests {
             global_delta: vec![2.0_f32, 1.0],
             n_samples: 10,
         }];
-        Ditto::aggregate_global(&mut state, &updates, &cfg).unwrap();
+        Ditto::aggregate_global(&mut state, &updates, &cfg)
+            .expect("aggregate_global should succeed");
         // w[j] -= global_lr * (n/N) * delta[j] = 1.0 * 1.0 * 2.0 = 2.0
         assert!((state.global_params[0] - 3.0).abs() < 1e-5);
         assert!((state.global_params[1] - 2.0).abs() < 1e-5);
@@ -301,7 +302,8 @@ mod tests {
                 n_samples: 5,
             },
         ];
-        Ditto::aggregate_global(&mut state, &updates, &cfg).unwrap();
+        Ditto::aggregate_global(&mut state, &updates, &cfg)
+            .expect("aggregate_global should succeed");
         // Equal weights, same delta -> same result as single update with that delta
         // delta_agg = 0.5*2 + 0.5*2 = 2.0
         assert!((state.global_params[0] - 8.0).abs() < 1e-4);
@@ -325,7 +327,8 @@ mod tests {
                 n_samples: 1,
             },
         ];
-        Ditto::aggregate_global(&mut state, &updates, &cfg).unwrap();
+        Ditto::aggregate_global(&mut state, &updates, &cfg)
+            .expect("aggregate_global should succeed");
         // delta_agg = (3/4)*4 + (1/4)*0 = 3.0; w -= 1.0 * 3.0 = -3.0
         assert!((state.global_params[0] - (-3.0)).abs() < 1e-4);
     }
@@ -341,9 +344,11 @@ mod tests {
             global_delta: vec![0.0, 0.0],
             n_samples: 1,
         }];
-        Ditto::aggregate_global(&mut state, &updates, &cfg).unwrap();
+        Ditto::aggregate_global(&mut state, &updates, &cfg)
+            .expect("aggregate_global should succeed");
         assert_eq!(state.round, 1);
-        Ditto::aggregate_global(&mut state, &updates, &cfg).unwrap();
+        Ditto::aggregate_global(&mut state, &updates, &cfg)
+            .expect("aggregate_global should succeed");
         assert_eq!(state.round, 2);
     }
 
@@ -354,7 +359,8 @@ mod tests {
         let mut state = DittoState::from_params(1, vec![0.0_f32]);
         state.personal_params[0] = vec![1.0_f32];
         let cfg = make_cfg(1, 1.0, 0.01, 0.5, 1);
-        Ditto::update_personal(&mut state, 0, |_v| vec![0.0_f32], &cfg).unwrap();
+        Ditto::update_personal(&mut state, 0, |_v| vec![0.0_f32], &cfg)
+            .expect("update_personal should succeed");
         // proximal_grad = 0 + 1*(1 - 0) = 1; new v = 1 - 0.5*1 = 0.5
         assert!((state.personal_params[0][0] - 0.5).abs() < 1e-5);
     }
@@ -368,7 +374,8 @@ mod tests {
         let mut state = DittoState::from_params(1, vec![0.0_f32]);
         state.personal_params[0] = vec![8.0_f32];
         let cfg = make_cfg(1, 1.0, 0.01, 0.5, 3);
-        Ditto::update_personal(&mut state, 0, |_v| vec![0.0_f32], &cfg).unwrap();
+        Ditto::update_personal(&mut state, 0, |_v| vec![0.0_f32], &cfg)
+            .expect("update_personal should succeed");
         assert!((state.personal_params[0][0] - 1.0).abs() < 1e-4);
     }
 
@@ -379,7 +386,8 @@ mod tests {
         let mut state = DittoState::from_params(1, vec![0.0_f32, 0.0]);
         state.personal_params[0] = init;
         let cfg = make_cfg(1, 1.0, 0.01, 0.1, 20);
-        Ditto::update_personal(&mut state, 0, |_v| vec![0.0_f32, 0.0], &cfg).unwrap();
+        Ditto::update_personal(&mut state, 0, |_v| vec![0.0_f32, 0.0], &cfg)
+            .expect("update_personal should succeed");
         // After 20 steps of shrinking by (1 - 0.1*1)^20 = 0.9^20 ≈ 0.122
         // params should be strictly closer to 0 than their initial values
         assert!(state.personal_params[0][0].abs() < 20.0);
@@ -393,7 +401,8 @@ mod tests {
         state.personal_params[0] = vec![10.0_f32];
         // With lambda=0, only the constant gradient 2.0 drives the update.
         let cfg = make_cfg(1, 0.0, 0.01, 0.5, 1);
-        Ditto::update_personal(&mut state, 0, |_v| vec![2.0_f32], &cfg).unwrap();
+        Ditto::update_personal(&mut state, 0, |_v| vec![2.0_f32], &cfg)
+            .expect("update_personal should succeed");
         // v = 10 - 0.5 * (2 + 0*(10-0)) = 10 - 1 = 9
         assert!((state.personal_params[0][0] - 9.0).abs() < 1e-5);
     }
@@ -405,7 +414,8 @@ mod tests {
         let state = DittoState::from_params(1, params.clone());
         // personal == global, so prox term is 0
         let cfg = make_cfg(1, 5.0, 0.01, 0.01, 1);
-        let obj = Ditto::proximal_objective(&state, 0, |_v| 7.0_f32, &cfg).unwrap();
+        let obj = Ditto::proximal_objective(&state, 0, |_v| 7.0_f32, &cfg)
+            .expect("proximal_objective should succeed");
         assert!((obj - 7.0).abs() < 1e-5);
     }
 
@@ -415,7 +425,8 @@ mod tests {
         let mut state = DittoState::from_params(1, vec![0.0_f32]);
         state.personal_params[0] = vec![2.0_f32];
         let cfg = make_cfg(1, 1.0, 0.01, 0.01, 1);
-        let obj = Ditto::proximal_objective(&state, 0, |_v| 0.0_f32, &cfg).unwrap();
+        let obj = Ditto::proximal_objective(&state, 0, |_v| 0.0_f32, &cfg)
+            .expect("proximal_objective should succeed");
         // prox = (1.0/2) * (2-0)^2 = 2.0; loss = 0 → obj = 2.0
         assert!((obj - 2.0).abs() < 1e-5);
     }
@@ -513,11 +524,14 @@ mod tests {
         let mut state = DittoState::new(3, 1);
         let cfg = make_cfg(3, 0.0, 0.01, 0.1, 5);
         // Client 0: pushed by +1 gradient
-        Ditto::update_personal(&mut state, 0, |_v| vec![1.0_f32], &cfg).unwrap();
+        Ditto::update_personal(&mut state, 0, |_v| vec![1.0_f32], &cfg)
+            .expect("update_personal should succeed");
         // Client 1: pushed by -1 gradient
-        Ditto::update_personal(&mut state, 1, |_v| vec![-1.0_f32], &cfg).unwrap();
+        Ditto::update_personal(&mut state, 1, |_v| vec![-1.0_f32], &cfg)
+            .expect("update_personal should succeed");
         // Client 2: pushed by +3 gradient
-        Ditto::update_personal(&mut state, 2, |_v| vec![3.0_f32], &cfg).unwrap();
+        Ditto::update_personal(&mut state, 2, |_v| vec![3.0_f32], &cfg)
+            .expect("update_personal should succeed");
 
         let v0 = state.personal_params[0][0];
         let v1 = state.personal_params[1][0];
@@ -548,7 +562,8 @@ mod tests {
                 n_samples: 5,
             },
         ];
-        Ditto::aggregate_global(&mut state, &updates, &cfg).unwrap();
+        Ditto::aggregate_global(&mut state, &updates, &cfg)
+            .expect("aggregate_global should succeed");
 
         assert_eq!(state.personal_params, personal_before);
     }

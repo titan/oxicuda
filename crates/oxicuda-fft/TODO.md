@@ -6,7 +6,7 @@ GPU-accelerated Fast Fourier Transform operations, serving as a pure Rust equiva
 
 ## Implementation Status
 
-**Actual: 9,749 SLoC (35 files) -- Estimated: 63K-103K SLoC (estimation.md Vol.5 FFT portion)**
+**Actual: 14,741 SLoC (44 files) -- Estimated: 63K-103K SLoC (estimation.md Vol.5 FFT portion)**
 
 Current implementation covers the core FFT pipeline: plan creation, Stockham kernel generation, radix-2/4/8/mixed/Bluestein butterflies, C2C/R2C/C2R/2D/3D transforms, batch FFT, large FFT, and matrix transpose kernels.
 
@@ -46,6 +46,9 @@ Current implementation covers the core FFT pipeline: plan creation, Stockham ker
 - [x] Convolution via FFT helper (conv_fft.rs) -- 1D/2D convolution + cross-correlation using FFT multiply IFFT pattern (P2)
 - [x] Half-precision FFT (FP16) -- FP16 storage with FP32 accumulation for memory-bound workloads (P2)
 - [x] Callback functions -- User-defined load/store callbacks during FFT execution for fused operations (P2)
+- [x] Number Theoretic Transform (NTT) (`transforms/ntt.rs`) — NTT over prime fields Z_p with primitive root ω; Cooley-Tukey butterfly using modular arithmetic; useful for exact polynomial multiplication and FHE; `NttPlan` (P1)
+- [x] Non-Uniform FFT (NUFFT) type I/II/III (`transforms/nufft.rs`) — Barnett 2019: spreading of non-uniform points to oversampled grid via Gaussian kernel + FFT + deconvolution; `NufftPlan` (P1)
+- [x] STFT / ISTFT helper (`transforms/stft.rs`) — sliding-window Short-Time Fourier Transform via batched R2C FFT over hop-strided frames with window function and OLA overlap-add reconstruction; `StftPlan` (P2)
 
 ## Benchmark Coverage
 
@@ -66,7 +69,7 @@ Current implementation covers the core FFT pipeline: plan creation, Stockham ker
 
 ## Quality Status
 
-- Tests: 314 passing
+- Tests: 418 passing
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
@@ -76,8 +79,8 @@ Current implementation covers the core FFT pipeline: plan creation, Stockham ker
 
 | Metric | Estimated (Vol.5 FFT) | Actual |
 |--------|----------------------|--------|
-| SLoC | 63K-103K | 8,853 |
-| Files | ~15-20 | 35 |
+| SLoC | 63K-103K | 14,741 |
+| Files | ~15-20 | 44 |
 | Coverage | Full cuFFT parity | Core pipeline |
 | Ratio | -- | ~3.5% of estimate |
 

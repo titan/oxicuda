@@ -130,7 +130,9 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let net = DragonNet::new(4, 8, 2, &mut rng);
         let x = vec![0.1_f32, 0.2, 0.3, 0.4];
-        let (mu0, mu1, pi) = net.forward(&x).unwrap();
+        let (mu0, mu1, pi) = net
+            .forward(&x)
+            .expect("DragonNet::forward should succeed for valid input");
         assert!(mu0.is_finite());
         assert!(mu1.is_finite());
         assert!(pi > 0.0 && pi < 1.0);

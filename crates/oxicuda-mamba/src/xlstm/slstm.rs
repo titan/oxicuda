@@ -262,20 +262,26 @@ impl SLstm {
                 let z_t = z_in + z_rec;
                 let o_t = o_in + o_rec;
 
-                // Stabilized exponential gates
+                // Stabilized exponential gates (Beck et al. 2024, §B).
+                //
+                // The running stabilizer is `m_t = max(f̃ + m_{t-1}, ĩ)`. By
+                // construction both exponent arguments below are `≤ 0`:
+                //   * `ĩ - m_t ≤ 0`               (since `m_t ≥ ĩ`), and
+                //   * `f̃ + m_{t-1} - m_t ≤ 0`     (since `m_t ≥ f̃ + m_{t-1}`),
+                // so each gate lies in `(0, 1]` and can never overflow. `m_t`
+                // itself must therefore NOT be clamped: clamping it would break
+                // the `arg ≤ 0` invariant and let the gates blow up (the cell
+                // state would then diverge to ±∞ under sustained large inputs).
                 let prev_m = state.m[head * hd + j];
-                let m_candidate = f_tilde + prev_m.max(f32::NEG_INFINITY);
-                let m_t = if m_candidate > i_tilde {
-                    m_candidate
+                let m_candidate = if prev_m.is_finite() {
+                    f_tilde + prev_m
                 } else {
-                    i_tilde
+                    f32::NEG_INFINITY
                 };
-
-                // Clamp for numerical safety
-                let safe_m_t = m_t.min(30.0_f32);
-                let i_gate = (i_tilde - safe_m_t).exp().min(1e9_f32);
+                let m_t = m_candidate.max(i_tilde);
+                let i_gate = (i_tilde - m_t).exp();
                 let f_gate = if prev_m.is_finite() {
-                    (f_tilde - safe_m_t + prev_m).exp().min(1e9_f32)
+                    (f_tilde - m_t + prev_m).exp()
                 } else {
                     0.0_f32
                 };
@@ -293,7 +299,10 @@ impl SLstm {
                 let out_idx = head * hd + j;
                 new_c[out_idx] = c_t;
                 new_n[out_idx] = n_t;
-                new_m[out_idx] = m_t.min(30.0_f32);
+                // Store the exact running max: it is the reference point that
+                // keeps the next step's gate exponents `≤ 0`, so it must not be
+                // clamped (it legitimately grows with sustained large drive).
+                new_m[out_idx] = m_t;
                 new_h[out_idx] = h_t;
             }
         }
@@ -460,7 +469,12 @@ mod tests {
 
     #[test]
     fn slstm_stabilization() {
-        // Max stabilizer m should remain bounded and not cause NaN
+        // The exponential-gate stabilizer must keep the *gates, cell state and
+        // outputs* finite under sustained large-magnitude inputs. The running
+        // max `m` is a stabilization reference, not a bounded quantity: it is
+        // non-decreasing and legitimately grows with continued large drive
+        // (clamping it would reintroduce overflow), so we assert finiteness and
+        // monotonicity of `m` — not an arbitrary numeric cap.
         let cfg = make_cfg();
         let mut rng = make_rng();
         let id = cfg.input_dim;
@@ -468,22 +482,32 @@ mod tests {
         let n_heads = cfg.n_heads;
         let model = SLstm::new(cfg, &mut rng).expect("SLstm::new");
         let mut state = model.init_state();
-        // Feed large-magnitude inputs to stress-test stabilization
+        // Feed large-magnitude inputs to stress-test stabilization.
         let x: Vec<f32> = (0..id).map(|i| i as f32 * 2.0).collect();
         let mut prev_m_max = f32::NEG_INFINITY;
         for _ in 0..8 {
             let (y, new_state) = model.step(&x, &state).expect("step");
             assert!(y.iter().all(|v| v.is_finite()), "outputs must stay finite");
-            // m state values should be bounded by our 30.0 clamp
+            // Cell and normalizer states must remain finite — the real payoff
+            // of the stabilizer (gate exponents stay `≤ 0`, so no overflow).
+            assert!(
+                new_state.c.iter().all(|v| v.is_finite()),
+                "cell state must stay finite"
+            );
+            assert!(
+                new_state.n.iter().all(|v| v.is_finite()),
+                "normalizer state must stay finite"
+            );
             let cur_m_max = new_state
                 .m
                 .iter()
                 .cloned()
                 .fold(f32::NEG_INFINITY, f32::max);
-            assert!(cur_m_max <= 31.0, "m_t exceeded clamp: {cur_m_max}");
+            assert!(cur_m_max.is_finite(), "stabilizer m must stay finite");
+            // `m` is a running max: never decreases step-to-step.
             assert!(
-                cur_m_max >= prev_m_max - 1.0,
-                "m_max regressed unexpectedly: {cur_m_max} < {prev_m_max}"
+                cur_m_max >= prev_m_max,
+                "running-max stabilizer regressed: {cur_m_max} < {prev_m_max}"
             );
             prev_m_max = cur_m_max;
             state = new_state;

@@ -133,7 +133,8 @@ mod tests {
         let mut omega = vec![0.0_f32; 4];
         let grad = vec![2.0_f32, -3.0, 0.5, -1.5];
         // With momentum=0: omega = |grad|
-        mas_importance_update(&mut omega, &grad, 0.0).unwrap();
+        mas_importance_update(&mut omega, &grad, 0.0)
+            .expect("MAS importance update should succeed with valid gradients");
         assert!((omega[0] - 2.0).abs() < 1e-6);
         assert!((omega[1] - 3.0).abs() < 1e-6);
         assert!((omega[2] - 0.5).abs() < 1e-6);
@@ -144,7 +145,8 @@ mod tests {
     fn mas_importance_all_non_negative() {
         let mut omega = vec![0.5_f32; 8];
         let grad: Vec<f32> = (0..8).map(|i| (i as f32 * 0.3).sin()).collect();
-        mas_importance_update(&mut omega, &grad, 0.9).unwrap();
+        mas_importance_update(&mut omega, &grad, 0.9)
+            .expect("MAS importance update should succeed with valid gradients");
         for &w in &omega {
             assert!(w >= 0.0, "MAS omega must be non-negative, got {w}");
         }
@@ -157,7 +159,8 @@ mod tests {
             omega: vec![1.0, 2.0, 3.0],
         };
         let cfg = MasConfig::default();
-        let pen = mas_penalty(&params, &params, &importance, &cfg).unwrap();
+        let pen = mas_penalty(&params, &params, &importance, &cfg)
+            .expect("MAS penalty should compute with matching dimensions");
         assert!(pen.abs() < 1e-6, "MAS penalty at anchor should be 0");
     }
 
@@ -170,8 +173,10 @@ mod tests {
         let cfg = MasConfig::default();
         let small = vec![0.1_f32; 4];
         let large = vec![1.0_f32; 4];
-        let pen_small = mas_penalty(&small, &anchor, &importance, &cfg).unwrap();
-        let pen_large = mas_penalty(&large, &anchor, &importance, &cfg).unwrap();
+        let pen_small = mas_penalty(&small, &anchor, &importance, &cfg)
+            .expect("MAS penalty should compute with matching dimensions");
+        let pen_large = mas_penalty(&large, &anchor, &importance, &cfg)
+            .expect("MAS penalty should compute with matching dimensions");
         assert!(
             pen_large > pen_small,
             "MAS penalty should grow with displacement"
@@ -183,7 +188,8 @@ mod tests {
         let mut omega = vec![1.0_f32; 2];
         let grad = vec![0.0_f32; 2]; // all zero gradient
         // With momentum=0.9: omega = 0.9 * 1.0 + 0.1 * 0 = 0.9
-        mas_importance_update(&mut omega, &grad, 0.9).unwrap();
+        mas_importance_update(&mut omega, &grad, 0.9)
+            .expect("MAS importance update should succeed with valid gradients");
         assert!((omega[0] - 0.9).abs() < 1e-6);
         assert!((omega[1] - 0.9).abs() < 1e-6);
     }
@@ -205,8 +211,10 @@ mod tests {
         };
         let cfg1 = MasConfig { lambda: 1.0 };
         let cfg2 = MasConfig { lambda: 3.0 };
-        let p1 = mas_penalty(&params, &anchor, &importance, &cfg1).unwrap();
-        let p2 = mas_penalty(&params, &anchor, &importance, &cfg2).unwrap();
+        let p1 = mas_penalty(&params, &anchor, &importance, &cfg1)
+            .expect("MAS penalty should compute with matching dimensions");
+        let p2 = mas_penalty(&params, &anchor, &importance, &cfg2)
+            .expect("MAS penalty should compute with matching dimensions");
         assert!((p2 - 3.0 * p1).abs() < 1e-5);
     }
 

@@ -107,7 +107,7 @@ fn main() -> SketchResult<()> {
 
 ## Status
 
-**Alpha** -- 8,533 SLoC, 332 passing tests. API may evolve before v1.0.
+**Alpha** -- 11,692 SLoC, 456 passing tests. API may evolve before v1.0.
 
 ## License
 

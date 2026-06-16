@@ -247,7 +247,10 @@ mod tests {
         for w in res.history.windows(2) {
             assert!(w[1] >= w[0], "history must be non-decreasing: {w:?}");
         }
-        assert!(res.history.last().unwrap() >= res.history.first().unwrap());
+        assert!(
+            res.history.last().expect("last should succeed")
+                >= res.history.first().expect("first should succeed")
+        );
     }
 
     #[test]

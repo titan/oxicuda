@@ -391,7 +391,9 @@ fn is_stagnated(best_history: &[f64], window: usize, tol: f64, sigma: f64, cond_
     // No significant improvement over the last `window` generations
     if best_history.len() >= window {
         let oldest = best_history[best_history.len() - window];
-        let newest = *best_history.last().unwrap();
+        let newest = *best_history
+            .last()
+            .expect("best_history.len() >= window > 0 (checked above)");
         if (oldest - newest).abs() <= tol.max(1e-300) {
             return true;
         }
@@ -773,7 +775,7 @@ mod tests {
 
     #[test]
     fn test_restart_config_new_valid() {
-        let cfg = RestartConfig::new(4).unwrap();
+        let cfg = RestartConfig::new(4).expect("new should succeed");
         assert_eq!(cfg.n, 4);
         assert!(cfg.sigma0 > 0.0);
         assert!(cfg.max_total_evals > 0);
@@ -808,7 +810,8 @@ mod tests {
             seed: 42,
         };
         let bounds = vec![(-5.0, 5.0); 2];
-        let state = ipop_cmaes_run(sphere, &[2.0, -2.0], &bounds, &cfg).unwrap();
+        let state = ipop_cmaes_run(sphere, &[2.0, -2.0], &bounds, &cfg)
+            .expect("ipop_cmaes_run should succeed");
         assert!(
             state.best_f < 0.1,
             "sphere 2D ipop: best_f={}",
@@ -829,7 +832,8 @@ mod tests {
             seed: 1,
         };
         let bounds = vec![(-3.0, 3.0); 2];
-        let state = ipop_cmaes_run(sphere, &[1.0, 1.0], &bounds, &cfg).unwrap();
+        let state = ipop_cmaes_run(sphere, &[1.0, 1.0], &bounds, &cfg)
+            .expect("ipop_cmaes_run should succeed");
         assert!(!state.regime_history.is_empty());
     }
 
@@ -846,7 +850,8 @@ mod tests {
             seed: 7,
         };
         let bounds = vec![(-5.0, 5.0); 2];
-        let state = ipop_cmaes_run(sphere, &[1.0, -1.0], &bounds, &cfg).unwrap();
+        let state = ipop_cmaes_run(sphere, &[1.0, -1.0], &bounds, &cfg)
+            .expect("ipop_cmaes_run should succeed");
         for r in &state.regime_history {
             assert_eq!(
                 r.kind,
@@ -869,7 +874,8 @@ mod tests {
             seed: 11,
         };
         let bounds = vec![(-5.0, 5.0); 3];
-        let state = ipop_cmaes_run(sphere, &[1.0, 1.0, 1.0], &bounds, &cfg).unwrap();
+        let state = ipop_cmaes_run(sphere, &[1.0, 1.0, 1.0], &bounds, &cfg)
+            .expect("ipop_cmaes_run should succeed");
         // Each successive restart should at most double the population
         for pair in state.regime_history.windows(2) {
             assert!(pair[1].pop_size >= pair[0].pop_size);
@@ -889,7 +895,8 @@ mod tests {
             small_sigma_factor: 2.0,
             seed: 3,
         };
-        let state = ipop_cmaes_run(sphere, &[0.5, -0.5], &bounds, &cfg).unwrap();
+        let state = ipop_cmaes_run(sphere, &[0.5, -0.5], &bounds, &cfg)
+            .expect("ipop_cmaes_run should succeed");
         for (&x, &(lo, hi)) in state.best_x.iter().zip(bounds.iter()) {
             assert!(
                 x >= lo - 1e-9 && x <= hi + 1e-9,
@@ -912,7 +919,8 @@ mod tests {
             seed: 5,
         };
         let bounds = vec![(-3.0, 3.0); 2];
-        let state = ipop_cmaes_run(sphere, &[1.0, 1.0], &bounds, &cfg).unwrap();
+        let state = ipop_cmaes_run(sphere, &[1.0, 1.0], &bounds, &cfg)
+            .expect("ipop_cmaes_run should succeed");
         // We allow a small overshoot of one lambda batch beyond the limit
         assert!(
             state.n_evals <= max_evals + 1000,
@@ -935,7 +943,8 @@ mod tests {
             seed: 9,
         };
         let bounds = vec![(-3.0, 3.0); 2];
-        let state = ipop_cmaes_run(sphere, &[1.5, -1.5], &bounds, &cfg).unwrap();
+        let state = ipop_cmaes_run(sphere, &[1.5, -1.5], &bounds, &cfg)
+            .expect("ipop_cmaes_run should succeed");
         for r in &state.regime_history {
             assert!(r.n_evals_used > 0);
         }
@@ -954,7 +963,8 @@ mod tests {
             seed: 13,
         };
         let bounds = vec![(-5.0, 5.0); 2];
-        let state = ipop_cmaes_run(sphere, &[0.0, 0.0], &bounds, &cfg).unwrap();
+        let state = ipop_cmaes_run(sphere, &[0.0, 0.0], &bounds, &cfg)
+            .expect("ipop_cmaes_run should succeed");
         for r in &state.regime_history {
             assert!(r.final_best.is_finite());
         }
@@ -975,7 +985,8 @@ mod tests {
             seed: 100,
         };
         let bounds = vec![(-5.0, 5.0); 2];
-        let state = bipop_cmaes_run(sphere, &[2.0, -2.0], &bounds, &cfg).unwrap();
+        let state = bipop_cmaes_run(sphere, &[2.0, -2.0], &bounds, &cfg)
+            .expect("bipop_cmaes_run should succeed");
         assert!(
             state.best_f < 0.5,
             "sphere 2D bipop: best_f={}",
@@ -997,7 +1008,8 @@ mod tests {
             seed: 200,
         };
         let bounds = vec![(-5.0, 5.0); 2];
-        let state = bipop_cmaes_run(sphere, &[1.0, 1.0], &bounds, &cfg).unwrap();
+        let state = bipop_cmaes_run(sphere, &[1.0, 1.0], &bounds, &cfg)
+            .expect("bipop_cmaes_run should succeed");
         let has_large = state
             .regime_history
             .iter()
@@ -1023,7 +1035,8 @@ mod tests {
             seed: 77,
         };
         let bounds = vec![(-5.0, 5.0); 3];
-        let state = bipop_cmaes_run(sphere, &[1.0, -1.0, 0.5], &bounds, &cfg).unwrap();
+        let state = bipop_cmaes_run(sphere, &[1.0, -1.0, 0.5], &bounds, &cfg)
+            .expect("bipop_cmaes_run should succeed");
         assert!(!state.regime_history.is_empty());
     }
 
@@ -1040,7 +1053,8 @@ mod tests {
             small_sigma_factor: 2.0,
             seed: 55,
         };
-        let state = bipop_cmaes_run(sphere, &[0.5, 0.5, 0.5], &bounds, &cfg).unwrap();
+        let state = bipop_cmaes_run(sphere, &[0.5, 0.5, 0.5], &bounds, &cfg)
+            .expect("bipop_cmaes_run should succeed");
         for (&x, &(lo, hi)) in state.best_x.iter().zip(bounds.iter()) {
             assert!(
                 x >= lo - 1e-9 && x <= hi + 1e-9,
@@ -1062,7 +1076,8 @@ mod tests {
             seed: 999,
         };
         let bounds = vec![(-5.0, 5.0); 2];
-        let state = bipop_cmaes_run(rosenbrock, &[0.0, 0.0], &bounds, &cfg).unwrap();
+        let state = bipop_cmaes_run(rosenbrock, &[0.0, 0.0], &bounds, &cfg)
+            .expect("bipop_cmaes_run should succeed");
         assert!(
             state.best_f < 200.0,
             "rosenbrock bipop: best_f={}",
@@ -1072,7 +1087,7 @@ mod tests {
 
     #[test]
     fn test_bipop_dimension_mismatch_error() {
-        let cfg = RestartConfig::new(3).unwrap();
+        let cfg = RestartConfig::new(3).expect("new should succeed");
         let bounds = vec![(-5.0, 5.0); 3];
         // init_x has wrong length
         assert!(bipop_cmaes_run(sphere, &[0.0; 2], &bounds, &cfg).is_err());
@@ -1080,7 +1095,7 @@ mod tests {
 
     #[test]
     fn test_ipop_dimension_mismatch_error() {
-        let cfg = RestartConfig::new(3).unwrap();
+        let cfg = RestartConfig::new(3).expect("new should succeed");
         let bounds = vec![(-5.0, 5.0); 3];
         assert!(ipop_cmaes_run(sphere, &[0.0; 4], &bounds, &cfg).is_err());
     }
@@ -1088,7 +1103,7 @@ mod tests {
     #[test]
     fn test_inner_cmaes_condition_number_identity() {
         let mut rng = LcgRng::new(0);
-        let state = InnerCmaEs::new(vec![0.0; 3], 0.3, 6, &mut rng).unwrap();
+        let state = InnerCmaEs::new(vec![0.0; 3], 0.3, 6, &mut rng).expect("new should succeed");
         // Initial covariance is identity: all d_vector = 1.0, cond = 1.0
         let cond = state.condition_number();
         assert!((cond - 1.0).abs() < 1e-6, "initial cond={cond}");

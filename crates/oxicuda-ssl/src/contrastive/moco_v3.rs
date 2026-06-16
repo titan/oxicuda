@@ -355,7 +355,7 @@ mod tests {
         let q = one_hot_batch(n, d);
         let k = q.clone();
         let cfg = MocoV3Config::default();
-        let (loss, acc) = moco_v3_loss(&q, &k, n, d, &cfg).unwrap();
+        let (loss, acc) = moco_v3_loss(&q, &k, n, d, &cfg).expect("moco_v3_loss should succeed");
         assert!(loss.is_finite(), "loss must be finite, got {loss}");
         assert!(
             (acc - 1.0).abs() < 1e-6,
@@ -374,7 +374,7 @@ mod tests {
         rng.fill_normal(&mut q);
         rng.fill_normal(&mut k);
         let cfg = MocoV3Config::default();
-        let (loss, acc) = moco_v3_loss(&q, &k, n, d, &cfg).unwrap();
+        let (loss, acc) = moco_v3_loss(&q, &k, n, d, &cfg).expect("moco_v3_loss should succeed");
         assert!(loss.is_finite(), "loss = {loss}");
         assert!((0.0..=1.0).contains(&acc), "acc = {acc}");
     }
@@ -397,8 +397,10 @@ mod tests {
             ..Default::default()
         };
 
-        let (loss_low, _) = moco_v3_loss(&q, &k, n, d, &cfg_low).unwrap();
-        let (loss_high, _) = moco_v3_loss(&q, &k, n, d, &cfg_high).unwrap();
+        let (loss_low, _) =
+            moco_v3_loss(&q, &k, n, d, &cfg_low).expect("moco_v3_loss should succeed");
+        let (loss_high, _) =
+            moco_v3_loss(&q, &k, n, d, &cfg_high).expect("moco_v3_loss should succeed");
 
         // With a sharper distribution, perfectly aligned pairs yield lower loss.
         assert!(
@@ -426,8 +428,10 @@ mod tests {
         rng.fill_normal(&mut k1);
 
         let cfg = MocoV3Config::default();
-        let (loss_ab, acc_ab) = moco_v3_symmetric_loss(&q1, &k2, &q2, &k1, n, d, &cfg).unwrap();
-        let (loss_ba, acc_ba) = moco_v3_symmetric_loss(&q2, &k1, &q1, &k2, n, d, &cfg).unwrap();
+        let (loss_ab, acc_ab) = moco_v3_symmetric_loss(&q1, &k2, &q2, &k1, n, d, &cfg)
+            .expect("moco_v3_symmetric_loss should succeed");
+        let (loss_ba, acc_ba) = moco_v3_symmetric_loss(&q2, &k1, &q1, &k2, n, d, &cfg)
+            .expect("moco_v3_symmetric_loss should succeed");
 
         assert!(
             (loss_ab - loss_ba).abs() < 1e-5,
@@ -454,7 +458,8 @@ mod tests {
         rng.fill_normal(&mut q2);
         rng.fill_normal(&mut k1);
         let cfg = MocoV3Config::default();
-        let (loss, acc) = moco_v3_symmetric_loss(&q1, &k2, &q2, &k1, n, d, &cfg).unwrap();
+        let (loss, acc) = moco_v3_symmetric_loss(&q1, &k2, &q2, &k1, n, d, &cfg)
+            .expect("moco_v3_symmetric_loss should succeed");
         assert!(loss.is_finite(), "loss = {loss}");
         assert!((0.0..=1.0).contains(&acc), "acc = {acc}");
     }
@@ -581,7 +586,7 @@ mod tests {
         let q = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         let k = q.clone();
         let cfg = MocoV3Config::default();
-        let (loss, acc) = moco_v3_loss(&q, &k, n, d, &cfg).unwrap();
+        let (loss, acc) = moco_v3_loss(&q, &k, n, d, &cfg).expect("moco_v3_loss should succeed");
         assert!(loss.is_finite(), "loss = {loss}");
         assert!((acc - 1.0).abs() < 1e-6, "acc = {acc}");
     }

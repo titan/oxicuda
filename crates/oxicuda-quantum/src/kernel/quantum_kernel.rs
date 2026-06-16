@@ -48,14 +48,16 @@ mod tests {
     #[test]
     fn self_kernel_is_one() {
         let x = vec![0.5_f32, 1.0];
-        let k = overlap_kernel(&x, &x).unwrap();
+        let k = overlap_kernel(&x, &x)
+            .expect("self-overlap of a non-empty, same-length vector pair cannot fail");
         assert!((k - 1.0).abs() < 1e-4, "k={k}");
     }
 
     #[test]
     fn kernel_matrix_diagonal_is_one() {
         let xs = vec![vec![0.3_f32, 0.7], vec![1.0_f32, -0.5]];
-        let mat = kernel_matrix(&xs).unwrap();
+        let mat = kernel_matrix(&xs)
+            .expect("kernel matrix of non-empty, equal-length vectors cannot fail");
         assert!((mat[0][0] - 1.0).abs() < 1e-4);
         assert!((mat[1][1] - 1.0).abs() < 1e-4);
     }

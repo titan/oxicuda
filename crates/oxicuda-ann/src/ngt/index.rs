@@ -385,7 +385,7 @@ mod tests {
     }
 
     fn idx(dim: usize) -> NgtIndex {
-        NgtIndex::new(cfg(dim)).unwrap()
+        NgtIndex::new(cfg(dim)).expect("valid NgtConfig should create index")
     }
 
     /// Six points in three clearly separated 2-D clusters.
@@ -413,9 +413,24 @@ mod tests {
     #[test]
     fn insert_returns_sequential_ids() {
         let mut index = idx(2);
-        assert_eq!(index.insert(&[0.0, 0.0]).unwrap(), 0);
-        assert_eq!(index.insert(&[1.0, 1.0]).unwrap(), 1);
-        assert_eq!(index.insert(&[2.0, 2.0]).unwrap(), 2);
+        assert_eq!(
+            index
+                .insert(&[0.0, 0.0])
+                .expect("insert with correct dimension should succeed"),
+            0
+        );
+        assert_eq!(
+            index
+                .insert(&[1.0, 1.0])
+                .expect("insert with correct dimension should succeed"),
+            1
+        );
+        assert_eq!(
+            index
+                .insert(&[2.0, 2.0])
+                .expect("insert with correct dimension should succeed"),
+            2
+        );
         assert_eq!(index.len(), 3);
         assert!(!index.is_empty());
     }
@@ -424,7 +439,9 @@ mod tests {
     fn build_sets_len() {
         let (data, n) = clustered();
         let mut index = idx(2);
-        index.build(&data, n).unwrap();
+        index
+            .build(&data, n)
+            .expect("build with correct data should succeed");
         assert_eq!(index.len(), n);
     }
 
@@ -432,8 +449,12 @@ mod tests {
     fn search_results_sorted_and_bounded() {
         let (data, n) = clustered();
         let mut index = idx(2);
-        index.build(&data, n).unwrap();
-        let res = index.search(&[0.1, 0.1], 3).unwrap();
+        index
+            .build(&data, n)
+            .expect("build with correct data should succeed");
+        let res = index
+            .search(&[0.1, 0.1], 3)
+            .expect("search with valid parameters should succeed");
         assert!(res.len() <= 3);
         for w in res.windows(2) {
             assert!(w[0].1 <= w[1].1, "not ascending: {res:?}");
@@ -444,8 +465,12 @@ mod tests {
     fn search_k_larger_than_n_returns_n() {
         let (data, n) = clustered();
         let mut index = idx(2);
-        index.build(&data, n).unwrap();
-        let res = index.search(&[0.0, 0.0], 100).unwrap();
+        index
+            .build(&data, n)
+            .expect("build with correct data should succeed");
+        let res = index
+            .search(&[0.0, 0.0], 100)
+            .expect("search with valid parameters should succeed");
         assert_eq!(res.len(), n);
     }
 
@@ -453,9 +478,13 @@ mod tests {
     fn search_finds_exact_nearest_in_clusters() {
         let (data, n) = clustered();
         let mut index = idx(2);
-        index.build(&data, n).unwrap();
+        index
+            .build(&data, n)
+            .expect("build with correct data should succeed");
         // Query exactly equal to stored point 3 -> nearest must be id 3, dist ~0.
-        let res = index.search(&[9.7, 10.2], 1).unwrap();
+        let res = index
+            .search(&[9.7, 10.2], 1)
+            .expect("search with valid parameters should succeed");
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].0, 3, "results: {res:?}");
         assert!(res[0].1.abs() < 1e-5, "dist={}", res[0].1);
@@ -465,17 +494,25 @@ mod tests {
     fn search_query_near_cluster_returns_member() {
         let (data, n) = clustered();
         let mut index = idx(2);
-        index.build(&data, n).unwrap();
+        index
+            .build(&data, n)
+            .expect("build with correct data should succeed");
         // Near the (-10,5) cluster: nearest should be 4 or 5.
-        let res = index.search(&[-9.9, 4.8], 1).unwrap();
+        let res = index
+            .search(&[-9.9, 4.8], 1)
+            .expect("search with valid parameters should succeed");
         assert!(res[0].0 == 4 || res[0].0 == 5, "results: {res:?}");
     }
 
     #[test]
     fn single_point_index_returns_that_point() {
         let mut index = idx(2);
-        index.insert(&[3.0, 4.0]).unwrap();
-        let res = index.search(&[3.0, 4.0], 5).unwrap();
+        index
+            .insert(&[3.0, 4.0])
+            .expect("insert with correct dimension should succeed");
+        let res = index
+            .search(&[3.0, 4.0], 5)
+            .expect("search with valid parameters should succeed");
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].0, 0);
         assert!(res[0].1.abs() < 1e-6);
@@ -484,12 +521,18 @@ mod tests {
     #[test]
     fn duplicate_points_are_insertable() {
         let mut index = idx(2);
-        let id0 = index.insert(&[1.0, 1.0]).unwrap();
-        let id1 = index.insert(&[1.0, 1.0]).unwrap();
+        let id0 = index
+            .insert(&[1.0, 1.0])
+            .expect("insert with correct dimension should succeed");
+        let id1 = index
+            .insert(&[1.0, 1.0])
+            .expect("insert with correct dimension should succeed");
         assert_eq!(id0, 0);
         assert_eq!(id1, 1);
         assert_eq!(index.len(), 2);
-        let res = index.search(&[1.0, 1.0], 2).unwrap();
+        let res = index
+            .search(&[1.0, 1.0], 2)
+            .expect("search with valid parameters should succeed");
         assert_eq!(res.len(), 2);
         // Both duplicates sit at distance ~0.
         assert!(res.iter().all(|(_, d)| d.abs() < 1e-6));
@@ -509,8 +552,10 @@ mod tests {
                 search_epsilon: eps,
                 seed_count: 2,
             };
-            let mut index = NgtIndex::new(c).unwrap();
-            index.build(&data, n).unwrap();
+            let mut index = NgtIndex::new(c).expect("valid NgtConfig should create index");
+            index
+                .build(&data, n)
+                .expect("build with correct data should succeed");
             index
         };
         let small = build_with(0.0);
@@ -520,7 +565,8 @@ mod tests {
         let brute_top1 = |q: &[f32]| -> u32 {
             let mut best = (0u32, f32::INFINITY);
             for i in 0..n {
-                let d = l2_sq(q, &data[i * dim..i * dim + dim]).unwrap();
+                let d = l2_sq(q, &data[i * dim..i * dim + dim])
+                    .expect("l2_sq with equal-length slices should succeed");
                 if d < best.1 {
                     best = (i as u32, d);
                 }
@@ -532,10 +578,20 @@ mod tests {
         let mut big_hits = 0usize;
         for q in &queries {
             let gt = brute_top1(q);
-            if small.search(q, 1).unwrap()[0].0 == gt {
+            if small
+                .search(q, 1)
+                .expect("search with valid parameters should succeed")[0]
+                .0
+                == gt
+            {
                 small_hits += 1;
             }
-            if big.search(q, 1).unwrap()[0].0 == gt {
+            if big
+                .search(q, 1)
+                .expect("search with valid parameters should succeed")[0]
+                .0
+                == gt
+            {
                 big_hits += 1;
             }
         }
@@ -550,11 +606,17 @@ mod tests {
         let (data, n) = clustered();
         let mut a = idx(2);
         let mut b = idx(2);
-        a.build(&data, n).unwrap();
-        b.build(&data, n).unwrap();
+        a.build(&data, n)
+            .expect("build with correct data should succeed");
+        b.build(&data, n)
+            .expect("build with correct data should succeed");
         for q in [[0.0_f32, 0.0], [10.0, 10.0], [-10.0, 5.0], [3.0, 3.0]] {
-            let ra = a.search(&q, 3).unwrap();
-            let rb = b.search(&q, 3).unwrap();
+            let ra = a
+                .search(&q, 3)
+                .expect("search with valid parameters should succeed");
+            let rb = b
+                .search(&q, 3)
+                .expect("search with valid parameters should succeed");
             assert_eq!(ra, rb, "query {q:?} produced different results");
         }
     }
@@ -563,7 +625,7 @@ mod tests {
     fn every_node_has_degree_at_least_one() {
         let (data, n) = clustered();
         let mut index = idx(2);
-        index.build(&data, n).unwrap();
+        index.build(&data, n).expect("build should succeed");
         for id in 0..n {
             assert!(
                 !index.adjacency[id].is_empty(),
@@ -578,11 +640,11 @@ mod tests {
         let (data, n) = clustered();
         let dim = 2;
         let mut index = idx(dim);
-        index.build(&data, n).unwrap();
+        index.build(&data, n).expect("build should succeed");
         // Each stored point should retrieve itself as the top-1 (dist ~0).
         for i in 0..n {
             let q = &data[i * dim..i * dim + dim];
-            let res = index.search(q, 1).unwrap();
+            let res = index.search(q, 1).expect("search should succeed");
             assert_eq!(res[0].0 as usize, i, "point {i} did not retrieve itself");
             assert!(res[0].1.abs() < 1e-5);
         }
@@ -601,7 +663,7 @@ mod tests {
     fn err_search_dim_mismatch() {
         let (data, n) = clustered();
         let mut index = idx(2);
-        index.build(&data, n).unwrap();
+        index.build(&data, n).expect("build should succeed");
         assert!(matches!(
             index.search(&[1.0, 2.0, 3.0], 1),
             Err(AnnError::DimensionMismatch { .. })
@@ -611,7 +673,7 @@ mod tests {
     #[test]
     fn err_search_k_zero() {
         let mut index = idx(2);
-        index.insert(&[0.0, 0.0]).unwrap();
+        index.insert(&[0.0, 0.0]).expect("insert should succeed");
         assert!(matches!(
             index.search(&[0.0, 0.0], 0),
             Err(AnnError::InvalidK { k: 0, .. })
@@ -680,7 +742,9 @@ mod tests {
         let mut index = idx(2);
         assert!(index.is_empty());
         for i in 0..5 {
-            index.insert(&[i as f32, 0.0]).unwrap();
+            index
+                .insert(&[i as f32, 0.0])
+                .expect("insert should succeed");
             assert!(!index.is_empty());
             assert_eq!(index.len(), i + 1);
         }
@@ -690,7 +754,7 @@ mod tests {
     fn search_on_empty_returns_empty() {
         // Empty graph + valid k -> empty result (not an error).
         let index = idx(2);
-        let res = index.search(&[0.0, 0.0], 3).unwrap();
+        let res = index.search(&[0.0, 0.0], 3).expect("search should succeed");
         assert!(res.is_empty());
     }
 
@@ -713,13 +777,13 @@ mod tests {
             search_epsilon: 0.3,
             seed_count: 4,
         })
-        .unwrap();
-        index.build(&data, n).unwrap();
+        .expect("value should be present");
+        index.build(&data, n).expect("build should succeed");
 
         let mut hits = 0usize;
         for i in 0..n {
             let q = &data[i * dim..i * dim + dim];
-            let res = index.search(q, 1).unwrap();
+            let res = index.search(q, 1).expect("search should succeed");
             if res[0].0 as usize == i {
                 hits += 1;
             }

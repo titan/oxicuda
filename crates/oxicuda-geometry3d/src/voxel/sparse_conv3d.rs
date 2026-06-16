@@ -156,7 +156,7 @@ mod tests {
             features: vec![1.0_f32; 2 * 4],
             c_in: 4,
         };
-        let out = conv.forward(&input).unwrap();
+        let out = conv.forward(&input).expect("forward should succeed");
         assert!(!out.coords.is_empty());
         assert_eq!(out.c_in, 8);
         assert_eq!(out.features.len(), out.coords.len() * 8);
@@ -176,7 +176,7 @@ mod tests {
             features: vec![],
             c_in: 4,
         };
-        let out = conv.forward(&input).unwrap();
+        let out = conv.forward(&input).expect("forward should succeed");
         assert!(out.coords.is_empty());
     }
 
@@ -194,7 +194,7 @@ mod tests {
             features: vec![1.0, -1.0],
             c_in: 2,
         };
-        let out = conv.forward(&input).unwrap();
+        let out = conv.forward(&input).expect("forward should succeed");
         assert!(out.features.iter().all(|v| v.is_finite()));
     }
 

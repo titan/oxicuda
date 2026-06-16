@@ -491,7 +491,8 @@ mod tests {
         let obj = 10.0_f64;
         let violations = [3.0_f64, 2.0];
         let coeffs = [1.0_f64, 1.0];
-        let penalised = static_penalty(obj, &violations, &coeffs).unwrap();
+        let penalised =
+            static_penalty(obj, &violations, &coeffs).expect("static_penalty should succeed");
         // penalty = 1*9 + 1*4 = 13; total = 23
         assert!((penalised - 23.0).abs() < 1e-12);
         assert!(penalised > obj, "penalised must exceed raw objective");
@@ -504,7 +505,8 @@ mod tests {
         let obj = 42.0_f64;
         let violations = [0.0_f64, 0.0];
         let coeffs = [100.0_f64, 100.0];
-        let penalised = static_penalty(obj, &violations, &coeffs).unwrap();
+        let penalised =
+            static_penalty(obj, &violations, &coeffs).expect("static_penalty should succeed");
         assert!((penalised - obj).abs() < 1e-12);
     }
 
@@ -629,7 +631,7 @@ mod tests {
         for _ in 0..200 {
             let winner =
                 constrained_tournament_select(&population, &objectives, &violations, 3, &mut rng)
-                    .unwrap();
+                    .expect("value should be present");
             if winner == 1 {
                 wins += 1;
             }

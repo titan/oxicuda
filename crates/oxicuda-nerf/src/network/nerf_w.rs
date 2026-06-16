@@ -435,9 +435,11 @@ mod tests {
     fn lookup_appearance_shape() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(42);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         for idx in 0..cfg.n_images {
-            let row = emb.lookup_appearance(idx).unwrap();
+            let row = emb
+                .lookup_appearance(idx)
+                .expect("lookup_appearance should succeed");
             assert_eq!(row.len(), cfg.embedding_dim_appearance);
         }
     }
@@ -446,9 +448,11 @@ mod tests {
     fn lookup_transient_shape() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(43);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         for idx in 0..cfg.n_images {
-            let row = emb.lookup_transient(idx).unwrap();
+            let row = emb
+                .lookup_transient(idx)
+                .expect("lookup_transient should succeed");
             assert_eq!(row.len(), cfg.embedding_dim_transient);
         }
     }
@@ -457,7 +461,7 @@ mod tests {
     fn lookup_idx_out_of_range() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(44);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         assert!(emb.lookup_appearance(cfg.n_images).is_err());
         assert!(emb.lookup_transient(cfg.n_images).is_err());
         assert!(emb.lookup_appearance(usize::MAX).is_err());
@@ -467,9 +471,9 @@ mod tests {
     fn concat_features_length_no_transient() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(45);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         let base = vec![1.0_f32; cfg.base_features_dim];
-        let out = concat_features(&base, &emb, 0, false).unwrap();
+        let out = concat_features(&base, &emb, 0, false).expect("concat_features should succeed");
         assert_eq!(
             out.len(),
             cfg.base_features_dim + cfg.embedding_dim_appearance
@@ -480,9 +484,9 @@ mod tests {
     fn concat_features_length_with_transient() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(46);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         let base = vec![2.5_f32; cfg.base_features_dim];
-        let out = concat_features(&base, &emb, 3, true).unwrap();
+        let out = concat_features(&base, &emb, 3, true).expect("concat_features should succeed");
         assert_eq!(
             out.len(),
             cfg.base_features_dim + cfg.embedding_dim_appearance + cfg.embedding_dim_transient
@@ -493,19 +497,23 @@ mod tests {
     fn concat_features_preserves_base() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(47);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         let base: Vec<f32> = (0..cfg.base_features_dim).map(|i| i as f32).collect();
-        let out = concat_features(&base, &emb, 1, true).unwrap();
+        let out = concat_features(&base, &emb, 1, true).expect("concat_features should succeed");
         for i in 0..base.len() {
             // Byte-for-byte equality on the leading prefix.
             assert_eq!(out[i].to_bits(), base[i].to_bits());
         }
         // The appearance + transient suffix matches the embedding rows.
-        let app = emb.lookup_appearance(1).unwrap();
+        let app = emb
+            .lookup_appearance(1)
+            .expect("lookup_appearance should succeed");
         for (j, &v) in app.iter().enumerate() {
             assert_eq!(out[base.len() + j].to_bits(), v.to_bits());
         }
-        let tr = emb.lookup_transient(1).unwrap();
+        let tr = emb
+            .lookup_transient(1)
+            .expect("lookup_transient should succeed");
         for (j, &v) in tr.iter().enumerate() {
             assert_eq!(out[base.len() + app.len() + j].to_bits(), v.to_bits());
         }
@@ -517,11 +525,12 @@ mod tests {
         let in_dim = cfg.base_features_dim;
         let hidden = 32;
         let mut rng = LcgRng::new(48);
-        let head = BetaHead::new(in_dim, hidden, cfg.beta_min, &mut rng).unwrap();
+        let head =
+            BetaHead::new(in_dim, hidden, cfg.beta_min, &mut rng).expect("new should succeed");
         for seed in 0..50u64 {
             let mut r2 = LcgRng::new(seed);
             let x: Vec<f32> = (0..in_dim).map(|_| r2.next_f32_range(-3.0, 3.0)).collect();
-            let beta = head.forward(&x).unwrap();
+            let beta = head.forward(&x).expect("forward should succeed");
             assert!(
                 beta > cfg.beta_min,
                 "β = {beta} must be strictly > beta_min = {}",
@@ -539,15 +548,15 @@ mod tests {
         let in_dim = 4usize;
         let hidden = 8usize;
         let mut rng = LcgRng::new(49);
-        let head = BetaHead::new(in_dim, hidden, 0.01, &mut rng).unwrap();
+        let head = BetaHead::new(in_dim, hidden, 0.01, &mut rng).expect("new should succeed");
         let x_lo = vec![-1.0_f32; in_dim];
         let x_hi = vec![1.0_f32; in_dim];
         // softplus is strictly monotone; for SOME input pair the head must
         // produce ordered β values (deterministic given the seed, but in
         // general the direction can flip with random weights). Test on many
         // seeds and check that at least one direction is strictly monotone.
-        let beta_lo = head.forward(&x_lo).unwrap();
-        let beta_hi = head.forward(&x_hi).unwrap();
+        let beta_lo = head.forward(&x_lo).expect("forward should succeed");
+        let beta_hi = head.forward(&x_hi).expect("forward should succeed");
         // The two β values cannot be equal up to fp noise unless ReLU killed
         // all path differences. Either lo < hi or lo > hi; in particular the
         // ordering is determined by the input.
@@ -560,7 +569,7 @@ mod tests {
         let p = [0.5_f32, 0.5, 0.5];
         let t = [0.5_f32, 0.5, 0.5];
         let beta = 0.2_f32;
-        let nll = nerf_w_nll(&p, &t, beta).unwrap();
+        let nll = nerf_w_nll(&p, &t, beta).expect("nerf_w_nll should succeed");
         let expected = 0.5 * (beta * beta).ln();
         assert!(
             (nll - expected).abs() < 1e-6,
@@ -572,8 +581,8 @@ mod tests {
     fn nll_decreases_with_large_residual_when_beta_grows() {
         let p = [1.0_f32, 1.0, 1.0];
         let t = [0.0_f32, 0.0, 0.0]; // ||p − t||² = 3.0
-        let lo = nerf_w_nll(&p, &t, 0.1).unwrap();
-        let hi = nerf_w_nll(&p, &t, 1.0).unwrap();
+        let lo = nerf_w_nll(&p, &t, 0.1).expect("nerf_w_nll should succeed");
+        let hi = nerf_w_nll(&p, &t, 1.0).expect("nerf_w_nll should succeed");
         assert!(
             hi < lo,
             "with LARGE residual, increasing β should DECREASE NLL: lo={lo} hi={hi}"
@@ -584,8 +593,8 @@ mod tests {
     fn nll_increases_with_tiny_residual_when_beta_grows() {
         let p = [1e-3_f32, 0.0, 0.0];
         let t = [0.0_f32, 0.0, 0.0]; // ||p − t||² ≈ 1e-6
-        let lo = nerf_w_nll(&p, &t, 0.05).unwrap();
-        let hi = nerf_w_nll(&p, &t, 1.0).unwrap();
+        let lo = nerf_w_nll(&p, &t, 0.05).expect("nerf_w_nll should succeed");
+        let hi = nerf_w_nll(&p, &t, 1.0).expect("nerf_w_nll should succeed");
         assert!(
             hi > lo,
             "with TINY residual, increasing β should INCREASE NLL: lo={lo} hi={hi}"
@@ -602,7 +611,7 @@ mod tests {
             beta_min: 0.03,
         };
         let mut rng = LcgRng::new(50);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         let mean_app: f32 = emb.appearance.iter().sum::<f32>() / emb.appearance.len() as f32;
         let mean_tr: f32 = emb.transient.iter().sum::<f32>() / emb.transient.len() as f32;
         assert!(mean_app.abs() < 5e-3, "mean appearance: {mean_app}");
@@ -619,11 +628,21 @@ mod tests {
             beta_min: 0.5,
         };
         let mut rng = LcgRng::new(51);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
-        assert_eq!(emb.lookup_appearance(0).unwrap().len(), 1);
-        assert_eq!(emb.lookup_transient(0).unwrap().len(), 1);
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
+        assert_eq!(
+            emb.lookup_appearance(0)
+                .expect("lookup_appearance should succeed")
+                .len(),
+            1
+        );
+        assert_eq!(
+            emb.lookup_transient(0)
+                .expect("lookup_transient should succeed")
+                .len(),
+            1
+        );
         let base = vec![1.0_f32];
-        let out = concat_features(&base, &emb, 0, true).unwrap();
+        let out = concat_features(&base, &emb, 0, true).expect("concat_features should succeed");
         assert_eq!(out.len(), 3);
     }
 
@@ -632,8 +651,8 @@ mod tests {
         let cfg = default_cfg();
         let mut r1 = LcgRng::new(52);
         let mut r2 = LcgRng::new(52);
-        let a = NerfWEmbeddings::new(&cfg, &mut r1).unwrap();
-        let b = NerfWEmbeddings::new(&cfg, &mut r2).unwrap();
+        let a = NerfWEmbeddings::new(&cfg, &mut r1).expect("new should succeed");
+        let b = NerfWEmbeddings::new(&cfg, &mut r2).expect("new should succeed");
         assert_eq!(a.appearance, b.appearance);
         assert_eq!(a.transient, b.transient);
     }
@@ -703,7 +722,7 @@ mod tests {
     fn err_concat_base_empty() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(54);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         let base: Vec<f32> = vec![];
         let res = concat_features(&base, &emb, 0, false);
         assert!(res.is_err());
@@ -712,7 +731,7 @@ mod tests {
     #[test]
     fn err_beta_head_shape_mismatch() {
         let mut rng = LcgRng::new(55);
-        let head = BetaHead::new(8, 16, 0.03, &mut rng).unwrap();
+        let head = BetaHead::new(8, 16, 0.03, &mut rng).expect("new should succeed");
         let res = head.forward(&[0.0_f32; 3]); // wrong in_dim
         assert!(res.is_err());
     }
@@ -729,7 +748,7 @@ mod tests {
     fn concat_idx_out_of_range() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(57);
-        let emb = NerfWEmbeddings::new(&cfg, &mut rng).unwrap();
+        let emb = NerfWEmbeddings::new(&cfg, &mut rng).expect("new should succeed");
         let base = vec![1.0_f32; cfg.base_features_dim];
         let res = concat_features(&base, &emb, cfg.n_images, false);
         assert!(res.is_err());
@@ -742,7 +761,7 @@ mod tests {
         let p = [0.2_f32, 0.0, 0.0];
         let t = [0.0_f32, 0.0, 0.0];
         let beta = 0.5_f32;
-        let nll = nerf_w_nll(&p, &t, beta).unwrap();
+        let nll = nerf_w_nll(&p, &t, beta).expect("nerf_w_nll should succeed");
         let expected = 0.04_f32 / (2.0 * 0.25) + 0.5 * 0.25_f32.ln();
         assert!(
             (nll - expected).abs() < 1e-6,

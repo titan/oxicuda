@@ -74,14 +74,14 @@ mod tests {
     #[test]
     fn mse_identical() {
         let x = [0.1_f32, 0.5, 0.9];
-        let m = mse_image(&x, &x).unwrap();
+        let m = mse_image(&x, &x).expect("mse_image should succeed");
         assert!(m.abs() < 1e-10);
     }
 
     #[test]
     fn psnr_identical_is_inf() {
         let x = [0.5_f32; 16];
-        assert_eq!(psnr(&x, &x).unwrap(), f32::INFINITY);
+        assert_eq!(psnr(&x, &x).expect("psnr should succeed"), f32::INFINITY);
     }
 
     #[test]
@@ -89,8 +89,8 @@ mod tests {
         let gt = vec![0.5_f32; 64];
         let low_noise: Vec<f32> = gt.iter().map(|&v| v + 0.01).collect();
         let high_noise: Vec<f32> = gt.iter().map(|&v| v + 0.1).collect();
-        let p_low = psnr(&gt, &low_noise).unwrap();
-        let p_high = psnr(&gt, &high_noise).unwrap();
+        let p_low = psnr(&gt, &low_noise).expect("psnr should succeed");
+        let p_high = psnr(&gt, &high_noise).expect("psnr should succeed");
         assert!(p_low > p_high, "PSNR should decrease with more noise");
     }
 }

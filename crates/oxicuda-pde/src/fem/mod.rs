@@ -1,14 +1,22 @@
 //! Finite-element method (P1 linear and P2 quadratic triangles).
 
 pub mod dirichlet_apply;
+pub mod elasticity;
 pub mod mass_stiffness;
+pub mod mixed_poisson;
 pub mod p1_tet;
 pub mod p1_triangle;
 pub mod p2_triangle;
+pub mod poisson;
 pub mod quadrilateral;
 
 pub use dirichlet_apply::apply_dirichlet_csr;
+pub use elasticity::{ELASTICITY_ELEM_DOFS, LinearElasticity2D};
 pub use mass_stiffness::{FemAssembly, assemble_mass_stiffness};
+pub use mixed_poisson::{
+    MixedBoundary, MixedSolution, element_divergence, flux_at_centroids, mixed_poisson_rt0,
+    schur_complement,
+};
 pub use p1_tet::{
     P1_TET_N_DOFS, p1_tet_local_load, p1_tet_local_mass, p1_tet_local_stiffness,
     p1_tet_matrix_is_symmetric, p1_tet_shape_grad, tet_volume,

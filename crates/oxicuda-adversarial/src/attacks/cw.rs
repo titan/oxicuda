@@ -243,14 +243,15 @@ mod tests {
     fn cw_loss_basic() {
         let z = vec![1.0_f32, 0.0, 0.0];
         // y=0 is the largest ⇒ margin term = max(0, 0 − 1 + 0) = 0.
-        let l = cw_loss_value(&[0.5_f32, -0.5], &z, 0, 1.0, 0.0).unwrap();
+        let l =
+            cw_loss_value(&[0.5_f32, -0.5], &z, 0, 1.0, 0.0).expect("cw_loss_value should succeed");
         assert!((l - 0.5).abs() < 1e-6); // only the ‖δ‖² term contributes.
     }
 
     #[test]
     fn cw_loss_misclassified_adds_margin() {
         let z = vec![0.0_f32, 1.0];
-        let l = cw_loss_value(&[0.0_f32], &z, 0, 1.0, 0.0).unwrap();
+        let l = cw_loss_value(&[0.0_f32], &z, 0, 1.0, 0.0).expect("cw_loss_value should succeed");
         // δ=0, margin = max(0, 1 − 0 + 0) = 1, c = 1 ⇒ loss = 1.
         assert!((l - 1.0).abs() < 1e-6);
     }
@@ -265,17 +266,18 @@ mod tests {
         // x·w and zero out the margin, paying a small ‖δ‖² penalty.
         let w = vec![1.0_f32, 0.0];
         let x = vec![-0.5_f32, 0.0];
-        let cfg = CwConfig::new(10.0, 0.0, 0.05, 100, 5.0).unwrap();
+        let cfg = CwConfig::new(10.0, 0.0, 0.05, 100, 5.0).expect("new should succeed");
         let cls = linear_two_class(w.clone(), x.clone(), cfg.c, cfg.kappa);
         let initial_loss = {
-            let (z0, _) = cls(&x).unwrap();
-            cw_loss_value(&[0.0; 2], &z0, 0, cfg.c, cfg.kappa).unwrap()
+            let (z0, _) = cls(&x).expect("cls should succeed");
+            cw_loss_value(&[0.0; 2], &z0, 0, cfg.c, cfg.kappa)
+                .expect("cw_loss_value should succeed")
         };
-        let y = cw_attack(&x, 0, -10.0, 10.0, &cfg, &cls).unwrap();
+        let y = cw_attack(&x, 0, -10.0, 10.0, &cfg, &cls).expect("cw_attack should succeed");
         let delta: Vec<f32> = y.iter().zip(x.iter()).map(|(a, b)| a - b).collect();
         let final_loss = {
-            let (zf, _) = cls(&y).unwrap();
-            cw_loss_value(&delta, &zf, 0, cfg.c, cfg.kappa).unwrap()
+            let (zf, _) = cls(&y).expect("cls should succeed");
+            cw_loss_value(&delta, &zf, 0, cfg.c, cfg.kappa).expect("cw_loss_value should succeed")
         };
         assert!(
             final_loss < initial_loss,
@@ -287,9 +289,9 @@ mod tests {
     fn projection_enforced() {
         let w = vec![1.0_f32; 8];
         let x = vec![0.5_f32; 8];
-        let cfg = CwConfig::new(100.0, 0.0, 0.5, 100, 0.2).unwrap();
+        let cfg = CwConfig::new(100.0, 0.0, 0.5, 100, 0.2).expect("new should succeed");
         let cls = linear_two_class(w, x.clone(), cfg.c, cfg.kappa);
-        let y = cw_attack(&x, 0, 0.0, 1.0, &cfg, &cls).unwrap();
+        let y = cw_attack(&x, 0, 0.0, 1.0, &cfg, &cls).expect("cw_attack should succeed");
         let delta: Vec<f32> = y.iter().zip(x.iter()).map(|(a, b)| a - b).collect();
         assert!(l2_norm(&delta) <= 0.2 + 1e-4);
         for v in &y {
@@ -301,7 +303,7 @@ mod tests {
     fn invalid_y_true_errors() {
         let w = vec![1.0_f32];
         let x = vec![0.5_f32];
-        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).unwrap();
+        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).expect("new should succeed");
         let cls = linear_two_class(w, x.clone(), cfg.c, cfg.kappa);
         // logits has length 2 ⇒ y_true = 5 must error.
         assert!(matches!(
@@ -313,7 +315,7 @@ mod tests {
     #[test]
     fn empty_input_rejected() {
         let x: Vec<f32> = vec![];
-        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).unwrap();
+        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).expect("new should succeed");
         let cls = |_x: &[f32]| Ok((vec![0.0_f32, 0.0], vec![]));
         assert_eq!(
             cw_attack(&x, 0, -1.0, 1.0, &cfg, cls).unwrap_err(),
@@ -324,7 +326,7 @@ mod tests {
     #[test]
     fn nan_in_logits_caught() {
         let x = vec![0.0_f32; 3];
-        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).unwrap();
+        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).expect("new should succeed");
         let cls = |_x: &[f32]| Ok((vec![f32::NAN, 0.0], vec![0.0_f32; 3]));
         assert!(matches!(
             cw_attack(&x, 0, -1.0, 1.0, &cfg, cls).unwrap_err(),
@@ -335,7 +337,7 @@ mod tests {
     #[test]
     fn nan_in_grad_caught() {
         let x = vec![0.0_f32; 3];
-        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).unwrap();
+        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).expect("new should succeed");
         let cls = |_x: &[f32]| Ok((vec![0.0_f32, 0.0], vec![1.0, f32::NAN, 1.0]));
         assert!(matches!(
             cw_attack(&x, 0, -1.0, 1.0, &cfg, cls).unwrap_err(),
@@ -346,7 +348,7 @@ mod tests {
     #[test]
     fn dim_mismatch_in_grad() {
         let x = vec![0.0_f32; 4];
-        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).unwrap();
+        let cfg = CwConfig::new(1.0, 0.0, 0.01, 1, 1.0).expect("new should succeed");
         let cls = |_x: &[f32]| Ok((vec![0.0_f32, 0.0], vec![1.0_f32; 3]));
         assert!(matches!(
             cw_attack(&x, 0, -1.0, 1.0, &cfg, cls).unwrap_err(),

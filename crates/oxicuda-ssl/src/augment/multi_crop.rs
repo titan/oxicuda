@@ -123,8 +123,8 @@ mod tests {
 
     #[test]
     fn multi_crop_returns_two_globals_then_n_local() {
-        let cfg = MultiCropConfig::new(160, 64, 4).unwrap();
-        let crops = multi_crop(&cfg).unwrap();
+        let cfg = MultiCropConfig::new(160, 64, 4).expect("new should succeed");
+        let crops = multi_crop(&cfg).expect("multi_crop should succeed");
         assert_eq!(crops.len(), 6);
         assert_eq!(crops[0].size, 160);
         assert!(crops[0].is_global);
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn multi_crop_default_yields_8_specs() {
         let cfg = MultiCropConfig::default();
-        let crops = multi_crop(&cfg).unwrap();
+        let crops = multi_crop(&cfg).expect("multi_crop should succeed");
         assert_eq!(crops.len(), 8);
     }
 }

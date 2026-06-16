@@ -334,7 +334,8 @@ mod tests {
 
     #[test]
     fn normalize_logp_divides_by_len_when_normalize_true() {
-        let result = LengthDpo::normalize_logp(-10.0, 5, true).unwrap();
+        let result =
+            LengthDpo::normalize_logp(-10.0, 5, true).expect("normalize_logp should succeed");
         assert!(
             (result - (-2.0_f32)).abs() < 1e-6,
             "normalize_logp(-10.0, 5, true) = {result}, expected -2.0"
@@ -343,7 +344,8 @@ mod tests {
 
     #[test]
     fn normalize_logp_returns_unchanged_when_normalize_false() {
-        let result = LengthDpo::normalize_logp(-10.0, 5, false).unwrap();
+        let result =
+            LengthDpo::normalize_logp(-10.0, 5, false).expect("normalize_logp should succeed");
         assert!(
             (result - (-10.0_f32)).abs() < 1e-6,
             "normalize_logp(-10.0, 5, false) = {result}, expected -10.0"
@@ -420,7 +422,7 @@ mod tests {
             normalize_by_length: false,
             target_reward_margin: 0.0,
         };
-        let loss = LengthDpo::loss_per_pair(&pair, &cfg).unwrap();
+        let loss = LengthDpo::loss_per_pair(&pair, &cfg).expect("loss_per_pair should succeed");
         // Manual: logit = 0.1 * ((-1.0 - -1.1) - (-2.0 - -1.9)) = 0.1 * (0.1 - (-0.1)) = 0.02
         let logit = 0.1_f32 * ((-1.0_f32 - -1.1_f32) - (-2.0_f32 - -1.9_f32));
         let expected = -log_sigmoid(logit);
@@ -439,7 +441,7 @@ mod tests {
             normalize_by_length: false,
             target_reward_margin: 0.0,
         };
-        let loss = LengthDpo::loss_per_pair(&pair, &cfg).unwrap();
+        let loss = LengthDpo::loss_per_pair(&pair, &cfg).expect("loss_per_pair should succeed");
         let logit = 0.1_f32 * ((-0.5_f32 - -1.0_f32) - (-1.5_f32 - -1.0_f32));
         let expected = -log_sigmoid(logit);
         assert!(
@@ -460,10 +462,10 @@ mod tests {
             normalize_by_length: false,
             target_reward_margin: 0.0,
         };
-        let loss_a = LengthDpo::loss_per_pair(&pair_a, &cfg).unwrap();
-        let loss_b = LengthDpo::loss_per_pair(&pair_b, &cfg).unwrap();
+        let loss_a = LengthDpo::loss_per_pair(&pair_a, &cfg).expect("loss_per_pair should succeed");
+        let loss_b = LengthDpo::loss_per_pair(&pair_b, &cfg).expect("loss_per_pair should succeed");
         let batch = LengthDpoBatch::new(vec![pair_a, pair_b]);
-        let batch_loss = LengthDpo::loss(&batch, &cfg).unwrap();
+        let batch_loss = LengthDpo::loss(&batch, &cfg).expect("loss should succeed");
         let expected = (loss_a + loss_b) / 2.0;
         assert!(
             (batch_loss - expected).abs() < 1e-5,
@@ -483,7 +485,8 @@ mod tests {
             normalize_by_length: false,
             target_reward_margin: 0.0,
         };
-        let diff = LengthDpo::implicit_reward_diff(&pair, &cfg).unwrap();
+        let diff = LengthDpo::implicit_reward_diff(&pair, &cfg)
+            .expect("implicit_reward_diff should succeed");
         assert!(
             diff > 0.0,
             "preferred chosen → positive reward diff, got {diff}"
@@ -499,7 +502,8 @@ mod tests {
             normalize_by_length: false,
             target_reward_margin: 0.3,
         };
-        let diff = LengthDpo::implicit_reward_diff(&pair, &cfg).unwrap();
+        let diff = LengthDpo::implicit_reward_diff(&pair, &cfg)
+            .expect("implicit_reward_diff should succeed");
         // β * (norm_c - norm_r) - γ = 0.5 * 0 - 0.3 = -0.3
         assert!(
             (diff - (-0.3_f32)).abs() < 1e-5,
@@ -520,8 +524,10 @@ mod tests {
             target_reward_margin: 1.0,
             ..cfg_no_margin.clone()
         };
-        let loss_no = LengthDpo::loss_per_pair(&pair, &cfg_no_margin).unwrap();
-        let loss_with = LengthDpo::loss_per_pair(&pair, &cfg_with_margin).unwrap();
+        let loss_no =
+            LengthDpo::loss_per_pair(&pair, &cfg_no_margin).expect("loss_per_pair should succeed");
+        let loss_with = LengthDpo::loss_per_pair(&pair, &cfg_with_margin)
+            .expect("loss_per_pair should succeed");
         assert!(
             loss_with > loss_no,
             "positive margin shifts logit down → higher loss; no_margin={loss_no}, with_margin={loss_with}"
@@ -542,8 +548,10 @@ mod tests {
             normalize_by_length: true,
             ..cfg_no_norm.clone()
         };
-        let loss_no_norm = LengthDpo::loss_per_pair(&pair, &cfg_no_norm).unwrap();
-        let loss_norm = LengthDpo::loss_per_pair(&pair, &cfg_norm).unwrap();
+        let loss_no_norm =
+            LengthDpo::loss_per_pair(&pair, &cfg_no_norm).expect("loss_per_pair should succeed");
+        let loss_norm =
+            LengthDpo::loss_per_pair(&pair, &cfg_norm).expect("loss_per_pair should succeed");
         // They should differ because normalisation changes the log-ratio
         let differ = (loss_no_norm - loss_norm).abs() > 1e-5;
         assert!(

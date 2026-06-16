@@ -258,8 +258,10 @@ mod tests {
     fn lof_fit_score_basic() {
         let data: Vec<f32> = (0..20).map(|i| i as f32 * 0.1).collect();
         let mut lof = Lof::new(3);
-        lof.fit(&data, 20, 1).unwrap();
-        let s = lof.score(&[0.5_f32]).unwrap();
+        lof.fit(&data, 20, 1).expect("LOF fit should succeed");
+        let s = lof
+            .score(&[0.5_f32])
+            .expect("LOF score should succeed for a fitted model");
         assert!(s.is_finite(), "lof={s}");
     }
 
@@ -272,7 +274,8 @@ mod tests {
     #[test]
     fn euclidean_distance_zero() {
         let v = vec![1.0_f32, 2.0, 3.0];
-        let d = euclidean_distance(&v, &v).unwrap();
+        let d = euclidean_distance(&v, &v)
+            .expect("euclidean_distance should succeed for equal-length vectors");
         assert!(d.abs() < 1e-6, "d={d}");
     }
 }

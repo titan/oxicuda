@@ -212,8 +212,11 @@ mod tests {
     fn ecod_1d_fit_score_finite() {
         let data = make_1d(20);
         let mut det = Ecod::new();
-        det.fit(&data, 20, 1).unwrap();
-        let s = det.score(&[10.0_f32]).unwrap();
+        det.fit(&data, 20, 1)
+            .expect("fit should succeed on 1-D data");
+        let s = det
+            .score(&[10.0_f32])
+            .expect("score should succeed after fit");
         assert!(s.is_finite() && s >= 0.0, "s={s}");
     }
 
@@ -233,9 +236,12 @@ mod tests {
     fn ecod_outlier_higher_than_inlier() {
         let data = make_1d(40);
         let mut det = Ecod::new();
-        det.fit(&data, 40, 1).unwrap();
-        let s_normal = det.score(&[20.0_f32]).unwrap();
-        let s_outlier = det.score(&[1000.0_f32]).unwrap();
+        det.fit(&data, 40, 1)
+            .expect("fit should succeed on 1-D data");
+        let s_normal = det.score(&[20.0_f32]).expect("normal score should succeed");
+        let s_outlier = det
+            .score(&[1000.0_f32])
+            .expect("outlier score should succeed");
         assert!(
             s_outlier > s_normal,
             "outlier={s_outlier} should > inlier={s_normal}"
@@ -247,9 +253,12 @@ mod tests {
     fn ecod_batch_correct_length() {
         let data = make_2d(20);
         let mut det = Ecod::new();
-        det.fit(&data, 20, 2).unwrap();
+        det.fit(&data, 20, 2)
+            .expect("fit should succeed on 2-D data");
         let queries = make_2d(5);
-        let scores = det.score_batch(&queries, 5).unwrap();
+        let scores = det
+            .score_batch(&queries, 5)
+            .expect("batch score should succeed after fit");
         assert_eq!(scores.len(), 5);
         assert!(scores.iter().all(|s| s.is_finite()), "all scores finite");
     }
@@ -279,7 +288,8 @@ mod tests {
     fn ecod_feature_count_mismatch_at_score() {
         let data = make_2d(20);
         let mut det = Ecod::new();
-        det.fit(&data, 20, 2).unwrap();
+        det.fit(&data, 20, 2)
+            .expect("fit should succeed on 2-D data");
         // Pass a 3-element slice to a 2-feature model.
         let err = det.score(&[1.0_f32, 2.0, 3.0]).unwrap_err();
         assert!(
@@ -301,7 +311,8 @@ mod tests {
         let n = 21_usize;
         let data: Vec<f32> = (0..n).map(|i| i as f32 - 10.0_f32).collect();
         let mut det = Ecod::new();
-        det.fit(&data, n, 1).unwrap();
+        det.fit(&data, n, 1)
+            .expect("fit should succeed on symmetric 1-D data");
 
         let skew = det.skewness()[0];
         let w_left = 0.5_f32 + 0.5_f32 * skew.tanh();
@@ -322,7 +333,8 @@ mod tests {
     fn ecod_multi_feature_batch_finite() {
         let data = make_2d(30);
         let mut det = Ecod::new();
-        det.fit(&data, 30, 2).unwrap();
+        det.fit(&data, 30, 2)
+            .expect("fit should succeed on 2-D data");
 
         // Five diverse query points.
         #[rustfmt::skip]
@@ -333,7 +345,9 @@ mod tests {
            500.0, 1000.0,  // extreme outlier
             15.0,  30.0,   // mid-range
         ];
-        let scores = det.score_batch(&queries, 5).unwrap();
+        let scores = det
+            .score_batch(&queries, 5)
+            .expect("batch score should succeed after fit");
         assert_eq!(scores.len(), 5);
         for (idx, &s) in scores.iter().enumerate() {
             assert!(s.is_finite(), "score[{idx}] is not finite: {s}");

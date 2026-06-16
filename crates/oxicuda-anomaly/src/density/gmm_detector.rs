@@ -696,7 +696,8 @@ mod tests {
         let data = gaussian_cloud(80, [0.0, 0.0], 1.0, 2);
         let cfg = GmmConfig::default();
         let mut rng = LcgRng::new(2);
-        let model = gmm_fit(&data, 80, 2, &cfg, &mut rng).unwrap();
+        let model =
+            gmm_fit(&data, 80, 2, &cfg, &mut rng).expect("GMM fit on 80 samples should succeed");
         let sum: f64 = model.weights.iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-10,
@@ -710,8 +711,10 @@ mod tests {
         let data = gaussian_cloud(60, [0.0, 0.0], 1.0, 3);
         let cfg = GmmConfig::default();
         let mut rng = LcgRng::new(3);
-        let model = gmm_fit(&data, 60, 2, &cfg, &mut rng).unwrap();
-        let lls = gmm_log_likelihood(&model, &data, 60).unwrap();
+        let model =
+            gmm_fit(&data, 60, 2, &cfg, &mut rng).expect("GMM fit on 60 samples should succeed");
+        let lls = gmm_log_likelihood(&model, &data, 60)
+            .expect("log-likelihood computation should succeed");
         assert_eq!(lls.len(), 60);
     }
 
@@ -721,8 +724,10 @@ mod tests {
         let data = gaussian_cloud(60, [0.0, 0.0], 1.0, 4);
         let cfg = GmmConfig::default();
         let mut rng = LcgRng::new(4);
-        let model = gmm_fit(&data, 60, 2, &cfg, &mut rng).unwrap();
-        let lls = gmm_log_likelihood(&model, &data, 60).unwrap();
+        let model =
+            gmm_fit(&data, 60, 2, &cfg, &mut rng).expect("GMM fit on 60 samples should succeed");
+        let lls = gmm_log_likelihood(&model, &data, 60)
+            .expect("log-likelihood computation should succeed");
         for (i, &v) in lls.iter().enumerate() {
             assert!(v.is_finite(), "log_lik[{i}] = {v} is not finite");
         }
@@ -745,8 +750,10 @@ mod tests {
             init_seed: 5,
         };
         let mut rng = LcgRng::new(5);
-        let model = gmm_fit(&data, n, 2, &cfg, &mut rng).unwrap();
-        let scores = gmm_score(&model, &data, n).unwrap();
+        let model = gmm_fit(&data, n, 2, &cfg, &mut rng)
+            .expect("GMM fit with outlier appended should succeed");
+        let scores =
+            gmm_score(&model, &data, n).expect("GMM score should succeed on training data");
         let outlier_score = scores[n - 1];
         let inlier_mean: f64 = scores[..n - 1].iter().sum::<f64>() / (n - 1) as f64;
         assert!(
@@ -761,8 +768,10 @@ mod tests {
         let data = gaussian_cloud(80, [0.0, 0.0], 1.0, 6);
         let cfg = GmmConfig::default();
         let mut rng = LcgRng::new(6);
-        let model = gmm_fit(&data, 80, 2, &cfg, &mut rng).unwrap();
-        let labels = gmm_predict(&model, &data, 80).unwrap();
+        let model =
+            gmm_fit(&data, 80, 2, &cfg, &mut rng).expect("GMM fit on 80 samples should succeed");
+        let labels =
+            gmm_predict(&model, &data, 80).expect("GMM predict on training data should succeed");
         for &l in &labels {
             assert!(l == 1 || l == -1, "label={l} not in {{-1, +1}}");
         }
@@ -774,9 +783,11 @@ mod tests {
         let data = gaussian_cloud(60, [0.0, 0.0], 1.0, 7);
         let cfg = GmmConfig::default();
         let mut rng = LcgRng::new(7);
-        let model = gmm_fit(&data, 60, 2, &cfg, &mut rng).unwrap();
+        let model =
+            gmm_fit(&data, 60, 2, &cfg, &mut rng).expect("GMM fit on 60 samples should succeed");
         let n_gen = 30usize;
-        let samples = gmm_sample(&model, n_gen, &mut rng).unwrap();
+        let samples = gmm_sample(&model, n_gen, &mut rng)
+            .expect("GMM sample from fitted model should succeed");
         assert_eq!(
             samples.len(),
             n_gen * 2,
@@ -802,7 +813,8 @@ mod tests {
             init_seed: 8,
         };
         let mut rng = LcgRng::new(8);
-        let model = gmm_fit(&data, n, 2, &cfg, &mut rng).unwrap();
+        let model =
+            gmm_fit(&data, n, 2, &cfg, &mut rng).expect("GMM fit on 2-cluster data should succeed");
 
         // Each fitted mean should be close to one of the two cluster centers
         let targets = [[-10.0_f64, -10.0], [10.0, 10.0]];
@@ -836,7 +848,8 @@ mod tests {
             init_seed: 9,
         };
         let mut rng = LcgRng::new(9);
-        let model = gmm_fit(&data, 100, 2, &cfg, &mut rng).unwrap();
+        let model = gmm_fit(&data, 100, 2, &cfg, &mut rng)
+            .expect("single-component GMM fit should succeed");
 
         assert_eq!(model.weights.len(), 1);
         assert!(
@@ -864,7 +877,8 @@ mod tests {
             init_seed: 10,
         };
         let mut rng = LcgRng::new(10);
-        let model = gmm_fit(&data, 100, 2, &cfg, &mut rng).unwrap();
+        let model = gmm_fit(&data, 100, 2, &cfg, &mut rng)
+            .expect("GMM fit on tight cluster should succeed");
         // Should have converged within 500 iterations on this easy data
         assert!(
             model.converged || model.n_iter < cfg.max_iter,
@@ -879,8 +893,10 @@ mod tests {
         let data = gaussian_cloud(60, [0.0, 0.0], 1.0, 11);
         let cfg = GmmConfig::default();
         let mut rng = LcgRng::new(11);
-        let model = gmm_fit(&data, 60, 2, &cfg, &mut rng).unwrap();
-        let samples = gmm_sample(&model, 50, &mut rng).unwrap();
+        let model =
+            gmm_fit(&data, 60, 2, &cfg, &mut rng).expect("GMM fit on 60 samples should succeed");
+        let samples =
+            gmm_sample(&model, 50, &mut rng).expect("GMM sample should produce 50 valid points");
         for (i, &v) in samples.iter().enumerate() {
             assert!(v.is_finite(), "sample[{i}]={v} is not finite");
         }
@@ -903,8 +919,9 @@ mod tests {
             init_seed: 12,
         };
         let mut rng = LcgRng::new(12);
-        let model = gmm_fit(&data, n, d, &cfg, &mut rng).unwrap();
-        let scores = gmm_score(&model, &data, n).unwrap();
+        let model =
+            gmm_fit(&data, n, d, &cfg, &mut rng).expect("GMM fit on 5-D data should succeed");
+        let scores = gmm_score(&model, &data, n).expect("GMM score on 5-D data should succeed");
         assert_eq!(scores.len(), n);
         assert!(
             scores.iter().all(|s| s.is_finite()),
@@ -916,7 +933,7 @@ mod tests {
     #[test]
     fn cholesky_identity_matrix() {
         let id = vec![1.0_f64, 0.0, 0.0, 1.0];
-        let l = cholesky(&id, 2).unwrap();
+        let l = cholesky(&id, 2).expect("Cholesky of identity matrix should succeed");
         // L of I = I
         assert!((l[0] - 1.0).abs() < 1e-12);
         assert!(l[1].abs() < 1e-12);

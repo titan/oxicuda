@@ -154,9 +154,12 @@ mod tests {
 
     #[test]
     fn lindblad_step_approximately_traces_to_one() {
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let sv = StateVector::new_zero_state(1).expect(
+            "n_qubits=1 is always a valid qubit count, so zero-state construction cannot fail",
+        );
         let mut dm = DensityMatrix::from_pure_state(&sv);
-        lindblad_step(&mut dm, &[], &[], 0.01).unwrap();
+        lindblad_step(&mut dm, &[], &[], 0.01)
+            .expect("empty Hamiltonian and Lindblad operator slices are trivially valid, so the Euler step cannot fail");
         let tr = dm.trace();
         assert!((tr.re - 1.0).abs() < 1e-3, "trace={}", tr.re);
     }

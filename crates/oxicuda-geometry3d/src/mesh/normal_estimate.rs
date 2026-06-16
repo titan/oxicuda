@@ -269,7 +269,7 @@ mod tests {
         let pts = vec![
             0.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.5, 0.5, 0.0,
         ];
-        let normals = estimate_normals(&pts, 5, 4).unwrap();
+        let normals = estimate_normals(&pts, 5, 4).expect("estimate_normals should succeed");
         assert_eq!(normals.len(), 15);
         // For a flat plane, normal should point in z direction
         for i in 0..5 {
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn normal_estimate_output_shape() {
         let pts: Vec<f32> = (0..10).flat_map(|i| vec![i as f32, 0.0, 0.0]).collect();
-        let normals = estimate_normals(&pts, 10, 3).unwrap();
+        let normals = estimate_normals(&pts, 10, 3).expect("estimate_normals should succeed");
         assert_eq!(normals.len(), 10 * 3);
     }
 
@@ -294,7 +294,7 @@ mod tests {
         let pts: Vec<f32> = (0..10)
             .flat_map(|i| vec![i as f32, (i as f32).sin(), 0.0])
             .collect();
-        let normals = estimate_normals(&pts, 10, 5).unwrap();
+        let normals = estimate_normals(&pts, 10, 5).expect("estimate_normals should succeed");
         for i in 0..10 {
             let nx = normals[i * 3];
             let ny = normals[i * 3 + 1];

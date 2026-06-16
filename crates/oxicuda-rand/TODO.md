@@ -6,7 +6,7 @@ GPU-accelerated random number generation, serving as a pure Rust equivalent to N
 
 ## Implementation Status
 
-**Actual: 10,115 SLoC (27 files) -- Estimated: 15K-24K SLoC (estimation.md Vol.5 rand portion)**
+**Actual: 12,518 SLoC (37 files) -- Estimated: 15K-24K SLoC (estimation.md Vol.5 rand portion)**
 
 Current implementation covers three PRNG engines (Philox-4x32-10, XORWOW, MRG32k3a), four distributions (uniform, normal, log-normal, Poisson), and one quasi-random sequence (Sobol).
 
@@ -39,6 +39,10 @@ Current implementation covers three PRNG engines (Philox-4x32-10, XORWOW, MRG32k
 - [x] Random matrix generation -- Wishart matrices, random orthogonal matrices (QR of Gaussian) for statistical applications (P2)
 - [x] Random graph generation -- Erdos-Renyi, stochastic block model, Barabasi-Albert, Watts-Strogatz, random regular (graph_gen.rs) (P2)
 - [x] Monte Carlo methods (monte_carlo.rs) -- GPU-accelerated Monte Carlo integration, importance sampling, Markov chain Monte Carlo (MCMC) with Metropolis-Hastings and Hamiltonian MC (P1)
+- [x] PCG (Permuted Congruential Generator) engine (`engines/pcg.rs`) — O'Neill 2014: 64-bit LCG state with output-permutation (XSH-RR) finalizer for excellent statistical quality at low overhead; `PcgEngine`
+- [x] xoshiro256** engine (`engines/xoshiro256ss.rs`) — Blackman-Vigna 2019: 256-bit state, "**" scrambler (left-rotate then multiply), long period 2²⁵⁶−1, jump-ahead for parallel streams; `Xoshiro256ss`
+- [ ] Niederreiter base-2 quasi-random sequences (`quasi/niederreiter.rs`) — Niederreiter 1992: base-2 digital net with generating matrices derived from primitive polynomials over GF(2); `NiederreiterSequence`
+- [x] Alias method + Bernoulli fast sampler (`distributions/alias.rs`) — Walker 1977 / Vose 1991: O(1) categorical sampling via pre-computed alias + probability tables; `AliasMethod`
 
 ## Dependencies
 
@@ -53,7 +57,7 @@ Current implementation covers three PRNG engines (Philox-4x32-10, XORWOW, MRG32k
 
 ## Quality Status
 
-- Tests: 270 passing
+- Tests: 368 passing
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
@@ -63,8 +67,8 @@ Current implementation covers three PRNG engines (Philox-4x32-10, XORWOW, MRG32k
 
 | Metric | Estimated (Vol.5 rand) | Actual |
 |--------|----------------------|--------|
-| SLoC | 15K-24K | 9,064 |
-| Files | ~10-15 | 27 |
+| SLoC | 15K-24K | 12,518 |
+| Files | ~10-15 | 37 |
 | Coverage | Full cuRAND parity | Core engines + distributions |
 | Ratio | -- | ~11.5% of estimate |
 

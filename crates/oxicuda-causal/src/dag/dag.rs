@@ -141,20 +141,20 @@ mod tests {
     #[test]
     fn basic_dag_ops() {
         let mut dag = Dag::new(4);
-        dag.add_edge(0, 1).unwrap();
-        dag.add_edge(1, 2).unwrap();
-        dag.add_edge(0, 3).unwrap();
+        dag.add_edge(0, 1).expect("add_edge should succeed");
+        dag.add_edge(1, 2).expect("add_edge should succeed");
+        dag.add_edge(0, 3).expect("add_edge should succeed");
         assert!(dag.has_edge(0, 1));
         assert!(!dag.has_edge(1, 0));
-        let order = dag.topo_sort().unwrap();
+        let order = dag.topo_sort().expect("topo_sort should succeed");
         assert_eq!(order[0], 0);
     }
 
     #[test]
     fn cycle_detection() {
         let mut dag = Dag::new(3);
-        dag.add_edge(0, 1).unwrap();
-        dag.add_edge(1, 2).unwrap();
+        dag.add_edge(0, 1).expect("add_edge should succeed");
+        dag.add_edge(1, 2).expect("add_edge should succeed");
         let result = dag.add_edge(2, 0);
         assert!(result.is_err());
     }
@@ -162,9 +162,9 @@ mod tests {
     #[test]
     fn ancestors_descendants() {
         let mut dag = Dag::new(4);
-        dag.add_edge(0, 1).unwrap();
-        dag.add_edge(1, 2).unwrap();
-        dag.add_edge(2, 3).unwrap();
+        dag.add_edge(0, 1).expect("add_edge should succeed");
+        dag.add_edge(1, 2).expect("add_edge should succeed");
+        dag.add_edge(2, 3).expect("add_edge should succeed");
         let anc = dag.ancestors(3);
         assert!(anc.contains(&0));
         assert!(anc.contains(&1));

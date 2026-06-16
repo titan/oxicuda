@@ -326,14 +326,16 @@ mod tests {
     #[test]
     fn partial_r2_from_t_basic() {
         // r² = 1²/(1²+10) = 1/11
-        let r2 = CinelliHazlett::partial_r2_from_t(1.0, 10.0).unwrap();
+        let r2 =
+            CinelliHazlett::partial_r2_from_t(1.0, 10.0).expect("partial_r2_from_t should succeed");
         assert!(approx(r2, 1.0 / 11.0, 1e-12));
     }
 
     #[test]
     fn partial_r2_from_t_large_t() {
         // Large t → r² approaches 1.
-        let r2 = CinelliHazlett::partial_r2_from_t(1000.0, 100.0).unwrap();
+        let r2 = CinelliHazlett::partial_r2_from_t(1000.0, 100.0)
+            .expect("partial_r2_from_t should succeed");
         assert!(r2 > 0.9999);
     }
 
@@ -351,20 +353,22 @@ mod tests {
 
     #[test]
     fn ovb_bias_zero_r2_y() {
-        let b = CinelliHazlett::ovb_bias(0.0, 0.5, 1.0, 100.0).unwrap();
+        let b = CinelliHazlett::ovb_bias(0.0, 0.5, 1.0, 100.0).expect("ovb_bias should succeed");
         assert!(approx(b, 0.0, 1e-12));
     }
 
     #[test]
     fn ovb_bias_zero_r2_d() {
-        let b = CinelliHazlett::ovb_bias(1.0, 0.0, 1.0, 100.0).unwrap();
+        let b = CinelliHazlett::ovb_bias(1.0, 0.0, 1.0, 100.0).expect("ovb_bias should succeed");
         assert!(approx(b, 0.0, 1e-12));
     }
 
     #[test]
     fn ovb_bias_monotone_in_r2_y() {
-        let b_small = CinelliHazlett::ovb_bias(0.3, 0.4, 1.0, 100.0).unwrap();
-        let b_large = CinelliHazlett::ovb_bias(0.5, 0.4, 1.0, 100.0).unwrap();
+        let b_small =
+            CinelliHazlett::ovb_bias(0.3, 0.4, 1.0, 100.0).expect("ovb_bias should succeed");
+        let b_large =
+            CinelliHazlett::ovb_bias(0.5, 0.4, 1.0, 100.0).expect("ovb_bias should succeed");
         assert!(b_large > b_small);
     }
 
@@ -387,13 +391,15 @@ mod tests {
 
     #[test]
     fn robustness_value_positive_and_below_one() {
-        let rv = CinelliHazlett::robustness_value(3.0, 100.0, 1.0).unwrap();
+        let rv = CinelliHazlett::robustness_value(3.0, 100.0, 1.0)
+            .expect("robustness_value should succeed");
         assert!(rv > 0.0 && rv < 1.0);
     }
 
     #[test]
     fn robustness_value_large_t_approaches_one() {
-        let rv = CinelliHazlett::robustness_value(100.0, 100.0, 1.0).unwrap();
+        let rv = CinelliHazlett::robustness_value(100.0, 100.0, 1.0)
+            .expect("robustness_value should succeed");
         assert!(rv > 0.95);
     }
 
@@ -423,7 +429,7 @@ mod tests {
             r2yd_x: 0.3,
         };
         let cfg = CinelliHazlettConfig::default();
-        let result = CinelliHazlett::analyze(&input, &cfg, &[]).unwrap();
+        let result = CinelliHazlett::analyze(&input, &cfg, &[]).expect("analyze should succeed");
         assert!(result.rv_q > 0.0);
         assert!(result.benchmarks.is_empty());
     }
@@ -439,8 +445,10 @@ mod tests {
         let cfg = CinelliHazlettConfig::default();
         let r2_y = 0.4;
         let r2_d = 0.3;
-        let result = CinelliHazlett::analyze(&input, &cfg, &[(r2_y, r2_d)]).unwrap();
-        let expected_bias = CinelliHazlett::ovb_bias(r2_y, r2_d, 0.2, 50.0).unwrap();
+        let result = CinelliHazlett::analyze(&input, &cfg, &[(r2_y, r2_d)])
+            .expect("value should be present");
+        let expected_bias =
+            CinelliHazlett::ovb_bias(r2_y, r2_d, 0.2, 50.0).expect("ovb_bias should succeed");
         assert!(approx(result.benchmarks[0].bias, expected_bias, 1e-10));
     }
 
@@ -543,7 +551,7 @@ mod tests {
             r2yd_x: 0.3,
         };
         let cfg = CinelliHazlettConfig::default();
-        let result = CinelliHazlett::analyze(&input, &cfg, &[]).unwrap();
+        let result = CinelliHazlett::analyze(&input, &cfg, &[]).expect("analyze should succeed");
         assert!(result.extreme_bias > 0.0);
     }
 
@@ -557,7 +565,7 @@ mod tests {
             r2yd_x: 0.05, // low r2yd_x → large extreme bias
         };
         let cfg = CinelliHazlettConfig::default();
-        let result = CinelliHazlett::analyze(&input, &cfg, &[]).unwrap();
+        let result = CinelliHazlett::analyze(&input, &cfg, &[]).expect("analyze should succeed");
         // extreme_bias = 0.1 * √200 * √(0.95/0.05) which is >> 0.01
         if result.extreme_bias > result.extreme_adjusted_theta.abs() {
             assert!(result.extreme_adjusted_theta < 0.0);
@@ -573,7 +581,8 @@ mod tests {
             r2yd_x: 0.3,
         };
         let cfg = CinelliHazlettConfig::default();
-        let result = CinelliHazlett::analyze(&input, &cfg, &[(0.5, 0.0)]).unwrap();
+        let result =
+            CinelliHazlett::analyze(&input, &cfg, &[(0.5, 0.0)]).expect("value should be present");
         assert!(approx(result.benchmarks[0].bias, 0.0, 1e-12));
     }
 
@@ -587,7 +596,7 @@ mod tests {
             r2yd_x: 0.4,
         };
         let cfg = CinelliHazlettConfig::default();
-        let result = CinelliHazlett::analyze(&input, &cfg, &[]).unwrap();
+        let result = CinelliHazlett::analyze(&input, &cfg, &[]).expect("analyze should succeed");
         // rv_alpha uses a smaller effective_q than rv_q when |t| >> t_crit.
         assert!(result.rv_alpha <= result.rv_q + 1e-10);
     }
@@ -601,8 +610,10 @@ mod tests {
             r2yd_x: 0.25,
         };
         let cfg = CinelliHazlettConfig::default();
-        let r1 = CinelliHazlett::analyze(&input, &cfg, &[(0.3, 0.2)]).unwrap();
-        let r2 = CinelliHazlett::analyze(&input, &cfg, &[(0.3, 0.2)]).unwrap();
+        let r1 =
+            CinelliHazlett::analyze(&input, &cfg, &[(0.3, 0.2)]).expect("value should be present");
+        let r2 =
+            CinelliHazlett::analyze(&input, &cfg, &[(0.3, 0.2)]).expect("value should be present");
         assert!(approx(r1.rv_q, r2.rv_q, 1e-15));
         assert!(approx(r1.extreme_bias, r2.extreme_bias, 1e-15));
         assert!(approx(r1.benchmarks[0].bias, r2.benchmarks[0].bias, 1e-15));

@@ -142,7 +142,7 @@ mod tests {
         };
         let s = vec![1.0_f32, 2.0, 3.0];
         let t = vec![1.1_f32, 2.1, 2.9];
-        let loss = kd_loss(&s, &t, 2, &cfg).unwrap();
+        let loss = kd_loss(&s, &t, 2, &cfg).expect("kd_loss should succeed");
         assert!(loss.is_finite() && loss >= 0.0);
     }
 }

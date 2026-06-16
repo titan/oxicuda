@@ -273,7 +273,7 @@ mod tests {
             uncertainty_penalty: lambda,
             aggregation,
         })
-        .unwrap()
+        .expect("value should be present")
     }
 
     // ── aggregate ───────────────────────────────────────────────────────────
@@ -282,14 +282,14 @@ mod tests {
     fn aggregate_mean_equals_mean() {
         let ens = make(4, 0.0, EnsembleAgg::Mean);
         let rewards = [1.0_f32, 2.0, 3.0, 4.0];
-        assert!((ens.aggregate(&rewards).unwrap() - 2.5).abs() < 1e-6);
+        assert!((ens.aggregate(&rewards).expect("aggregate should succeed") - 2.5).abs() < 1e-6);
     }
 
     #[test]
     fn aggregate_min_equals_min() {
         let ens = make(4, 0.0, EnsembleAgg::Min);
         let rewards = [3.0_f32, 1.0, 4.0, 2.0];
-        assert!((ens.aggregate(&rewards).unwrap() - 1.0).abs() < 1e-6);
+        assert!((ens.aggregate(&rewards).expect("aggregate should succeed") - 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -297,7 +297,7 @@ mod tests {
         // `new` gives uniform weights → WeightedMean must equal the plain mean.
         let ens = make(4, 0.0, EnsembleAgg::WeightedMean);
         let rewards = [1.0_f32, 2.0, 3.0, 4.0];
-        assert!((ens.aggregate(&rewards).unwrap() - 2.5).abs() < 1e-6);
+        assert!((ens.aggregate(&rewards).expect("aggregate should succeed") - 2.5).abs() < 1e-6);
     }
 
     #[test]
@@ -309,12 +309,13 @@ mod tests {
         };
         // weights [1, 2, 1] sum 4 → normalised [0.25, 0.5, 0.25]
         // rewards [4, 0, 4] → 0.25*4 + 0.5*0 + 0.25*4 = 2.0
-        let ens = RewardEnsemble::with_weights(cfg, vec![1.0, 2.0, 1.0]).unwrap();
+        let ens = RewardEnsemble::with_weights(cfg, vec![1.0, 2.0, 1.0])
+            .expect("with_weights should succeed");
         let rewards = [4.0_f32, 0.0, 4.0];
         assert!(
-            (ens.aggregate(&rewards).unwrap() - 2.0).abs() < 1e-6,
+            (ens.aggregate(&rewards).expect("aggregate should succeed") - 2.0).abs() < 1e-6,
             "weighted mean = {}, expected 2.0",
-            ens.aggregate(&rewards).unwrap()
+            ens.aggregate(&rewards).expect("aggregate should succeed")
         );
     }
 
@@ -327,9 +328,14 @@ mod tests {
         let rewards = [2.0_f32, 4.0, 4.0, 6.0];
         let expected = 2.0_f32.sqrt();
         assert!(
-            (ens.uncertainty(&rewards).unwrap() - expected).abs() < 1e-5,
+            (ens.uncertainty(&rewards)
+                .expect("uncertainty should succeed")
+                - expected)
+                .abs()
+                < 1e-5,
             "uncertainty = {}, expected {expected}",
-            ens.uncertainty(&rewards).unwrap()
+            ens.uncertainty(&rewards)
+                .expect("uncertainty should succeed")
         );
     }
 
@@ -338,7 +344,10 @@ mod tests {
         let ens = make(5, 0.0, EnsembleAgg::Mean);
         let rewards = [3.3_f32, 3.3, 3.3, 3.3, 3.3];
         assert!(
-            ens.uncertainty(&rewards).unwrap().abs() < 1e-6,
+            ens.uncertainty(&rewards)
+                .expect("uncertainty should succeed")
+                .abs()
+                < 1e-6,
             "uncertainty should be 0 when all models agree"
         );
     }
@@ -346,7 +355,12 @@ mod tests {
     #[test]
     fn uncertainty_single_model_zero() {
         let ens = make(1, 1.0, EnsembleAgg::Mean);
-        assert!(ens.uncertainty(&[5.0_f32]).unwrap().abs() < 1e-6);
+        assert!(
+            ens.uncertainty(&[5.0_f32])
+                .expect("uncertainty should succeed")
+                .abs()
+                < 1e-6
+        );
     }
 
     // ── penalized_reward ──────────────────────────────────────────────────────
@@ -356,13 +370,20 @@ mod tests {
         let lambda = 0.5_f32;
         let ens = make(4, lambda, EnsembleAgg::Mean);
         let rewards = [2.0_f32, 4.0, 4.0, 6.0];
-        let agg = ens.aggregate(&rewards).unwrap();
-        let std = ens.uncertainty(&rewards).unwrap();
+        let agg = ens.aggregate(&rewards).expect("aggregate should succeed");
+        let std = ens
+            .uncertainty(&rewards)
+            .expect("uncertainty should succeed");
         let expected = agg - lambda * std;
         assert!(
-            (ens.penalized_reward(&rewards).unwrap() - expected).abs() < 1e-5,
+            (ens.penalized_reward(&rewards)
+                .expect("penalized_reward should succeed")
+                - expected)
+                .abs()
+                < 1e-5,
             "penalized = {}, expected {expected}",
-            ens.penalized_reward(&rewards).unwrap()
+            ens.penalized_reward(&rewards)
+                .expect("penalized_reward should succeed")
         );
     }
 
@@ -370,8 +391,10 @@ mod tests {
     fn penalized_below_aggregate_when_disagreement() {
         let ens = make(3, 1.0, EnsembleAgg::Mean);
         let rewards = [1.0_f32, 3.0, 5.0]; // std > 0
-        let agg = ens.aggregate(&rewards).unwrap();
-        let pen = ens.penalized_reward(&rewards).unwrap();
+        let agg = ens.aggregate(&rewards).expect("aggregate should succeed");
+        let pen = ens
+            .penalized_reward(&rewards)
+            .expect("penalized_reward should succeed");
         assert!(
             pen < agg,
             "penalized {pen} should be strictly below aggregate {agg} when λ>0 and disagreement>0"
@@ -382,8 +405,10 @@ mod tests {
     fn penalized_equals_aggregate_when_lambda_zero() {
         let ens = make(3, 0.0, EnsembleAgg::Mean);
         let rewards = [1.0_f32, 3.0, 5.0];
-        let agg = ens.aggregate(&rewards).unwrap();
-        let pen = ens.penalized_reward(&rewards).unwrap();
+        let agg = ens.aggregate(&rewards).expect("aggregate should succeed");
+        let pen = ens
+            .penalized_reward(&rewards)
+            .expect("penalized_reward should succeed");
         assert!(
             (pen - agg).abs() < 1e-6,
             "penalized {pen} should equal aggregate {agg} when λ=0"
@@ -393,7 +418,9 @@ mod tests {
     #[test]
     fn penalized_single_model_equals_reward() {
         let ens = make(1, 2.0, EnsembleAgg::Mean);
-        let pen = ens.penalized_reward(&[7.0_f32]).unwrap();
+        let pen = ens
+            .penalized_reward(&[7.0_f32])
+            .expect("penalized_reward should succeed");
         assert!(
             (pen - 7.0).abs() < 1e-6,
             "single model penalized should equal the reward (no disagreement)"
@@ -403,8 +430,12 @@ mod tests {
     #[test]
     fn min_aggregation_le_mean() {
         let rewards = [1.0_f32, 3.0, 5.0, 7.0];
-        let mean = make(4, 0.0, EnsembleAgg::Mean).aggregate(&rewards).unwrap();
-        let min = make(4, 0.0, EnsembleAgg::Min).aggregate(&rewards).unwrap();
+        let mean = make(4, 0.0, EnsembleAgg::Mean)
+            .aggregate(&rewards)
+            .expect("aggregate should succeed");
+        let min = make(4, 0.0, EnsembleAgg::Min)
+            .aggregate(&rewards)
+            .expect("aggregate should succeed");
         assert!(
             min <= mean,
             "Min aggregation {min} must be <= Mean aggregation {mean} (conservative)"
@@ -418,7 +449,9 @@ mod tests {
         let ens = make(2, 0.5, EnsembleAgg::Mean);
         // 3 items × 2 models
         let rewards = [1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let out = ens.batch_penalized(&rewards, 3).unwrap();
+        let out = ens
+            .batch_penalized(&rewards, 3)
+            .expect("batch_penalized should succeed");
         assert_eq!(out.len(), 3);
     }
 
@@ -426,10 +459,14 @@ mod tests {
     fn batch_matches_per_item_penalized() {
         let ens = make(2, 0.7, EnsembleAgg::Min);
         let rewards = [1.0_f32, 5.0, 2.0, 2.0, 9.0, 1.0];
-        let batch = ens.batch_penalized(&rewards, 3).unwrap();
+        let batch = ens
+            .batch_penalized(&rewards, 3)
+            .expect("batch_penalized should succeed");
         for item in 0..3 {
             let row = &rewards[item * 2..item * 2 + 2];
-            let single = ens.penalized_reward(row).unwrap();
+            let single = ens
+                .penalized_reward(row)
+                .expect("penalized_reward should succeed");
             assert!(
                 (batch[item] - single).abs() < 1e-6,
                 "batch[{item}] = {} should match per-item {single}",
@@ -444,9 +481,15 @@ mod tests {
     fn deterministic_repeated_calls() {
         let ens = make(4, 0.3, EnsembleAgg::Mean);
         let rewards = [0.5_f32, 1.5, 2.5, 3.5];
-        let a = ens.penalized_reward(&rewards).unwrap();
-        let b = ens.penalized_reward(&rewards).unwrap();
-        let c = ens.penalized_reward(&rewards).unwrap();
+        let a = ens
+            .penalized_reward(&rewards)
+            .expect("penalized_reward should succeed");
+        let b = ens
+            .penalized_reward(&rewards)
+            .expect("penalized_reward should succeed");
+        let c = ens
+            .penalized_reward(&rewards)
+            .expect("penalized_reward should succeed");
         assert_eq!(a.to_bits(), b.to_bits());
         assert_eq!(b.to_bits(), c.to_bits());
     }

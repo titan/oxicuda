@@ -218,11 +218,11 @@ mod tests {
             decoder_dims: vec![2, 4, 8],
         };
         let mut rng = LcgRng::new(42);
-        let ae = AutoencoderAnomaly::new(cfg, &mut rng).unwrap();
+        let ae = AutoencoderAnomaly::new(cfg, &mut rng).expect("autoencoder should initialize");
         let x = vec![0.5_f32; 8];
-        let z = ae.encode(&x).unwrap();
+        let z = ae.encode(&x).expect("autoencoder encode should succeed");
         assert_eq!(z.len(), 2);
-        let xr = ae.decode(&z).unwrap();
+        let xr = ae.decode(&z).expect("autoencoder decode should succeed");
         assert_eq!(xr.len(), 8);
     }
 
@@ -233,8 +233,11 @@ mod tests {
             decoder_dims: vec![2, 4, 8],
         };
         let mut rng = LcgRng::new(99);
-        let ae = AutoencoderAnomaly::new(cfg, &mut rng).unwrap();
-        let s = ae.score(&[0.1_f32; 8]).unwrap();
+        let ae = AutoencoderAnomaly::new(cfg, &mut rng)
+            .expect("autoencoder should initialize with valid config");
+        let s = ae
+            .score(&[0.1_f32; 8])
+            .expect("score computation should succeed");
         assert!(s.is_finite(), "score={s}");
         assert!(s >= 0.0, "score={s}");
     }

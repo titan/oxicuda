@@ -143,7 +143,8 @@ mod tests {
     #[test]
     fn average_forgetting_zero_perfect_retention() {
         let mat = perfect_retention_matrix(4, 0.9);
-        let af = average_forgetting(&mat).unwrap();
+        let af =
+            average_forgetting(&mat).expect("average forgetting should compute on valid matrix");
         assert!(
             af.abs() < 1e-6,
             "Avg forgetting should be 0 for perfect retention, got {af}"
@@ -162,7 +163,8 @@ mod tests {
         mat.data[2][0] = 0.2;
         mat.data[2][1] = 0.4;
         mat.data[2][2] = 0.9;
-        let af = average_forgetting(&mat).unwrap();
+        let af =
+            average_forgetting(&mat).expect("average forgetting should compute on valid matrix");
         // For task 0: max(0.9, 0.5) - 0.2 = 0.7
         // For task 1: max(0.0, 0.9) - 0.4 = 0.5
         // AF = (0.7 + 0.5) / 2 = 0.6
@@ -178,7 +180,8 @@ mod tests {
         mat.data[2][0] = 0.3;
         mat.data[2][1] = 0.4;
         mat.data[2][2] = 0.88;
-        let bwt = backward_transfer(&mat).unwrap();
+        let bwt =
+            backward_transfer(&mat).expect("backward transfer should compute on valid matrix");
         // BWT = ((0.3 - 0.9) + (0.4 - 0.85)) / 2 = (-0.6 - 0.45) / 2 = -0.525
         assert!(
             bwt < 0.0,
@@ -189,7 +192,8 @@ mod tests {
     #[test]
     fn backward_transfer_zero_perfect_retention() {
         let mat = perfect_retention_matrix(4, 0.95);
-        let bwt = backward_transfer(&mat).unwrap();
+        let bwt =
+            backward_transfer(&mat).expect("backward transfer should compute on valid matrix");
         assert!(
             bwt.abs() < 1e-6,
             "BWT should be 0 for perfect retention, got {bwt}"
@@ -200,7 +204,8 @@ mod tests {
     fn single_task_forgetting_is_zero() {
         let mut mat = AccuracyMatrix::new(1);
         mat.data[0][0] = 0.9;
-        let af = average_forgetting(&mat).unwrap();
+        let af =
+            average_forgetting(&mat).expect("average forgetting should compute on valid matrix");
         assert_eq!(af, 0.0);
     }
 
@@ -210,7 +215,7 @@ mod tests {
         mat.data[0][0] = 0.8;
         mat.data[1][1] = 0.9;
         mat.data[2][2] = 0.7;
-        let p = plasticity(&mat).unwrap();
+        let p = plasticity(&mat).expect("plasticity should compute on valid matrix");
         assert!(
             (p - 0.8).abs() < 1e-6,
             "Plasticity should be avg of diagonal"

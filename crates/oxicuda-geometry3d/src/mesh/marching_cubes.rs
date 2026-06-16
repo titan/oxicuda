@@ -609,7 +609,7 @@ mod tests {
         let nz = 20;
         let cfg = default_cfg_with_size(nx, ny, nz);
         let sdf = sphere_sdf(nx, ny, nz, cfg.dx, cfg.dy, cfg.dz, cfg.origin, 0.7);
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         assert!(res.n_triangles > 0, "sphere SDF must yield triangles");
     }
 
@@ -620,7 +620,7 @@ mod tests {
         let nz = 5;
         let cfg = default_cfg_with_size(nx, ny, nz);
         let sdf = vec![1.0_f32; nx * ny * nz];
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         assert_eq!(res.n_triangles, 0, "all-positive SDF: no surface");
     }
 
@@ -631,7 +631,7 @@ mod tests {
         let nz = 5;
         let cfg = default_cfg_with_size(nx, ny, nz);
         let sdf = vec![-1.0_f32; nx * ny * nz];
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         assert_eq!(
             res.n_triangles, 0,
             "all-negative SDF (all inside): no surface"
@@ -645,7 +645,7 @@ mod tests {
         let nz = 15;
         let cfg = default_cfg_with_size(nx, ny, nz);
         let sdf = sphere_sdf(nx, ny, nz, cfg.dx, cfg.dy, cfg.dz, cfg.origin, 0.5);
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         assert_eq!(
             res.n_vertices,
             res.n_triangles * 3,
@@ -669,7 +669,7 @@ mod tests {
             isovalue: 0.0,
         };
         let sdf = sphere_sdf(nx, ny, nz, cfg.dx, cfg.dy, cfg.dz, cfg.origin, 0.5);
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
 
         let max_x = cfg.origin[0] + (nx - 1) as f32 * cfg.dx;
         let max_y = cfg.origin[1] + (ny - 1) as f32 * cfg.dy;
@@ -717,7 +717,7 @@ mod tests {
             isovalue: 0.0,
         };
         let sdf = sphere_sdf(nx, ny, nz, cfg.dx, cfg.dy, cfg.dz, cfg.origin, radius);
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
 
         let cx = (nx as f32 - 1.0) * cfg.dx * 0.5;
         let cy = (ny as f32 - 1.0) * cfg.dy * 0.5;
@@ -751,7 +751,7 @@ mod tests {
                 }
             }
         }
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         assert!(res.n_triangles > 0, "plane SDF must yield triangles");
     }
 
@@ -771,7 +771,7 @@ mod tests {
         let nz = 3;
         let cfg = default_cfg_with_size(nx, ny, nz);
         let sdf = sphere_sdf(nx, ny, nz, cfg.dx, cfg.dy, cfg.dz, cfg.origin, 0.1);
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         // May or may not produce triangles, but should not error.
         assert_eq!(res.n_vertices, res.n_triangles * 3);
     }
@@ -783,7 +783,7 @@ mod tests {
         let nz = 10;
         let cfg = default_cfg_with_size(nx, ny, nz);
         let sdf = sphere_sdf(nx, ny, nz, cfg.dx, cfg.dy, cfg.dz, cfg.origin, 0.4);
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         assert_eq!(res.n_vertices, res.vertices.len() / 3);
         assert_eq!(res.n_triangles, res.triangles.len() / 3);
     }
@@ -853,8 +853,8 @@ mod tests {
         cfg5.isovalue = 0.3;
 
         let sdf = sphere_sdf(nx, ny, nz, 0.1, 0.1, 0.1, [0.0; 3], 0.5);
-        let res0 = marching_cubes(&sdf, &cfg0).unwrap();
-        let res5 = marching_cubes(&sdf, &cfg5).unwrap();
+        let res0 = marching_cubes(&sdf, &cfg0).expect("marching_cubes should succeed");
+        let res5 = marching_cubes(&sdf, &cfg5).expect("marching_cubes should succeed");
         // Different isovalues extract different surfaces; counts should differ
         // (or both may have triangles but different counts).
         // At minimum both should run without error and isovalue=0.3 gives a smaller sphere.
@@ -887,8 +887,8 @@ mod tests {
             isovalue: 0.0,
         };
         let sdf = sphere_sdf(nx, ny, nz, 0.1, 0.1, 0.1, [0.0; 3], 0.3);
-        let res_off = marching_cubes(&sdf, &cfg_origin).unwrap();
-        let res_zero = marching_cubes(&sdf, &cfg_zero).unwrap();
+        let res_off = marching_cubes(&sdf, &cfg_origin).expect("marching_cubes should succeed");
+        let res_zero = marching_cubes(&sdf, &cfg_zero).expect("marching_cubes should succeed");
 
         if res_off.n_vertices > 0 && res_zero.n_vertices > 0 {
             // All vertices in offset mesh should be shifted by (10, 20, 30)
@@ -922,7 +922,7 @@ mod tests {
         // SDF: v0=(x=0,y=0,z=0)=-1; all others=+1
         let mut sdf = vec![1.0_f32; 8];
         sdf[0] = -1.0; // index 0*2*2 + 0*2 + 0 = 0
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         assert_eq!(
             res.n_triangles, 1,
             "single corner inside -> exactly 1 triangle"
@@ -948,7 +948,7 @@ mod tests {
         };
         let mut sdf = vec![1.0_f32; 8];
         sdf[0] = -1.0; // v0 inside
-        let res = marching_cubes(&sdf, &cfg).unwrap();
+        let res = marching_cubes(&sdf, &cfg).expect("marching_cubes should succeed");
         assert_eq!(res.n_triangles, 1);
 
         // Find the vertex on edge 0 (x between 0 and 1, y=0, z=0)

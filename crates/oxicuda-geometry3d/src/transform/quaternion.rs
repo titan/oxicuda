@@ -174,7 +174,8 @@ mod tests {
 
     #[test]
     fn quat_from_axis_angle_unit_norm() {
-        let q = Quat::from_axis_angle([0.0, 0.0, 1.0], std::f32::consts::PI / 2.0).unwrap();
+        let q = Quat::from_axis_angle([0.0, 0.0, 1.0], std::f32::consts::PI / 2.0)
+            .expect("from_axis_angle should succeed");
         let n = q.0.iter().map(|v| v * v).sum::<f32>().sqrt();
         assert!((n - 1.0).abs() < 1e-5, "Quaternion must be unit norm");
     }
@@ -186,7 +187,8 @@ mod tests {
 
     #[test]
     fn quat_mul_identity() {
-        let q = Quat::from_axis_angle([0.0, 1.0, 0.0], 0.5).unwrap();
+        let q =
+            Quat::from_axis_angle([0.0, 1.0, 0.0], 0.5).expect("from_axis_angle should succeed");
         let id = Quat::identity();
         let q_id = q.mul(&id);
         for (a, b) in q.0.iter().zip(q_id.0.iter()) {
@@ -196,7 +198,8 @@ mod tests {
 
     #[test]
     fn quat_conjugate_inverse() {
-        let q = Quat::from_axis_angle([1.0, 0.0, 0.0], 1.0).unwrap();
+        let q =
+            Quat::from_axis_angle([1.0, 0.0, 0.0], 1.0).expect("from_axis_angle should succeed");
         let q_inv = q.conjugate();
         let prod = q.mul(&q_inv);
         // Should be near identity
@@ -216,9 +219,10 @@ mod tests {
 
     #[test]
     fn quat_roundtrip_matrix() {
-        let q = Quat::from_axis_angle([1.0, 1.0, 0.0], 0.8).unwrap();
+        let q =
+            Quat::from_axis_angle([1.0, 1.0, 0.0], 0.8).expect("from_axis_angle should succeed");
         let r = q.to_rotation_matrix();
-        let q2 = Quat::from_rotation_matrix(&r).unwrap();
+        let q2 = Quat::from_rotation_matrix(&r).expect("from_rotation_matrix should succeed");
         for (a, b) in q.0.iter().zip(q2.0.iter()) {
             assert!(
                 (a - b).abs() < 1e-4,
@@ -231,10 +235,15 @@ mod tests {
 
     #[test]
     fn quat_slerp_t0_is_a() {
-        let a = Quat::from_axis_angle([0.0, 0.0, 1.0], 0.0).unwrap();
-        let b = Quat::from_axis_angle([0.0, 0.0, 1.0], 1.0).unwrap();
-        let s = Quat::slerp(&a, &b, 0.0).unwrap();
-        for (x, y) in s.0.iter().zip(a.normalize().unwrap().0.iter()) {
+        let a =
+            Quat::from_axis_angle([0.0, 0.0, 1.0], 0.0).expect("from_axis_angle should succeed");
+        let b =
+            Quat::from_axis_angle([0.0, 0.0, 1.0], 1.0).expect("from_axis_angle should succeed");
+        let s = Quat::slerp(&a, &b, 0.0).expect("slerp should succeed");
+        for (x, y) in
+            s.0.iter()
+                .zip(a.normalize().expect("normalize should succeed").0.iter())
+        {
             assert!((x - y).abs() < 1e-4, "slerp(t=0) should be a");
         }
     }
@@ -243,9 +252,10 @@ mod tests {
     fn quat_slerp_t1_is_b() {
         let a = Quat::identity();
         // Use 0.9 radians rather than PI to avoid gimbal issues at t=1 with 180° rotation
-        let b = Quat::from_axis_angle([1.0, 0.0, 0.0], 0.9).unwrap();
-        let s = Quat::slerp(&a, &b, 1.0).unwrap();
-        let b_n = b.normalize().unwrap();
+        let b =
+            Quat::from_axis_angle([1.0, 0.0, 0.0], 0.9).expect("from_axis_angle should succeed");
+        let s = Quat::slerp(&a, &b, 1.0).expect("slerp should succeed");
+        let b_n = b.normalize().expect("normalize should succeed");
         for (x, y) in s.0.iter().zip(b_n.0.iter()) {
             assert!(
                 (x - y).abs() < 1e-4,
@@ -257,11 +267,13 @@ mod tests {
 
     #[test]
     fn quat_slerp_unit_norm() {
-        let a = Quat::from_axis_angle([1.0, 0.0, 0.0], 0.3).unwrap();
-        let b = Quat::from_axis_angle([0.0, 1.0, 0.0], 1.2).unwrap();
+        let a =
+            Quat::from_axis_angle([1.0, 0.0, 0.0], 0.3).expect("from_axis_angle should succeed");
+        let b =
+            Quat::from_axis_angle([0.0, 1.0, 0.0], 1.2).expect("from_axis_angle should succeed");
         for ti in 0..=10 {
             let t = ti as f32 / 10.0;
-            let s = Quat::slerp(&a, &b, t).unwrap();
+            let s = Quat::slerp(&a, &b, t).expect("slerp should succeed");
             let n = s.0.iter().map(|v| v * v).sum::<f32>().sqrt();
             assert!(
                 (n - 1.0).abs() < 1e-4,

@@ -688,7 +688,8 @@ mod tests {
             init: SomInit::Random,
             seed: 7,
         };
-        let result = kohonen_som_fit(&data, n_data, dim, &cfg).unwrap();
+        let result =
+            kohonen_som_fit(&data, n_data, dim, &cfg).expect("kohonen_som_fit should succeed");
         assert_eq!(result.labels.len(), n_data);
         assert_eq!(result.grid_rows, 5);
         assert_eq!(result.grid_cols, 5);
@@ -736,8 +737,10 @@ mod tests {
             ..base_cfg.clone()
         };
 
-        let r1 = kohonen_som_fit(&data, n_data, dim, &cfg1).unwrap();
-        let r100 = kohonen_som_fit(&data, n_data, dim, &cfg100).unwrap();
+        let r1 =
+            kohonen_som_fit(&data, n_data, dim, &cfg1).expect("kohonen_som_fit should succeed");
+        let r100 =
+            kohonen_som_fit(&data, n_data, dim, &cfg100).expect("kohonen_som_fit should succeed");
 
         assert!(
             r100.quantization_error <= r1.quantization_error + 1.0,
@@ -765,7 +768,8 @@ mod tests {
             n_epochs: 5,
             ..Default::default()
         };
-        let result = kohonen_som_fit(&data, n_data, dim, &cfg).unwrap();
+        let result =
+            kohonen_som_fit(&data, n_data, dim, &cfg).expect("kohonen_som_fit should succeed");
         assert_eq!(result.weights.len(), 4 * 6 * dim);
     }
 
@@ -787,7 +791,8 @@ mod tests {
             n_epochs: 20,
             ..Default::default()
         };
-        let result = kohonen_som_fit(&data, n_data, dim, &cfg).unwrap();
+        let result =
+            kohonen_som_fit(&data, n_data, dim, &cfg).expect("kohonen_som_fit should succeed");
         assert!(
             result.topographic_error >= 0.0 && result.topographic_error <= 1.0,
             "TE={} not in [0,1]",
@@ -813,7 +818,8 @@ mod tests {
             n_epochs: 10,
             ..Default::default()
         };
-        let result = kohonen_som_fit(&data, n_data, dim, &cfg).unwrap();
+        let result =
+            kohonen_som_fit(&data, n_data, dim, &cfg).expect("kohonen_som_fit should succeed");
         assert!(result.quantization_error >= 0.0);
     }
 
@@ -843,7 +849,8 @@ mod tests {
             init: SomInit::Random,
             seed: 123,
         };
-        let result = kohonen_som_fit(&data, n_data, dim, &cfg).unwrap();
+        let result =
+            kohonen_som_fit(&data, n_data, dim, &cfg).expect("kohonen_som_fit should succeed");
 
         // Extract the x-coordinate of each neuron weight (neuron index → x pos).
         let neuron_x: Vec<f64> = (0..10).map(|k| result.weights[k * dim]).collect();
@@ -898,7 +905,8 @@ mod tests {
             init: SomInit::PcaBased,
             seed: 42,
         };
-        let result = kohonen_som_fit(&data, n_data, dim, &cfg).unwrap();
+        let result =
+            kohonen_som_fit(&data, n_data, dim, &cfg).expect("kohonen_som_fit should succeed");
 
         // For each SOM neuron, find the dominant ground-truth cluster label.
         let n_neurons = 3 * 3;
@@ -927,7 +935,7 @@ mod tests {
             let total: usize = cluster_hist.iter().sum();
             if total > 0 {
                 occupied_neurons += 1;
-                let max_count = *cluster_hist.iter().max().unwrap();
+                let max_count = *cluster_hist.iter().max().expect("max should succeed");
                 if max_count * 2 >= total {
                     // Majority (≥50%) from one cluster.
                     purity_count += 1;
@@ -1019,7 +1027,8 @@ mod tests {
             n_epochs: 0,
             ..Default::default()
         };
-        let result = kohonen_som_fit(&data, n_data, dim, &cfg).unwrap();
+        let result =
+            kohonen_som_fit(&data, n_data, dim, &cfg).expect("kohonen_som_fit should succeed");
         assert_eq!(result.n_epochs, 0);
         assert_eq!(result.labels.len(), n_data);
         assert!(result.quantization_error >= 0.0);
@@ -1072,7 +1081,8 @@ mod tests {
             seed: 1,
             ..Default::default()
         };
-        let result = kohonen_som_fit(&data, n_data, dim, &cfg).unwrap();
+        let result =
+            kohonen_som_fit(&data, n_data, dim, &cfg).expect("kohonen_som_fit should succeed");
         // All weights must be finite.
         assert!(
             result.weights.iter().all(|v| v.is_finite()),

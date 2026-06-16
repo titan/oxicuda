@@ -814,7 +814,7 @@ mod tests {
             reassign_empty: true,
             seed: 7,
         };
-        let result = deep_cluster(&data, n, d, &config).unwrap();
+        let result = deep_cluster(&data, n, d, &config).expect("deep_cluster should succeed");
         // Count points per label
         let mut count = [0_usize; 2];
         for &l in &result.labels {
@@ -840,7 +840,7 @@ mod tests {
             reassign_empty: true,
             seed: 13,
         };
-        let result = deep_cluster(&data, n, d, &config).unwrap();
+        let result = deep_cluster(&data, n, d, &config).expect("deep_cluster should succeed");
         assert!(
             result.converged,
             "should converge; n_iter = {}",
@@ -863,7 +863,7 @@ mod tests {
             reassign_empty: true,
             seed: 17,
         };
-        let result = deep_cluster(&features, n, d, &config).unwrap();
+        let result = deep_cluster(&features, n, d, &config).expect("deep_cluster should succeed");
         assert_eq!(result.labels.len(), n);
     }
 
@@ -882,7 +882,7 @@ mod tests {
             reassign_empty: true,
             seed: 23,
         };
-        let result = deep_cluster(&features, n, d, &config).unwrap();
+        let result = deep_cluster(&features, n, d, &config).expect("deep_cluster should succeed");
         assert_eq!(result.centroids.len(), k * d);
     }
 
@@ -893,7 +893,8 @@ mod tests {
         let k = 4_usize;
         let logits: Vec<f32> = (0..n * k).map(|i| (i as f32) * 0.1).collect();
         let labels = vec![0_usize, 1, 2, 3, 0, 1, 2, 3];
-        let loss = deep_cluster_loss(&logits, &labels, n, k).unwrap();
+        let loss =
+            deep_cluster_loss(&logits, &labels, n, k).expect("deep_cluster_loss should succeed");
         assert!(loss.is_finite(), "loss = {loss}");
         assert!(loss >= 0.0, "loss = {loss}");
     }
@@ -905,7 +906,8 @@ mod tests {
         let k = 8_usize;
         let logits = vec![0.0_f32; n * k]; // all equal → softmax = 1/k
         let labels: Vec<usize> = (0..n).map(|i| i % k).collect();
-        let loss = deep_cluster_loss(&logits, &labels, n, k).unwrap();
+        let loss =
+            deep_cluster_loss(&logits, &labels, n, k).expect("deep_cluster_loss should succeed");
         let expected = (k as f32).ln();
         assert!(
             (loss - expected).abs() < 1e-4,
@@ -931,7 +933,8 @@ mod tests {
             cluster_scales: vec![2, 3],
             base_config: base,
         };
-        let result = deeper_cluster(&features, n, d, &config).unwrap();
+        let result =
+            deeper_cluster(&features, n, d, &config).expect("deeper_cluster should succeed");
         assert_eq!(result.per_scale.len(), 2);
         assert_eq!(result.multi_labels.len(), 2);
         assert_eq!(result.multi_labels[0].len(), n);
@@ -958,7 +961,8 @@ mod tests {
             features.push(1.0 * (t * 0.073).cos()); // σ≈1/√2 in y
         }
         let n_comp = 2_usize;
-        let whitened = pca_whiten(&features, n, d, n_comp, 1e-6).unwrap();
+        let whitened =
+            pca_whiten(&features, n, d, n_comp, 1e-6).expect("pca_whiten should succeed");
         assert_eq!(whitened.len(), n * n_comp);
         // Check each column has roughly unit variance.
         for col in 0..n_comp {
@@ -994,7 +998,7 @@ mod tests {
             seed: 37,
         };
         // Should complete without panic.
-        let result = deep_cluster(&features, n, d, &config).unwrap();
+        let result = deep_cluster(&features, n, d, &config).expect("deep_cluster should succeed");
         assert_eq!(result.labels.len(), n);
     }
 
@@ -1036,7 +1040,7 @@ mod tests {
             reassign_empty: true,
             seed: 53,
         };
-        let result = deep_cluster(&features, n, d, &config).unwrap();
+        let result = deep_cluster(&features, n, d, &config).expect("deep_cluster should succeed");
         assert!(result.inertia.is_finite(), "inertia = {}", result.inertia);
         assert!(result.inertia >= 0.0, "inertia = {}", result.inertia);
     }
@@ -1056,7 +1060,7 @@ mod tests {
             reassign_empty: true,
             seed: 61,
         };
-        let result = deep_cluster(&data, n, d, &config).unwrap();
+        let result = deep_cluster(&data, n, d, &config).expect("deep_cluster should succeed");
         assert!(result.converged, "should have converged");
     }
 

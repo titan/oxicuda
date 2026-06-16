@@ -319,7 +319,7 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let net = PointNet::new(cfg, &mut rng);
         let pts = make_points(16, 1);
-        let logits = net.forward(&pts).unwrap();
+        let logits = net.forward(&pts).expect("forward should succeed");
         assert_eq!(logits.len(), 10);
     }
 
@@ -332,7 +332,7 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let net = PointNet::new(cfg, &mut rng);
         let pts = make_points(8, 1);
-        let logits = net.forward(&pts).unwrap();
+        let logits = net.forward(&pts).expect("forward should succeed");
         assert!(
             logits.iter().all(|v| v.is_finite()),
             "Logits must be finite"
@@ -349,7 +349,7 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let net = PointNet::new(cfg, &mut rng);
         let pts = make_points(16, 2);
-        let cls = net.classify(&pts).unwrap();
+        let cls = net.classify(&pts).expect("classify should succeed");
         assert!(cls < n_classes, "Class must be in [0, n_classes)");
     }
 
@@ -367,8 +367,8 @@ mod tests {
         let mut rng2 = LcgRng::new(99);
         let net2 = PointNet::new(cfg, &mut rng2);
 
-        let l1 = net1.forward(&pts).unwrap();
-        let l2 = net2.forward(&pts).unwrap();
+        let l1 = net1.forward(&pts).expect("forward should succeed");
+        let l2 = net2.forward(&pts).expect("forward should succeed");
         assert_eq!(l1, l2, "Same seed must produce identical output");
     }
 

@@ -277,21 +277,21 @@ mod tests {
 
     #[test]
     fn knn_predicts_constant_dataset() {
-        let mut p = KnnAccuracyPredictor::new(3).unwrap();
-        let f =
-            ArchFeatures::from_layers(&[LayerSpec::new(OpKind::SepConv3x3, 4, 4, 8, 8)]).unwrap();
+        let mut p = KnnAccuracyPredictor::new(3).expect("new should succeed");
+        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::SepConv3x3, 4, 4, 8, 8)])
+            .expect("value should be present");
         for _ in 0..5 {
-            p.add(f.data.clone(), 0.7).unwrap();
+            p.add(f.data.clone(), 0.7).expect("value should be present");
         }
         let q = p
             .predict(&[LayerSpec::new(OpKind::SepConv3x3, 4, 4, 8, 8)])
-            .unwrap();
+            .expect("value should be present");
         assert!((q - 0.7).abs() < 1e-4);
     }
 
     #[test]
     fn knn_rejects_empty_predict() {
-        let p = KnnAccuracyPredictor::new(2).unwrap();
+        let p = KnnAccuracyPredictor::new(2).expect("new should succeed");
         assert!(
             p.predict(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)])
                 .is_err()
@@ -300,8 +300,9 @@ mod tests {
 
     #[test]
     fn knn_rejects_invalid_accuracy() {
-        let mut p = KnnAccuracyPredictor::new(1).unwrap();
-        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)]).unwrap();
+        let mut p = KnnAccuracyPredictor::new(1).expect("new should succeed");
+        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)])
+            .expect("value should be present");
         assert!(p.add(f.data.clone(), 1.5).is_err());
         assert!(p.add(f.data, f32::NAN).is_err());
     }
@@ -313,29 +314,32 @@ mod tests {
 
     #[test]
     fn rbf_fit_zero_target_zero_alpha() {
-        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)]).unwrap();
+        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)])
+            .expect("value should be present");
         let samples = vec![(f.data.clone(), 0.0_f32); 4];
-        let p = RbfAccuracyPredictor::fit(&samples, 1.0, 0.1).unwrap();
+        let p = RbfAccuracyPredictor::fit(&samples, 1.0, 0.1).expect("fit should succeed");
         let q = p
             .predict(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)])
-            .unwrap();
+            .expect("value should be present");
         assert!(q.abs() < 1e-4);
     }
 
     #[test]
     fn rbf_fit_recovers_constant_target() {
-        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)]).unwrap();
+        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)])
+            .expect("value should be present");
         let samples = vec![(f.data.clone(), 0.5_f32); 3];
-        let p = RbfAccuracyPredictor::fit(&samples, 1.0, 1e-4).unwrap();
+        let p = RbfAccuracyPredictor::fit(&samples, 1.0, 1e-4).expect("fit should succeed");
         let q = p
             .predict(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)])
-            .unwrap();
+            .expect("value should be present");
         assert!((q - 0.5).abs() < 1e-2, "q = {q}");
     }
 
     #[test]
     fn rbf_rejects_invalid_bandwidth() {
-        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)]).unwrap();
+        let f = ArchFeatures::from_layers(&[LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)])
+            .expect("value should be present");
         let samples = vec![(f.data, 0.5_f32)];
         let r = RbfAccuracyPredictor::fit(&samples, 0.0, 1e-4);
         assert!(r.is_err());

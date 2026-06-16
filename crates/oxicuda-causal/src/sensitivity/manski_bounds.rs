@@ -302,7 +302,7 @@ mod tests {
         let y = vec![0.6_f64; n];
         let t = vec![0u8; n];
         let cfg = na_cfg();
-        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
         // p1=0, p0=1: E[Y(0)] = 1·0.6 + 0·y_lo = 0.6 (both bounds equal ȳ₀).
         assert!(approx(r.e_y0_lower, 0.6, 1e-12));
         assert!(approx(r.e_y0_upper, 0.6, 1e-12));
@@ -321,7 +321,7 @@ mod tests {
             y_upper: 1.0,
             assumption: ManskiAssumption::NoAssumption,
         };
-        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
         let expected_width = 1.0; // y_upper − y_lower = 1.0 − 0.0
         assert!(
             approx(r.width, expected_width, 1e-10),
@@ -340,7 +340,7 @@ mod tests {
             y_upper: 1.0,
             assumption: ManskiAssumption::MeanIndependence,
         };
-        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
         let expected_ate = 0.5; // ȳ₁ − ȳ₀ = 1.0 − 0.5
         assert!(
             approx(r.ate_upper, expected_ate, 1e-10),
@@ -364,7 +364,7 @@ mod tests {
             y_upper: 1.0,
             assumption: ManskiAssumption::MonotoneTreatmentResponse,
         };
-        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
         assert!(
             r.ate_lower >= 0.0,
             "MTR requires ate_lower >= 0, got {}",
@@ -386,8 +386,8 @@ mod tests {
             y_upper: 2.0,
             assumption: ManskiAssumption::MonotoneTreatmentSelection,
         };
-        let r_na = ManskiBounds::ate_bounds(&y, &t, &na_cfg).unwrap();
-        let r_mts = ManskiBounds::ate_bounds(&y, &t, &mts_cfg).unwrap();
+        let r_na = ManskiBounds::ate_bounds(&y, &t, &na_cfg).expect("ate_bounds should succeed");
+        let r_mts = ManskiBounds::ate_bounds(&y, &t, &mts_cfg).expect("ate_bounds should succeed");
         // MTS tightens E[Y(1)] upper.
         assert!(
             r_mts.e_y1_upper <= r_na.e_y1_upper + 1e-10,
@@ -450,7 +450,7 @@ mod tests {
         let y = vec![0.8_f64; n];
         let t = vec![1u8; n];
         let cfg = na_cfg();
-        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
         // p1=1, p0=0: E[Y(1)] = 1·ȳ₁ + 0·y_lo = ȳ₁ for both bounds.
         assert!(approx(r.e_y1_lower, 0.8, 1e-12));
         assert!(approx(r.e_y1_upper, 0.8, 1e-12));
@@ -475,8 +475,8 @@ mod tests {
             y_upper: 1.0,
             assumption: ManskiAssumption::MonotoneTreatmentSelection,
         };
-        let r_na = ManskiBounds::ate_bounds(&y, &t, &na).unwrap();
-        let r_mts = ManskiBounds::ate_bounds(&y, &t, &mts).unwrap();
+        let r_na = ManskiBounds::ate_bounds(&y, &t, &na).expect("ate_bounds should succeed");
+        let r_mts = ManskiBounds::ate_bounds(&y, &t, &mts).expect("ate_bounds should succeed");
         // MTS should have a narrower (or equal) width.
         assert!(
             r_mts.width <= r_na.width + 1e-10,
@@ -501,7 +501,7 @@ mod tests {
                 y_upper: 1.0,
                 assumption,
             };
-            let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+            let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
             assert!(
                 approx(r.width, r.ate_upper - r.ate_lower, 1e-10),
                 "assumption={assumption:?}: width={} ≠ ate_upper - ate_lower={}",
@@ -521,7 +521,7 @@ mod tests {
             y_upper: 1.0,
             assumption: ManskiAssumption::NoAssumption,
         };
-        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+        let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
         // All E[Y(t)] bounds must lie within [y_lower, y_upper].
         assert!(r.e_y1_lower >= -1e-12);
         assert!(r.e_y1_upper <= 1.0 + 1e-12);
@@ -544,7 +544,7 @@ mod tests {
             y_upper: y_hi,
             assumption: ManskiAssumption::NoAssumption,
         };
-        let r0 = ManskiBounds::ate_bounds(&y0, &t0, &cfg).unwrap();
+        let r0 = ManskiBounds::ate_bounds(&y0, &t0, &cfg).expect("ate_bounds should succeed");
         assert!(
             approx(r0.width, y_hi - y_lo, 1e-10),
             "p1=0 width={} expected {}",
@@ -555,7 +555,7 @@ mod tests {
         // All treated (p1=1).
         let y1 = vec![1.5_f64; n];
         let t1 = vec![1u8; n];
-        let r1 = ManskiBounds::ate_bounds(&y1, &t1, &cfg).unwrap();
+        let r1 = ManskiBounds::ate_bounds(&y1, &t1, &cfg).expect("ate_bounds should succeed");
         assert!(
             approx(r1.width, y_hi - y_lo, 1e-10),
             "p1=1 width={} expected {}",
@@ -579,7 +579,7 @@ mod tests {
                 y_upper: 1.0,
                 assumption,
             };
-            let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+            let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
             assert!(
                 r.e_y1_lower <= r.e_y1_upper + 1e-12,
                 "{assumption:?}: e_y1_lower={} > e_y1_upper={}",
@@ -604,7 +604,7 @@ mod tests {
                 y_upper: 1.0,
                 assumption,
             };
-            let r = ManskiBounds::ate_bounds(&y, &t, &cfg).unwrap();
+            let r = ManskiBounds::ate_bounds(&y, &t, &cfg).expect("ate_bounds should succeed");
             assert!(
                 r.e_y0_lower <= r.e_y0_upper + 1e-12,
                 "{assumption:?}: e_y0_lower={} > e_y0_upper={}",
@@ -628,8 +628,8 @@ mod tests {
             y_upper: 1.0,
             assumption: ManskiAssumption::MonotoneTreatmentResponse,
         };
-        let r_na = ManskiBounds::ate_bounds(&y, &t, &na_cfg).unwrap();
-        let r_mtr = ManskiBounds::ate_bounds(&y, &t, &mtr_cfg).unwrap();
+        let r_na = ManskiBounds::ate_bounds(&y, &t, &na_cfg).expect("ate_bounds should succeed");
+        let r_mtr = ManskiBounds::ate_bounds(&y, &t, &mtr_cfg).expect("ate_bounds should succeed");
         // MTR upper = NA upper (MTR does not change the upper bound).
         assert!(
             approx(r_mtr.ate_upper, r_na.ate_upper, 1e-10),

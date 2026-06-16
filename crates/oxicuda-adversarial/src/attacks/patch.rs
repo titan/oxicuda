@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn patch_mask_length_and_count() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let mask = p.patch_mask();
         assert_eq!(mask.len(), 3 * 4 * 4);
         let true_count = mask.iter().filter(|&&b| b).count();
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn patch_mask_marks_correct_region() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let mask = p.patch_mask();
         let plane = 4 * 4;
         // Channel 0, rows 1..3, cols 1..3 should be true; (0,0) false.
@@ -335,11 +335,13 @@ mod tests {
     #[test]
     fn patch_mask_matches_apply_patch_region() {
         // The pixels apply_patch overwrites must be exactly the masked pixels.
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.3_f32; 3 * 4 * 4];
         // Distinct patch content (all 0.9) so overwrites are detectable.
         let patch = vec![0.9_f32; 2 * 2 * 3];
-        let out = p.apply_patch(&image, &patch).unwrap();
+        let out = p
+            .apply_patch(&image, &patch)
+            .expect("apply_patch should succeed");
         let mask = p.patch_mask();
         for (i, (&before, &after)) in image.iter().zip(out.iter()).enumerate() {
             if mask[i] {
@@ -354,20 +356,24 @@ mod tests {
 
     #[test]
     fn attack_output_length_equals_image() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.5_f32; 3 * 4 * 4];
         let g = vec![1.0_f32; 3 * 4 * 4];
-        let out = p.attack(&image, const_grad(g)).unwrap();
+        let out = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         assert_eq!(out.len(), image.len());
     }
 
     #[test]
     fn attack_leaves_non_patch_pixels_exactly_unchanged() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image: Vec<f32> = (0..3 * 4 * 4).map(|i| (i as f32) * 0.01).collect();
         // Large positive gradient everywhere; only patch pixels may move.
         let g = vec![5.0_f32; 3 * 4 * 4];
-        let out = p.attack(&image, const_grad(g)).unwrap();
+        let out = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         let mask = p.patch_mask();
         for (i, (&before, &after)) in image.iter().zip(out.iter()).enumerate() {
             if !mask[i] {
@@ -378,10 +384,12 @@ mod tests {
 
     #[test]
     fn attack_clamps_patch_pixels() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.95_f32; 3 * 4 * 4];
         let g = vec![1.0_f32; 3 * 4 * 4]; // ascend → hits upper clamp
-        let out = p.attack(&image, const_grad(g)).unwrap();
+        let out = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         for &v in &out {
             assert!((0.0..=1.0).contains(&v), "out of [0,1]: {v}");
         }
@@ -390,10 +398,12 @@ mod tests {
     #[test]
     fn attack_constant_gradient_increments_by_step_times_nsteps() {
         // step_size * n_steps = 0.1 * 3 = 0.3; image at 0.0 stays well below clamp.
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.0_f32; 3 * 4 * 4];
         let g = vec![2.0_f32; 3 * 4 * 4]; // positive sign → +step each step
-        let out = p.attack(&image, const_grad(g)).unwrap();
+        let out = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         let mask = p.patch_mask();
         for (i, &after) in out.iter().enumerate() {
             if mask[i] {
@@ -406,10 +416,12 @@ mod tests {
 
     #[test]
     fn attack_negative_gradient_decrements() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.5_f32; 3 * 4 * 4];
         let g = vec![-1.0_f32; 3 * 4 * 4]; // negative sign → −step each step
-        let out = p.attack(&image, const_grad(g)).unwrap();
+        let out = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         let mask = p.patch_mask();
         for (i, &after) in out.iter().enumerate() {
             if mask[i] {
@@ -421,11 +433,15 @@ mod tests {
 
     #[test]
     fn attack_deterministic() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.4_f32; 3 * 4 * 4];
         let g = vec![1.0_f32; 3 * 4 * 4];
-        let a = p.attack(&image, const_grad(g.clone())).unwrap();
-        let b = p.attack(&image, const_grad(g)).unwrap();
+        let a = p
+            .attack(&image, const_grad(g.clone()))
+            .expect("value should be present");
+        let b = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         assert_eq!(a, b);
     }
 
@@ -436,10 +452,12 @@ mod tests {
             pos_col: 2,
             ..cfg_default()
         };
-        let p = PatchAttack::new(cfg).unwrap();
+        let p = PatchAttack::new(cfg).expect("new should succeed");
         let image = vec![0.0_f32; 3 * 4 * 4];
         let g = vec![1.0_f32; 3 * 4 * 4];
-        let out = p.attack(&image, const_grad(g)).unwrap();
+        let out = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         // Bottom-right corner pixel (channel 0, row 3, col 3) is inside patch.
         let idx = 3 * 4 + 3;
         assert!((out[idx] - 0.3).abs() < 1e-5);
@@ -458,10 +476,12 @@ mod tests {
             pos_col: 0,
             ..cfg_default()
         };
-        let p = PatchAttack::new(cfg).unwrap();
+        let p = PatchAttack::new(cfg).expect("new should succeed");
         let image = vec![0.0_f32; 4];
         let g = vec![1.0_f32; 4];
-        let out = p.attack(&image, const_grad(g)).unwrap();
+        let out = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         // Every pixel is in the patch, so all incremented by 0.3.
         for &v in &out {
             assert!((v - 0.3).abs() < 1e-5);
@@ -476,10 +496,12 @@ mod tests {
             channels: 1,
             ..cfg_default()
         };
-        let p = PatchAttack::new(cfg).unwrap();
+        let p = PatchAttack::new(cfg).expect("new should succeed");
         let image = vec![0.0_f32; 4 * 4];
         let g = vec![1.0_f32; 4 * 4];
-        let out = p.attack(&image, const_grad(g)).unwrap();
+        let out = p
+            .attack(&image, const_grad(g))
+            .expect("value should be present");
         let mask = p.patch_mask();
         assert_eq!(mask.iter().filter(|&&b| b).count(), 2 * 2);
         for (i, &after) in out.iter().enumerate() {
@@ -493,10 +515,12 @@ mod tests {
 
     #[test]
     fn apply_patch_overwrites_only_region() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.2_f32; 3 * 4 * 4];
         let patch = vec![0.8_f32; 2 * 2 * 3];
-        let out = p.apply_patch(&image, &patch).unwrap();
+        let out = p
+            .apply_patch(&image, &patch)
+            .expect("apply_patch should succeed");
         let mask = p.patch_mask();
         for (i, &after) in out.iter().enumerate() {
             if mask[i] {
@@ -509,11 +533,13 @@ mod tests {
 
     #[test]
     fn apply_patch_clamps_content() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.5_f32; 3 * 4 * 4];
         // Patch content exceeds the box → must be clamped to [0, 1].
         let patch = vec![5.0_f32; 2 * 2 * 3];
-        let out = p.apply_patch(&image, &patch).unwrap();
+        let out = p
+            .apply_patch(&image, &patch)
+            .expect("apply_patch should succeed");
         let mask = p.patch_mask();
         for (i, &after) in out.iter().enumerate() {
             if mask[i] {
@@ -535,10 +561,12 @@ mod tests {
             pos_col: 0,
             ..cfg_default()
         };
-        let p = PatchAttack::new(cfg).unwrap();
+        let p = PatchAttack::new(cfg).expect("new should succeed");
         let image = vec![0.0_f32; 9];
         let patch = vec![0.7_f32];
-        let out = p.apply_patch(&image, &patch).unwrap();
+        let out = p
+            .apply_patch(&image, &patch)
+            .expect("apply_patch should succeed");
         let idx = 2 * 3; // row 2, col 0
         assert!((out[idx] - 0.7).abs() < 1e-6);
         // Everything else stays 0.
@@ -638,7 +666,7 @@ mod tests {
 
     #[test]
     fn err_image_wrong_length() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.5_f32; 10]; // expected 48
         assert!(matches!(
             p.attack(&image, const_grad(vec![1.0; 10])).unwrap_err(),
@@ -652,7 +680,7 @@ mod tests {
 
     #[test]
     fn err_patch_wrong_length() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.5_f32; 3 * 4 * 4];
         let patch = vec![0.8_f32; 5]; // expected 12
         assert!(matches!(
@@ -663,7 +691,7 @@ mod tests {
 
     #[test]
     fn err_grad_wrong_length_during_attack() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.5_f32; 3 * 4 * 4];
         // Gradient closure returns the wrong length.
         let bad = |_x: &[f32]| vec![1.0_f32; 7];
@@ -675,7 +703,7 @@ mod tests {
 
     #[test]
     fn err_nan_gradient_during_attack() {
-        let p = PatchAttack::new(cfg_default()).unwrap();
+        let p = PatchAttack::new(cfg_default()).expect("value should be present");
         let image = vec![0.5_f32; 3 * 4 * 4];
         // Put a NaN at a patch index (channel 0, row 1, col 1 = index 5).
         let mut g = vec![1.0_f32; 3 * 4 * 4];
@@ -689,7 +717,7 @@ mod tests {
     #[test]
     fn config_accessor_round_trips() {
         let cfg = cfg_default();
-        let p = PatchAttack::new(cfg).unwrap();
+        let p = PatchAttack::new(cfg).expect("new should succeed");
         assert_eq!(p.config().patch_h, cfg.patch_h);
         assert_eq!(p.config().channels, cfg.channels);
     }

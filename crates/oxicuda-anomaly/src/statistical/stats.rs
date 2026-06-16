@@ -258,39 +258,44 @@ pub fn percentile_threshold(scores: &[f32], percentile: f32) -> AnomalyResult<f3
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AnomalyResult;
 
     #[test]
-    fn mad_detector_basic() {
+    fn mad_detector_basic() -> AnomalyResult<()> {
         let data: Vec<f32> = (0..20_usize)
             .flat_map(|i| vec![i as f32, (i * 2) as f32])
             .collect();
         let mut det = MadDetector::new();
-        det.fit(&data, 20, 2).unwrap();
-        let s = det.score(&[10.0_f32, 20.0]).unwrap();
+        det.fit(&data, 20, 2)?;
+        let s = det.score(&[10.0_f32, 20.0])?;
         assert!(s.is_finite(), "s={s}");
+        Ok(())
     }
 
     #[test]
-    fn zscore_detector_outlier() {
+    fn zscore_detector_outlier() -> AnomalyResult<()> {
         let data: Vec<f32> = (0..20_usize).map(|i| i as f32).collect();
         let mut det = ZScoreDetector::new();
-        det.fit(&data, 20, 1).unwrap();
-        let s_normal = det.score(&[10.0_f32]).unwrap();
-        let s_outlier = det.score(&[1000.0_f32]).unwrap();
+        det.fit(&data, 20, 1)?;
+        let s_normal = det.score(&[10.0_f32])?;
+        let s_outlier = det.score(&[1000.0_f32])?;
         assert!(s_outlier > s_normal, "{s_outlier} > {s_normal}");
+        Ok(())
     }
 
     #[test]
-    fn percentile_threshold_50() {
+    fn percentile_threshold_50() -> AnomalyResult<()> {
         let scores = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0];
-        let med = percentile_threshold(&scores, 50.0).unwrap();
+        let med = percentile_threshold(&scores, 50.0)?;
         assert!((med - 3.0).abs() < 1e-5, "med={med}");
+        Ok(())
     }
 
     #[test]
-    fn percentile_threshold_100() {
+    fn percentile_threshold_100() -> AnomalyResult<()> {
         let scores = vec![1.0_f32, 2.0, 5.0, 3.0];
-        let max = percentile_threshold(&scores, 100.0).unwrap();
+        let max = percentile_threshold(&scores, 100.0)?;
         assert!((max - 5.0).abs() < 1e-5, "max={max}");
+        Ok(())
     }
 }

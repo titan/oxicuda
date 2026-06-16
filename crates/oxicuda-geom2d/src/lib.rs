@@ -5,17 +5,18 @@
 //! ```text
 //! oxicuda-geom2d
 //! |-- primitives/      - Point, Vector, Line, Segment, Ray, Circle, Aabb, Polygon
-//! |-- predicate/       - Orientation, in-circle, dot/cross, robust signs
+//! |-- predicate/       - Orientation, in-circle, dot/cross, robust signs, Shewchuk exact orient2d/incircle
 //! |-- intersection/    - Segment-segment, line-line, segment-polygon, circle-* intersection
 //! |-- containment/     - Point-in-polygon (winding/ray-cast), in convex polygon, in circle
 //! |-- hull/            - Graham scan, Andrew monotone chain, QuickHull, Jarvis march, Chan
-//! |-- triangulation/   - Ear clipping, Bowyer-Watson Delaunay, constrained Delaunay
+//! |-- triangulation/   - Ear clipping, Bowyer-Watson Delaunay, constrained Delaunay, monotone
 //! |-- voronoi/         - Fortune sweepline, Voronoi from Delaunay dual
 //! |-- clipping/        - Sutherland-Hodgman, Weiler-Atherton, Cohen-Sutherland, Liang-Barsky
 //! |-- polygon_ops/     - Shoelace area, centroid, perimeter, convexity, offset, Minkowski sum
 //! |-- closest_pair/    - Brute force O(n^2), divide-and-conquer O(n log n)
 //! |-- enclosing/       - Welzl smallest circle, AABB, rotating calipers diameter/width
 //! |-- sweepline/       - Bentley-Ottmann segment intersection sweep
+//! |-- visibility/      - Visibility graph (Lozano-Perez) + Dijkstra path planning
 //! |-- point_location/  - Slab method, trapezoidal map
 //! |-- index/           - 2D KD-tree, R-tree (STR bulk load), Quadtree
 //! |-- metrics/         - Euclidean, Manhattan, Chebyshev, angle, signed area
@@ -29,11 +30,13 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 #![allow(clippy::useless_vec)]
 
+pub mod alpha_shape;
 pub mod clipping;
 pub mod closest_pair;
 pub mod containment;
 pub mod enclosing;
 pub mod error;
+pub mod halfplane;
 pub mod handle;
 pub mod hull;
 pub mod index;
@@ -46,6 +49,7 @@ pub mod primitives;
 pub mod ptx_kernels;
 pub mod sweepline;
 pub mod triangulation;
+pub mod visibility;
 pub mod voronoi;
 
 pub use error::{Geom2dError, Geom2dResult};

@@ -606,8 +606,10 @@ mod tests {
         let cfg = default_cfg();
         let n = 20_usize;
         let x = make_normal_data(n, cfg.input_dim, 1);
-        let fit = mem_ae_fit(&x, n, &cfg, 42).unwrap();
-        let scores = mem_ae_score(&fit, &x, n).unwrap();
+        let fit =
+            mem_ae_fit(&x, n, &cfg, 42).expect("mem_ae_fit should succeed on valid training data");
+        let scores =
+            mem_ae_score(&fit, &x, n).expect("mem_ae_score should succeed on training data");
         assert_eq!(scores.len(), n);
         assert!(
             scores.iter().all(|&s| s.is_finite()),
@@ -623,8 +625,10 @@ mod tests {
         let n_test = 10_usize;
         let x_train = make_normal_data(n_train, cfg.input_dim, 2);
         let x_test = make_normal_data(n_test, cfg.input_dim, 3);
-        let fit = mem_ae_fit(&x_train, n_train, &cfg, 7).unwrap();
-        let scores = mem_ae_score(&fit, &x_test, n_test).unwrap();
+        let fit = mem_ae_fit(&x_train, n_train, &cfg, 7)
+            .expect("mem_ae_fit should succeed on training data");
+        let scores =
+            mem_ae_score(&fit, &x_test, n_test).expect("mem_ae_score should succeed on new data");
         assert_eq!(scores.len(), n_test);
         assert!(scores.iter().all(|&s| s.is_finite() && s >= 0.0));
     }
@@ -644,15 +648,15 @@ mod tests {
         };
         let n = 40_usize;
         let x_train = make_normal_data(n, cfg.input_dim, 10);
-        let fit = mem_ae_fit(&x_train, n, &cfg, 42).unwrap();
+        let fit = mem_ae_fit(&x_train, n, &cfg, 42).expect("mem_ae_fit should succeed");
 
         // Inlier: same distribution as training
         let x_in = make_normal_data(5, cfg.input_dim, 99);
-        let scores_in = mem_ae_score(&fit, &x_in, 5).unwrap();
+        let scores_in = mem_ae_score(&fit, &x_in, 5).expect("inlier score should succeed");
 
         // Outlier: far from training cluster (values near 0 vs training near 0.5)
         let x_out: Vec<f64> = (0..5 * cfg.input_dim).map(|_| 100.0).collect();
-        let scores_out = mem_ae_score(&fit, &x_out, 5).unwrap();
+        let scores_out = mem_ae_score(&fit, &x_out, 5).expect("outlier score should succeed");
 
         let mean_in: f64 = scores_in.iter().sum::<f64>() / 5.0;
         let mean_out: f64 = scores_out.iter().sum::<f64>() / 5.0;
@@ -668,8 +672,8 @@ mod tests {
         let cfg = default_cfg();
         let n = 15_usize;
         let x = make_normal_data(n, cfg.input_dim, 4);
-        let fit = mem_ae_fit(&x, n, &cfg, 1).unwrap();
-        let preds = mem_ae_predict(&fit, &x, n, 0.5).unwrap();
+        let fit = mem_ae_fit(&x, n, &cfg, 1).expect("mem_ae_fit should succeed");
+        let preds = mem_ae_predict(&fit, &x, n, 0.5).expect("mem_ae_predict should succeed");
         assert_eq!(preds.len(), n);
     }
 
@@ -684,11 +688,13 @@ mod tests {
         };
         let n = 30_usize;
         let x_train = make_normal_data(n, cfg.input_dim, 5);
-        let fit = mem_ae_fit(&x_train, n, &cfg, 2).unwrap();
+        let fit = mem_ae_fit(&x_train, n, &cfg, 2)
+            .expect("mem_ae_fit should succeed for outlier prediction test");
 
         // Extreme outliers should have score > very_low_threshold
         let x_out: Vec<f64> = (0..5 * cfg.input_dim).map(|_| 100.0).collect();
-        let preds = mem_ae_predict(&fit, &x_out, 5, 1e-6).unwrap();
+        let preds = mem_ae_predict(&fit, &x_out, 5, 1e-6)
+            .expect("mem_ae_predict should succeed for obvious outliers");
         let n_anomalies = preds.iter().filter(|&&p| p).count();
         assert!(n_anomalies > 0, "Expected at least 1 anomaly flagged");
     }
@@ -699,7 +705,8 @@ mod tests {
         let cfg = default_cfg();
         let n = 10_usize;
         let x = make_normal_data(n, cfg.input_dim, 6);
-        let fit = mem_ae_fit(&x, n, &cfg, 3).unwrap();
+        let fit = mem_ae_fit(&x, n, &cfg, 3)
+            .expect("mem_ae_fit should succeed before testing dimension mismatch");
 
         // Wrong feature dimension
         let x_bad = vec![0.5_f64; 5]; // input_dim=8, but 5 given
@@ -731,7 +738,8 @@ mod tests {
         let cfg = default_cfg();
         let n = 20_usize;
         let x = make_normal_data(n, cfg.input_dim, 8);
-        let fit = mem_ae_fit(&x, n, &cfg, 4).unwrap();
+        let fit = mem_ae_fit(&x, n, &cfg, 4)
+            .expect("mem_ae_fit should succeed for unit-norm memory test");
 
         for i in 0..cfg.mem_size {
             let start = i * cfg.latent_dim;
@@ -750,10 +758,11 @@ mod tests {
         let cfg = default_cfg();
         let n = 10_usize;
         let x = make_normal_data(n, cfg.input_dim, 9);
-        let fit = mem_ae_fit(&x, n, &cfg, 5).unwrap();
+        let fit = mem_ae_fit(&x, n, &cfg, 5).expect("mem_ae_fit should succeed for attention test");
 
         let xi = &x[..cfg.input_dim];
-        let weights = mem_ae_attention(&fit, xi).unwrap();
+        let weights =
+            mem_ae_attention(&fit, xi).expect("mem_ae_attention should succeed on valid sample");
         let sum: f64 = weights.iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-9,
@@ -771,15 +780,17 @@ mod tests {
         };
         let n = 40_usize;
         let x_train = make_normal_data(n, cfg.input_dim, 11);
-        let fit = mem_ae_fit(&x_train, n, &cfg, 6).unwrap();
+        let fit =
+            mem_ae_fit(&x_train, n, &cfg, 6).expect("mem_ae_fit should succeed for distance test");
 
         // Reference inlier: close to training distribution
         let x_close = make_normal_data(1, cfg.input_dim, 77);
-        let s_close = mem_ae_score(&fit, &x_close, 1).unwrap()[0];
+        let s_close =
+            mem_ae_score(&fit, &x_close, 1).expect("close sample score should succeed")[0];
 
         // Far outlier: very large magnitude
         let x_far: Vec<f64> = (0..cfg.input_dim).map(|_| 50.0).collect();
-        let s_far = mem_ae_score(&fit, &x_far, 1).unwrap()[0];
+        let s_far = mem_ae_score(&fit, &x_far, 1).expect("far sample score should succeed")[0];
 
         assert!(
             s_far > s_close,
@@ -793,8 +804,9 @@ mod tests {
         let cfg = default_cfg();
         let n = 20_usize;
         let x = make_normal_data(n, cfg.input_dim, 12);
-        let fit = mem_ae_fit(&x, n, &cfg, 8).unwrap();
-        let scores = mem_ae_score(&fit, &x, n).unwrap();
+        let fit = mem_ae_fit(&x, n, &cfg, 8).expect("mem_ae_fit should succeed for non-neg test");
+        let scores = mem_ae_score(&fit, &x, n)
+            .expect("mem_ae_score should succeed and return non-negative scores");
         assert!(scores.iter().all(|&s| s >= 0.0), "scores should be >= 0");
     }
 
@@ -819,8 +831,10 @@ mod tests {
         };
         let n = 20_usize;
         let x = make_normal_data(n, cfg.input_dim, 13);
-        let fit = mem_ae_fit(&x, n, &cfg, 9).unwrap();
-        let scores = mem_ae_score(&fit, &x, n).unwrap();
+        let fit =
+            mem_ae_fit(&x, n, &cfg, 9).expect("mem_ae_fit should succeed with large memory size");
+        let scores =
+            mem_ae_score(&fit, &x, n).expect("mem_ae_score should succeed with large memory");
         assert!(scores.iter().all(|&s| s.is_finite() && s >= 0.0));
         assert_eq!(fit.memory.len(), 100 * cfg.latent_dim);
     }
@@ -831,11 +845,13 @@ mod tests {
         let cfg = default_cfg();
         let n = 10_usize;
         let x = make_normal_data(n, cfg.input_dim, 14);
-        let fit = mem_ae_fit(&x, n, &cfg, 10).unwrap();
+        let fit = mem_ae_fit(&x, n, &cfg, 10)
+            .expect("mem_ae_fit should succeed for attention non-neg test");
 
         for s in 0..n {
             let xi = &x[s * cfg.input_dim..(s + 1) * cfg.input_dim];
-            let weights = mem_ae_attention(&fit, xi).unwrap();
+            let weights =
+                mem_ae_attention(&fit, xi).expect("mem_ae_attention should succeed for sample");
             assert!(
                 weights.iter().all(|&w| w >= 0.0),
                 "attention weights should be non-negative"

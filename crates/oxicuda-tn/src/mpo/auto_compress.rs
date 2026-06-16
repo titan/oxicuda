@@ -366,7 +366,7 @@ mod tests {
         bond_dims.push(1usize);
 
         for k in 0..n {
-            let r_l = *bond_dims.last().unwrap();
+            let r_l = *bond_dims.last().expect("last should succeed");
             let r_r = if k == n - 1 { 1 } else { inner_bond };
             bond_dims.push(r_r);
             let size = r_l * d_in * d_out * r_r;

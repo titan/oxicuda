@@ -16,13 +16,13 @@
 //!
 //! // Single environment.
 //! let mut single = LinearQuadraticEnv::new(4, 200);
-//! let obs = single.reset().unwrap();
+//! let obs = single.reset().expect("reset should succeed");
 //! assert_eq!(obs.len(), 4);
 //!
 //! // Vectorized.
 //! let envs: Vec<_> = (0..4).map(|_| LinearQuadraticEnv::new(4, 200)).collect();
 //! let mut ve = VecEnv::new(envs);
-//! let flat = ve.reset_all().unwrap();
+//! let flat = ve.reset_all().expect("reset_all should succeed");
 //! assert_eq!(flat.len(), 4 * 4);
 //! ```
 

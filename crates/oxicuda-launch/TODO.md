@@ -6,7 +6,7 @@ Type-safe GPU kernel launch infrastructure. Provides ergonomic abstractions for 
 
 ## Implementation Status
 
-**Actual SLoC: 4,728** (15 files; estimated 70K-112K for all Vol.1 combined)
+**Actual SLoC: 5,112** (17 files; estimated 70K-112K for all Vol.1 combined)
 
 The launch crate ties together driver (module/function) and memory (buffers) into a safe kernel dispatch API. It provides the `launch!` macro and typed kernel wrappers that prevent common launch errors.
 
@@ -43,7 +43,7 @@ The launch crate ties together driver (module/function) and memory (buffers) int
 ## Quality Status
 
 - Warnings: 0
-- Tests: 207 passing
+- Tests: 214 passing
 - unwrap() calls: 0
 - Kernel owns Module via Arc -- safe shared ownership across threads
 

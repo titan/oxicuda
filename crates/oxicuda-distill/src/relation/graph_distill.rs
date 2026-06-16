@@ -326,7 +326,8 @@ mod tests {
         let n = 4usize;
         let dim = 3usize;
         let emb: Vec<f32> = (0..n * dim).map(|i| (i as f32) * 0.3 - 1.0).collect();
-        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean).unwrap();
+        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
         for i in 0..n {
             for j in 0..n {
                 let gij = g[i * n + j];
@@ -345,7 +346,8 @@ mod tests {
         let n = 5usize;
         let dim = 4usize;
         let emb: Vec<f32> = (0..n * dim).map(|i| (i as f32 + 1.0) * 0.2).collect();
-        let g = build_relation_graph(&emb, n, dim, RelationMetric::Cosine).unwrap();
+        let g = build_relation_graph(&emb, n, dim, RelationMetric::Cosine)
+            .expect("build_relation_graph should succeed");
         for i in 0..n {
             for j in 0..n {
                 assert!((g[i * n + j] - g[j * n + i]).abs() < 1e-6);
@@ -360,7 +362,8 @@ mod tests {
         let dim = 2usize;
         let emb: Vec<f32> = (0..n * dim).map(|i| i as f32 + 1.0).collect();
         for metric in [RelationMetric::Euclidean, RelationMetric::Cosine] {
-            let g = build_relation_graph(&emb, n, dim, metric).unwrap();
+            let g = build_relation_graph(&emb, n, dim, metric)
+                .expect("build_relation_graph should succeed");
             for i in 0..n {
                 assert_eq!(
                     g[i * n + i],
@@ -379,7 +382,8 @@ mod tests {
         let emb: Vec<f32> = (0..n * dim).map(|i| (i as f32) * 0.5).collect();
         for metric in [RelationMetric::Euclidean, RelationMetric::Cosine] {
             let c = cfg(metric, Aggregation::Mean);
-            let loss = graph_distill_loss(&emb, &emb, n, dim, &c).unwrap();
+            let loss = graph_distill_loss(&emb, &emb, n, dim, &c)
+                .expect("graph_distill_loss should succeed");
             assert!(loss.abs() < 1e-6, "identical → 0, got {loss} ({metric:?})");
         }
     }
@@ -390,7 +394,8 @@ mod tests {
         let n = 6usize;
         let dim = 4usize;
         let emb: Vec<f32> = (0..n * dim).map(|i| ((i * 7) % 11) as f32 - 5.0).collect();
-        let g = build_relation_graph(&emb, n, dim, RelationMetric::Cosine).unwrap();
+        let g = build_relation_graph(&emb, n, dim, RelationMetric::Cosine)
+            .expect("build_relation_graph should succeed");
         for &v in &g {
             assert!(
                 (-1.0 - 1e-5..=1.0 + 1e-5).contains(&v),
@@ -405,7 +410,8 @@ mod tests {
         let n = 5usize;
         let dim = 3usize;
         let emb: Vec<f32> = (0..n * dim).map(|i| (i as f32) * 0.7 - 3.0).collect();
-        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean).unwrap();
+        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
         for &v in &g {
             assert!(v >= 0.0, "euclidean distance must be >= 0, got {v}");
         }
@@ -419,8 +425,10 @@ mod tests {
         let emb: Vec<f32> = (0..n * dim).map(|i| (i as f32 + 1.0) * 0.3).collect();
         let scaled: Vec<f32> = emb.iter().map(|&v| v * 5.0).collect();
 
-        let cos1 = build_relation_graph(&emb, n, dim, RelationMetric::Cosine).unwrap();
-        let cos2 = build_relation_graph(&scaled, n, dim, RelationMetric::Cosine).unwrap();
+        let cos1 = build_relation_graph(&emb, n, dim, RelationMetric::Cosine)
+            .expect("build_relation_graph should succeed");
+        let cos2 = build_relation_graph(&scaled, n, dim, RelationMetric::Cosine)
+            .expect("build_relation_graph should succeed");
         for (a, b) in cos1.iter().zip(cos2.iter()) {
             assert!(
                 (a - b).abs() < 1e-4,
@@ -428,8 +436,10 @@ mod tests {
             );
         }
 
-        let euc1 = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean).unwrap();
-        let euc2 = build_relation_graph(&scaled, n, dim, RelationMetric::Euclidean).unwrap();
+        let euc1 = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
+        let euc2 = build_relation_graph(&scaled, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
         let changed = euc1
             .iter()
             .zip(euc2.iter())
@@ -444,7 +454,8 @@ mod tests {
         let emb = vec![0.0_f32, 1.0, 3.0];
         let n = 3usize;
         let dim = 1usize;
-        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean).unwrap();
+        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
         // A = [[0,1,3],[1,0,2],[3,2,0]]
         // h0 = (1+3)/2 = 2 ; h1 = (1+2)/2 = 1.5 ; h2 = (3+2)/2 = 2.5
         let h = aggregate_vertices(&g, n, Aggregation::Mean);
@@ -459,7 +470,8 @@ mod tests {
         let emb = vec![0.0_f32, 1.0, 3.0, 6.0];
         let n = 4usize;
         let dim = 1usize;
-        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean).unwrap();
+        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
         let hm = aggregate_vertices(&g, n, Aggregation::Mean);
         let hs = aggregate_vertices(&g, n, Aggregation::SumNormalized);
         for (a, b) in hm.iter().zip(hs.iter()) {
@@ -485,7 +497,8 @@ mod tests {
             lambda_vertex: 0.0, // isolate the edge term
             lambda_edge: 1.0,
         };
-        let loss = graph_distill_loss(&s, &t, n, dim, &c).unwrap();
+        let loss =
+            graph_distill_loss(&s, &t, n, dim, &c).expect("graph_distill_loss should succeed");
         assert!(
             (loss - 4.0 / 6.0).abs() < 1e-5,
             "edge loss={loss}, expected {}",
@@ -505,8 +518,10 @@ mod tests {
         c1.lambda_edge = 1.0;
         let mut c2 = c1.clone();
         c2.lambda_edge = 4.0;
-        let l1 = graph_distill_loss(&s, &t, n, dim, &c1).unwrap();
-        let l2 = graph_distill_loss(&s, &t, n, dim, &c2).unwrap();
+        let l1 =
+            graph_distill_loss(&s, &t, n, dim, &c1).expect("graph_distill_loss should succeed");
+        let l2 =
+            graph_distill_loss(&s, &t, n, dim, &c2).expect("graph_distill_loss should succeed");
         assert!(
             (l2 - 4.0 * l1).abs() < 1e-5,
             "lambda_edge must scale: {l1} {l2}"
@@ -525,8 +540,10 @@ mod tests {
         c1.lambda_vertex = 1.0;
         let mut c2 = c1.clone();
         c2.lambda_vertex = 3.0;
-        let l1 = graph_distill_loss(&s, &t, n, dim, &c1).unwrap();
-        let l2 = graph_distill_loss(&s, &t, n, dim, &c2).unwrap();
+        let l1 =
+            graph_distill_loss(&s, &t, n, dim, &c1).expect("graph_distill_loss should succeed");
+        let l2 =
+            graph_distill_loss(&s, &t, n, dim, &c2).expect("graph_distill_loss should succeed");
         assert!(l1 > 0.0, "vertex loss should be positive here, got {l1}");
         assert!(
             (l2 - 3.0 * l1).abs() < 1e-5,
@@ -540,7 +557,8 @@ mod tests {
         let n = 5usize;
         let dim = 3usize;
         let emb: Vec<f32> = (0..n * dim).map(|i| i as f32).collect();
-        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean).unwrap();
+        let g = build_relation_graph(&emb, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
         assert_eq!(g.len(), n * n, "graph must be n²");
         let h = aggregate_vertices(&g, n, Aggregation::Mean);
         assert_eq!(h.len(), n, "vertex features must be length n");
@@ -561,8 +579,10 @@ mod tests {
             .flat_map(|&p| [f0, f1, f2][p].to_vec())
             .collect();
         let n = 3usize;
-        let g = build_relation_graph(&orig, n, dim, RelationMetric::Euclidean).unwrap();
-        let gp = build_relation_graph(&permuted, n, dim, RelationMetric::Euclidean).unwrap();
+        let g = build_relation_graph(&orig, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
+        let gp = build_relation_graph(&permuted, n, dim, RelationMetric::Euclidean)
+            .expect("build_relation_graph should succeed");
         // gp[a,b] must equal g[perm[a], perm[b]].
         for a in 0..n {
             for b in 0..n {
@@ -642,7 +662,8 @@ mod tests {
     fn cosine_zero_norm_no_nan() {
         // One node is the zero vector → cosine with it must be finite (guarded).
         let emb = vec![0.0_f32, 0.0, 1.0, 2.0, 3.0, 4.0]; // n=3, dim=2; node0 = zero
-        let g = build_relation_graph(&emb, 3, 2, RelationMetric::Cosine).unwrap();
+        let g = build_relation_graph(&emb, 3, 2, RelationMetric::Cosine)
+            .expect("build_relation_graph should succeed");
         for &v in &g {
             assert!(
                 v.is_finite(),
@@ -663,9 +684,12 @@ mod tests {
         let mut vertex_only = cfg(RelationMetric::Euclidean, Aggregation::Mean);
         vertex_only.lambda_edge = 0.0;
         let both = cfg(RelationMetric::Euclidean, Aggregation::Mean);
-        let le = graph_distill_loss(&s, &t, n, dim, &edge_only).unwrap();
-        let lv = graph_distill_loss(&s, &t, n, dim, &vertex_only).unwrap();
-        let lb = graph_distill_loss(&s, &t, n, dim, &both).unwrap();
+        let le = graph_distill_loss(&s, &t, n, dim, &edge_only)
+            .expect("graph_distill_loss should succeed");
+        let lv = graph_distill_loss(&s, &t, n, dim, &vertex_only)
+            .expect("graph_distill_loss should succeed");
+        let lb =
+            graph_distill_loss(&s, &t, n, dim, &both).expect("graph_distill_loss should succeed");
         assert!(
             (lb - (le + lv)).abs() < 1e-5,
             "combined {lb} != edge {le} + vertex {lv}"

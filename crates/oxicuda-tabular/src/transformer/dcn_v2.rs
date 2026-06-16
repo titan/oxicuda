@@ -432,7 +432,7 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg).unwrap();
+        let model = DcnV2::new(cfg).expect("new should succeed");
 
         // Build identity W
         let mut w = vec![0.0_f32; d * d];
@@ -469,7 +469,7 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg).unwrap();
+        let model = DcnV2::new(cfg).expect("new should succeed");
         let weights = CrossLayerWeights {
             w_or_u: vec![0.0_f32; d * d],
             v: Vec::new(),
@@ -499,7 +499,7 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg).unwrap();
+        let model = DcnV2::new(cfg).expect("new should succeed");
         let mut rng = LcgRng::new(7);
         // Random W and b
         let w: Vec<f32> = (0..d * d).map(|_| rng.next_f32()).collect();
@@ -534,7 +534,7 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(1);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x0: Vec<f32> = (0..d).map(|i| i as f32 * 0.1).collect();
@@ -554,7 +554,7 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(2);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x0 = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
@@ -577,11 +577,13 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(3);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x: Vec<f32> = (0..d).map(|i| i as f32 * 0.05).collect();
-        let out = model.deep_network(&x, &weights).unwrap();
+        let out = model
+            .deep_network(&x, &weights)
+            .expect("deep_network should succeed");
         assert_eq!(out.len(), h, "deep_network output shape mismatch");
     }
 
@@ -597,11 +599,13 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(42);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x: Vec<f32> = (0..d).map(|i| (i as f32).sin()).collect();
-        let out = model.deep_network(&x, &weights).unwrap();
+        let out = model
+            .deep_network(&x, &weights)
+            .expect("deep_network should succeed");
         assert!(
             out.iter().all(|v| v.is_finite()),
             "deep_network output must be finite"
@@ -621,11 +625,13 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 3,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(5);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x = vec![0.1_f32; 16];
-        let logits = model.forward_single(&x, &weights).unwrap();
+        let logits = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
         assert_eq!(logits.len(), 3);
     }
 
@@ -640,11 +646,13 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(99);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x = vec![0.5_f32; 8];
-        let logits = model.forward_single(&x, &weights).unwrap();
+        let logits = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
         assert_eq!(logits.len(), 2);
         assert!(logits.iter().all(|v| v.is_finite()));
     }
@@ -660,11 +668,13 @@ mod tests {
             mode: DcnV2Mode::Stacked,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(13);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x = vec![0.3_f32; 8];
-        let logits = model.forward_single(&x, &weights).unwrap();
+        let logits = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
         assert_eq!(logits.len(), 2);
         assert!(logits.iter().all(|v| v.is_finite()));
     }
@@ -682,11 +692,11 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 3,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(7);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x = vec![0.1_f32; 5 * 16]; // 5 samples
-        let logits = model.forward(&x, &weights).unwrap();
+        let logits = model.forward(&x, &weights).expect("forward should succeed");
         assert_eq!(logits.len(), 5 * 3);
     }
 
@@ -701,11 +711,11 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(11);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x: Vec<f32> = (0..4 * 16).map(|i| (i as f32) * 0.01).collect();
-        let logits = model.forward(&x, &weights).unwrap();
+        let logits = model.forward(&x, &weights).expect("forward should succeed");
         assert!(
             logits.iter().all(|v| v.is_finite()),
             "batch logits must be finite"
@@ -745,11 +755,13 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 1,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(17);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x = vec![0.5_f32; 8];
-        let logits = model.forward_single(&x, &weights).unwrap();
+        let logits = model
+            .forward_single(&x, &weights)
+            .expect("forward_single should succeed");
         assert_eq!(logits.len(), 1);
     }
 
@@ -767,7 +779,7 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model = DcnV2::new(cfg.clone()).unwrap();
+        let model = DcnV2::new(cfg.clone()).expect("value should be present");
         let mut rng = LcgRng::new(22);
         let weights = DcnV2Weights::new_random(&cfg, &mut rng);
         let x0 = vec![0.1_f32; d];
@@ -788,7 +800,7 @@ mod tests {
             mode: DcnV2Mode::Parallel,
             n_classes: 2,
         };
-        let model_lr = DcnV2::new(cfg_lr.clone()).unwrap();
+        let model_lr = DcnV2::new(cfg_lr.clone()).expect("value should be present");
         let mut rng = LcgRng::new(44);
         let w_lr = DcnV2Weights::new_random(&cfg_lr, &mut rng);
         let x0 = vec![0.5_f32; d];
@@ -800,7 +812,7 @@ mod tests {
             low_rank: None,
             ..cfg_lr
         };
-        let model_fr = DcnV2::new(cfg_fr.clone()).unwrap();
+        let model_fr = DcnV2::new(cfg_fr.clone()).expect("value should be present");
         let mut rng2 = LcgRng::new(44);
         let w_fr = DcnV2Weights::new_random(&cfg_fr, &mut rng2);
         let out_fr = model_fr.cross_network(&x0, &w_fr);

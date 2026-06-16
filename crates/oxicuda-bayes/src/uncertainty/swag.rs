@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn swag_initialises_with_zero_mean() {
-        let s = SwagPosterior::new(4, 3).unwrap();
+        let s = SwagPosterior::new(4, 3).expect("new should succeed");
         assert_eq!(s.mean, vec![0.0_f32; 4]);
         assert_eq!(s.second_moment, vec![0.0_f32; 4]);
         assert!(s.deviations.is_empty());
@@ -168,18 +168,18 @@ mod tests {
 
     #[test]
     fn swag_update_running_mean_correct() {
-        let mut s = SwagPosterior::new(2, 5).unwrap();
-        s.update(&[1.0_f32, 2.0]).unwrap();
-        s.update(&[3.0_f32, 4.0]).unwrap();
+        let mut s = SwagPosterior::new(2, 5).expect("new should succeed");
+        s.update(&[1.0_f32, 2.0]).expect("update should succeed");
+        s.update(&[3.0_f32, 4.0]).expect("update should succeed");
         assert!((s.mean[0] - 2.0).abs() < 1e-5);
         assert!((s.mean[1] - 3.0).abs() < 1e-5);
     }
 
     #[test]
     fn swag_diagonal_variance_correct() {
-        let mut s = SwagPosterior::new(1, 5).unwrap();
-        s.update(&[1.0_f32]).unwrap();
-        s.update(&[3.0_f32]).unwrap();
+        let mut s = SwagPosterior::new(1, 5).expect("new should succeed");
+        s.update(&[1.0_f32]).expect("update should succeed");
+        s.update(&[3.0_f32]).expect("update should succeed");
         // E[X] = 2, E[X^2] = 5, var = 1
         let v = s.diagonal_variance();
         assert!((v[0] - 1.0).abs() < 1e-5, "v={v:?}");
@@ -187,9 +187,9 @@ mod tests {
 
     #[test]
     fn swag_low_rank_buffer_caps_at_max_rank() {
-        let mut s = SwagPosterior::new(1, 2).unwrap();
+        let mut s = SwagPosterior::new(1, 2).expect("new should succeed");
         for i in 0..5 {
-            s.update(&[i as f32]).unwrap();
+            s.update(&[i as f32]).expect("update should succeed");
         }
         assert_eq!(s.deviations.len(), 2);
         assert_eq!(s.n_iterates, 5);
@@ -198,13 +198,13 @@ mod tests {
     #[test]
     fn swag_sample_returns_correct_dim() {
         let mut rng = LcgRng::new(42);
-        let mut s = SwagPosterior::new(3, 4).unwrap();
+        let mut s = SwagPosterior::new(3, 4).expect("new should succeed");
         for _ in 0..6 {
             let mut v = vec![0.0_f32; 3];
             rng.fill_normal(&mut v);
-            s.update(&v).unwrap();
+            s.update(&v).expect("update should succeed");
         }
-        let theta = s.sample(&mut rng).unwrap();
+        let theta = s.sample(&mut rng).expect("sample should succeed");
         assert_eq!(theta.len(), 3);
         assert!(theta.iter().all(|v| v.is_finite()));
     }
@@ -223,14 +223,14 @@ mod tests {
 
     #[test]
     fn swag_update_rejects_dim_mismatch() {
-        let mut s = SwagPosterior::new(3, 2).unwrap();
+        let mut s = SwagPosterior::new(3, 2).expect("new should succeed");
         let r = s.update(&[1.0_f32, 2.0]);
         assert!(r.is_err());
     }
 
     #[test]
     fn swag_update_rejects_nan() {
-        let mut s = SwagPosterior::new(2, 2).unwrap();
+        let mut s = SwagPosterior::new(2, 2).expect("new should succeed");
         let r = s.update(&[1.0_f32, f32::NAN]);
         assert!(r.is_err());
     }
@@ -238,8 +238,8 @@ mod tests {
     #[test]
     fn swag_sample_requires_two_iterates() {
         let mut rng = LcgRng::new(0);
-        let mut s = SwagPosterior::new(2, 2).unwrap();
-        s.update(&[1.0_f32, 2.0]).unwrap();
+        let mut s = SwagPosterior::new(2, 2).expect("new should succeed");
+        s.update(&[1.0_f32, 2.0]).expect("update should succeed");
         assert!(s.sample(&mut rng).is_err());
     }
 }

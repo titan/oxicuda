@@ -22,16 +22,24 @@
 //! - **No warnings**: Zero clippy/rustc warnings across the entire crate.
 
 pub mod audio;
+pub mod beamform;
 pub mod correlation;
+pub mod cwt;
 pub mod dct;
 pub mod dwt;
+pub mod emd;
 pub mod error;
 pub mod filter;
 pub mod handle;
 pub mod image;
 pub mod ptx_helpers;
+pub mod resample;
+pub mod spectral;
 pub mod types;
 pub mod window;
+
+#[cfg(test)]
+mod e2e_tests;
 
 pub use error::{SignalError, SignalResult};
 pub use handle::SignalHandle;
@@ -40,6 +48,8 @@ pub use types::{
     WindowType,
 };
 
+pub use crate::beamform::{MvdrConfig, delay_and_sum, mvdr_weights};
+
 /// Convenience prelude — import everything needed for typical signal-processing
 /// pipelines in one `use oxicuda_signal::prelude::*;` statement.
 pub mod prelude {
@@ -47,10 +57,15 @@ pub mod prelude {
         MfccConfig, SpectrogramConfig, SpectrogramType, StftConfig, chroma_from_power,
         magnitude_spectrogram, mfcc, power_spectrogram, spectrogram, stft_reference,
     };
+    pub use crate::beamform::{MvdrConfig, delay_and_sum, mvdr_weights};
     pub use crate::correlation::{
         autocorr_biased, autocorr_normalised, autocorr_unbiased, autocovariance, convolve,
         convolve_circular, crosscorr, crosscorr_normalised, find_delay, gcc_phat, ljung_box_q,
         pacf,
+    };
+    pub use crate::cwt::{
+        CwtConfig, CwtOutput, CwtWavelet, cwt, cwt_cone_of_influence, cwt_global_power, cwt_ridge,
+        cwt_scalogram,
     };
     pub use crate::dct::{
         Dct2Plan, MdctPlan, dct2_reference, dct3_reference, dct4_reference, imdct, mdct,
@@ -59,16 +74,23 @@ pub mod prelude {
         WaveletDecomposition, hard_threshold, multilevel_forward, multilevel_inverse,
         soft_threshold, universal_threshold,
     };
+    pub use crate::emd::{
+        EmdConfig, EmdResult, emd, emd_energy, hilbert_transform, instantaneous_frequency,
+    };
     pub use crate::error::{SignalError, SignalResult};
     pub use crate::filter::{
-        Biquad, apply_wiener_gains, design_bandpass, design_highpass, design_lowpass,
-        design_raised_cosine, estimate_noise_psd, fir_apply, iir_apply, local_wiener_1d,
+        Biquad, ButterworthConfig, ButterworthFilter, FilterType, RemezBand, apply_wiener_gains,
+        design_bandpass, design_highpass, design_lowpass, design_raised_cosine, estimate_noise_psd,
+        fir_apply, iir_apply, local_wiener_1d, median_filter_1d, remez, remez_bandpass,
+        remez_bandstop, remez_highpass, remez_lowpass, weighted_median_1d, wiener_filter,
         wiener_gain,
     };
     pub use crate::image::{
         BBox, SoftNmsDecay, close, dilate, erode, gaussian_blur, morphological_gradient,
         nms_greedy, nms_heatmap, nms_soft, open, sobel, sobel_magnitude,
     };
+    pub use crate::resample::{resample_poly, resample_rate};
+    pub use crate::spectral::{PsdScaling, bartlett_psd, multitaper_psd, periodogram, welch};
     pub use crate::types::{
         NormMode, PadMode, SignalPrecision, StructuringElement, TransformDirection, WaveletFamily,
         WindowType,

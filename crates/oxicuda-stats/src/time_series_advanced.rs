@@ -631,7 +631,7 @@ mod tests {
     #[test]
     fn vrt_q1_is_exactly_one() {
         let prices = random_walk_prices(200, 1);
-        let (vr, z) = variance_ratio_test(&prices, 1).unwrap();
+        let (vr, z) = variance_ratio_test(&prices, 1).expect("variance_ratio_test should succeed");
         assert_eq!(vr, 1.0, "VR(1) must be exactly 1.0");
         assert_eq!(z, 0.0, "Z(1) must be exactly 0.0");
     }
@@ -639,7 +639,7 @@ mod tests {
     #[test]
     fn vrt_q2_random_walk_near_one() {
         let prices = random_walk_prices(500, 2);
-        let (vr, _z) = variance_ratio_test(&prices, 2).unwrap();
+        let (vr, _z) = variance_ratio_test(&prices, 2).expect("variance_ratio_test should succeed");
         assert!(
             (vr - 1.0).abs() < 0.5,
             "VR(2) for random walk should be near 1, got {vr}"
@@ -650,7 +650,7 @@ mod tests {
     fn vrt_ma1_not_one() {
         // MA(1) with θ=0.5 → VR(2) deviates from 1 systematically
         let prices = ma1_prices(1000, 0.5, 3);
-        let (vr, _z) = variance_ratio_test(&prices, 2).unwrap();
+        let (vr, _z) = variance_ratio_test(&prices, 2).expect("variance_ratio_test should succeed");
         // VR should differ from 1 by more than 0.05 for strong MA(1)
         assert!(
             (vr - 1.0).abs() > 0.02,
@@ -661,7 +661,7 @@ mod tests {
     #[test]
     fn vrt_statistic_positive() {
         let prices = random_walk_prices(300, 4);
-        let (vr, _) = variance_ratio_test(&prices, 4).unwrap();
+        let (vr, _) = variance_ratio_test(&prices, 4).expect("variance_ratio_test should succeed");
         assert!(vr > 0.0, "VR must be positive, got {vr}");
     }
 
@@ -685,7 +685,7 @@ mod tests {
             .map(|&xi| 2.0 + 0.5 * xi + rng.next_normal())
             .collect();
         let bp = n / 2;
-        let (f_stat, p_val) = chow_test(&y, &x, bp).unwrap();
+        let (f_stat, p_val) = chow_test(&y, &x, bp).expect("chow_test should succeed");
         assert!(f_stat.is_finite(), "F should be finite");
         // With same DGP, p-value should generally be high
         assert!(
@@ -709,7 +709,7 @@ mod tests {
             y[i] = 100.0 + 10.0 * x[i] + rng.next_normal() * 0.1;
         }
         let bp = n / 2;
-        let (f_stat, p_val) = chow_test(&y, &x, bp).unwrap();
+        let (f_stat, p_val) = chow_test(&y, &x, bp).expect("chow_test should succeed");
         assert!(f_stat > 1.0, "F should be large for clear break: {f_stat}");
         assert!(
             p_val < 0.5,
@@ -735,7 +735,7 @@ mod tests {
         let n = 300_usize;
         let mut rng = TestRng::new(30);
         let residuals: Vec<f64> = (0..n).map(|_| rng.next_normal()).collect();
-        let (lm, p) = arch_test(&residuals, 5).unwrap();
+        let (lm, p) = arch_test(&residuals, 5).expect("arch_test should succeed");
         assert!(
             lm.is_finite() && lm >= 0.0,
             "LM should be non-negative: {lm}"
@@ -759,7 +759,7 @@ mod tests {
             *e = sigma2.sqrt() * z;
             sigma2 = 0.2 + 0.7 * (*e) * (*e); // strong ARCH(1)
         }
-        let (lm, p) = arch_test(&eps, 5).unwrap();
+        let (lm, p) = arch_test(&eps, 5).expect("arch_test should succeed");
         // Strong ARCH effect: LM should be large and p small
         assert!(lm > 0.0, "LM should be positive: {lm}");
         // With strong ARCH and n=500, detection should be reliable
@@ -792,7 +792,8 @@ mod tests {
         for slot in y.iter_mut().take(n).skip(bp_true) {
             *slot = 10.0 + rng.next_normal() * 0.1; // mean = 10
         }
-        let (bp_est, f_stat, _p) = bai_perron_single_break(&y, 10).unwrap();
+        let (bp_est, f_stat, _p) =
+            bai_perron_single_break(&y, 10).expect("bai_perron_single_break should succeed");
         assert!(f_stat > 0.0, "F-stat should be positive: {f_stat}");
         // Allow some tolerance around the true break
         assert!(
@@ -821,7 +822,7 @@ mod tests {
         for t in 1..n {
             y[t] = y[t - 1] + rng.next_normal();
         }
-        let (min_t, _) = zivot_andrews_test(&y, 10).unwrap();
+        let (min_t, _) = zivot_andrews_test(&y, 10).expect("zivot_andrews_test should succeed");
         assert!(min_t.is_finite(), "t-stat should be finite, got {min_t}");
         // For random walk, min t-stat should not be very negative (cannot reject)
         // Critical value at 5% is -4.42; integrated series should be above this
@@ -855,7 +856,7 @@ mod tests {
 
     #[test]
     fn chi2_sf_valid_range() {
-        let p = chi2_sf(3.84, 1.0).unwrap(); // chi2(1) 5% CV ≈ 3.84
+        let p = chi2_sf(3.84, 1.0).expect("chi2_sf should succeed"); // chi2(1) 5% CV ≈ 3.84
         assert!(
             (p - 0.05).abs() < 0.005,
             "chi2_sf(3.84, 1) should be ≈ 0.05, got {p}"
@@ -865,7 +866,7 @@ mod tests {
     #[test]
     fn f_sf_valid_range() {
         // F(1,∞) ≈ z²; F = 3.84, df=(1,100) → p ≈ 0.05
-        let p = f_sf(4.0, 1.0, 100.0).unwrap();
+        let p = f_sf(4.0, 1.0, 100.0).expect("f_sf should succeed");
         assert!(
             p < 0.06 && p > 0.03,
             "f_sf(4.0, 1, 100) should be ≈ 0.05, got {p}"
@@ -875,7 +876,7 @@ mod tests {
     #[test]
     fn chi2_sf_at_zero_returns_one() {
         // chi2_sf(x <= 0) must return 1.0 (whole mass is to the right of 0)
-        let p = chi2_sf(0.0, 2.0).unwrap();
+        let p = chi2_sf(0.0, 2.0).expect("chi2_sf should succeed");
         assert_eq!(p, 1.0, "chi2_sf(0, 2) should be 1.0, got {p}");
     }
 }

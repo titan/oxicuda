@@ -94,14 +94,16 @@ mod tests {
 
     #[test]
     fn ns_vorticity_residual_formula() {
-        let r = ns_vorticity_residual(1.0, 0.5, 0.3, 2.0, 1.5, 0.5, 0.5, NU).unwrap();
+        let r = ns_vorticity_residual(1.0, 0.5, 0.3, 2.0, 1.5, 0.5, 0.5, NU).expect("ns_vorticity_residual should succeed for finite vorticity inputs with valid kinematic viscosity nu");
         let expected = 1.0 + 0.5 * 2.0 + 0.3 * 1.5 - NU * (0.5 + 0.5);
         assert!((r - expected).abs() < 1e-5);
     }
 
     #[test]
     fn taylor_green_residual_check_passes() {
-        let ok = taylor_green_residual_check(0.5, 0.5, 0.1, NU, 0.05).unwrap();
+        let ok = taylor_green_residual_check(0.5, 0.5, 0.1, NU, 0.05).expect(
+            "taylor_green_residual_check should succeed for valid nu at (x=0.5, y=0.5, t=0.1)",
+        );
         assert!(ok, "Taylor-Green residual check should pass");
     }
 

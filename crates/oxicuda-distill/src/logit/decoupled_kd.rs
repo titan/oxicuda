@@ -94,7 +94,7 @@ mod tests {
     fn tckd_nonneg() {
         let s = vec![1.0_f32, 3.0, 2.0];
         let t = vec![0.5_f32, 3.5, 2.0];
-        let v = tckd_loss(&s, &t, 1, 4.0).unwrap();
+        let v = tckd_loss(&s, &t, 1, 4.0).expect("tckd_loss should succeed");
         assert!(v >= 0.0 && v.is_finite());
     }
 
@@ -102,7 +102,7 @@ mod tests {
     fn nckd_nonneg() {
         let s = vec![1.0_f32, 3.0, 2.0];
         let t = vec![0.5_f32, 3.5, 2.0];
-        let v = nckd_loss(&s, &t, 1, 4.0).unwrap();
+        let v = nckd_loss(&s, &t, 1, 4.0).expect("nckd_loss should succeed");
         assert!(v >= 0.0 && v.is_finite());
     }
 
@@ -110,7 +110,7 @@ mod tests {
     fn dkd_loss_finite() {
         let s = vec![1.0_f32, 2.0, 3.0, 4.0];
         let t = vec![1.5_f32, 2.5, 2.5, 3.5];
-        let l = dkd_loss(&s, &t, 3, 1.0, 1.0, 4.0).unwrap();
+        let l = dkd_loss(&s, &t, 3, 1.0, 1.0, 4.0).expect("dkd_loss should succeed");
         assert!(l.is_finite());
     }
 }

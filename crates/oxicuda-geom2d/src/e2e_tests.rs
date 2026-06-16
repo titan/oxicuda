@@ -297,3 +297,119 @@ fn e2e_closest_pair_dc_brute_agree() {
     let (_, _, d_d) = closest_pair_dc(&pts).expect("ok");
     assert!((d_b - d_d).abs() < 1e-12);
 }
+
+// 21. Greiner-Hormann area identity vs shoelace: A∩B + A∪B == A + B exactly.
+#[test]
+fn e2e_greiner_hormann_area_identity() {
+    let a = Polygon::new(vec![
+        Point::new(0.0, 0.0),
+        Point::new(3.0, 0.0),
+        Point::new(3.0, 3.0),
+        Point::new(0.0, 3.0),
+    ])
+    .expect("ok");
+    let b = Polygon::new(vec![
+        Point::new(1.5, 1.5),
+        Point::new(4.5, 1.5),
+        Point::new(4.5, 4.5),
+        Point::new(1.5, 4.5),
+    ])
+    .expect("ok");
+    let inter = crate::clipping::greiner_hormann::intersection(&a, &b).expect("ok");
+    let uni = crate::clipping::greiner_hormann::union(&a, &b).expect("ok");
+    let lhs = crate::clipping::greiner_hormann::filled_area_of_rings(&inter)
+        + crate::clipping::greiner_hormann::filled_area_of_rings(&uni);
+    let rhs = a.area() + b.area();
+    assert!((lhs - rhs).abs() < 1e-9, "lhs={lhs}, rhs={rhs}");
+}
+
+// 22. Greiner-Hormann intersection agrees with Sutherland-Hodgman for a convex
+//     clip (cross-validation against the existing convex clipper).
+#[test]
+fn e2e_greiner_hormann_matches_sutherland_hodgman() {
+    let subj = Polygon::new(vec![
+        Point::new(0.0, 0.0),
+        Point::new(2.0, 0.0),
+        Point::new(2.0, 2.0),
+        Point::new(0.0, 2.0),
+    ])
+    .expect("ok");
+    let clip = Polygon::new(vec![
+        Point::new(1.0, 1.0),
+        Point::new(3.0, 1.0),
+        Point::new(3.0, 3.0),
+        Point::new(1.0, 3.0),
+    ])
+    .expect("ok");
+    let gh = crate::clipping::greiner_hormann::intersection(&subj, &clip).expect("ok");
+    let sh = sutherland_hodgman(&subj, &clip).expect("ok");
+    let gh_area: f64 = gh.iter().map(Polygon::area).sum();
+    assert!(
+        (gh_area - sh.area()).abs() < 1e-9,
+        "gh={gh_area}, sh={}",
+        sh.area()
+    );
+}
+
+// 23. Alpha-shape with very large alpha recovers the convex-hull boundary
+//     vertices exactly (cross-check against Andrew's monotone chain). Uses a
+//     general-position seed (no points collinear on a hull edge).
+#[test]
+fn e2e_alpha_shape_recovers_hull() {
+    let mut r = LcgRng::new(11);
+    let pts: Vec<Point> = (0..50)
+        .map(|_| Point::new(r.next_f64() * 10.0, r.next_f64() * 10.0))
+        .collect();
+    let shape = crate::alpha_shape::alpha_shape(&pts, 1.0e9).expect("ok");
+    let mut boundary_v: Vec<usize> = shape
+        .boundary_edges
+        .iter()
+        .flat_map(|e| [e[0], e[1]])
+        .collect();
+    boundary_v.sort_unstable();
+    boundary_v.dedup();
+
+    let hull = andrew_monotone_chain(&pts).expect("ok");
+    let mut hull_idx: Vec<usize> = hull
+        .iter()
+        .map(|hp| {
+            pts.iter()
+                .position(|p| (p.x - hp.x).abs() < 1e-9 && (p.y - hp.y).abs() < 1e-9)
+                .expect("hull point is input")
+        })
+        .collect();
+    hull_idx.sort_unstable();
+    hull_idx.dedup();
+    assert_eq!(boundary_v, hull_idx);
+}
+
+// 24. Half-plane intersection of a polygon's CCW edges reconstructs that polygon
+//     (area matches shoelace; cross-check with the hull of the same points).
+#[test]
+fn e2e_half_plane_reconstructs_polygon() {
+    use crate::halfplane::{HalfPlane, HalfPlaneRegion, half_plane_intersection};
+    let verts = [
+        Point::new(0.0, 0.0),
+        Point::new(4.0, 0.0),
+        Point::new(4.0, 3.0),
+        Point::new(0.0, 3.0),
+    ];
+    let mut planes = Vec::new();
+    for i in 0..verts.len() {
+        let from = verts[i];
+        let to = verts[(i + 1) % verts.len()];
+        planes.push(HalfPlane::from_directed_edge(from, to).expect("edge"));
+    }
+    match half_plane_intersection(&planes).expect("ok") {
+        HalfPlaneRegion::Polygon(p) => {
+            assert!((p.area() - 12.0).abs() < 1e-7);
+            // Every vertex satisfies every constraint.
+            for v in &p.vertices {
+                for h in &planes {
+                    assert!(h.c - (h.a * v.x + h.b * v.y) >= -1e-6);
+                }
+            }
+        }
+        other => panic!("expected bounded polygon, got {other:?}"),
+    }
+}

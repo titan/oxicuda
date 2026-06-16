@@ -171,7 +171,7 @@ mod tests {
         };
         let ec = EdgeConv::new(cfg, c_in, &mut rng);
         let feat: Vec<f32> = (0..n * c_in).map(|i| i as f32 * 0.01).collect();
-        let out = ec.forward(&feat, n, c_in).unwrap();
+        let out = ec.forward(&feat, n, c_in).expect("forward should succeed");
         assert_eq!(out.len(), n * c_out);
     }
 
@@ -188,7 +188,7 @@ mod tests {
         let mut feat_rng = LcgRng::new(99);
         let mut feat = vec![0.0_f32; n * c_in];
         feat_rng.fill_normal(&mut feat);
-        let out = ec.forward(&feat, n, c_in).unwrap();
+        let out = ec.forward(&feat, n, c_in).expect("forward should succeed");
         assert!(
             out.iter().all(|v| v.is_finite()),
             "EdgeConv output must be finite"

@@ -26,7 +26,7 @@
 //! with a partial Fisher–Yates shuffle driven by `next_usize(n)`, which gives
 //! an exact (deterministic, count-correct) selection of `round(mask_ratio · n)`
 //! masked indices. Weight initialisation uses
-//! `(next_u32() as f32) / 2_147_483_648.0 − 0.5` (the genuine `[-0.5, 0.5)`
+//! `(next_u32() as f32) / 4_294_967_296.0 − 0.5` (the genuine `[-0.5, 0.5)`
 //! recipe).
 
 use crate::{
@@ -260,7 +260,7 @@ pub struct Mae {
 /// gives a true `[0, 1)` sample; subtracting 0.5 centres it.
 #[inline]
 fn safe_centered_uniform(rng: &mut LcgRng) -> f32 {
-    (rng.next_u32() as f32) / 2_147_483_648.0 - 0.5
+    (rng.next_u32() as f32) / 4_294_967_296.0 - 0.5
 }
 
 /// Fill `buf` with i.i.d. `[-scale, scale)` samples using the hazard-safe
@@ -795,7 +795,7 @@ mod tests {
         let mut patches = vec![0.0f32; n_patches * pp];
         let mut rin = LcgRng::new(5);
         for v in patches.iter_mut() {
-            *v = (rin.next_u32() as f32) / 2_147_483_648.0;
+            *v = (rin.next_u32() as f32) / 4_294_967_296.0;
         }
 
         let mut r_a = LcgRng::new(77);

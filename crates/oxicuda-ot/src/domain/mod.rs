@@ -18,3 +18,19 @@ pub mod feature_flow;
 pub mod mapping;
 
 pub use feature_flow::{FeatureFlowConfig, FeatureFlowResult, domain_discrepancy, ot_feature_flow};
+
+/// Distributionally Robust Optimisation with Wasserstein uncertainty sets (Esfahani-Kuhn 2018).
+pub mod dro_wasserstein;
+pub use dro_wasserstein::{
+    DroConfig, DroResult, DroSolver, dro_lipschitz_bound, dro_quadratic_loss, robustness_gap,
+};
+
+/// Entropic domain adaptation with a group-lasso label prior (Courty 2017).
+pub mod entropic_da;
+pub use entropic_da::{EntropicDaConfig, EntropicDaResult, lpl1_barycentric_map, sinkhorn_lpl1_mm};
+
+/// Laplacian-regularised OT for domain adaptation (Courty 2014).
+pub mod laplacian_ot;
+pub use laplacian_ot::{
+    LaplacianOtConfig, LaplacianOtResult, laplacian_barycentric_map, laplacian_ot,
+};

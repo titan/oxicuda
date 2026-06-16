@@ -10,7 +10,7 @@ propagation. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.51).
 
 ## Implementation Status
 
-**Actual: 6,021 lines / 5,124 SLoC (41 files)** — implements every major sequence /
+**Actual: 6,021 lines / 20,887 SLoC (88 files)** — implements every major sequence /
 structured-prediction algorithm in pure Rust with log-space numerics for stability,
 including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
 
@@ -116,7 +116,7 @@ including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
 - [x] `crf/lbfgs_b.rs` — L-BFGS-B with box constraints for non-negativity-constrained
   CRF training
   (crf/lbfgs_b.rs -- Byrd-Lu-Nocedal 1995; L-BFGS two-loop + projected line search + box-projection; box-constrained CRF training)
-- [ ] `crf/sgd.rs` — Stochastic gradient training with mini-batches and AdaGrad /
+- [x] `crf/sgd.rs` — Stochastic gradient training with mini-batches and AdaGrad /
   Adam variants
 - [x] `ssvm/cutting_plane_full.rs` — Full cutting-plane SVM optimiser with QP
   inner solver (current implementation is a scaffold)
@@ -130,12 +130,12 @@ including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
 - [x] `hmm/semimarkov.rs` — Semi-Markov / segmental HMM with explicit duration models
 - [x] `crf/skip_chain.rs` — Skip-chain CRF for long-range label dependencies
   (crf/skip_chain.rs -- linear-chain CRF + long-range skip edges, loopy sum-product/max-product BP; exact = forward-backward when no skip edges)
-- [ ] `crf/general_graph.rs` — General-graph CRF training (not just linear chain) via
+- [x] `crf/general_graph.rs` — General-graph CRF training (not just linear chain) via
   loopy belief propagation
-- [ ] `memm/lbfgs.rs` — L-BFGS training for MEMM (currently sub-gradient only)
-- [ ] `ssvm/n_slack.rs` — n-slack formulation alternative to 1-slack
+- [x] `memm/lbfgs.rs` — L-BFGS training for MEMM (currently sub-gradient only)
+- [x] `ssvm/n_slack.rs` — n-slack formulation alternative to 1-slack
 - [x] `beam/diverse.rs` — Diverse beam search (Vijayakumar 2018) with group penalties
-- [ ] `beam/length_penalty.rs` — GNMT-style length penalty
+- [x] `beam/length_penalty.rs` — GNMT-style length penalty
   ((5 + |Y|) / 6)^alpha for translation
 - [ ] `alignment/blast.rs` — Heuristic BLAST-style seed-and-extend alignment for
   database search
@@ -153,12 +153,16 @@ including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
 - [x] `decoders/top_k.rs` — Top-k sampling (Fan-Lewis-Dauphin 2018) with temperature
 - [x] `decoders/typical.rs` — Typical sampling (Meister 2022) with entropy-distance ordering
 - [x] `decoders/contrastive.rs` — Contrastive search decoding (Su 2022)
+- [ ] `crf/neural_crf.rs` — Neural CRF (Collobert 2011 extended): replace hand-crafted features with LSTM/CNN encoder; end-to-end training with Viterbi decoding; `NeuralCrfConfig { encoder_type: EncoderType }`
+- [ ] `structured/sinkhorn_crf.rs` — Sinkhorn CRF (Shi 2020): replace sum-product with Sinkhorn normalisation for structured prediction; differentiable top-k selection via entropic regularisation
+- [x] `alignment/ctc_advanced.rs` — CTC with language model shallow fusion (Hannun 2014): beam search with LM log-probability addition; blank collapse; prefix probability aggregation; `CtcBeamSearch { beam_width, lm_weight }`
+- [ ] `seq2seq/pointer_network.rs` — Pointer Network (Vinyals 2015): attention mechanism where output token = position in input (not vocabulary); TSP / sorting / parsing applications; `PointerNetwork { hidden_dim }`
 
 #### P2 — Advanced & Hybrid
 - [x] `metrics/chrf.rs` — Character n-gram F-score (chrF / chrF++) for translation
   quality
 - [ ] `metrics/ter.rs` — Translation Edit Rate
-- [ ] `metrics/wer.rs` — Word Error Rate for ASR-style outputs
+- [x] `metrics/wer.rs` — Word Error Rate for ASR-style outputs
 - [ ] `metrics/bertscore.rs` — Embedding-based metric scaffold (requires external
   embeddings; placeholder)
 - [ ] `benches/algo_bench.rs` — Extended algorithm benches: standard NLP corpora
@@ -167,7 +171,7 @@ including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
 #### P2 — GPU / Architecture-Specific
 - [ ] PTX kernel for batched forward-backward across many short sequences in parallel
 - [ ] PTX kernel for warp-cooperative Viterbi over wide label sets (≥ 64 labels)
-- [ ] PTX kernel for parallel beam-search top-k via bitonic sort
+- [x] PTX kernel for parallel beam-search top-k via bitonic sort
 
 ## Dependencies
 

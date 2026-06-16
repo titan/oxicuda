@@ -81,6 +81,7 @@
 
 pub mod batch;
 pub mod cache;
+pub mod decoding;
 pub mod error;
 pub mod executor;
 pub mod handle;
@@ -93,15 +94,20 @@ pub use batch::{
     ScheduledBatch, Scheduler, SchedulerConfig, Sequence, SequenceId, SequenceStatus,
 };
 pub use cache::{BlockId, CacheManager, KvBlock, PagedKvCache, PrefixCache, PrefixEntry};
+pub use decoding::{
+    BeamCandidate, BeamConfig, PromptLookupDecoder, beam_search, no_repeat_ngram_banned,
+};
 pub use error::{InferError, InferResult};
 pub use executor::{
     AttentionConfig, MockModelRunner, ModelRunner, RunnerStats, paged_attention_cpu,
 };
 pub use handle::InferHandle;
 pub use sampling::{
-    BeamHypothesis, BeamSearchConfig, BeamSearchState, JsonConstraint, JsonToken, MedusaConfig,
-    MedusaDecoder, Rng, greedy_sample, greedy_sample_batch, speculative_verify, top_k_filter,
-    top_k_sample, top_p_filter, top_p_sample,
+    BeamHypothesis, BeamSearchConfig, BeamSearchState, ContrastiveSearchConfig, JsonConstraint,
+    JsonToken, LogitsProcessor, LogitsProcessorConfig, MedusaConfig, MedusaDecoder, Mirostat,
+    MirostatConfig, Rng, WatermarkDetection, Watermarker, contrastive_search_select,
+    epsilon_filter, epsilon_sample, greedy_sample, greedy_sample_batch, speculative_verify,
+    top_k_filter, top_k_sample, top_p_filter, top_p_sample, typical_filter, typical_sample,
 };
 
 // ─── Integration tests ───────────────────────────────────────────────────────

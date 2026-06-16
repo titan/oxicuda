@@ -56,7 +56,8 @@ mod tests {
     #[test]
     fn amplitude_embedding_is_normalized() {
         let data = [1.0_f32, 2.0, 3.0, 4.0];
-        let sv = amplitude_embedding(&data).unwrap();
+        let sv = amplitude_embedding(&data)
+            .expect("data is non-empty with non-zero norm so amplitude embedding cannot fail");
         let norm = sv.norm_sq();
         assert!((norm - 1.0).abs() < 1e-5, "norm={norm}");
     }
@@ -64,7 +65,8 @@ mod tests {
     #[test]
     fn amplitude_embedding_pads_to_power_of_two() {
         let data = [1.0_f32, 0.0, 0.0];
-        let sv = amplitude_embedding(&data).unwrap();
+        let sv = amplitude_embedding(&data)
+            .expect("data is non-empty with non-zero norm so amplitude embedding cannot fail");
         assert_eq!(sv.amps.len(), 4); // 2^2
     }
 

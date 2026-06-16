@@ -424,7 +424,8 @@ mod tests {
             probe_budget,
         };
         let mut rng = LcgRng::new(seed);
-        MultiProbeLsh::new(cfg, 8, &mut rng).unwrap()
+        MultiProbeLsh::new(cfg, 8, &mut rng)
+            .expect("valid LSH config should construct successfully")
     }
 
     // 1. determinism: same seed → identical projections, biases, hashes.
@@ -438,15 +439,20 @@ mod tests {
         };
         let mut r1 = LcgRng::new(7);
         let mut r2 = LcgRng::new(7);
-        let a = MultiProbeLsh::new(cfg, 8, &mut r1).unwrap();
-        let b = MultiProbeLsh::new(cfg, 8, &mut r2).unwrap();
+        let a = MultiProbeLsh::new(cfg, 8, &mut r1)
+            .expect("valid LSH config should construct successfully");
+        let b = MultiProbeLsh::new(cfg, 8, &mut r2)
+            .expect("valid LSH config should construct successfully");
         for t in 0..3 {
             assert_eq!(a.projections[t], b.projections[t]);
             assert_eq!(a.biases[t], b.biases[t]);
         }
         let v = vec![0.1_f32, -0.2, 0.3, 0.4, 0.5, -0.6, 0.7, -0.8];
         for t in 0..3 {
-            assert_eq!(a.hash_key(t, &v).unwrap(), b.hash_key(t, &v).unwrap());
+            assert_eq!(
+                a.hash_key(t, &v).expect("valid table index and vector"),
+                b.hash_key(t, &v).expect("valid table index and vector")
+            );
         }
     }
 
@@ -456,10 +462,12 @@ mod tests {
         let mut idx = small_index(11, 3, 4);
         let mut rng = LcgRng::new(99);
         let v = rand_vec(8, &mut rng);
-        idx.insert(42, &v).unwrap();
+        idx.insert(42, &v).expect("valid vector dimension");
         for t in 0..idx.n_tables {
-            let key = idx.hash_key(t, &v).unwrap();
-            let bucket = idx.tables[t].get(&key).unwrap();
+            let key = idx.hash_key(t, &v).expect("valid table index and vector");
+            let bucket = idx.tables[t]
+                .get(&key)
+                .expect("key must exist after insert");
             assert!(bucket.contains(&42));
         }
     }
@@ -477,15 +485,16 @@ mod tests {
         let n_trials = 8;
         for seed in 0..n_trials {
             let mut rng = LcgRng::new(seed as u64 + 7);
-            let mut idx = MultiProbeLsh::new(cfg, 8, &mut rng).unwrap();
+            let mut idx = MultiProbeLsh::new(cfg, 8, &mut rng)
+                .expect("valid LSH config should construct successfully");
             let base = rand_vec(8, &mut rng);
-            idx.insert(0, &base).unwrap();
+            idx.insert(0, &base).expect("valid vector dimension");
             // small additive noise on top
             let mut noisy = base.clone();
             for s in &mut noisy {
                 *s += (rng.next_f32() - 0.5) * 0.05;
             }
-            let cands = idx.query(&noisy, 32).unwrap();
+            let cands = idx.query(&noisy, 32).expect("valid query dimension");
             if cands.contains(&0) {
                 succ += 1;
             }
@@ -503,12 +512,13 @@ mod tests {
             probe_budget: 1,
         };
         let mut rng = LcgRng::new(33);
-        let mut idx = MultiProbeLsh::new(cfg, 8, &mut rng).unwrap();
+        let mut idx = MultiProbeLsh::new(cfg, 8, &mut rng)
+            .expect("valid LSH config should construct successfully");
         let v = vec![0.0_f32; 8];
-        idx.insert(0, &v).unwrap();
+        idx.insert(0, &v).expect("valid vector dimension");
         // far query
         let q = vec![100.0_f32; 8];
-        let cands = idx.query(&q, 8).unwrap();
+        let cands = idx.query(&q, 8).expect("valid query dimension");
         assert!(!cands.contains(&0));
     }
 
@@ -522,21 +532,22 @@ mod tests {
             probe_budget: 1,
         };
         let mut rng = LcgRng::new(55);
-        let mut idx = MultiProbeLsh::new(cfg_one, 8, &mut rng).unwrap();
+        let mut idx = MultiProbeLsh::new(cfg_one, 8, &mut rng)
+            .expect("valid LSH config should construct successfully");
         // populate
         let mut r2 = LcgRng::new(77);
         let mut all_vecs: Vec<Vec<f32>> = Vec::new();
         for i in 0..16 {
             let v = rand_vec(8, &mut r2);
-            idx.insert(i, &v).unwrap();
+            idx.insert(i, &v).expect("valid vector dimension");
             all_vecs.push(v);
         }
         // query: candidates returned must exactly be union of base buckets across tables
         let q = rand_vec(8, &mut r2);
-        let cands = idx.query(&q, 64).unwrap();
+        let cands = idx.query(&q, 64).expect("valid query dimension");
         let mut expected: std::collections::HashSet<usize> = std::collections::HashSet::new();
         for t in 0..idx.n_tables {
-            let key = idx.hash_key(t, &q).unwrap();
+            let key = idx.hash_key(t, &q).expect("valid table index and vector");
             if let Some(b) = idx.tables[t].get(&key) {
                 for id in b {
                     expected.insert(*id);
@@ -567,24 +578,28 @@ mod tests {
             probe_budget: 3,
         };
         let mut rng = LcgRng::new(1);
-        let mut a = MultiProbeLsh::new(cfg_zero, 1, &mut rng).unwrap();
+        let mut a = MultiProbeLsh::new(cfg_zero, 1, &mut rng)
+            .expect("valid LSH config should construct successfully");
         // overwrite to a deterministic projection: a = [1], b = [0].
         a.projections[0] = vec![1.0_f32];
         a.biases[0] = vec![0.0_f32];
         // and rebuild bucket map from scratch
         a.tables[0].clear();
-        a.insert(0, &[0.05_f32]).unwrap(); // bucket 0 (since 0.05/1 -> floor=0)
+        a.insert(0, &[0.05_f32]).expect("valid vector dimension"); // bucket 0 (since 0.05/1 -> floor=0)
 
-        let mut b_index = MultiProbeLsh::new(cfg_multi, 1, &mut rng).unwrap();
+        let mut b_index = MultiProbeLsh::new(cfg_multi, 1, &mut rng)
+            .expect("valid LSH config should construct successfully");
         b_index.projections[0] = vec![1.0_f32];
         b_index.biases[0] = vec![0.0_f32];
         b_index.tables[0].clear();
-        b_index.insert(0, &[0.05_f32]).unwrap();
+        b_index
+            .insert(0, &[0.05_f32])
+            .expect("valid vector dimension");
 
         // Query at 1.05 → bucket = floor(1.05) = 1, so single-bucket LSH misses point 0
         let q = &[1.05_f32];
-        let cands_a = a.query(q, 4).unwrap();
-        let cands_b = b_index.query(q, 4).unwrap();
+        let cands_a = a.query(q, 4).expect("valid query dimension");
+        let cands_b = b_index.query(q, 4).expect("valid query dimension");
         assert!(!cands_a.contains(&0));
         assert!(cands_b.contains(&0));
     }
@@ -599,14 +614,15 @@ mod tests {
             probe_budget: 1,
         };
         let mut rng = LcgRng::new(0);
-        let mut idx = MultiProbeLsh::new(cfg, 3, &mut rng).unwrap();
+        let mut idx = MultiProbeLsh::new(cfg, 3, &mut rng)
+            .expect("valid LSH config should construct successfully");
         // override projections & biases
         idx.projections[0] = vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0]; // 2 rows x 3 cols
         idx.biases[0] = vec![0.0_f32, 1.0];
         let x = vec![3.0_f32, 5.5, 0.0];
         // p0 = 1*3 + 0*5.5 + 0*0 + 0 = 3   ; ⌊3/2⌋ = 1
         // p1 = 0*3 + 1*5.5 + 0*0 + 1 = 6.5 ; ⌊6.5/2⌋ = 3
-        let key = idx.hash_key(0, &x).unwrap();
+        let key = idx.hash_key(0, &x).expect("valid table index and vector");
         assert_eq!(key, vec![1, 3]);
     }
 
@@ -620,9 +636,12 @@ mod tests {
             probe_budget: 8,
         };
         let mut rng = LcgRng::new(2);
-        let idx = MultiProbeLsh::new(cfg, 8, &mut rng).unwrap();
+        let idx = MultiProbeLsh::new(cfg, 8, &mut rng)
+            .expect("valid LSH config should construct successfully");
         let q = rand_vec(8, &mut LcgRng::new(123));
-        let dists = idx.probe_distances_for(0, &q).unwrap();
+        let dists = idx
+            .probe_distances_for(0, &q)
+            .expect("valid table index and query dimension");
         assert!(dists.len() >= 2);
         for w in dists.windows(2) {
             assert!(w[0] <= w[1] + 1e-6, "probe order violated: {w:?}");
@@ -634,7 +653,7 @@ mod tests {
     fn mp_lsh_empty_index_empty_query() {
         let idx = small_index(0, 2, 2);
         let q = vec![0.5_f32; 8];
-        let cands = idx.query(&q, 10).unwrap();
+        let cands = idx.query(&q, 10).expect("valid query dimension");
         assert!(cands.is_empty());
     }
 
@@ -648,20 +667,22 @@ mod tests {
             probe_budget: 1,
         };
         let mut r1 = LcgRng::new(5);
-        let mut a = MultiProbeLsh::new(cfg, 4, &mut r1).unwrap();
+        let mut a = MultiProbeLsh::new(cfg, 4, &mut r1)
+            .expect("valid LSH config should construct successfully");
         let mut r2 = LcgRng::new(5);
-        let mut b = MultiProbeLsh::new(cfg, 4, &mut r2).unwrap();
+        let mut b = MultiProbeLsh::new(cfg, 4, &mut r2)
+            .expect("valid LSH config should construct successfully");
 
         let mut data_rng = LcgRng::new(42);
         let data: Vec<Vec<f32>> = (0..8).map(|_| rand_vec(4, &mut data_rng)).collect();
 
         // order A: 0..n
         for (i, v) in data.iter().enumerate() {
-            a.insert(i, v).unwrap();
+            a.insert(i, v).expect("valid vector dimension");
         }
         // order B: reversed
         for (i, v) in data.iter().enumerate().rev() {
-            b.insert(i, v).unwrap();
+            b.insert(i, v).expect("valid vector dimension");
         }
         for t in 0..a.n_tables {
             let mut ka: Vec<&Vec<i32>> = a.tables[t].keys().collect();
@@ -670,8 +691,14 @@ mod tests {
             kb.sort();
             assert_eq!(ka, kb);
             for k in ka {
-                let mut va = a.tables[t].get(k).unwrap().clone();
-                let mut vb = b.tables[t].get(k).unwrap().clone();
+                let mut va = a.tables[t]
+                    .get(k)
+                    .expect("key must exist in both tables")
+                    .clone();
+                let mut vb = b.tables[t]
+                    .get(k)
+                    .expect("key must exist in both tables")
+                    .clone();
                 va.sort();
                 vb.sort();
                 assert_eq!(va, vb);
@@ -685,12 +712,14 @@ mod tests {
         let mut idx = small_index(3, 2, 1);
         let mut rng = LcgRng::new(8);
         let v = rand_vec(8, &mut rng);
-        idx.insert(99, &v).unwrap();
-        idx.insert(99, &v).unwrap();
-        idx.insert(99, &v).unwrap();
+        idx.insert(99, &v).expect("valid vector dimension");
+        idx.insert(99, &v).expect("valid vector dimension");
+        idx.insert(99, &v).expect("valid vector dimension");
         for t in 0..idx.n_tables {
-            let key = idx.hash_key(t, &v).unwrap();
-            let bucket = idx.tables[t].get(&key).unwrap();
+            let key = idx.hash_key(t, &v).expect("valid table index and vector");
+            let bucket = idx.tables[t]
+                .get(&key)
+                .expect("key must exist after insert");
             let count = bucket.iter().filter(|id| **id == 99).count();
             assert_eq!(count, 1);
         }

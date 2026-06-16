@@ -56,7 +56,7 @@ mod tests {
     #[test]
     fn zz_feature_map_preserves_norm() {
         let data = [0.5_f32, 1.0, -0.3];
-        let sv = zz_feature_map(&data, 2).unwrap();
+        let sv = zz_feature_map(&data, 2).expect("data is non-empty and all unitary gates succeed with depth=2, so zz_feature_map returns Ok");
         let norm = sv.norm_sq();
         assert!((norm - 1.0).abs() < 1e-4, "norm={norm}");
     }

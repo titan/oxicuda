@@ -504,10 +504,10 @@ mod tests {
 
     #[test]
     fn build_sets_len() {
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
         let dim = 2;
         let data: Vec<f32> = (0..10).flat_map(|i| [i as f32, -i as f32]).collect();
-        idx.build(&data, 10, dim).unwrap();
+        idx.build(&data, 10, dim).expect("build with valid data");
         assert_eq!(idx.len(), 10);
         assert!(!idx.is_empty());
         assert_eq!(idx.dim(), dim);
@@ -515,10 +515,10 @@ mod tests {
 
     #[test]
     fn every_node_respects_degree_r() {
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
         let dim = 2;
         let data: Vec<f32> = (0..15).flat_map(|i| [i as f32, (i * 2) as f32]).collect();
-        idx.build(&data, 15, dim).unwrap();
+        idx.build(&data, 15, dim).expect("build with valid data");
         for id in 0..15 {
             let nb = idx.neighbors(id as u32);
             assert!(
@@ -532,12 +532,14 @@ mod tests {
 
     #[test]
     fn greedy_search_returns_sorted_bounded() {
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
         let dim = 2;
         let data: Vec<f32> = (0..20).flat_map(|i| [i as f32, (10 - i) as f32]).collect();
-        idx.build(&data, 20, dim).unwrap();
+        idx.build(&data, 20, dim).expect("build with valid data");
         let q = vec![5.0_f32, 5.0];
-        let res = idx.greedy_search(&q, 6).unwrap();
+        let res = idx
+            .greedy_search(&q, 6)
+            .expect("greedy_search with valid parameters");
         assert!(res.len() <= 6);
         for w in res.windows(2) {
             assert!(w[0].1 <= w[1].1, "not ascending: {res:?}");
@@ -546,12 +548,12 @@ mod tests {
 
     #[test]
     fn search_returns_sorted_and_bounded() {
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
         let dim = 2;
         let data: Vec<f32> = (0..20).flat_map(|i| [i as f32, (10 - i) as f32]).collect();
-        idx.build(&data, 20, dim).unwrap();
+        idx.build(&data, 20, dim).expect("build with valid data");
         let q = vec![5.0_f32, 5.0];
-        let res = idx.search(&q, 3).unwrap();
+        let res = idx.search(&q, 3).expect("search with valid parameters");
         assert!(res.len() <= 3);
         for w in res.windows(2) {
             assert!(w[0].1 <= w[1].1);
@@ -561,11 +563,11 @@ mod tests {
     #[test]
     fn exact_nn_on_well_separated_clusters() {
         let (data, n, dim) = well_separated_5();
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
-        idx.build(&data, n, dim).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        idx.build(&data, n, dim).expect("build with valid data");
         for i in 0..n {
             let q = &data[i * dim..(i + 1) * dim];
-            let res = idx.search(q, 1).unwrap();
+            let res = idx.search(q, 1).expect("search with valid parameters");
             assert_eq!(res.len(), 1);
             assert_eq!(res[0].0 as usize, i, "i={i} res={res:?}");
             assert!(res[0].1 < 1e-6);
@@ -579,12 +581,14 @@ mod tests {
             search_l: 8,
             alpha: 1.2,
         })
-        .unwrap();
+        .expect("config is valid");
         let dim = 2;
         let data: Vec<f32> = (0..10).flat_map(|i| [i as f32, 0.0]).collect();
-        idx.build(&data, 10, dim).unwrap();
+        idx.build(&data, 10, dim).expect("build with valid data");
         let mut cand: Vec<(u32, f32)> = (1u32..10).map(|v| (v, idx.dist_nodes(0, v))).collect();
-        let pruned = idx.robust_prune(0, &mut cand).unwrap();
+        let pruned = idx
+            .robust_prune(0, &mut cand)
+            .expect("robust_prune is infallible");
         assert!(pruned.len() <= 3, "pruned={pruned:?}");
     }
 
@@ -595,13 +599,15 @@ mod tests {
             search_l: 8,
             alpha: 1.2,
         })
-        .unwrap();
+        .expect("config is valid");
         let dim = 2;
         // 6 collinear points where the prune rule has plenty of dominated pairs.
         let data: Vec<f32> = (0..6).flat_map(|i| [i as f32, 0.0]).collect();
-        idx.build(&data, 6, dim).unwrap();
+        idx.build(&data, 6, dim).expect("build with valid data");
         let mut cand: Vec<(u32, f32)> = (1u32..6).map(|v| (v, idx.dist_nodes(0, v))).collect();
-        let pruned = idx.robust_prune(0, &mut cand).unwrap();
+        let pruned = idx
+            .robust_prune(0, &mut cand)
+            .expect("robust_prune is infallible");
         let alpha = idx.cfg.alpha;
         // For every retained pair (v, v'), with v earlier than v' in the
         // prune output, the rule guarantees α · dist(v, v') > dist(p, v').
@@ -624,9 +630,11 @@ mod tests {
 
     #[test]
     fn robust_prune_empty_input() {
-        let idx = VamanaIndex::new(small_cfg()).unwrap();
+        let idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
         let mut cand: Vec<(u32, f32)> = Vec::new();
-        let pruned = idx.robust_prune(0, &mut cand).unwrap();
+        let pruned = idx
+            .robust_prune(0, &mut cand)
+            .expect("robust_prune is infallible");
         assert!(pruned.is_empty());
     }
 
@@ -634,15 +642,18 @@ mod tests {
     fn deterministic_build_no_rng() {
         let dim = 2;
         let data: Vec<f32> = (0..12).flat_map(|i| [i as f32, (3 * i) as f32]).collect();
-        let mut a = VamanaIndex::new(small_cfg()).unwrap();
-        let mut b = VamanaIndex::new(small_cfg()).unwrap();
-        a.build(&data, 12, dim).unwrap();
-        b.build(&data, 12, dim).unwrap();
+        let mut a = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        let mut b = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        a.build(&data, 12, dim).expect("build with valid data");
+        b.build(&data, 12, dim).expect("build with valid data");
         for id in 0..12u32 {
             assert_eq!(a.neighbors(id), b.neighbors(id), "id={id}");
         }
         let q = vec![3.0_f32, 9.0];
-        assert_eq!(a.search(&q, 3).unwrap(), b.search(&q, 3).unwrap());
+        assert_eq!(
+            a.search(&q, 3).expect("search with valid parameters"),
+            b.search(&q, 3).expect("search with valid parameters")
+        );
     }
 
     #[test]
@@ -686,7 +697,7 @@ mod tests {
 
     #[test]
     fn err_build_data_length_mismatch() {
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
         let r = idx.build(&[0.0_f32, 1.0, 2.0], 2, 2);
         assert!(matches!(r, Err(AnnError::DimensionMismatch { .. })));
     }
@@ -694,8 +705,8 @@ mod tests {
     #[test]
     fn err_search_query_wrong_length() {
         let (data, n, dim) = well_separated_5();
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
-        idx.build(&data, n, dim).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        idx.build(&data, n, dim).expect("build with valid data");
         let bad = vec![0.0_f32; 3];
         let r = idx.search(&bad, 1);
         assert!(matches!(r, Err(AnnError::DimensionMismatch { .. })));
@@ -704,8 +715,8 @@ mod tests {
     #[test]
     fn err_k_zero() {
         let (data, n, dim) = well_separated_5();
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
-        idx.build(&data, n, dim).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        idx.build(&data, n, dim).expect("build with valid data");
         let q = vec![0.0_f32; dim];
         let r = idx.search(&q, 0);
         assert!(matches!(r, Err(AnnError::InvalidK { k: 0, .. })));
@@ -713,7 +724,7 @@ mod tests {
 
     #[test]
     fn err_n_zero_and_dim_zero() {
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
         assert!(matches!(idx.build(&[], 0, 2), Err(AnnError::EmptyInput)));
         assert!(matches!(
             idx.build(&[], 1, 0),
@@ -723,9 +734,12 @@ mod tests {
 
     #[test]
     fn single_point_index_returns_that_point() {
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
-        idx.build(&[3.0_f32, 4.0], 1, 2).unwrap();
-        let res = idx.search(&[3.0_f32, 4.0], 1).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        idx.build(&[3.0_f32, 4.0], 1, 2)
+            .expect("build with valid data");
+        let res = idx
+            .search(&[3.0_f32, 4.0], 1)
+            .expect("search with valid parameters");
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].0, 0);
         assert!(res[0].1.abs() < 1e-6);
@@ -734,8 +748,8 @@ mod tests {
     #[test]
     fn connectivity_every_node_reachable_from_start() {
         let (data, n, dim) = well_separated_5();
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
-        idx.build(&data, n, dim).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        idx.build(&data, n, dim).expect("build with valid data");
         // BFS from start_node in the directed graph -> every node must be visited.
         let start = idx.start_node() as usize;
         let mut visited = vec![false; n];
@@ -756,7 +770,7 @@ mod tests {
 
     #[test]
     fn duplicate_points_handled() {
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
         let dim = 2;
         let data = vec![
             0.0_f32, 0.0, // 0
@@ -764,9 +778,11 @@ mod tests {
             5.0, 5.0, // 2
             5.0, 5.0, // 3 (dup of 2)
         ];
-        idx.build(&data, 4, dim).unwrap();
+        idx.build(&data, 4, dim).expect("build with valid data");
         assert_eq!(idx.len(), 4);
-        let res = idx.search(&[0.0_f32, 0.0], 2).unwrap();
+        let res = idx
+            .search(&[0.0_f32, 0.0], 2)
+            .expect("search with valid parameters");
         assert_eq!(res.len(), 2);
         assert!(res.iter().all(|&(_, d)| d.abs() < 1e-6));
         // Both top-2 should be the duplicated pair {0, 1}.
@@ -778,28 +794,30 @@ mod tests {
     #[test]
     fn greedy_search_k_greater_than_n_returns_n() {
         let (data, n, dim) = well_separated_5();
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
-        idx.build(&data, n, dim).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        idx.build(&data, n, dim).expect("build with valid data");
         let q = vec![0.0_f32; dim];
-        let res = idx.greedy_search(&q, 100).unwrap();
+        let res = idx
+            .greedy_search(&q, 100)
+            .expect("greedy_search with valid parameters");
         assert_eq!(res.len(), n);
     }
 
     #[test]
     fn search_k_greater_than_n_returns_n() {
         let (data, n, dim) = well_separated_5();
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
-        idx.build(&data, n, dim).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        idx.build(&data, n, dim).expect("build with valid data");
         let q = vec![0.0_f32; dim];
-        let res = idx.search(&q, 100).unwrap();
+        let res = idx.search(&q, 100).expect("search with valid parameters");
         assert_eq!(res.len(), n);
     }
 
     #[test]
     fn err_greedy_search_l_zero() {
         let (data, n, dim) = well_separated_5();
-        let mut idx = VamanaIndex::new(small_cfg()).unwrap();
-        idx.build(&data, n, dim).unwrap();
+        let mut idx = VamanaIndex::new(small_cfg()).expect("small_cfg is valid");
+        idx.build(&data, n, dim).expect("build with valid data");
         let q = vec![0.0_f32; dim];
         let r = idx.greedy_search(&q, 0);
         assert!(matches!(r, Err(AnnError::InvalidK { k: 0, .. })));

@@ -338,14 +338,15 @@ mod tests {
     // 6. Never inserted x; estimate(x)==0.
     #[test]
     fn estimate_unseen_is_zero() {
-        let hk = HeavyKeeper::new(HeavyKeeperConfig::default()).unwrap();
+        let hk = HeavyKeeper::new(HeavyKeeperConfig::default()).expect("value should be present");
         assert_eq!(hk.estimate(99999), 0);
     }
 
     // 7. add same x 10 times; estimate(x) ≥ 1.
     #[test]
     fn add_single_item_estimate() {
-        let mut hk = HeavyKeeper::new(HeavyKeeperConfig::default()).unwrap();
+        let mut hk =
+            HeavyKeeper::new(HeavyKeeperConfig::default()).expect("value should be present");
         let mut rng = default_rng();
         for _ in 0..10 {
             hk.add(42, &mut rng);
@@ -356,7 +357,7 @@ mod tests {
     // 8. No inserts; top_k().is_empty().
     #[test]
     fn top_k_empty() {
-        let hk = HeavyKeeper::new(HeavyKeeperConfig::default()).unwrap();
+        let hk = HeavyKeeper::new(HeavyKeeperConfig::default()).expect("value should be present");
         assert!(hk.top_k().is_empty());
     }
 
@@ -369,7 +370,7 @@ mod tests {
             depth: 3,
             b: 1.08,
         };
-        let mut hk = HeavyKeeper::new(cfg).unwrap();
+        let mut hk = HeavyKeeper::new(cfg).expect("new should succeed");
         let mut rng = default_rng();
         let heavy: u64 = 777;
         for _ in 0..1000 {
@@ -392,7 +393,7 @@ mod tests {
             depth: 3,
             b: 1.08,
         };
-        let mut hk = HeavyKeeper::new(cfg).unwrap();
+        let mut hk = HeavyKeeper::new(cfg).expect("new should succeed");
         let mut rng = default_rng();
         for i in 0u64..5 {
             let count = (i + 1) * 100;
@@ -415,7 +416,7 @@ mod tests {
             depth: 3,
             b: 1.08,
         };
-        let mut hk = HeavyKeeper::new(cfg).unwrap();
+        let mut hk = HeavyKeeper::new(cfg).expect("new should succeed");
         let mut rng = default_rng();
         for i in 0u64..100 {
             hk.add(i, &mut rng);
@@ -432,7 +433,7 @@ mod tests {
             depth: 3,
             b: 1.08,
         };
-        let mut hk = HeavyKeeper::new(cfg).unwrap();
+        let mut hk = HeavyKeeper::new(cfg).expect("new should succeed");
         let mut rng = default_rng();
         let dominant: u64 = 42;
         for _ in 0..2000 {
@@ -453,7 +454,8 @@ mod tests {
     // 13. estimate(x) after 100 inserts ≥ after 10 inserts.
     #[test]
     fn estimate_monotone_after_more_inserts() {
-        let mut hk = HeavyKeeper::new(HeavyKeeperConfig::default()).unwrap();
+        let mut hk =
+            HeavyKeeper::new(HeavyKeeperConfig::default()).expect("value should be present");
         let mut rng = default_rng();
         for _ in 0..10 {
             hk.add(1, &mut rng);
@@ -472,7 +474,8 @@ mod tests {
     // 14. n equals total add() calls.
     #[test]
     fn n_counts_total_inserts() {
-        let mut hk = HeavyKeeper::new(HeavyKeeperConfig::default()).unwrap();
+        let mut hk =
+            HeavyKeeper::new(HeavyKeeperConfig::default()).expect("value should be present");
         let mut rng = default_rng();
         for i in 0u64..50 {
             hk.add(i, &mut rng);
@@ -489,7 +492,7 @@ mod tests {
             depth: 3,
             b: 1.08,
         };
-        let mut hk = HeavyKeeper::new(cfg).unwrap();
+        let mut hk = HeavyKeeper::new(cfg).expect("new should succeed");
         let mut rng = default_rng();
         // Insert with frequencies 500, 200, 100, 20, 5.
         let freqs: &[(u64, u64)] = &[(1, 500), (2, 200), (3, 100), (4, 20), (5, 5)];
@@ -513,7 +516,7 @@ mod tests {
             depth: 3,
             b: 1.08,
         };
-        let mut hk = HeavyKeeper::new(cfg).unwrap();
+        let mut hk = HeavyKeeper::new(cfg).expect("new should succeed");
         let mut rng = default_rng();
         for i in 0u64..200 {
             hk.add(i, &mut rng);
@@ -530,7 +533,7 @@ mod tests {
             depth: 1,
             b: 1.08,
         };
-        let mut hk = HeavyKeeper::new(cfg).unwrap();
+        let mut hk = HeavyKeeper::new(cfg).expect("new should succeed");
         let mut rng = default_rng();
         // Two distinct keys — one will survive via decay.
         for _ in 0..50 {
@@ -557,8 +560,10 @@ mod tests {
         };
         let mut rng1 = LcgRng::new(12345);
         let mut rng2 = LcgRng::new(12345);
-        let mut hk1 = HeavyKeeper::new_with_rng(cfg, &mut rng1).unwrap();
-        let mut hk2 = HeavyKeeper::new_with_rng(cfg, &mut rng2).unwrap();
+        let mut hk1 =
+            HeavyKeeper::new_with_rng(cfg, &mut rng1).expect("new_with_rng should succeed");
+        let mut hk2 =
+            HeavyKeeper::new_with_rng(cfg, &mut rng2).expect("new_with_rng should succeed");
 
         let mut insert_rng1 = LcgRng::new(999);
         let mut insert_rng2 = LcgRng::new(999);

@@ -237,7 +237,9 @@ mod tests {
         let sched = FlowMatchingScheduler::new(100);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 5.0, 6.0];
-        let out = sched.interpolate(&x0, &x1, 0.0).unwrap();
+        let out = sched
+            .interpolate(&x0, &x1, 0.0)
+            .expect("interpolate should succeed");
         for (&o, &a) in out.iter().zip(&x0) {
             assert!((o - a).abs() < EPS, "{o} != {a}");
         }
@@ -248,7 +250,9 @@ mod tests {
         let sched = FlowMatchingScheduler::new(100);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 5.0, 6.0];
-        let out = sched.interpolate(&x0, &x1, 1.0).unwrap();
+        let out = sched
+            .interpolate(&x0, &x1, 1.0)
+            .expect("interpolate should succeed");
         for (&o, &b) in out.iter().zip(&x1) {
             assert!((o - b).abs() < EPS, "{o} != {b}");
         }
@@ -259,7 +263,9 @@ mod tests {
         let sched = FlowMatchingScheduler::new(100);
         let x0 = zeros(4);
         let x1 = ones(4);
-        let out = sched.interpolate(&x0, &x1, 0.5).unwrap();
+        let out = sched
+            .interpolate(&x0, &x1, 0.5)
+            .expect("interpolate should succeed");
         for &v in &out {
             assert!((v - 0.5).abs() < EPS, "midpoint should be 0.5, got {v}");
         }
@@ -285,7 +291,9 @@ mod tests {
         let sched = FlowMatchingScheduler::new(100);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 5.0, 6.0];
-        let v = sched.vector_field(&x0, &x1).unwrap();
+        let v = sched
+            .vector_field(&x0, &x1)
+            .expect("vector_field should succeed");
         for (&vi, (&a, &b)) in v.iter().zip(x0.iter().zip(&x1)) {
             assert!((vi - (b - a)).abs() < EPS, "{vi} != {}", b - a);
         }
@@ -297,7 +305,9 @@ mod tests {
         let x_t = vec![0.0_f32, 0.0, 0.0];
         let velocity = vec![1.0_f32, 2.0, 3.0];
         let dt = 0.1;
-        let out = sched.euler_step(&x_t, &velocity, dt).unwrap();
+        let out = sched
+            .euler_step(&x_t, &velocity, dt)
+            .expect("euler_step should succeed");
         let expected = vec![0.1, 0.2, 0.3];
         for (&o, &e) in out.iter().zip(&expected) {
             assert!((o - e).abs() < EPS, "{o} != {e}");
@@ -311,8 +321,12 @@ mod tests {
         let x_t = vec![1.0_f32, 2.0, 3.0];
         let v = vec![0.5_f32, -0.5, 1.0];
         let dt = 0.1;
-        let euler = sched.euler_step(&x_t, &v, dt).unwrap();
-        let heun = sched.heun_step(&x_t, &v, &v, dt).unwrap();
+        let euler = sched
+            .euler_step(&x_t, &v, dt)
+            .expect("euler_step should succeed");
+        let heun = sched
+            .heun_step(&x_t, &v, &v, dt)
+            .expect("heun_step should succeed");
         for (&e, &h) in euler.iter().zip(&heun) {
             assert!((e - h).abs() < EPS, "heun != euler when v_t == v_t+1");
         }
@@ -347,8 +361,12 @@ mod tests {
         let ot = FlowMatchingScheduler::with_path(100, FlowMatchingPath::OptimalTransport);
         let x0 = vec![1.0_f32, 2.0, 3.0];
         let x1 = vec![4.0_f32, 5.0, 6.0];
-        let out_lin = linear.interpolate(&x0, &x1, 0.5).unwrap();
-        let out_ot = ot.interpolate(&x0, &x1, 0.5).unwrap();
+        let out_lin = linear
+            .interpolate(&x0, &x1, 0.5)
+            .expect("interpolate should succeed");
+        let out_ot = ot
+            .interpolate(&x0, &x1, 0.5)
+            .expect("interpolate should succeed");
         // They should differ due to sigma_min correction
         let diff: f32 = out_lin
             .iter()
@@ -364,11 +382,15 @@ mod tests {
         let sched = FlowMatchingScheduler::new(100);
         let x0 = vec![0.0_f32, 0.0];
         let x1 = vec![1.0_f32, 1.0];
-        let v = sched.vector_field(&x0, &x1).unwrap();
+        let v = sched
+            .vector_field(&x0, &x1)
+            .expect("vector_field should succeed");
         let mut x = x0.clone();
         let dt = 1.0 / 100.0;
         for _ in 0..100 {
-            x = sched.euler_step(&x, &v, dt).unwrap();
+            x = sched
+                .euler_step(&x, &v, dt)
+                .expect("euler_step should succeed");
         }
         for (&xi, &target) in x.iter().zip(&x1) {
             assert!(

@@ -221,9 +221,9 @@ mod tests {
     #[test]
     fn node_tree_forward_shape() {
         let mut rng = LcgRng::new(42);
-        let tree = NodeTree::new(3, 8, 2, &mut rng).unwrap();
+        let tree = NodeTree::new(3, 8, 2, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32; 8];
-        let out = tree.forward(&x).unwrap();
+        let out = tree.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), 2);
     }
 
@@ -236,16 +236,16 @@ mod tests {
             input_dim: 8,
             output_dim: 1,
         };
-        let ensemble = NodeEnsemble::new(cfg, &mut rng).unwrap();
+        let ensemble = NodeEnsemble::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.1_f32; 8];
-        let out = ensemble.forward(&x).unwrap();
+        let out = ensemble.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), 1);
     }
 
     #[test]
     fn node_n_leaves() {
         let mut rng = LcgRng::new(1);
-        let tree = NodeTree::new(4, 4, 1, &mut rng).unwrap();
+        let tree = NodeTree::new(4, 4, 1, &mut rng).expect("new should succeed");
         assert_eq!(tree.n_leaves(), 16);
     }
 }

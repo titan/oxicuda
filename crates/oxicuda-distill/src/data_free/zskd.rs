@@ -101,7 +101,7 @@ mod tests {
         let max_idx = imp
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).expect("partial_cmp should succeed"))
             .map(|(i, _)| i)
             .unwrap_or(0);
         assert_eq!(max_idx, 2);
@@ -112,7 +112,8 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let teacher_soft = synthesize_impression(4, 1, &mut rng);
         let s_logits = vec![1.0_f32, 3.0, 1.0, 1.0];
-        let loss = zskd_student_loss(&s_logits, &teacher_soft, 4.0).unwrap();
+        let loss = zskd_student_loss(&s_logits, &teacher_soft, 4.0)
+            .expect("zskd_student_loss should succeed");
         assert!(loss >= 0.0 && loss.is_finite());
     }
 }

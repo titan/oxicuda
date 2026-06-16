@@ -140,8 +140,8 @@ mod tests {
     #[test]
     fn kl_zero_for_standard_normal() {
         // μ=0, logvar=0 → KL = 0.5*(0 + 1 - 1 - 0) = 0
-        let latent = GaussianLatent::standard_normal(64).unwrap();
-        let kl = latent.kl_loss().unwrap();
+        let latent = GaussianLatent::standard_normal(64).expect("standard_normal should succeed");
+        let kl = latent.kl_loss().expect("kl_loss should succeed");
         assert!(kl.abs() < EPS, "KL should be ~0 for standard normal: {kl}");
     }
 
@@ -150,8 +150,8 @@ mod tests {
         // Any deviation from standard normal should give positive KL
         let mu = vec![1.0_f32; 16];
         let logvar = vec![0.0_f32; 16];
-        let latent = GaussianLatent::new(mu, logvar).unwrap();
-        let kl = latent.kl_loss().unwrap();
+        let latent = GaussianLatent::new(mu, logvar).expect("new should succeed");
+        let kl = latent.kl_loss().expect("kl_loss should succeed");
         assert!(kl > 0.0, "KL should be positive for μ≠0: {kl}");
     }
 
@@ -159,14 +159,14 @@ mod tests {
     fn kl_positive_for_large_logvar() {
         let mu = vec![0.0_f32; 16];
         let logvar = vec![2.0_f32; 16]; // large variance
-        let latent = GaussianLatent::new(mu, logvar).unwrap();
-        let kl = latent.kl_loss().unwrap();
+        let latent = GaussianLatent::new(mu, logvar).expect("new should succeed");
+        let kl = latent.kl_loss().expect("kl_loss should succeed");
         assert!(kl > 0.0, "KL should be positive for logvar≠0: {kl}");
     }
 
     #[test]
     fn sample_shape() {
-        let latent = GaussianLatent::standard_normal(128).unwrap();
+        let latent = GaussianLatent::standard_normal(128).expect("standard_normal should succeed");
         let mut rng = LcgRng::new(42);
         let z = latent.sample(&mut rng);
         assert_eq!(z.len(), 128);
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn sample_is_finite() {
-        let latent = GaussianLatent::standard_normal(64).unwrap();
+        let latent = GaussianLatent::standard_normal(64).expect("standard_normal should succeed");
         let mut rng = LcgRng::new(7);
         for _ in 0..10 {
             let z = latent.sample(&mut rng);
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn std_for_standard_normal() {
-        let latent = GaussianLatent::standard_normal(8).unwrap();
+        let latent = GaussianLatent::standard_normal(8).expect("standard_normal should succeed");
         let std = latent.std();
         for &s in &std {
             assert!((s - 1.0).abs() < EPS, "std should be 1.0 for logvar=0: {s}");
@@ -205,8 +205,8 @@ mod tests {
     fn kl_elementwise_sums_to_total() {
         let mu: Vec<f32> = (0..16).map(|i| i as f32 * 0.1).collect();
         let logvar: Vec<f32> = (0..16).map(|i| -(i as f32) * 0.05).collect();
-        let latent = GaussianLatent::new(mu, logvar).unwrap();
-        let kl_total = latent.kl_loss().unwrap();
+        let latent = GaussianLatent::new(mu, logvar).expect("new should succeed");
+        let kl_total = latent.kl_loss().expect("kl_loss should succeed");
         let kl_elem: f32 = latent.kl_loss_elementwise().iter().sum::<f32>() / 16.0;
         assert!(
             (kl_total - kl_elem).abs() < EPS,
@@ -219,7 +219,7 @@ mod tests {
         // Even with extreme logvar, std should be finite
         let mu = vec![0.0_f32; 4];
         let logvar = vec![100.0_f32; 4]; // would overflow exp without clamping
-        let latent = GaussianLatent::new(mu, logvar).unwrap();
+        let latent = GaussianLatent::new(mu, logvar).expect("new should succeed");
         let std = latent.std();
         assert!(
             std.iter().all(|v| v.is_finite()),

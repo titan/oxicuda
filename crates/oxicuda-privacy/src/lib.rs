@@ -4,13 +4,14 @@
 //!
 //! ```text
 //! oxicuda-privacy
-//! ├── mechanism/          — Exponential, Report-Noisy-Max, Propose-Test-Release
+//! ├── mechanism/          — Exponential, Report-Noisy-Max, Propose-Test-Release, Sampled-Gaussian
 //! ├── selection/          — Sparse Vector Technique, AboveThreshold
-//! ├── accounting/         — f-DP/GDP, zCDP/tCDP, PRV (numerical composition)
-//! ├── composition/        — Strong composition, subsampling/shuffling amplification
-//! ├── optimizer/          — DP-FTRL (tree agg), DP-Adam
+//! ├── accounting/         — f-DP/GDP, zCDP/tCDP, CDP (mean-concentrated), PRV (numerical composition)
+//! ├── composition/        — Strong composition, subsampling/shuffling/iteration amplification
+//! ├── optimizer/          — DP-FTRL (tree agg), DP-Adam, DP-SGD (moments accountant)
 //! ├── local/              — GRR, OUE, RAPPOR (local differential privacy)
 //! ├── sensitivity/        — Local sensitivity, smooth sensitivity
+//! ├── sanitisation/       — k-anonymity generalisation + suppression (Sweeney 2002)
 //! └── metrics/            — Budget tracking, MSE, SNR, utility
 //! ```
 //!
@@ -27,6 +28,7 @@ pub mod mechanism;
 pub mod metrics;
 pub mod optimizer;
 pub mod ptx_kernels;
+pub mod sanitisation;
 pub mod selection;
 pub mod sensitivity;
 

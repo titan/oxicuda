@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn new_codebook_valid() {
-        let cb = VqCodebook::new(16, 64).unwrap();
+        let cb = VqCodebook::new(16, 64).expect("new should succeed");
         assert_eq!(cb.n_codes(), 16);
         assert_eq!(cb.embed_dim(), 64);
         assert_eq!(cb.embeddings().len(), 16 * 64);
@@ -303,18 +303,18 @@ mod tests {
 
     #[test]
     fn quantize_output_shape() {
-        let cb = VqCodebook::new(8, 4).unwrap();
+        let cb = VqCodebook::new(8, 4).expect("new should succeed");
         let z = vec![0.1_f32; 8 * 4]; // 8 vectors of dim 4
-        let (q, idx) = cb.quantize(&z).unwrap();
+        let (q, idx) = cb.quantize(&z).expect("quantize should succeed");
         assert_eq!(q.len(), 8 * 4);
         assert_eq!(idx.len(), 8);
     }
 
     #[test]
     fn quantize_indices_in_range() {
-        let cb = VqCodebook::new(16, 8).unwrap();
+        let cb = VqCodebook::new(16, 8).expect("new should succeed");
         let z = vec![0.5_f32; 4 * 8]; // 4 vectors
-        let (_, idx) = cb.quantize(&z).unwrap();
+        let (_, idx) = cb.quantize(&z).expect("quantize should succeed");
         for &i in &idx {
             assert!(i < 16, "index {i} out of range");
         }
@@ -328,17 +328,20 @@ mod tests {
         let mut embeddings = vec![0.0_f32; n_codes * embed_dim];
         // Code 2: [1, 0, 0, 0]
         embeddings[2 * embed_dim] = 1.0;
-        let cb = VqCodebook::from_embeddings(embeddings, n_codes, embed_dim).unwrap();
+        let cb = VqCodebook::from_embeddings(embeddings, n_codes, embed_dim)
+            .expect("from_embeddings should succeed");
         let z = vec![1.0_f32, 0.0, 0.0, 0.0];
-        let (_, idx) = cb.quantize(&z).unwrap();
+        let (_, idx) = cb.quantize(&z).expect("quantize should succeed");
         assert_eq!(idx[0], 2, "should map to code 2");
     }
 
     #[test]
     fn commitment_loss_zero_for_quantized() {
-        let cb = VqCodebook::new(8, 4).unwrap();
+        let cb = VqCodebook::new(8, 4).expect("new should succeed");
         let z = vec![0.0_f32; 8];
-        let commitment = cb.commitment_loss(&z, &z).unwrap();
+        let commitment = cb
+            .commitment_loss(&z, &z)
+            .expect("commitment_loss should succeed");
         assert!(
             commitment.abs() < 1e-7,
             "commitment loss should be 0 for identical: {commitment}"
@@ -347,10 +350,12 @@ mod tests {
 
     #[test]
     fn commitment_loss_positive_for_different() {
-        let cb = VqCodebook::new(8, 4).unwrap();
+        let cb = VqCodebook::new(8, 4).expect("new should succeed");
         let z = vec![1.0_f32; 8];
         let q = vec![0.0_f32; 8];
-        let commitment = cb.commitment_loss(&z, &q).unwrap();
+        let commitment = cb
+            .commitment_loss(&z, &q)
+            .expect("commitment_loss should succeed");
         assert!(
             commitment > 0.0,
             "commitment loss should be positive: {commitment}"
@@ -359,16 +364,16 @@ mod tests {
 
     #[test]
     fn ema_update_runs() {
-        let mut cb = VqCodebook::new(8, 4).unwrap();
+        let mut cb = VqCodebook::new(8, 4).expect("new should succeed");
         let z = vec![0.5_f32; 4];
-        let (_, idx) = cb.quantize(&z).unwrap();
+        let (_, idx) = cb.quantize(&z).expect("quantize should succeed");
         // Should not error
-        cb.ema_update(&z, &idx).unwrap();
+        cb.ema_update(&z, &idx).expect("ema_update should succeed");
     }
 
     #[test]
     fn quantize_dimension_mismatch() {
-        let cb = VqCodebook::new(8, 4).unwrap();
+        let cb = VqCodebook::new(8, 4).expect("new should succeed");
         let z = vec![0.0_f32; 7]; // 7 is not divisible by 4
         assert!(matches!(
             cb.quantize(&z),
@@ -378,7 +383,7 @@ mod tests {
 
     #[test]
     fn commitment_loss_dimension_mismatch() {
-        let cb = VqCodebook::new(8, 4).unwrap();
+        let cb = VqCodebook::new(8, 4).expect("new should succeed");
         let z = vec![1.0_f32; 8];
         let q = vec![0.0_f32; 4];
         assert!(matches!(
@@ -389,12 +394,12 @@ mod tests {
 
     #[test]
     fn ema_update_changes_embeddings() {
-        let mut cb = VqCodebook::with_decay(4, 2, 0.5).unwrap();
+        let mut cb = VqCodebook::with_decay(4, 2, 0.5).expect("with_decay should succeed");
         let original = cb.embeddings().to_vec();
         // Quantize and update
         let z = vec![10.0_f32, 10.0, -10.0, -10.0];
-        let (_, idx) = cb.quantize(&z).unwrap();
-        cb.ema_update(&z, &idx).unwrap();
+        let (_, idx) = cb.quantize(&z).expect("quantize should succeed");
+        cb.ema_update(&z, &idx).expect("ema_update should succeed");
         let updated = cb.embeddings().to_vec();
         // At least some embeddings should have changed
         let changed = original

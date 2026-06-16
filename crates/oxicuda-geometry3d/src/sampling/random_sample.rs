@@ -58,21 +58,21 @@ mod tests {
     #[test]
     fn random_sample_m_zero_returns_empty() {
         let mut rng = LcgRng::new(0);
-        let r = random_sample(5, 0, &mut rng).unwrap();
+        let r = random_sample(5, 0, &mut rng).expect("random_sample should succeed");
         assert!(r.is_empty());
     }
 
     #[test]
     fn random_sample_correct_count() {
         let mut rng = LcgRng::new(42);
-        let r = random_sample(100, 20, &mut rng).unwrap();
+        let r = random_sample(100, 20, &mut rng).expect("random_sample should succeed");
         assert_eq!(r.len(), 20);
     }
 
     #[test]
     fn random_sample_all_distinct() {
         let mut rng = LcgRng::new(42);
-        let r = random_sample(100, 50, &mut rng).unwrap();
+        let r = random_sample(100, 50, &mut rng).expect("random_sample should succeed");
         let mut sorted = r.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -82,14 +82,14 @@ mod tests {
     #[test]
     fn random_sample_indices_in_range() {
         let mut rng = LcgRng::new(7);
-        let r = random_sample(50, 25, &mut rng).unwrap();
+        let r = random_sample(50, 25, &mut rng).expect("random_sample should succeed");
         assert!(r.iter().all(|&i| i < 50));
     }
 
     #[test]
     fn random_sample_all_n_when_m_equals_n() {
         let mut rng = LcgRng::new(1);
-        let r = random_sample(10, 10, &mut rng).unwrap();
+        let r = random_sample(10, 10, &mut rng).expect("random_sample should succeed");
         assert_eq!(r.len(), 10);
         let mut sorted = r.clone();
         sorted.sort_unstable();

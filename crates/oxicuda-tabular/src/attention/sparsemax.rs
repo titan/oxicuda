@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn sparsemax_uniform_sums_to_one() {
         let z = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let out = sparsemax(&z).unwrap();
+        let out = sparsemax(&z).expect("sparsemax should succeed");
         let s: f32 = out.iter().sum();
         assert!((s - 1.0).abs() < 1e-5);
     }
@@ -117,7 +117,7 @@ mod tests {
     fn sparsemax_sparse_result() {
         // Large gap → only max survives
         let z = vec![10.0_f32, 0.0, 0.0, 0.0];
-        let out = sparsemax(&z).unwrap();
+        let out = sparsemax(&z).expect("sparsemax should succeed");
         assert!((out[0] - 1.0).abs() < 1e-5);
         assert!(out[1..].iter().all(|&v| v < 1e-6));
     }
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn entmax15_sums_to_one() {
         let z = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let out = entmax15(&z).unwrap();
+        let out = entmax15(&z).expect("entmax15 should succeed");
         let s: f32 = out.iter().sum();
         assert!((s - 1.0).abs() < 1e-3);
     }
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn sparsemax_batch_shape() {
         let z = vec![1.0_f32; 6];
-        let out = sparsemax_batch(&z, 2, 3).unwrap();
+        let out = sparsemax_batch(&z, 2, 3).expect("sparsemax_batch should succeed");
         assert_eq!(out.len(), 6);
     }
 }

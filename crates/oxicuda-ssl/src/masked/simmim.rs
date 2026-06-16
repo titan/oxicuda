@@ -315,7 +315,8 @@ mod tests {
         let target = vec![1.0_f32; n * d];
         // Mask all patches.
         let mask = vec![true; n];
-        let loss = simmim_l1_loss(&pred, &target, &mask, n, d).unwrap();
+        let loss =
+            simmim_l1_loss(&pred, &target, &mask, n, d).expect("simmim_l1_loss should succeed");
         assert!(loss > 0.0, "loss should be > 0, got {loss}");
         // Expected: mean |0 - 1| = 1.0
         assert!((loss - 1.0).abs() < 1e-5, "expected 1.0, got {loss}");
@@ -331,7 +332,8 @@ mod tests {
         let mask = vec![
             true, false, true, false, true, false, true, false, true, false,
         ];
-        let loss = simmim_l1_loss(&pred, &target, &mask, n, d).unwrap();
+        let loss =
+            simmim_l1_loss(&pred, &target, &mask, n, d).expect("simmim_l1_loss should succeed");
         assert!(loss.abs() < 1e-7, "perfect reconstruction: loss = {loss}");
     }
 
@@ -352,8 +354,10 @@ mod tests {
         let target = vec![0.0_f32; n * d];
         let pred = vec![2.0_f32; n * d]; // error = 2 per element
         let mask = vec![true; n];
-        let l1 = simmim_l1_loss(&pred, &target, &mask, n, d).unwrap();
-        let l2 = simmim_l2_loss(&pred, &target, &mask, n, d).unwrap();
+        let l1 =
+            simmim_l1_loss(&pred, &target, &mask, n, d).expect("simmim_l1_loss should succeed");
+        let l2 =
+            simmim_l2_loss(&pred, &target, &mask, n, d).expect("simmim_l2_loss should succeed");
         // L1 = mean|2| = 2.0,  L2 = mean 4 = 4.0  ⟹ L1 ≤ L2
         assert!(
             l1 <= l2,
@@ -372,7 +376,8 @@ mod tests {
         let target = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let pred = vec![2.0_f32, 3.0, 3.0, 4.0, 6.0, 7.0, 7.0, 8.0];
         let mask = vec![true, false, true, false];
-        let loss = simmim_l2_loss(&pred, &target, &mask, n, d).unwrap();
+        let loss =
+            simmim_l2_loss(&pred, &target, &mask, n, d).expect("simmim_l2_loss should succeed");
         // Masked patches 0 and 2:
         //   patch 0: (2-1)²=1, (3-2)²=1  → sum = 2
         //   patch 2: (6-5)²=1, (7-6)²=1  → sum = 2
@@ -388,7 +393,8 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let n = 200;
         let ratio = 0.6_f32;
-        let mask = simmim_random_mask(n, ratio, &mut rng).unwrap();
+        let mask =
+            simmim_random_mask(n, ratio, &mut rng).expect("simmim_random_mask should succeed");
         let n_masked = mask.iter().filter(|&&v| v).count();
         let realised = n_masked as f32 / n as f32;
         assert!(
@@ -402,7 +408,7 @@ mod tests {
     fn simmim_random_mask_length_correct() {
         let mut rng = LcgRng::new(7);
         let n = 196;
-        let mask = simmim_random_mask(n, 0.6, &mut rng).unwrap();
+        let mask = simmim_random_mask(n, 0.6, &mut rng).expect("simmim_random_mask should succeed");
         assert_eq!(mask.len(), n, "mask length mismatch");
     }
 
@@ -416,7 +422,8 @@ mod tests {
         let h = 14;
         let w = 14;
         let ratio = 0.5_f32;
-        let mask = simmim_block_mask(h, w, ratio, &mut rng).unwrap();
+        let mask =
+            simmim_block_mask(h, w, ratio, &mut rng).expect("simmim_block_mask should succeed");
         let total = h * w;
         assert_eq!(mask.len(), total);
         let n_masked = mask.iter().filter(|&&v| v).count();
@@ -437,7 +444,8 @@ mod tests {
         let pred: Vec<f32> = (0..n * d).map(|i| (i as f32) * 0.05).collect();
         let target = vec![0.5_f32; n * d];
         let mask = vec![true, false, true, false, true, false];
-        let loss = simmim_reconstruction_loss(&pred, &target, &mask, n, d, true).unwrap();
+        let loss = simmim_reconstruction_loss(&pred, &target, &mask, n, d, true)
+            .expect("simmim_reconstruction_loss should succeed");
         assert!(loss.is_finite(), "L1 dispatch returned non-finite: {loss}");
     }
 
@@ -449,7 +457,8 @@ mod tests {
         let pred: Vec<f32> = (0..n * d).map(|i| (i as f32) * 0.05).collect();
         let target = vec![0.5_f32; n * d];
         let mask = vec![true, false, true, false, true, false];
-        let loss = simmim_reconstruction_loss(&pred, &target, &mask, n, d, false).unwrap();
+        let loss = simmim_reconstruction_loss(&pred, &target, &mask, n, d, false)
+            .expect("simmim_reconstruction_loss should succeed");
         assert!(loss.is_finite(), "L2 dispatch returned non-finite: {loss}");
     }
 
@@ -464,7 +473,8 @@ mod tests {
         let mask = vec![true, false, true, false, false, true];
         // Base prediction: all zeros.
         let pred_base = vec![0.0_f32; n * d];
-        let loss_base = simmim_l1_loss(&pred_base, &target, &mask, n, d).unwrap();
+        let loss_base = simmim_l1_loss(&pred_base, &target, &mask, n, d)
+            .expect("simmim_l1_loss should succeed");
         // Mutate only unmasked patches (indices 1, 3, 4).
         let mut pred_mutated = pred_base.clone();
         for &i in &[1_usize, 3, 4] {
@@ -472,7 +482,8 @@ mod tests {
                 pred_mutated[i * d + k] = 999.0;
             }
         }
-        let loss_mutated = simmim_l1_loss(&pred_mutated, &target, &mask, n, d).unwrap();
+        let loss_mutated = simmim_l1_loss(&pred_mutated, &target, &mask, n, d)
+            .expect("simmim_l1_loss should succeed");
         assert!(
             (loss_base - loss_mutated).abs() < 1e-6,
             "unmasked patches affected loss: {loss_base} vs {loss_mutated}"
@@ -515,7 +526,7 @@ mod tests {
     fn zero_mask_ratio_returns_error_or_zero_loss() {
         let mut rng = LcgRng::new(3);
         let n = 16;
-        let mask = simmim_random_mask(n, 0.0, &mut rng).unwrap();
+        let mask = simmim_random_mask(n, 0.0, &mut rng).expect("simmim_random_mask should succeed");
         // All false — no masked patches.
         assert!(mask.iter().all(|&v| !v));
         let pred = vec![1.0_f32; n * 4];

@@ -144,7 +144,7 @@ mod tests {
             *v = ((i as f32) * 0.31415).sin();
         }
         let cfg = BarlowTwinsConfig::default();
-        let l = barlow_twins_loss(&z, &z, n, d, &cfg).unwrap();
+        let l = barlow_twins_loss(&z, &z, n, d, &cfg).expect("barlow_twins_loss should succeed");
         assert!(l < 1.0, "l = {l}");
     }
 
@@ -171,7 +171,8 @@ mod tests {
             *v = ((rng_b >> 33) as f32 / (u32::MAX as f32 + 1.0)) - 0.5;
         }
         let cfg = BarlowTwinsConfig::default();
-        let l = barlow_twins_loss(&z_a, &z_b, n, d, &cfg).unwrap();
+        let l =
+            barlow_twins_loss(&z_a, &z_b, n, d, &cfg).expect("barlow_twins_loss should succeed");
         // Each diagonal contributes ~1; total >= ~3 for d=4.
         assert!(l > 2.0, "l = {l}");
     }
@@ -204,10 +205,12 @@ mod tests {
         for (i, v) in z.iter_mut().enumerate() {
             *v = (i as f32) * 0.1;
         }
-        let cfg_zero = BarlowTwinsConfig::new(0.0).unwrap();
+        let cfg_zero = BarlowTwinsConfig::new(0.0).expect("new should succeed");
         let cfg_default = BarlowTwinsConfig::default();
-        let l_zero = barlow_twins_loss(&z, &z, n, d, &cfg_zero).unwrap();
-        let l_default = barlow_twins_loss(&z, &z, n, d, &cfg_default).unwrap();
+        let l_zero =
+            barlow_twins_loss(&z, &z, n, d, &cfg_zero).expect("barlow_twins_loss should succeed");
+        let l_default = barlow_twins_loss(&z, &z, n, d, &cfg_default)
+            .expect("barlow_twins_loss should succeed");
         // λ=0 should lose only the diagonal contribution — λ=default adds the
         // off-diagonal squared sum on top.
         assert!(l_default >= l_zero - 1e-4);

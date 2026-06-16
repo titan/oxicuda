@@ -56,7 +56,7 @@ mod tests {
     #[test]
     fn z_loss_nonneg() {
         let logits = [1.0_f32, 2.0, 0.5, -0.3, 1.5, 0.8];
-        let loss = router_z_loss(&logits, 2, 3).unwrap();
+        let loss = router_z_loss(&logits, 2, 3).expect("router_z_loss should succeed");
         assert!(loss >= 0.0, "z-loss must be non-negative, got {loss}");
         assert!(loss.is_finite(), "z-loss must be finite, got {loss}");
     }
@@ -67,7 +67,8 @@ mod tests {
         let n_experts = 4_usize;
         let n_tokens = 3_usize;
         let logits = vec![0.0_f32; n_tokens * n_experts];
-        let loss = router_z_loss(&logits, n_tokens, n_experts).unwrap();
+        let loss =
+            router_z_loss(&logits, n_tokens, n_experts).expect("router_z_loss should succeed");
         let expected = (n_experts as f32).ln().powi(2);
         assert!(
             (loss - expected).abs() < 1e-4,

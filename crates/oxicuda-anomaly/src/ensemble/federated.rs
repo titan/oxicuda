@@ -486,9 +486,10 @@ mod tests {
         let data0 = make_data(10, d, 10);
         let data1 = make_data(10, d, 11);
         let data2 = make_data(10, d, 12);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         let test = make_data(7, d, 99);
-        let scores = federated_score(&fit, &test, 7).unwrap();
+        let scores = federated_score(&fit, &test, 7).expect("federated_score should succeed");
         assert_eq!(scores.len(), 7);
     }
 
@@ -501,9 +502,10 @@ mod tests {
         let data0 = make_data(15, d, 20);
         let data1 = make_data(15, d, 21);
         let data2 = make_data(15, d, 22);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[15, 15, 15], d, &cfg, 7).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[15, 15, 15], d, &cfg, 7)
+            .expect("federated_fit should succeed");
         let test = make_data(10, d, 55);
-        let scores = federated_score(&fit, &test, 10).unwrap();
+        let scores = federated_score(&fit, &test, 10).expect("federated_score should succeed");
         for (i, &s) in scores.iter().enumerate() {
             assert!(s.is_finite(), "score[{i}] = {s} not finite");
             assert!(s >= 0.0, "score[{i}] = {s} negative");
@@ -519,9 +521,11 @@ mod tests {
         let data0 = make_data(10, d, 30);
         let data1 = make_data(10, d, 31);
         let data2 = make_data(10, d, 32);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         let test = make_data(5, d, 77);
-        let preds = federated_predict(&fit, &test, 5, 0.5).unwrap();
+        let preds =
+            federated_predict(&fit, &test, 5, 0.5).expect("federated_predict should succeed");
         assert_eq!(preds.len(), 5);
     }
 
@@ -534,10 +538,13 @@ mod tests {
         let data0 = make_data(10, d, 40);
         let data1 = make_data(10, d, 41);
         let data2 = make_data(10, d, 42);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         let test = make_data(4, d, 88);
-        let s0 = federated_client_score(&fit, 0, &test, 4).unwrap();
-        let s2 = federated_client_score(&fit, 2, &test, 4).unwrap();
+        let s0 = federated_client_score(&fit, 0, &test, 4)
+            .expect("federated_client_score should succeed");
+        let s2 = federated_client_score(&fit, 2, &test, 4)
+            .expect("federated_client_score should succeed");
         assert_eq!(s0.len(), 4);
         assert_eq!(s2.len(), 4);
         // Client scores may differ (different local data)
@@ -554,7 +561,8 @@ mod tests {
         let data0 = make_data(10, d, 50);
         let data1 = make_data(10, d, 51);
         let data2 = make_data(10, d, 52);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         let test = make_data(3, d, 66);
         let result = federated_client_score(&fit, 99, &test, 3);
         assert!(result.is_err());
@@ -573,9 +581,10 @@ mod tests {
         };
         let data0 = make_data(10, d, 60);
         let data1 = make_data(10, d, 61);
-        let fit = federated_fit(&[&data0, &data1], &[10, 10], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1], &[10, 10], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         let test = make_data(5, d, 70);
-        let scores = federated_score(&fit, &test, 5).unwrap();
+        let scores = federated_score(&fit, &test, 5).expect("federated_score should succeed");
         assert_eq!(scores.len(), 5);
         assert!(scores.iter().all(|v| v.is_finite() && *v >= 0.0));
     }
@@ -594,7 +603,8 @@ mod tests {
         let data0 = make_data(8, d, 70);
         let data1 = make_data(8, d, 71);
         let data2 = make_data(8, d, 72);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[8, 8, 8], d, &cfg, 1).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[8, 8, 8], d, &cfg, 1)
+            .expect("federated_fit should succeed");
         assert!(fit.global_weights.iter().all(|v| v.is_finite()));
         assert_eq!(fit.rounds_completed, 3);
     }
@@ -609,7 +619,8 @@ mod tests {
         let data0 = make_data(5, d, 80);
         let data1 = make_data(5, d, 81);
         let data2 = make_data(5, d, 82);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[5, 5, 5], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[5, 5, 5], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         assert_eq!(fit.rounds_completed, 7);
     }
 
@@ -623,8 +634,10 @@ mod tests {
         let data1 = make_data(10, d, 91);
         let data2 = make_data(10, d, 92);
 
-        let fit1 = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 777).unwrap();
-        let fit2 = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 777).unwrap();
+        let fit1 = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 777)
+            .expect("federated_fit should succeed");
+        let fit2 = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 777)
+            .expect("federated_fit should succeed");
 
         for (a, b) in fit1.global_weights.iter().zip(fit2.global_weights.iter()) {
             assert_eq!(a, b);
@@ -640,9 +653,11 @@ mod tests {
         let data0 = make_data(10, d, 100);
         let data1 = make_data(10, d, 101);
         let data2 = make_data(10, d, 102);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[10, 10, 10], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         let test = make_data(10, d, 200);
-        let preds = federated_predict(&fit, &test, 10, 1e12).unwrap();
+        let preds =
+            federated_predict(&fit, &test, 10, 1e12).expect("federated_predict should succeed");
         assert!(preds.iter().all(|&b| !b));
     }
 
@@ -659,7 +674,8 @@ mod tests {
         };
         let data0 = make_data(5, d, 110);
         let data1 = make_data(5, d, 111);
-        let fit = federated_fit(&[&data0, &data1], &[5, 5], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1], &[5, 5], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         assert_eq!(fit.n_features, d);
         assert_eq!(fit.global_weights.len(), d);
     }
@@ -704,7 +720,8 @@ mod tests {
         let data0 = make_data(20, d, 120);
         let data1 = make_data(5, d, 121);
         let data2 = make_data(10, d, 122);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[20, 5, 10], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[20, 5, 10], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         assert_eq!(fit.client_models[0].data_size, 20);
         assert_eq!(fit.client_models[1].data_size, 5);
         assert!(fit.global_weights.iter().all(|v| v.is_finite()));
@@ -719,7 +736,8 @@ mod tests {
         let data0 = make_data(5, d, 130);
         let data1 = make_data(5, d, 131);
         let data2 = make_data(5, d, 132);
-        let fit = federated_fit(&[&data0, &data1, &data2], &[5, 5, 5], d, &cfg, 42).unwrap();
+        let fit = federated_fit(&[&data0, &data1, &data2], &[5, 5, 5], d, &cfg, 42)
+            .expect("federated_fit should succeed");
         let result = federated_score(&fit, &[], 0);
         assert!(result.is_err());
     }

@@ -179,7 +179,7 @@ mod tests {
     fn gaussian_covariance_identity_rot_unit_scale() {
         // log_scale=0 → exp(0)=1, identity rotation → Σ = I
         let g = Gaussian3d::new_unit([0.0, 0.0, 0.0]);
-        let cov = g.covariance3d().unwrap();
+        let cov = g.covariance3d().expect("covariance3d should succeed");
         // Should be identity
         assert!((cov[0] - 1.0).abs() < 1e-5, "cov[0]={}", cov[0]);
         assert!((cov[4] - 1.0).abs() < 1e-5, "cov[4]={}", cov[4]);
@@ -204,7 +204,7 @@ mod tests {
             opacity: 0.0,
             sh: vec![0.0; 27],
         };
-        let cov = g.covariance3d().unwrap();
+        let cov = g.covariance3d().expect("covariance3d should succeed");
         assert!(cov[0] > 0.0, "cov[0] must be positive");
         assert!(cov[4] > 0.0, "cov[4] must be positive");
         assert!(cov[8] > 0.0, "cov[8] must be positive");
@@ -213,7 +213,9 @@ mod tests {
     #[test]
     fn gaussian_sh_color_shape() {
         let g = Gaussian3d::new_unit([0.0, 0.0, 0.0]);
-        let color = g.sh_color([0.0, 0.0, 1.0]).unwrap();
+        let color = g
+            .sh_color([0.0, 0.0, 1.0])
+            .expect("sh_color should succeed");
         assert_eq!(color.len(), 3);
     }
 
@@ -226,7 +228,9 @@ mod tests {
             opacity: 0.0,
             sh: vec![1.0; 27],
         };
-        let color = g.sh_color([0.577, 0.577, 0.577]).unwrap();
+        let color = g
+            .sh_color([0.577, 0.577, 0.577])
+            .expect("sh_color should succeed");
         assert!(color.iter().all(|v| v.is_finite()));
     }
 

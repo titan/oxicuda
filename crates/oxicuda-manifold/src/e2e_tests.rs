@@ -6,11 +6,14 @@ use crate::linalg::jacobi_eig::{jacobi_eigh, sort_eigen_descending};
 use crate::linear::fast_ica::{IcaNonlinearity, fast_ica};
 use crate::linear::kernel_pca::{KernelKind, kernel_pca};
 use crate::linear::pca::pca_fit;
+use crate::local::hessian_lle::hessian_lle;
 use crate::local::isomap::isomap_fit;
 use crate::local::laplacian_eigenmaps::laplacian_eigenmaps_fit;
 use crate::local::lle::lle_fit;
+use crate::local::ltsa::ltsa;
 use crate::local::mlle::mlle_fit;
 use crate::mds::classical_mds::classical_mds;
+use crate::mds::nonmetric_mds::nonmetric_mds;
 use crate::mds::smacof::smacof_mds;
 use crate::metrics::metrics::{
     continuity, kl_pq, neighborhood_preservation, pairwise_distances, trustworthiness,
@@ -480,4 +483,135 @@ fn poincare_distance_triangle() {
     let dvw = poincare_distance(&v, &w).expect("ok");
     let duw = poincare_distance(&u, &w).expect("ok");
     assert!(duw <= duv + dvw + 1e-6);
+}
+
+/// Flattened upper-triangular pairwise Euclidean distances of a row-major `n x d`.
+fn upper_pairwise(emb: &[f64], n: usize, d: usize) -> Vec<f64> {
+    let mut out = Vec::with_capacity(n * (n - 1) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut s = 0.0;
+            for c in 0..d {
+                let v = emb[i * d + c] - emb[j * d + c];
+                s += v * v;
+            }
+            out.push(s.sqrt());
+        }
+    }
+    out
+}
+
+fn pearson_corr(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len() as f64;
+    let ma = a.iter().sum::<f64>() / n;
+    let mb = b.iter().sum::<f64>() / n;
+    let mut cov = 0.0;
+    let mut va = 0.0;
+    let mut vb = 0.0;
+    for (x, y) in a.iter().zip(b) {
+        let dx = x - ma;
+        let dy = y - mb;
+        cov += dx * dy;
+        va += dx * dx;
+        vb += dy * dy;
+    }
+    if va <= 1e-30 || vb <= 1e-30 {
+        return 0.0;
+    }
+    cov / (va.sqrt() * vb.sqrt())
+}
+
+// 26. HLLE and LTSA produce consistent (highly-correlated) embeddings of the same
+//     linear 2D-in-3D data: both recover the intrinsic geometry up to an affine map,
+//     so their pairwise-distance structures must agree.
+#[test]
+fn hlle_and_ltsa_agree_on_linear_data() {
+    let side = 8;
+    let n = side * side;
+    let dim = 3;
+    let mut data = vec![0.0; n * dim];
+    for a in 0..side {
+        for b in 0..side {
+            let idx = a * side + b;
+            let t0 = a as f64 / (side - 1) as f64;
+            let t1 = b as f64 / (side - 1) as f64;
+            data[idx * dim] = t0;
+            data[idx * dim + 1] = t1;
+            data[idx * dim + 2] = 0.25 * t0 - 0.15 * t1;
+        }
+    }
+    let emb_h = hessian_lle(&data, n, dim, 2, 9).expect("hlle ok");
+    let emb_l = ltsa(&data, n, dim, 2, 9).expect("ltsa ok");
+    let pd_h = upper_pairwise(&emb_h, n, 2);
+    let pd_l = upper_pairwise(&emb_l, n, 2);
+    let corr = pearson_corr(&pd_h, &pd_l).abs();
+    assert!(
+        corr > 0.95,
+        "HLLE/LTSA pairwise-distance agreement too low: {corr}"
+    );
+}
+
+// 27. Non-metric MDS on the *raw* Euclidean distances of a configuration approximately
+//     reproduces classical MDS: with metric (linear) dissimilarities, the ordinal fit
+//     degenerates to the metric one, so the recovered pairwise distances match those of
+//     classical MDS up to rotation/scale.
+#[test]
+fn nonmetric_mds_matches_classical_on_euclidean() {
+    let mut rng = LcgRng::new(321);
+    let n = 24;
+    let dim = 2;
+    let mut pts = vec![0.0; n * dim];
+    for v in &mut pts {
+        *v = rng.next_range(-2.0, 2.0);
+    }
+    // True Euclidean distance matrix.
+    let d = pairwise_distances(&pts, n, dim).expect("ok");
+    let cmds = classical_mds(&d, n, dim).expect("cmds ok");
+    let nmds = nonmetric_mds(&d, n, dim, 300, 1e-10).expect("nmds ok");
+    let pd_c = upper_pairwise(&cmds.embedding, n, dim);
+    let pd_n = upper_pairwise(&nmds.embedding, n, dim);
+    let corr = pearson_corr(&pd_c, &pd_n).abs();
+    assert!(
+        corr > 0.98,
+        "non-metric vs classical MDS pairwise distances disagree: corr={corr}"
+    );
+    // On metric input the ordinal stress should be small.
+    assert!(
+        nmds.stress < 0.05,
+        "stress too high on metric input: {}",
+        nmds.stress
+    );
+}
+
+// 28. LTSA recovers a linear embedding whose neighbourhood structure matches LLE's on
+//     the same data, confirming the new local method integrates with the existing ones.
+#[test]
+fn ltsa_and_lle_neighbor_consistency() {
+    let side = 7;
+    let n = side * side;
+    let dim = 3;
+    let mut data = vec![0.0; n * dim];
+    let mut params = vec![0.0; n * 2];
+    for a in 0..side {
+        for b in 0..side {
+            let idx = a * side + b;
+            let t0 = a as f64 / (side - 1) as f64;
+            let t1 = b as f64 / (side - 1) as f64;
+            params[idx * 2] = t0;
+            params[idx * 2 + 1] = t1;
+            data[idx * dim] = t0;
+            data[idx * dim + 1] = t1;
+            data[idx * dim + 2] = 0.2 * t0 + 0.1 * t1;
+        }
+    }
+    let emb_ltsa = ltsa(&data, n, dim, 2, 8).expect("ltsa ok");
+    let lle = lle_fit(&data, n, dim, 8, 2, 1e-3).expect("lle ok");
+    // Both should preserve the intrinsic-parameter neighbourhoods well.
+    let np_ltsa = neighborhood_preservation(&params, &emb_ltsa, n, 2, 2, 5).expect("np ok");
+    let np_lle = neighborhood_preservation(&params, &lle.embedding, n, 2, 2, 5).expect("np ok");
+    assert!(
+        np_ltsa > 0.7,
+        "LTSA neighbour preservation too low: {np_ltsa}"
+    );
+    assert!(np_lle > 0.5, "LLE neighbour preservation too low: {np_lle}");
 }

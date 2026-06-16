@@ -120,8 +120,8 @@ mod tests {
     fn backdoor_chain() {
         // X -> Z -> Y: no confounders, empty set is valid
         let mut dag = Dag::new(3);
-        dag.add_edge(0, 2).unwrap();
-        dag.add_edge(2, 1).unwrap();
+        dag.add_edge(0, 2).expect("add_edge should succeed");
+        dag.add_edge(2, 1).expect("add_edge should succeed");
         assert!(backdoor_admissible(&dag, 0, 1, &[]));
     }
 
@@ -130,9 +130,9 @@ mod tests {
         // C -> X, C -> Y, X -> Y: need to adjust for C
         let mut dag = Dag::new(3);
         let c = 2;
-        dag.add_edge(c, 0).unwrap(); // C -> X
-        dag.add_edge(c, 1).unwrap(); // C -> Y
-        dag.add_edge(0, 1).unwrap(); // X -> Y
+        dag.add_edge(c, 0).expect("add_edge should succeed"); // C -> X
+        dag.add_edge(c, 1).expect("add_edge should succeed"); // C -> Y
+        dag.add_edge(0, 1).expect("add_edge should succeed"); // X -> Y
         assert!(!backdoor_admissible(&dag, 0, 1, &[]));
         assert!(backdoor_admissible(&dag, 0, 1, &[c]));
     }

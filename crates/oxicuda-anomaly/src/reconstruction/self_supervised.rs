@@ -473,8 +473,10 @@ mod tests {
         let cfg = default_cfg_4();
         let n = 15_usize;
         let x = make_data(n, cfg.input_dim, 1);
-        let fit = self_supervised_fit(&x, n, &cfg, 42).unwrap();
-        let scores = self_supervised_score(&fit, &x, n).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 42)
+            .expect("self-supervised fit with n_rotations=4 should succeed");
+        let scores =
+            self_supervised_score(&fit, &x, n).expect("scoring training data should succeed");
         assert_eq!(scores.len(), n);
         assert!(
             scores.iter().all(|&s| s.is_finite()),
@@ -488,8 +490,10 @@ mod tests {
         let cfg = default_cfg_2();
         let n = 10_usize;
         let x = make_data(n, cfg.input_dim, 2);
-        let fit = self_supervised_fit(&x, n, &cfg, 7).unwrap();
-        let scores = self_supervised_score(&fit, &x, n).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 7)
+            .expect("self-supervised fit with n_rotations=2 should succeed");
+        let scores =
+            self_supervised_score(&fit, &x, n).expect("scoring training data should succeed");
         assert_eq!(scores.len(), n);
         assert!(scores.iter().all(|&s| s.is_finite()));
     }
@@ -500,8 +504,9 @@ mod tests {
         let cfg = default_cfg_4();
         let n = 20_usize;
         let x = make_data(n, cfg.input_dim, 3);
-        let fit = self_supervised_fit(&x, n, &cfg, 1).unwrap();
-        let scores = self_supervised_score(&fit, &x, n).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 1).expect("self-supervised fit should succeed");
+        let scores =
+            self_supervised_score(&fit, &x, n).expect("entropy scores should be computable");
 
         let max_entropy = (cfg.n_rotations as f64).ln();
         for &s in &scores {
@@ -520,8 +525,9 @@ mod tests {
         let cfg = default_cfg_4();
         let n = 12_usize;
         let x = make_data(n, cfg.input_dim, 4);
-        let fit = self_supervised_fit(&x, n, &cfg, 2).unwrap();
-        let preds = self_supervised_predict(&fit, &x, n, 0.5).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 2).expect("self-supervised fit should succeed");
+        let preds =
+            self_supervised_predict(&fit, &x, n, 0.5).expect("predict should return bool vector");
         assert_eq!(preds.len(), n);
     }
 
@@ -531,7 +537,7 @@ mod tests {
         let cfg = default_cfg_4();
         let n = 10_usize;
         let x = make_data(n, cfg.input_dim, 5);
-        let fit = self_supervised_fit(&x, n, &cfg, 3).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 3).expect("self-supervised fit should succeed");
 
         // Pass wrong number of elements (only 3 instead of 8)
         let result = self_supervised_score(&fit, &[0.1, 0.2, 0.3], 1);
@@ -547,10 +553,12 @@ mod tests {
         let cfg = default_cfg_2();
         let n = 20_usize;
         let x = make_data(n, cfg.input_dim, 6);
-        let fit = self_supervised_fit(&x, n, &cfg, 4).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 4)
+            .expect("self-supervised fit with n_rotations=2 should succeed");
         assert_eq!(fit.head_w.len(), 2 * (cfg.hidden_dim / 2));
         assert_eq!(fit.head_b.len(), 2);
-        let scores = self_supervised_score(&fit, &x, n).unwrap();
+        let scores = self_supervised_score(&fit, &x, n)
+            .expect("entropy scores for n_rotations=2 should succeed");
         assert!(scores.iter().all(|&s| s.is_finite() && s >= -1e-9));
     }
 
@@ -560,10 +568,12 @@ mod tests {
         let cfg = default_cfg_4();
         let n = 20_usize;
         let x = make_data(n, cfg.input_dim, 7);
-        let fit = self_supervised_fit(&x, n, &cfg, 5).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 5)
+            .expect("self-supervised fit with n_rotations=4 should succeed");
         assert_eq!(fit.head_w.len(), 4 * (cfg.hidden_dim / 2));
         assert_eq!(fit.head_b.len(), 4);
-        let scores = self_supervised_score(&fit, &x, n).unwrap();
+        let scores = self_supervised_score(&fit, &x, n)
+            .expect("entropy scores for n_rotations=4 should succeed");
         assert!(scores.iter().all(|&s| s.is_finite() && s >= -1e-9));
     }
 
@@ -573,10 +583,11 @@ mod tests {
         let cfg = default_cfg_4();
         let n = 15_usize;
         let x = make_data(n, cfg.input_dim, 8);
-        let fit = self_supervised_fit(&x, n, &cfg, 6).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 6).expect("self-supervised fit should succeed");
 
         // With threshold=0 (all entropy > 0) everything should be flagged
-        let preds = self_supervised_predict(&fit, &x, n, 0.0).unwrap();
+        let preds = self_supervised_predict(&fit, &x, n, 0.0)
+            .expect("predict with zero threshold should succeed");
         let flagged = preds.iter().filter(|&&p| p).count();
         assert!(flagged > 0, "At least 1 sample should have entropy > 0");
     }
@@ -612,8 +623,9 @@ mod tests {
         let cfg = default_cfg_4();
         let n = 10_usize;
         let x = make_data(n, cfg.input_dim, 12);
-        let fit = self_supervised_fit(&x, n, &cfg, 9).unwrap();
-        let gaps = self_supervised_confidence_gap(&fit, &x, n).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 9).expect("self-supervised fit should succeed");
+        let gaps = self_supervised_confidence_gap(&fit, &x, n)
+            .expect("confidence-gap scores should be computable");
         for &g in &gaps {
             assert!(
                 (-1e-9..=1.0 + 1e-9).contains(&g),
@@ -639,7 +651,7 @@ mod tests {
         let cfg = default_cfg_4();
         let n = 5_usize;
         let x = make_data(n, cfg.input_dim, 14);
-        let fit = self_supervised_fit(&x, n, &cfg, 10).unwrap();
+        let fit = self_supervised_fit(&x, n, &cfg, 10).expect("self-supervised fit should succeed");
 
         for s in 0..n {
             let xi = &x[s * cfg.input_dim..(s + 1) * cfg.input_dim];

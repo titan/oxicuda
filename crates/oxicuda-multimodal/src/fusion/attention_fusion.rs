@@ -153,31 +153,33 @@ mod tests {
 
     #[test]
     fn attention_fusion_weights_sum_to_one() {
-        let af = AttentionFusion::zeros(3, 8).unwrap();
+        let af = AttentionFusion::zeros(3, 8).expect("zeros should succeed");
         let m0 = vec![1.0_f32; 8];
         let m1 = vec![2.0_f32; 8];
         let m2 = vec![0.5_f32; 8];
-        let (weights, _fused) = af.forward(&[&m0, &m1, &m2]).unwrap();
+        let (weights, _fused) = af
+            .forward(&[&m0, &m1, &m2])
+            .expect("forward should succeed");
         let s: f32 = weights.iter().sum();
         assert!((s - 1.0).abs() < 1e-6, "weights sum = {s}");
     }
 
     #[test]
     fn attention_fusion_fused_shape() {
-        let af = AttentionFusion::zeros(2, 8).unwrap();
+        let af = AttentionFusion::zeros(2, 8).expect("zeros should succeed");
         let m0 = vec![0.0_f32; 8];
         let m1 = vec![1.0_f32; 8];
-        let (_w, fused) = af.forward(&[&m0, &m1]).unwrap();
+        let (_w, fused) = af.forward(&[&m0, &m1]).expect("forward should succeed");
         assert_eq!(fused.len(), 8);
     }
 
     #[test]
     fn attention_fusion_zero_weights_uniform() {
         // With zero attention weights: all logits equal → uniform weights
-        let af = AttentionFusion::zeros(4, 8).unwrap();
+        let af = AttentionFusion::zeros(4, 8).expect("zeros should succeed");
         let modals: Vec<Vec<f32>> = (0..4).map(|i| vec![i as f32; 8]).collect();
         let refs: Vec<&[f32]> = modals.iter().map(|v| v.as_slice()).collect();
-        let (weights, _) = af.forward(&refs).unwrap();
+        let (weights, _) = af.forward(&refs).expect("forward should succeed");
         for &w in &weights {
             assert!((w - 0.25).abs() < 1e-6, "expected 0.25, got {w}");
         }
@@ -186,10 +188,10 @@ mod tests {
     #[test]
     fn attention_fusion_weighted_sum_correct() {
         // With uniform weights, fused = mean of modalities
-        let af = AttentionFusion::zeros(2, 4).unwrap();
+        let af = AttentionFusion::zeros(2, 4).expect("zeros should succeed");
         let m0 = vec![2.0_f32; 4];
         let m1 = vec![4.0_f32; 4];
-        let (_w, fused) = af.forward(&[&m0, &m1]).unwrap();
+        let (_w, fused) = af.forward(&[&m0, &m1]).expect("forward should succeed");
         // Expected: 0.5 * 2 + 0.5 * 4 = 3
         for &v in &fused {
             assert!((v - 3.0).abs() < 1e-6, "expected 3.0, got {v}");
@@ -210,10 +212,12 @@ mod tests {
 
     #[test]
     fn attention_fusion_batch_correct() {
-        let af = AttentionFusion::zeros(2, 4).unwrap();
+        let af = AttentionFusion::zeros(2, 4).expect("zeros should succeed");
         let m0 = vec![1.0_f32; 2 * 4];
         let m1 = vec![3.0_f32; 2 * 4];
-        let (w, f) = af.forward_batch(&[m0, m1], 2).unwrap();
+        let (w, f) = af
+            .forward_batch(&[m0, m1], 2)
+            .expect("forward_batch should succeed");
         assert_eq!(w.len(), 2 * 2);
         assert_eq!(f.len(), 2 * 4);
         // All batch weights sum to 1
@@ -225,7 +229,7 @@ mod tests {
 
     #[test]
     fn attention_fusion_finite_output() {
-        let mut af = AttentionFusion::zeros(3, 8).unwrap();
+        let mut af = AttentionFusion::zeros(3, 8).expect("zeros should succeed");
         for (i, w) in af.w_attn.iter_mut().enumerate() {
             *w = (i as f32 * 0.1).sin();
         }
@@ -233,7 +237,7 @@ mod tests {
             .map(|i| (0..8).map(|d| (i * d) as f32 * 0.1).collect())
             .collect();
         let refs_slices: Vec<&[f32]> = refs.iter().map(|v| v.as_slice()).collect();
-        let (w, f) = af.forward(&refs_slices).unwrap();
+        let (w, f) = af.forward(&refs_slices).expect("forward should succeed");
         assert!(w.iter().all(|v| v.is_finite()));
         assert!(f.iter().all(|v| v.is_finite()));
     }

@@ -451,9 +451,10 @@ mod tests {
         // Hebbian: store(key, value); recall(key) = (key·key) * value (exact direction).
         let key = vec![1.0f32, 0.0, 0.0, 0.0];
         let value = vec![2.0f32, -3.0, 1.0];
-        let mut mem = HeteroAssociativeMemory::new(cfg(4, 3, false)).unwrap();
-        mem.store(&key, &value).unwrap();
-        let recalled = mem.recall(&key).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(4, 3, false)).expect("value should be present");
+        mem.store(&key, &value).expect("store should succeed");
+        let recalled = mem.recall(&key).expect("recall should succeed");
         // key·key = 1, so recall == value exactly here.
         for (r, v) in recalled.iter().zip(value.iter()) {
             assert!((r - v).abs() < 1e-5, "r={r} v={v}");
@@ -465,9 +466,10 @@ mod tests {
         // Non-unit key: recall = ||key||^2 * value (direction preserved, scaled).
         let key = vec![2.0f32, 0.0]; // ||key||^2 = 4
         let value = vec![1.0f32, -1.0, 0.5];
-        let mut mem = HeteroAssociativeMemory::new(cfg(2, 3, false)).unwrap();
-        mem.store(&key, &value).unwrap();
-        let recalled = mem.recall(&key).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(2, 3, false)).expect("value should be present");
+        mem.store(&key, &value).expect("store should succeed");
+        let recalled = mem.recall(&key).expect("recall should succeed");
         for (r, v) in recalled.iter().zip(value.iter()) {
             assert!((r - 4.0 * v).abs() < 1e-4, "r={r} expected={}", 4.0 * v);
         }
@@ -476,7 +478,8 @@ mod tests {
     #[test]
     fn orthonormal_keys_recall_exact_hebbian() {
         // Orthonormal keys (standard basis) → Hebbian recall is exact.
-        let mut mem = HeteroAssociativeMemory::new(cfg(3, 2, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(3, 2, false)).expect("value should be present");
         let keys = [
             vec![1.0f32, 0.0, 0.0],
             vec![0.0f32, 1.0, 0.0],
@@ -484,10 +487,10 @@ mod tests {
         ];
         let values = [vec![5.0f32, -2.0], vec![-1.0f32, 3.0], vec![0.5f32, 0.5]];
         for (k, v) in keys.iter().zip(values.iter()) {
-            mem.store(k, v).unwrap();
+            mem.store(k, v).expect("store should succeed");
         }
         for (k, v) in keys.iter().zip(values.iter()) {
-            let recalled = mem.recall(k).unwrap();
+            let recalled = mem.recall(k).expect("recall should succeed");
             for (r, e) in recalled.iter().zip(v.iter()) {
                 assert!((r - e).abs() < 1e-4, "recall {r} != {e}");
             }
@@ -498,14 +501,15 @@ mod tests {
     fn orthonormal_rotated_keys_recall_exact_hebbian() {
         // A rotated orthonormal basis is still orthonormal → Hebbian recall exact.
         let s = std::f32::consts::FRAC_1_SQRT_2;
-        let mut mem = HeteroAssociativeMemory::new(cfg(2, 2, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(2, 2, false)).expect("value should be present");
         let keys = [vec![s, s], vec![s, -s]];
         let values = [vec![3.0f32, 7.0], vec![-4.0f32, 1.0]];
         for (k, v) in keys.iter().zip(values.iter()) {
-            mem.store(k, v).unwrap();
+            mem.store(k, v).expect("store should succeed");
         }
         for (k, v) in keys.iter().zip(values.iter()) {
-            let recalled = mem.recall(k).unwrap();
+            let recalled = mem.recall(k).expect("recall should succeed");
             for (r, e) in recalled.iter().zip(v.iter()) {
                 assert!((r - e).abs() < 1e-4, "recall {r} != {e}");
             }
@@ -516,7 +520,8 @@ mod tests {
     fn pseudo_inverse_exact_recall_nonorthogonal_keys() {
         // Correlated (non-orthogonal) keys: Hebbian crosstalk would corrupt recall, but
         // the ridge pseudo-inverse recovers exact values.
-        let mut mem = HeteroAssociativeMemory::new(cfg(3, 2, true)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(3, 2, true)).expect("value should be present");
         let keys = [
             vec![1.0f32, 0.5, 0.0],
             vec![0.5f32, 1.0, 0.5],
@@ -524,11 +529,11 @@ mod tests {
         ];
         let values = [vec![1.0f32, 2.0], vec![3.0f32, -1.0], vec![-2.0f32, 0.5]];
         for (k, v) in keys.iter().zip(values.iter()) {
-            mem.store(k, v).unwrap();
+            mem.store(k, v).expect("store should succeed");
         }
-        mem.finalize().unwrap();
+        mem.finalize().expect("finalize should succeed");
         for (k, v) in keys.iter().zip(values.iter()) {
-            let recalled = mem.recall(k).unwrap();
+            let recalled = mem.recall(k).expect("recall should succeed");
             for (r, e) in recalled.iter().zip(v.iter()) {
                 assert!((r - e).abs() < 1e-3, "pinv recall {r} != {e}");
             }
@@ -542,19 +547,20 @@ mod tests {
         let key_dim = 8;
         let value_dim = 5;
         let n = 6; // fewer pairs than key_dim → well-conditioned
-        let mut mem = HeteroAssociativeMemory::new(cfg(key_dim, value_dim, true)).unwrap();
+        let mut mem = HeteroAssociativeMemory::new(cfg(key_dim, value_dim, true))
+            .expect("value should be present");
         let mut keys = Vec::new();
         let mut values = Vec::new();
         for _ in 0..n {
             let k = gaussian_vec(key_dim, &mut rng);
             let v = gaussian_vec(value_dim, &mut rng);
-            mem.store(&k, &v).unwrap();
+            mem.store(&k, &v).expect("store should succeed");
             keys.push(k);
             values.push(v);
         }
-        mem.finalize().unwrap();
+        mem.finalize().expect("finalize should succeed");
         for (k, v) in keys.iter().zip(values.iter()) {
-            let recalled = mem.recall(k).unwrap();
+            let recalled = mem.recall(k).expect("recall should succeed");
             for (r, e) in recalled.iter().zip(v.iter()) {
                 assert!((r - e).abs() < 1e-3, "recall {r} != {e}");
             }
@@ -564,7 +570,8 @@ mod tests {
     #[test]
     fn recall_cleanup_picks_correct_codebook_index() {
         // Store orthonormal-keyed pairs, then clean up the recall against a codebook.
-        let mut mem = HeteroAssociativeMemory::new(cfg(3, 3, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(3, 3, false)).expect("value should be present");
         let keys = [
             vec![1.0f32, 0.0, 0.0],
             vec![0.0f32, 1.0, 0.0],
@@ -576,12 +583,14 @@ mod tests {
             vec![0.0f32, 0.0, 1.0],
         ];
         for (k, v) in keys.iter().zip(values.iter()) {
-            mem.store(k, v).unwrap();
+            mem.store(k, v).expect("store should succeed");
         }
         // Codebook = the three value prototypes flattened.
         let codebook: Vec<f32> = values.iter().flatten().copied().collect();
         for (i, k) in keys.iter().enumerate() {
-            let idx = mem.recall_cleanup(k, &codebook, 3).unwrap();
+            let idx = mem
+                .recall_cleanup(k, &codebook, 3)
+                .expect("recall_cleanup should succeed");
             assert_eq!(idx, i, "cleanup picked {idx}, expected {i}");
         }
     }
@@ -589,30 +598,42 @@ mod tests {
     #[test]
     fn recall_cleanup_robust_to_scaling() {
         // Cosine cleanup is scale-invariant: a scaled codebook still matches.
-        let mut mem = HeteroAssociativeMemory::new(cfg(2, 2, false)).unwrap();
-        mem.store(&[1.0, 0.0], &[1.0, 0.0]).unwrap();
-        mem.store(&[0.0, 1.0], &[0.0, 1.0]).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(2, 2, false)).expect("value should be present");
+        mem.store(&[1.0, 0.0], &[1.0, 0.0])
+            .expect("store should succeed");
+        mem.store(&[0.0, 1.0], &[0.0, 1.0])
+            .expect("store should succeed");
         // Codebook scaled by 10 — cosine ignores magnitude.
         let codebook = vec![10.0f32, 0.0, 0.0, 10.0];
-        assert_eq!(mem.recall_cleanup(&[1.0, 0.0], &codebook, 2).unwrap(), 0);
-        assert_eq!(mem.recall_cleanup(&[0.0, 1.0], &codebook, 2).unwrap(), 1);
+        assert_eq!(
+            mem.recall_cleanup(&[1.0, 0.0], &codebook, 2)
+                .expect("recall_cleanup should succeed"),
+            0
+        );
+        assert_eq!(
+            mem.recall_cleanup(&[0.0, 1.0], &codebook, 2)
+                .expect("recall_cleanup should succeed"),
+            1
+        );
     }
 
     #[test]
     fn recall_length_equals_value_dim() {
-        let mem = HeteroAssociativeMemory::new(cfg(7, 4, false)).unwrap();
-        let recalled = mem.recall(&[0.0; 7]).unwrap();
+        let mem = HeteroAssociativeMemory::new(cfg(7, 4, false)).expect("value should be present");
+        let recalled = mem.recall(&[0.0; 7]).expect("recall should succeed");
         assert_eq!(recalled.len(), 4);
     }
 
     #[test]
     fn rectangular_weight_key_ne_value() {
         // key_dim != value_dim: rectangular W, recall maps 5→3.
-        let mut mem = HeteroAssociativeMemory::new(cfg(5, 3, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(5, 3, false)).expect("value should be present");
         let key = vec![1.0f32, 0.0, 0.0, 0.0, 0.0];
         let value = vec![9.0f32, 8.0, 7.0];
-        mem.store(&key, &value).unwrap();
-        let recalled = mem.recall(&key).unwrap();
+        mem.store(&key, &value).expect("store should succeed");
+        let recalled = mem.recall(&key).expect("recall should succeed");
         assert_eq!(recalled.len(), 3);
         for (r, v) in recalled.iter().zip(value.iter()) {
             assert!((r - v).abs() < 1e-5);
@@ -621,10 +642,13 @@ mod tests {
 
     #[test]
     fn n_stored_counts_pairs() {
-        let mut mem = HeteroAssociativeMemory::new(cfg(2, 2, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(2, 2, false)).expect("value should be present");
         assert_eq!(mem.n_stored(), 0);
-        mem.store(&[1.0, 0.0], &[1.0, 0.0]).unwrap();
-        mem.store(&[0.0, 1.0], &[0.0, 1.0]).unwrap();
+        mem.store(&[1.0, 0.0], &[1.0, 0.0])
+            .expect("store should succeed");
+        mem.store(&[0.0, 1.0], &[0.0, 1.0])
+            .expect("store should succeed");
         assert_eq!(mem.n_stored(), 2);
     }
 
@@ -635,17 +659,25 @@ mod tests {
         let keys = vec![1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0];
         let values = vec![5.0f32, 6.0, 7.0, 8.0];
 
-        let mut batched = HeteroAssociativeMemory::new(cfg(key_dim, value_dim, false)).unwrap();
-        batched.store_batch(&keys, &values, 2).unwrap();
+        let mut batched = HeteroAssociativeMemory::new(cfg(key_dim, value_dim, false))
+            .expect("value should be present");
+        batched
+            .store_batch(&keys, &values, 2)
+            .expect("store_batch should succeed");
 
-        let mut single = HeteroAssociativeMemory::new(cfg(key_dim, value_dim, false)).unwrap();
-        single.store(&keys[0..3], &values[0..2]).unwrap();
-        single.store(&keys[3..6], &values[2..4]).unwrap();
+        let mut single = HeteroAssociativeMemory::new(cfg(key_dim, value_dim, false))
+            .expect("value should be present");
+        single
+            .store(&keys[0..3], &values[0..2])
+            .expect("store should succeed");
+        single
+            .store(&keys[3..6], &values[2..4])
+            .expect("store should succeed");
 
         assert_eq!(batched.n_stored(), single.n_stored());
         let probe = vec![0.3f32, -0.7, 1.1];
-        let rb = batched.recall(&probe).unwrap();
-        let rs = single.recall(&probe).unwrap();
+        let rb = batched.recall(&probe).expect("recall should succeed");
+        let rs = single.recall(&probe).expect("recall should succeed");
         for (a, b) in rb.iter().zip(rs.iter()) {
             assert!((a - b).abs() < 1e-5, "batch {a} != single {b}");
         }
@@ -659,19 +691,22 @@ mod tests {
         let key_dim = 256;
         let value_dim = 64;
         let n = 5;
-        let mut mem = HeteroAssociativeMemory::new(cfg(key_dim, value_dim, false)).unwrap();
+        let mut mem = HeteroAssociativeMemory::new(cfg(key_dim, value_dim, false))
+            .expect("value should be present");
         let mut keys = Vec::new();
         let mut values = Vec::new();
         for _ in 0..n {
             let k = gaussian_vec(key_dim, &mut rng);
             let v = gaussian_vec(value_dim, &mut rng);
-            mem.store(&k, &v).unwrap();
+            mem.store(&k, &v).expect("store should succeed");
             keys.push(k);
             values.push(v);
         }
         let codebook: Vec<f32> = values.iter().flatten().copied().collect();
         for (i, k) in keys.iter().enumerate() {
-            let idx = mem.recall_cleanup(k, &codebook, n).unwrap();
+            let idx = mem
+                .recall_cleanup(k, &codebook, n)
+                .expect("recall_cleanup should succeed");
             assert_eq!(idx, i, "high-D cleanup picked {idx}, expected {i}");
         }
     }
@@ -679,21 +714,29 @@ mod tests {
     #[test]
     fn deterministic_recall() {
         let build = || {
-            let mut m = HeteroAssociativeMemory::new(cfg(4, 3, false)).unwrap();
-            m.store(&[1.0, 2.0, 3.0, 4.0], &[0.1, 0.2, 0.3]).unwrap();
-            m.store(&[4.0, 3.0, 2.0, 1.0], &[0.3, 0.2, 0.1]).unwrap();
+            let mut m =
+                HeteroAssociativeMemory::new(cfg(4, 3, false)).expect("value should be present");
+            m.store(&[1.0, 2.0, 3.0, 4.0], &[0.1, 0.2, 0.3])
+                .expect("store should succeed");
+            m.store(&[4.0, 3.0, 2.0, 1.0], &[0.3, 0.2, 0.1])
+                .expect("store should succeed");
             m
         };
         let a = build();
         let b = build();
-        let ra = a.recall(&[1.0, 1.0, 1.0, 1.0]).unwrap();
-        let rb = b.recall(&[1.0, 1.0, 1.0, 1.0]).unwrap();
+        let ra = a
+            .recall(&[1.0, 1.0, 1.0, 1.0])
+            .expect("recall should succeed");
+        let rb = b
+            .recall(&[1.0, 1.0, 1.0, 1.0])
+            .expect("recall should succeed");
         assert_eq!(ra, rb);
     }
 
     #[test]
     fn err_key_wrong_length() {
-        let mut mem = HeteroAssociativeMemory::new(cfg(4, 2, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(4, 2, false)).expect("value should be present");
         let res = mem.store(&[1.0, 0.0, 0.0], &[1.0, 0.0]);
         assert!(matches!(res, Err(HdcError::DimensionMismatch { .. })));
         let res2 = mem.recall(&[1.0, 0.0]);
@@ -702,14 +745,15 @@ mod tests {
 
     #[test]
     fn err_value_wrong_length() {
-        let mut mem = HeteroAssociativeMemory::new(cfg(2, 4, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(2, 4, false)).expect("value should be present");
         let res = mem.store(&[1.0, 0.0], &[1.0, 0.0, 0.0]);
         assert!(matches!(res, Err(HdcError::DimensionMismatch { .. })));
     }
 
     #[test]
     fn err_codebook_length_mismatch() {
-        let mem = HeteroAssociativeMemory::new(cfg(2, 3, false)).unwrap();
+        let mem = HeteroAssociativeMemory::new(cfg(2, 3, false)).expect("value should be present");
         // n_codes=2 expects 2*3=6 elems; supply 5.
         let res = mem.recall_cleanup(&[1.0, 0.0], &[0.0; 5], 2);
         assert!(matches!(res, Err(HdcError::DimensionMismatch { .. })));
@@ -717,7 +761,7 @@ mod tests {
 
     #[test]
     fn err_codebook_empty() {
-        let mem = HeteroAssociativeMemory::new(cfg(2, 3, false)).unwrap();
+        let mem = HeteroAssociativeMemory::new(cfg(2, 3, false)).expect("value should be present");
         let res = mem.recall_cleanup(&[1.0, 0.0], &[], 0);
         assert!(matches!(res, Err(HdcError::EmptyInput)));
     }
@@ -736,7 +780,8 @@ mod tests {
 
     #[test]
     fn err_batch_keys_length_mismatch() {
-        let mut mem = HeteroAssociativeMemory::new(cfg(3, 2, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(3, 2, false)).expect("value should be present");
         // n=2 expects keys.len()=6; supply 5.
         let res = mem.store_batch(&[0.0; 5], &[0.0; 4], 2);
         assert!(matches!(res, Err(HdcError::DimensionMismatch { .. })));
@@ -744,7 +789,8 @@ mod tests {
 
     #[test]
     fn err_batch_values_length_mismatch() {
-        let mut mem = HeteroAssociativeMemory::new(cfg(3, 2, false)).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(3, 2, false)).expect("value should be present");
         // n=2 expects values.len()=4; supply 3.
         let res = mem.store_batch(&[0.0; 6], &[0.0; 3], 2);
         assert!(matches!(res, Err(HdcError::DimensionMismatch { .. })));
@@ -752,8 +798,10 @@ mod tests {
 
     #[test]
     fn empty_memory_recall_is_zeros() {
-        let mem = HeteroAssociativeMemory::new(cfg(5, 3, false)).unwrap();
-        let recalled = mem.recall(&[1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
+        let mem = HeteroAssociativeMemory::new(cfg(5, 3, false)).expect("value should be present");
+        let recalled = mem
+            .recall(&[1.0, 2.0, 3.0, 4.0, 5.0])
+            .expect("recall should succeed");
         assert_eq!(recalled, vec![0.0, 0.0, 0.0]);
     }
 
@@ -761,39 +809,46 @@ mod tests {
     fn cosine_cleanup_tie_breaks_to_lower_index() {
         // Empty memory → recall is zeros → all cosines are NEG_INFINITY (tie); the
         // argmax keeps the first index (lower index wins).
-        let mem = HeteroAssociativeMemory::new(cfg(2, 2, false)).unwrap();
+        let mem = HeteroAssociativeMemory::new(cfg(2, 2, false)).expect("value should be present");
         let codebook = vec![1.0f32, 0.0, 0.0, 1.0];
-        let idx = mem.recall_cleanup(&[0.0, 0.0], &codebook, 2).unwrap();
+        let idx = mem
+            .recall_cleanup(&[0.0, 0.0], &codebook, 2)
+            .expect("recall_cleanup should succeed");
         assert_eq!(idx, 0);
     }
 
     #[test]
     fn finalize_hebbian_mode_is_noop() {
         // use_pseudo_inverse=false: finalize must not alter the Hebbian weights.
-        let mut mem = HeteroAssociativeMemory::new(cfg(2, 2, false)).unwrap();
-        mem.store(&[1.0, 0.0], &[3.0, 4.0]).unwrap();
-        let before = mem.recall(&[1.0, 0.0]).unwrap();
-        mem.finalize().unwrap();
-        let after = mem.recall(&[1.0, 0.0]).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(2, 2, false)).expect("value should be present");
+        mem.store(&[1.0, 0.0], &[3.0, 4.0])
+            .expect("store should succeed");
+        let before = mem.recall(&[1.0, 0.0]).expect("recall should succeed");
+        mem.finalize().expect("finalize should succeed");
+        let after = mem.recall(&[1.0, 0.0]).expect("recall should succeed");
         assert_eq!(before, after);
     }
 
     #[test]
     fn finalize_no_stored_pairs_is_noop() {
         // Pseudo-inverse mode but nothing stored → finalize is a clean no-op.
-        let mut mem = HeteroAssociativeMemory::new(cfg(3, 2, true)).unwrap();
-        mem.finalize().unwrap();
-        let recalled = mem.recall(&[1.0, 2.0, 3.0]).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(3, 2, true)).expect("value should be present");
+        mem.finalize().expect("finalize should succeed");
+        let recalled = mem.recall(&[1.0, 2.0, 3.0]).expect("recall should succeed");
         assert_eq!(recalled, vec![0.0, 0.0]);
     }
 
     #[test]
     fn pseudo_inverse_single_pair_exact() {
         // Single pair, pseudo-inverse: recall(key) recovers value exactly.
-        let mut mem = HeteroAssociativeMemory::new(cfg(3, 2, true)).unwrap();
-        mem.store(&[2.0, 1.0, 0.0], &[5.0, -3.0]).unwrap();
-        mem.finalize().unwrap();
-        let recalled = mem.recall(&[2.0, 1.0, 0.0]).unwrap();
+        let mut mem =
+            HeteroAssociativeMemory::new(cfg(3, 2, true)).expect("value should be present");
+        mem.store(&[2.0, 1.0, 0.0], &[5.0, -3.0])
+            .expect("store should succeed");
+        mem.finalize().expect("finalize should succeed");
+        let recalled = mem.recall(&[2.0, 1.0, 0.0]).expect("recall should succeed");
         assert!((recalled[0] - 5.0).abs() < 1e-3, "got {}", recalled[0]);
         assert!((recalled[1] + 3.0).abs() < 1e-3, "got {}", recalled[1]);
     }
@@ -803,7 +858,7 @@ mod tests {
         // Sanity check on the inline solver: I·X = B ⇒ X = B.
         let a = vec![1.0, 0.0, 0.0, 1.0]; // 2×2 identity
         let b = vec![3.0, 4.0, 5.0, 6.0]; // 2×2 rhs
-        let x = solve_linear_system(a, b.clone(), 2, 2).unwrap();
+        let x = solve_linear_system(a, b.clone(), 2, 2).expect("value should be present");
         assert_eq!(x, b);
     }
 

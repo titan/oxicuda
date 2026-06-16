@@ -339,7 +339,7 @@ mod tests {
             .map(|i| {
                 let t = a + i as f64 * h;
                 let w = if i == 0 || i == n { 0.5 } else { 1.0 };
-                w * von_mises_pdf(t, mu, kappa).unwrap()
+                w * von_mises_pdf(t, mu, kappa).expect("von_mises_pdf should succeed")
             })
             .sum::<f64>()
             * h;

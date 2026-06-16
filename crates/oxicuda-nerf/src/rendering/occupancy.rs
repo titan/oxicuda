@@ -151,17 +151,17 @@ mod tests {
 
     #[test]
     fn occupancy_set_get() {
-        let mut grid = OccupancyGrid::new(8, 1.0).unwrap();
-        grid.set(2, 3, 4, true).unwrap();
-        assert!(grid.get(2, 3, 4).unwrap());
-        assert!(!grid.get(0, 0, 0).unwrap());
+        let mut grid = OccupancyGrid::new(8, 1.0).expect("new should succeed");
+        grid.set(2, 3, 4, true).expect("set should succeed");
+        assert!(grid.get(2, 3, 4).expect("get should succeed"));
+        assert!(!grid.get(0, 0, 0).expect("get should succeed"));
     }
 
     #[test]
     fn world_query_inside_bound() {
-        let mut grid = OccupancyGrid::new(4, 1.0).unwrap();
+        let mut grid = OccupancyGrid::new(4, 1.0).expect("new should succeed");
         // Mark center voxel
-        grid.set(2, 2, 2, true).unwrap();
+        grid.set(2, 2, 2, true).expect("set should succeed");
         // World point that maps to (2,2,2) in a 4-res grid spanning [-1,1]
         // cell width = 2/4 = 0.5, center of voxel 2 = -1 + 2.5*0.5 = 0.25
         assert!(grid.is_occupied_world([0.25, 0.25, 0.25]));
@@ -169,9 +169,10 @@ mod tests {
 
     #[test]
     fn update_from_density() {
-        let mut grid = OccupancyGrid::new(2, 1.0).unwrap();
+        let mut grid = OccupancyGrid::new(2, 1.0).expect("new should succeed");
         let density = vec![0.1, 0.2, 0.5, 0.8, 0.0, 0.9, 0.3, 0.7];
-        grid.update_from_density(&density, 0.4).unwrap();
+        grid.update_from_density(&density, 0.4)
+            .expect("update_from_density should succeed");
         // voxels 0,1,2,4,6 below threshold → empty; 3,5,7 above → occupied
         assert!(!grid.data[0]);
         assert!(grid.data[3]);

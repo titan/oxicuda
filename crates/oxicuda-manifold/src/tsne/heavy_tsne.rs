@@ -922,7 +922,7 @@ mod tests {
         };
         let result = heavy_tsne_fit(&x, n, dim, &cfg, &mut rng);
         assert!(result.is_ok(), "alpha=1 failed: {:?}", result.err());
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert_eq!(r.embedding.len(), n * 2);
         assert!(r.embedding.iter().all(|v| v.is_finite()));
     }
@@ -1052,7 +1052,7 @@ mod tests {
         let x: Vec<f64> = (0..n * dim).map(|_| rng.next_normal()).collect();
         let result = cauchy_tsne_fit(&x, n, dim, 50, 2.0, 100.0, &mut rng);
         assert!(result.is_ok(), "cauchy_tsne_fit failed: {:?}", result.err());
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert!(r.embedding.iter().all(|v| v.is_finite()));
     }
 
@@ -1089,7 +1089,7 @@ mod tests {
         };
         let result = alpha_tsne_fit(&x, n, dim, &cfg, &mut rng);
         assert!(result.is_ok(), "alpha_tsne_fit failed: {:?}", result.err());
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert!(r.embedding.iter().all(|v| v.is_finite()));
     }
 

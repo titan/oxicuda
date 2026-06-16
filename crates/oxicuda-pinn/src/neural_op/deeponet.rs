@@ -219,7 +219,9 @@ mod tests {
         let mut rng = LcgRng::new(2);
         let model = DeepONet::new(make_config(), &mut rng);
         let fs = vec![0.1_f32; 8];
-        let out = model.branch_forward(&fs).unwrap();
+        let out = model
+            .branch_forward(&fs)
+            .expect("branch forward should succeed for valid sensor input");
         assert_eq!(out.len(), 16);
     }
 
@@ -228,7 +230,9 @@ mod tests {
         let mut rng = LcgRng::new(3);
         let model = DeepONet::new(make_config(), &mut rng);
         let q = vec![0.5_f32];
-        let out = model.trunk_forward(&q).unwrap();
+        let out = model
+            .trunk_forward(&q)
+            .expect("trunk forward should succeed for valid query input");
         assert_eq!(out.len(), 16);
     }
 
@@ -238,7 +242,9 @@ mod tests {
         let model = DeepONet::new(make_config(), &mut rng);
         let fs = vec![0.1_f32; 8];
         let q = vec![0.5_f32];
-        let out = model.forward(&fs, &q).unwrap();
+        let out = model
+            .forward(&fs, &q)
+            .expect("DeepONet forward should produce a finite scalar output");
         assert!(out.is_finite());
     }
 
@@ -248,7 +254,9 @@ mod tests {
         let model = DeepONet::new(make_config(), &mut rng);
         let fs = vec![0.1_f32; 8];
         let queries: Vec<f32> = (0..10).map(|i| i as f32 * 0.1).collect();
-        let out = model.forward_batch(&fs, &queries, 10).unwrap();
+        let out = model
+            .forward_batch(&fs, &queries, 10)
+            .expect("batch forward with 10 queries should succeed");
         assert_eq!(out.len(), 10);
     }
 
@@ -258,7 +266,9 @@ mod tests {
         let model = DeepONet::new(make_config(), &mut rng);
         let fs = vec![0.5_f32; 8];
         let queries = vec![0.3_f32; 5];
-        let out = model.forward_batch(&fs, &queries, 5).unwrap();
+        let out = model
+            .forward_batch(&fs, &queries, 5)
+            .expect("batch forward with 5 queries should produce finite values");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -277,15 +287,21 @@ mod tests {
         let model = DeepONet::new(cfg, &mut rng);
         let fs = vec![1.0_f32; 2];
         let q = vec![1.0_f32];
-        let b = model.branch_forward(&fs).unwrap();
-        let t = model.trunk_forward(&q).unwrap();
+        let b = model
+            .branch_forward(&fs)
+            .expect("branch forward should succeed for valid sensor input in dot product check");
+        let t = model
+            .trunk_forward(&q)
+            .expect("trunk forward should succeed for valid query in dot product check");
         let manual_dot: f32 = b
             .iter()
             .zip(t.iter())
             .map(|(&bi, &ti)| bi * ti)
             .sum::<f32>()
             + model.bias[0];
-        let model_out = model.forward(&fs, &q).unwrap();
+        let model_out = model
+            .forward(&fs, &q)
+            .expect("DeepONet forward should match manual dot product computation");
         assert!((manual_dot - model_out).abs() < 1e-5);
     }
 

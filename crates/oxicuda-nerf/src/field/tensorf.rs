@@ -211,20 +211,24 @@ mod tests {
             n_color_feat: 3,
         };
         let mut rng = LcgRng::new(seed);
-        TensorRf::new(cfg, &mut rng).unwrap()
+        TensorRf::new(cfg, &mut rng).expect("new should succeed")
     }
 
     #[test]
     fn density_nonneg() {
         let tf = make_tensorf(42);
-        let d = tf.query_density([0.1, -0.3, 0.5]).unwrap();
+        let d = tf
+            .query_density([0.1, -0.3, 0.5])
+            .expect("query_density should succeed");
         assert!(d >= 0.0);
     }
 
     #[test]
     fn color_shape() {
         let tf = make_tensorf(17);
-        let c = tf.query_color([0.0, 0.0, 0.0]).unwrap();
+        let c = tf
+            .query_color([0.0, 0.0, 0.0])
+            .expect("query_color should succeed");
         assert_eq!(c.len(), tf.config.n_color_feat);
     }
 
@@ -236,7 +240,7 @@ mod tests {
             n_color_feat: 3,
         };
         let mut rng = LcgRng::new(1);
-        let tf = TensorRf::new(cfg, &mut rng).unwrap();
+        let tf = TensorRf::new(cfg, &mut rng).expect("new should succeed");
         // density: 4*3*8=96, color: 4*3*8*3=288, total=384
         assert_eq!(tf.param_count(), 96 + 288);
     }

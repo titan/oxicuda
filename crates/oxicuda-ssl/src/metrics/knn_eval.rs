@@ -521,7 +521,7 @@ mod tests {
             n_classes,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
 
         assert_eq!(
             result.top1_accuracy, 1.0,
@@ -564,7 +564,7 @@ mod tests {
             n_classes,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
 
         assert!(
             (0.0..=1.0).contains(&result.top1_accuracy),
@@ -612,7 +612,7 @@ mod tests {
             n_classes,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
 
         assert!(
             result.top5_accuracy >= result.top1_accuracy - 1e-10,
@@ -652,7 +652,7 @@ mod tests {
             n_classes,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
 
         assert_eq!(result.n_test, n_test);
         assert_eq!(result.n_train, n_train);
@@ -688,7 +688,7 @@ mod tests {
             n_classes,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
 
         assert_eq!(result.k, 7);
     }
@@ -723,7 +723,7 @@ mod tests {
             n_classes,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
 
         assert_eq!(result.per_class_top1.len(), n_classes);
     }
@@ -774,9 +774,9 @@ mod tests {
         let pred = scores
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).expect("partial_cmp should succeed"))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(pred, 2, "predicted class should be 2, got {pred}");
         // All other classes must have score 0.
         for (c, &s) in scores.iter().enumerate() {
@@ -898,7 +898,7 @@ mod tests {
             n_classes,
             &cfg,
         )
-        .unwrap();
+        .expect("value should be present");
 
         assert_eq!(
             result.top1_accuracy, 1.0,

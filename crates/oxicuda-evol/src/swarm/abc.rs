@@ -113,7 +113,7 @@ impl AbcState {
             .iter()
             .enumerate()
             .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .unwrap();
+            .expect("raw_vals is non-empty (n_food > 0 is checked above)");
 
         let best = food[best_idx].clone();
 
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_config_new_valid() {
-        let cfg = AbcConfig::new(10, 3).unwrap();
+        let cfg = AbcConfig::new(10, 3).expect("new should succeed");
         assert_eq!(cfg.n_food, 10);
         assert_eq!(cfg.n_bees, 10);
         assert_eq!(cfg.limit, 30);
@@ -367,7 +367,7 @@ mod tests {
     fn test_state_new_correct_sizes() {
         let bounds = vec![(0.0f64, 1.0f64); 3];
         let mut rng = LcgRng::new(0);
-        let state = AbcState::new(bounds, 5, 15, &sphere, &mut rng).unwrap();
+        let state = AbcState::new(bounds, 5, 15, &sphere, &mut rng).expect("new should succeed");
         assert_eq!(state.food.len(), 5);
         assert_eq!(state.fitness.len(), 5);
         assert_eq!(state.trial.len(), 5);
@@ -379,7 +379,7 @@ mod tests {
     fn test_state_new_fitness_in_range() {
         let bounds = vec![(-5.0f64, 5.0f64); 4];
         let mut rng = LcgRng::new(42);
-        let state = AbcState::new(bounds, 8, 32, &sphere, &mut rng).unwrap();
+        let state = AbcState::new(bounds, 8, 32, &sphere, &mut rng).expect("new should succeed");
         for &f in &state.fitness {
             assert!(f > 0.0 && f <= 1.0, "fitness out of range: {f}");
         }
@@ -389,7 +389,7 @@ mod tests {
     fn test_state_new_best_valid() {
         let bounds = vec![(0.0f64, 1.0f64); 2];
         let mut rng = LcgRng::new(7);
-        let state = AbcState::new(bounds, 4, 8, &sphere, &mut rng).unwrap();
+        let state = AbcState::new(bounds, 4, 8, &sphere, &mut rng).expect("new should succeed");
         assert!(state.best_fitness.is_finite());
         assert!(state.best_fitness >= 0.0);
     }
@@ -415,7 +415,8 @@ mod tests {
     fn test_abc_step_increments_generation() {
         let bounds = vec![(-5.0f64, 5.0f64); 3];
         let mut rng = LcgRng::new(1);
-        let mut state = AbcState::new(bounds, 4, 12, &sphere, &mut rng).unwrap();
+        let mut state =
+            AbcState::new(bounds, 4, 12, &sphere, &mut rng).expect("new should succeed");
         assert_eq!(state.generation, 0);
         abc_step(&mut state, &sphere, &mut rng);
         assert_eq!(state.generation, 1);
@@ -427,7 +428,8 @@ mod tests {
     fn test_abc_step_preserves_best() {
         let bounds = vec![(-5.0f64, 5.0f64); 2];
         let mut rng = LcgRng::new(100);
-        let mut state = AbcState::new(bounds, 6, 12, &sphere, &mut rng).unwrap();
+        let mut state =
+            AbcState::new(bounds, 6, 12, &sphere, &mut rng).expect("new should succeed");
         let initial_best = state.best_fitness;
         for _ in 0..50 {
             abc_step(&mut state, &sphere, &mut rng);
@@ -448,7 +450,7 @@ mod tests {
             max_iter: 200,
             seed: 42,
         };
-        let state = abc_run(sphere, &bounds, &cfg).unwrap();
+        let state = abc_run(sphere, &bounds, &cfg).expect("abc_run should succeed");
         assert!(
             state.best_fitness < 5.0,
             "best_fitness = {}",
@@ -467,7 +469,7 @@ mod tests {
             max_iter: 1000,
             seed: 7,
         };
-        let state = abc_run(sphere, &bounds, &cfg).unwrap();
+        let state = abc_run(sphere, &bounds, &cfg).expect("abc_run should succeed");
         let initial_random_expected_sq = 5.0f64 * 5.0 * 5.0; // rough upper bound
         assert!(
             state.best_fitness < initial_random_expected_sq,
@@ -487,7 +489,7 @@ mod tests {
             seed: 11,
         };
         let worst_possible = ackley(&[5.0, 5.0, 5.0]);
-        let state = abc_run(ackley, &bounds, &cfg).unwrap();
+        let state = abc_run(ackley, &bounds, &cfg).expect("abc_run should succeed");
         assert!(
             state.best_fitness < worst_possible,
             "best={} worst={}",
@@ -506,7 +508,7 @@ mod tests {
             max_iter: 2000,
             seed: 77,
         };
-        let state = abc_run(rosenbrock, &bounds, &cfg).unwrap();
+        let state = abc_run(rosenbrock, &bounds, &cfg).expect("abc_run should succeed");
         // Rosenbrock global min = 0 at (1,1). Should do better than 200.
         assert!(state.best_fitness < 200.0, "best = {}", state.best_fitness);
     }
@@ -522,7 +524,7 @@ mod tests {
             max_iter: 1000,
             seed: 33,
         };
-        let state = abc_run(rastrigin, &bounds, &cfg).unwrap();
+        let state = abc_run(rastrigin, &bounds, &cfg).expect("abc_run should succeed");
         assert!(
             state.best_fitness < worst,
             "best={} worst={}",
@@ -566,7 +568,7 @@ mod tests {
             max_iter: 500,
             seed: 21,
         };
-        let state = abc_run(sphere, &bounds, &cfg).unwrap();
+        let state = abc_run(sphere, &bounds, &cfg).expect("abc_run should succeed");
         for (d, &x) in state.best.iter().enumerate() {
             let (lb, ub) = bounds[d];
             assert!(x >= lb && x <= ub, "dim {d}: {x} out of [{lb}, {ub}]");
@@ -583,8 +585,8 @@ mod tests {
             max_iter: 100,
             seed: 999,
         };
-        let s1 = abc_run(sphere, &bounds, &cfg).unwrap();
-        let s2 = abc_run(sphere, &bounds, &cfg).unwrap();
+        let s1 = abc_run(sphere, &bounds, &cfg).expect("abc_run should succeed");
+        let s2 = abc_run(sphere, &bounds, &cfg).expect("abc_run should succeed");
         assert_eq!(s1.best_fitness, s2.best_fitness, "runs not deterministic");
     }
 }

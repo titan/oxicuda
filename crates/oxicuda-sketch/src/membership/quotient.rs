@@ -406,23 +406,23 @@ mod tests {
 
     #[test]
     fn qf_new_empty() {
-        let qf = QuotientFilter::new(8, 8, 0).unwrap();
+        let qf = QuotientFilter::new(8, 8, 0).expect("new should succeed");
         assert_eq!(qf.load_factor(), 0.0);
         assert_eq!(qf.n_items, 0);
     }
 
     #[test]
     fn qf_insert_lookup_basic() {
-        let mut qf = QuotientFilter::new(8, 8, 1).unwrap();
-        qf.insert(42).unwrap();
+        let mut qf = QuotientFilter::new(8, 8, 1).expect("new should succeed");
+        qf.insert(42).expect("insert should succeed");
         assert!(qf.contains(42));
     }
 
     #[test]
     fn qf_false_negative_free() {
-        let mut qf = QuotientFilter::new(9, 8, 2).unwrap();
+        let mut qf = QuotientFilter::new(9, 8, 2).expect("new should succeed");
         for i in 0..100u64 {
-            qf.insert(i).unwrap();
+            qf.insert(i).expect("insert should succeed");
         }
         for i in 0..100u64 {
             assert!(qf.contains(i), "false negative for item {i}");
@@ -432,9 +432,9 @@ mod tests {
     #[test]
     fn qf_false_positive_rate() {
         let r_bits = 8u32;
-        let mut qf = QuotientFilter::new(8, r_bits, 3).unwrap();
+        let mut qf = QuotientFilter::new(8, r_bits, 3).expect("new should succeed");
         for i in 0..50u64 {
-            qf.insert(i).unwrap();
+            qf.insert(i).expect("insert should succeed");
         }
         let trials = 5000u64;
         let mut fp_count = 0u64;
@@ -453,8 +453,8 @@ mod tests {
 
     #[test]
     fn qf_delete_found_item() {
-        let mut qf = QuotientFilter::new(8, 8, 4).unwrap();
-        qf.insert(99).unwrap();
+        let mut qf = QuotientFilter::new(8, 8, 4).expect("new should succeed");
+        qf.insert(99).expect("insert should succeed");
         assert!(qf.contains(99));
         let deleted = qf.delete(99);
         assert!(deleted);
@@ -462,24 +462,24 @@ mod tests {
 
     #[test]
     fn qf_delete_not_inserted() {
-        let mut qf = QuotientFilter::new(8, 8, 5).unwrap();
+        let mut qf = QuotientFilter::new(8, 8, 5).expect("new should succeed");
         assert!(!qf.delete(12345));
     }
 
     #[test]
     fn qf_load_factor_increases() {
-        let mut qf = QuotientFilter::new(8, 8, 6).unwrap();
+        let mut qf = QuotientFilter::new(8, 8, 6).expect("new should succeed");
         let lf0 = qf.load_factor();
         for i in 0..10u64 {
-            qf.insert(i).unwrap();
+            qf.insert(i).expect("insert should succeed");
         }
         assert!(qf.load_factor() > lf0);
     }
 
     #[test]
     fn qf_estimated_fp_rate_positive() {
-        let mut qf = QuotientFilter::new(8, 8, 7).unwrap();
-        qf.insert(1).unwrap();
+        let mut qf = QuotientFilter::new(8, 8, 7).expect("new should succeed");
+        qf.insert(1).expect("insert should succeed");
         assert!(qf.estimated_fp_rate() > 0.0);
     }
 
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn qf_multiple_inserts_same_quotient() {
-        let mut qf = QuotientFilter::new(2, 16, 8).unwrap();
+        let mut qf = QuotientFilter::new(2, 16, 8).expect("new should succeed");
         let mut inserted = Vec::new();
         for i in 0u64..10 {
             if qf.insert(i).is_ok() {
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn qf_full_returns_err() {
-        let mut qf = QuotientFilter::new(2, 8, 9).unwrap();
+        let mut qf = QuotientFilter::new(2, 8, 9).expect("new should succeed");
         let mut inserted = 0;
         for i in 0u64..1000 {
             if qf.insert(i).is_err() {
@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn qf_fingerprint_q_r_split() {
-        let qf = QuotientFilter::new(4, 8, 10).unwrap();
+        let qf = QuotientFilter::new(4, 8, 10).expect("new should succeed");
         let fp = qf.fingerprint(42);
         let q = qf.fp_quotient(fp);
         let r = qf.fp_remainder(fp);
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn qf_many_inserts_no_panic() {
-        let mut qf = QuotientFilter::new(8, 8, 11).unwrap();
+        let mut qf = QuotientFilter::new(8, 8, 11).expect("new should succeed");
         let mut count = 0;
         for i in 0u64..100 {
             if qf.insert(i).is_ok() {
@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn qf_get_set_slot_metadata() {
-        let mut qf = QuotientFilter::new(4, 8, 12).unwrap();
+        let mut qf = QuotientFilter::new(4, 8, 12).expect("new should succeed");
         qf.set_slot(0, true, false, true, 0xAB);
         assert!(qf.get_is_occupied(0));
         assert!(!qf.get_is_continuation(0));
@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn qf_collision_handling() {
-        let mut qf = QuotientFilter::new(3, 16, 13).unwrap();
+        let mut qf = QuotientFilter::new(3, 16, 13).expect("new should succeed");
         let mut inserted = Vec::new();
         for i in 0u64..20 {
             if qf.insert(i).is_ok() {
@@ -578,8 +578,8 @@ mod tests {
 
     #[test]
     fn qf_different_seeds_different_fp() {
-        let qf1 = QuotientFilter::new(8, 8, 14).unwrap();
-        let qf2 = QuotientFilter::new(8, 8, 99).unwrap();
+        let qf1 = QuotientFilter::new(8, 8, 14).expect("new should succeed");
+        let qf2 = QuotientFilter::new(8, 8, 99).expect("new should succeed");
         let fp1 = qf1.fingerprint(12345);
         let fp2 = qf2.fingerprint(12345);
         assert_ne!(
@@ -591,9 +591,9 @@ mod tests {
     #[test]
     fn qf_large_r_bits_low_fp() {
         let r_bits = 20u32;
-        let mut qf = QuotientFilter::new(4, r_bits, 15).unwrap();
+        let mut qf = QuotientFilter::new(4, r_bits, 15).expect("new should succeed");
         for i in 0u64..5 {
-            qf.insert(i).unwrap();
+            qf.insert(i).expect("insert should succeed");
         }
         let actual = qf.estimated_fp_rate();
         assert!(

@@ -352,7 +352,8 @@ mod tests {
     #[test]
     fn ece_zero_for_perfectly_calibrated() {
         let (c, ok) = perfectly_calibrated();
-        let ece = expected_calibration_error(&c, &ok, 10).unwrap();
+        let ece = expected_calibration_error(&c, &ok, 10)
+            .expect("expected_calibration_error should succeed");
         assert!(ece < 1e-5, "ece = {ece}");
     }
 
@@ -361,7 +362,8 @@ mod tests {
         // Always says 0.99, only 50% correct
         let c = vec![0.99_f32; 100];
         let ok: Vec<bool> = (0..100).map(|i| i % 2 == 0).collect();
-        let ece = expected_calibration_error(&c, &ok, 10).unwrap();
+        let ece = expected_calibration_error(&c, &ok, 10)
+            .expect("expected_calibration_error should succeed");
         assert!(ece > 0.4, "expected severe miscalibration, got ece = {ece}");
     }
 
@@ -369,8 +371,10 @@ mod tests {
     fn mce_geq_ece() {
         let c = vec![0.99_f32; 100];
         let ok: Vec<bool> = (0..100).map(|i| i % 4 == 0).collect();
-        let ece = expected_calibration_error(&c, &ok, 10).unwrap();
-        let mce = maximum_calibration_error(&c, &ok, 10).unwrap();
+        let ece = expected_calibration_error(&c, &ok, 10)
+            .expect("expected_calibration_error should succeed");
+        let mce = maximum_calibration_error(&c, &ok, 10)
+            .expect("maximum_calibration_error should succeed");
         assert!(mce >= ece - 1e-6);
     }
 
@@ -379,7 +383,8 @@ mod tests {
         // Bimodal data (10 at conf=0.5, 10 at conf=0.9) — ACE with 2 quantile bins
         // perfectly aligns with the two modes and yields zero error.
         let (c, ok) = perfectly_calibrated();
-        let ace = adaptive_calibration_error(&c, &ok, 2).unwrap();
+        let ace = adaptive_calibration_error(&c, &ok, 2)
+            .expect("adaptive_calibration_error should succeed");
         assert!(ace < 1e-5, "ace = {ace}");
     }
 
@@ -387,7 +392,8 @@ mod tests {
     fn ace_handles_more_bins_than_samples() {
         let c = vec![0.5_f32, 0.6, 0.7];
         let ok = vec![true, false, true];
-        let ace = adaptive_calibration_error(&c, &ok, 10).unwrap();
+        let ace = adaptive_calibration_error(&c, &ok, 10)
+            .expect("adaptive_calibration_error should succeed");
         assert!(ace.is_finite());
     }
 
@@ -395,7 +401,7 @@ mod tests {
     fn brier_score_perfect_predictions() {
         let probs = vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
         let labels = vec![0_usize, 1, 2];
-        let bs = brier_score(&probs, &labels, 3).unwrap();
+        let bs = brier_score(&probs, &labels, 3).expect("brier_score should succeed");
         assert!(bs < 1e-6, "bs = {bs}");
     }
 
@@ -403,7 +409,7 @@ mod tests {
     fn brier_score_uniform_three_class() {
         let probs = vec![1.0_f32 / 3.0; 9];
         let labels = vec![0_usize, 1, 2];
-        let bs = brier_score(&probs, &labels, 3).unwrap();
+        let bs = brier_score(&probs, &labels, 3).expect("brier_score should succeed");
         // expected: per-sample contribution = (2/3)^2 + 2*(1/3)^2 = 4/9 + 2/9 = 6/9 = 2/3
         assert!((bs - (2.0 / 3.0)).abs() < 1e-3, "bs = {bs}");
     }
@@ -412,7 +418,8 @@ mod tests {
     fn nll_perfect_predictions_zero() {
         let probs = vec![1.0_f32, 0.0, 0.0, 1.0];
         let labels = vec![0_usize, 1];
-        let nll = negative_log_likelihood(&probs, &labels, 2).unwrap();
+        let nll = negative_log_likelihood(&probs, &labels, 2)
+            .expect("negative_log_likelihood should succeed");
         assert!(nll.abs() < 1e-5, "nll = {nll}");
     }
 
@@ -420,7 +427,8 @@ mod tests {
     fn nll_uniform_predictions_log_k() {
         let probs = vec![0.5_f32, 0.5, 0.5, 0.5];
         let labels = vec![0_usize, 1];
-        let nll = negative_log_likelihood(&probs, &labels, 2).unwrap();
+        let nll = negative_log_likelihood(&probs, &labels, 2)
+            .expect("negative_log_likelihood should succeed");
         // -ln(0.5) = ln(2) ≈ 0.6931
         assert!((nll - std::f32::consts::LN_2).abs() < 1e-4, "nll = {nll}");
     }
@@ -429,7 +437,8 @@ mod tests {
     fn nll_clamps_zero_probability() {
         let probs = vec![0.0_f32, 1.0];
         let labels = vec![0_usize];
-        let nll = negative_log_likelihood(&probs, &labels, 2).unwrap();
+        let nll = negative_log_likelihood(&probs, &labels, 2)
+            .expect("negative_log_likelihood should succeed");
         assert!(nll.is_finite() && nll > 0.0);
     }
 
@@ -437,7 +446,8 @@ mod tests {
     fn top1_confidences_argmax_tie_breaks_first() {
         let probs = vec![0.5_f32, 0.5, 0.0];
         let labels = vec![0_usize];
-        let (c, ok) = top1_confidences(&probs, &labels, 3).unwrap();
+        let (c, ok) =
+            top1_confidences(&probs, &labels, 3).expect("top1_confidences should succeed");
         assert_eq!(c.len(), 1);
         assert!((c[0] - 0.5).abs() < 1e-6);
         assert!(ok[0]);
@@ -447,7 +457,7 @@ mod tests {
     fn reliability_diagram_bin_count_matches() {
         let c = vec![0.05_f32, 0.15, 0.25, 0.95];
         let ok = vec![true, false, true, true];
-        let rd = reliability_diagram(&c, &ok, 10).unwrap();
+        let rd = reliability_diagram(&c, &ok, 10).expect("reliability_diagram should succeed");
         assert_eq!(rd.bins.len(), 10);
         assert_eq!(rd.n_samples, 4);
     }

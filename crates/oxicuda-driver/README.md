@@ -99,8 +99,8 @@ let kernel = module.get_function("vector_add")?;
 
 | Item       | Value              |
 |------------|--------------------|
-| Version    | 0.1.5 (2026-05-01) |
-| Tests      | 358 passing        |
+| Version    | 0.2.0 (2026-06-16) |
+| Tests      | 383 passing        |
 | Warnings   | 0                  |
 | `unwrap()` | 0                  |
 

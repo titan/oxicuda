@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn arch_features_dim_matches_layers() {
         let layers = sample_layers();
-        let f = ArchFeatures::from_layers(&layers).unwrap();
+        let f = ArchFeatures::from_layers(&layers).expect("from_layers should succeed");
         assert_eq!(f.n_layers, 3);
         assert_eq!(f.dim(), 3 * ArchFeatures::PER_LAYER_DIM);
     }
@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn arch_features_one_hot_op() {
         let layers = vec![LayerSpec::new(OpKind::Identity, 4, 4, 8, 8)];
-        let f = ArchFeatures::from_layers(&layers).unwrap();
+        let f = ArchFeatures::from_layers(&layers).expect("from_layers should succeed");
         // Identity is index 1 in OpKind::all().
         assert!((f.data[1] - 1.0).abs() < 1e-6);
         // Other op-kind slots zero.

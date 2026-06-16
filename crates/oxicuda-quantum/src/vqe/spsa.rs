@@ -277,7 +277,9 @@ mod tests {
     #[test]
     fn spsa_energy_is_finite() {
         let (opt, _) = make_optimizer(2, 1, 1);
-        let e = opt.energy(&opt.params.clone()).unwrap();
+        let e = opt
+            .energy(&opt.params.clone())
+            .expect("energy evaluation should succeed");
         assert!(e.is_finite(), "energy={e}");
     }
 
@@ -343,7 +345,9 @@ mod tests {
         let (opt, mut rng) = make_optimizer(2, 1, 8);
         let params = opt.params.clone();
         let n = params.len();
-        let grad = opt.spsa_gradient(&params, 0.1, &mut rng).unwrap();
+        let grad = opt
+            .spsa_gradient(&params, 0.1, &mut rng)
+            .expect("SPSA gradient computation should succeed");
         assert_eq!(grad.len(), n);
     }
 
@@ -351,7 +355,9 @@ mod tests {
     fn spsa_gradient_finite() {
         let (opt, mut rng) = make_optimizer(2, 1, 9);
         let params = opt.params.clone();
-        let grad = opt.spsa_gradient(&params, 0.1, &mut rng).unwrap();
+        let grad = opt
+            .spsa_gradient(&params, 0.1, &mut rng)
+            .expect("SPSA gradient computation should succeed");
         for (i, &g) in grad.iter().enumerate() {
             assert!(g.is_finite(), "gradient[{i}] is not finite: {g}");
         }
@@ -364,7 +370,9 @@ mod tests {
             max_iter: 5,
             ..SpsaConfig::default()
         };
-        let result = opt.optimize(&mut rng).unwrap();
+        let result = opt
+            .optimize(&mut rng)
+            .expect("SPSA optimize should succeed");
         assert!(
             result.final_energy.is_finite(),
             "final_energy={}",
@@ -379,7 +387,9 @@ mod tests {
         opt.cfg.max_iter = max_iter;
         opt.cfg.tol = 0.0;
         opt.cfg.patience = 0;
-        let result = opt.optimize(&mut rng).unwrap();
+        let result = opt
+            .optimize(&mut rng)
+            .expect("SPSA optimize should succeed");
         assert_eq!(
             result.energy_history.len(),
             result.n_iter,
@@ -394,7 +404,9 @@ mod tests {
         opt.cfg.max_iter = max_iter;
         opt.cfg.tol = 0.0;
         opt.cfg.patience = 0;
-        let result = opt.optimize(&mut rng).unwrap();
+        let result = opt
+            .optimize(&mut rng)
+            .expect("SPSA optimize should succeed");
         assert_eq!(result.n_iter, max_iter, "should use all iterations");
     }
 
@@ -414,8 +426,12 @@ mod tests {
         };
         let mut rng = LcgRng::new(13);
         let mut opt = SpsaVqeOptimizer::new(ans, ham, cfg, &mut rng);
-        let e_init = opt.energy(&opt.params.clone()).unwrap();
-        let result = opt.optimize(&mut rng).unwrap();
+        let e_init = opt
+            .energy(&opt.params.clone())
+            .expect("initial energy evaluation should succeed");
+        let result = opt
+            .optimize(&mut rng)
+            .expect("SPSA optimize should succeed");
         assert!(
             result.final_energy <= e_init + 0.5,
             "energy did not improve: init={e_init} final={}",
@@ -429,7 +445,9 @@ mod tests {
         opt.cfg.max_iter = 200;
         opt.cfg.tol = 100.0;
         opt.cfg.patience = 5;
-        let result = opt.optimize(&mut rng).unwrap();
+        let result = opt
+            .optimize(&mut rng)
+            .expect("SPSA optimize should succeed");
         assert!(
             result.converged,
             "expected converged=true with very large tol"
@@ -443,7 +461,7 @@ mod tests {
         let n = params.len();
         let hdiag = opt
             .hessian_diagonal_estimate(&params, 0.1, &mut rng)
-            .unwrap();
+            .expect("Hessian diagonal estimate should succeed");
         assert_eq!(hdiag.len(), n);
     }
 
@@ -453,7 +471,7 @@ mod tests {
         let params = opt.params.clone();
         let hdiag = opt
             .hessian_diagonal_estimate(&params, 0.1, &mut rng)
-            .unwrap();
+            .expect("Hessian diagonal estimate should succeed");
         for (i, &h) in hdiag.iter().enumerate() {
             assert!(h.is_finite(), "hessian_diag[{i}] is not finite: {h}");
         }
@@ -489,12 +507,16 @@ mod tests {
         };
         let mut rng1 = LcgRng::new(18);
         let mut spsa_opt = SpsaVqeOptimizer::new(ans1, make_ham(), cfg, &mut rng1);
-        let spsa_result = spsa_opt.optimize(&mut rng1).unwrap();
+        let spsa_result = spsa_opt
+            .optimize(&mut rng1)
+            .expect("SPSA optimize should succeed");
 
         let ans2 = HardwareEfficientAnsatz::new(2, 1);
         let mut rng2 = LcgRng::new(18);
         let mut vqe_opt = crate::vqe::vqe::VqeOptimizer::new(ans2, make_ham(), &mut rng2);
-        let (gd_energy, _) = vqe_opt.optimize(30, 0.1).unwrap();
+        let (gd_energy, _) = vqe_opt
+            .optimize(30, 0.1)
+            .expect("gradient-descent VQE optimize should succeed");
 
         assert!(
             spsa_result.final_energy.is_finite() && gd_energy.is_finite(),

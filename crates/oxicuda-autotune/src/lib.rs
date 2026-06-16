@@ -97,6 +97,7 @@ pub mod bayesian;
 pub mod benchmark;
 pub mod cli;
 pub mod config;
+pub mod cost_model;
 pub mod db_migration;
 pub mod dispatch;
 pub mod distributed;
@@ -115,6 +116,7 @@ pub mod power_aware;
 
 pub mod ptx_integration;
 pub mod result_db;
+pub mod search;
 pub mod search_space;
 pub mod simulated_annealing;
 pub mod transfer_learning;
@@ -136,6 +138,9 @@ pub use cli::{
     TuneReport,
 };
 pub use config::Config;
+pub use cost_model::{
+    BandwidthCeiling, Bound, KernelDescriptor, LatencyPredictor, Roofline, RooflineClassification,
+};
 pub use dispatch::{DispatchTier, Dispatcher};
 pub use distributed::{
     DistributedCoordinator, DistributedTuneConfig, DistributedTuneJob, InMemoryTransport, NodeId,
@@ -183,6 +188,9 @@ pub use ptx_integration::{
     scan_search_space,
 };
 pub use result_db::{ProblemKey, ResultDb};
+pub use search::{
+    CostModel, FeatureCostModel, Loop, LoopNest, Schedule, ScheduleSearcher, Transform,
+};
 pub use search_space::{SearchSpace, SearchSpaceBuilder};
 pub use simulated_annealing::{SimulatedAnnealing, SimulatedAnnealingConfig};
 pub use transfer_learning::{
@@ -208,20 +216,23 @@ pub mod prelude {
     pub use crate::{
         AccessPattern, AcquisitionFunction, AdaptivePolicy, AdaptiveSelector, AdaptiveTuneReport,
         ArchitectureProfile, ArchitectureSimilarity, ArithmeticIntensity, AutotuneError,
-        AutotuneResult, BayesianOptimizer, BenchmarkConfig, BenchmarkEngine, BenchmarkResult,
-        BudgetSuggestion, BudgetUtilization, Config, ConfigAdapter, ConfigTransferRule,
-        ConfigTransformer, ConstrainedSearchSpace, ConstrainedTuner, DispatchTier, Dispatcher,
-        EarlyStoppingConfig, EarlyStoppingSummary, EarlyStoppingTracker, ExplorationScheduler,
-        GaussianProcess, GemmMemoryEstimator, GeneticAlgorithm, GeneticConfig, GpPrediction,
-        GuidedPtxGenerator, GuidedPtxStrategy, HintMerger, KernelSignature, KernelSimilarityIndex,
-        MemoryBudget, MemoryEstimate, MemoryEstimator, MetricsWindow, MultiObjectiveOptimizer,
-        MultiObjectiveResult, Objective, ObjectiveDirection, ObjectiveSpec, ObjectiveValue,
-        ParetoFront, PerformanceRegression, PerformanceTrend, PowerAwareBenchmarkEngine,
-        PowerAwareBenchmarkResult, PowerAwareSelector, PowerConstraint, PowerMonitor, PowerProfile,
-        PowerReading, ProblemDims, ProblemKey, ProblemSize, PtxGenerationHint, PtxSpecialization,
-        ReductionType, ResultDb, RuntimeMetric, SearchSpace, SearchSpaceBuilder, SimilarityMatch,
-        SimilarityScore, SimulatedAnnealing, SimulatedAnnealingConfig, SizeInterpolator,
-        StopReason, SwitchDecision, TemplateAutotuner, TransferLearningEngine, TransferStrategy,
-        TransferredConfig, TunableKernel, WarmupStrategy, WeightedScalarization,
+        AutotuneResult, BandwidthCeiling, BayesianOptimizer, BenchmarkConfig, BenchmarkEngine,
+        BenchmarkResult, Bound, BudgetSuggestion, BudgetUtilization, Config, ConfigAdapter,
+        ConfigTransferRule, ConfigTransformer, ConstrainedSearchSpace, ConstrainedTuner, CostModel,
+        DispatchTier, Dispatcher, EarlyStoppingConfig, EarlyStoppingSummary, EarlyStoppingTracker,
+        ExplorationScheduler, FeatureCostModel, GaussianProcess, GemmMemoryEstimator,
+        GeneticAlgorithm, GeneticConfig, GpPrediction, GuidedPtxGenerator, GuidedPtxStrategy,
+        HintMerger, KernelDescriptor, KernelSignature, KernelSimilarityIndex, LatencyPredictor,
+        Loop, LoopNest, MemoryBudget, MemoryEstimate, MemoryEstimator, MetricsWindow,
+        MultiObjectiveOptimizer, MultiObjectiveResult, Objective, ObjectiveDirection,
+        ObjectiveSpec, ObjectiveValue, ParetoFront, PerformanceRegression, PerformanceTrend,
+        PowerAwareBenchmarkEngine, PowerAwareBenchmarkResult, PowerAwareSelector, PowerConstraint,
+        PowerMonitor, PowerProfile, PowerReading, ProblemDims, ProblemKey, ProblemSize,
+        PtxGenerationHint, PtxSpecialization, ReductionType, ResultDb, Roofline,
+        RooflineClassification, RuntimeMetric, Schedule, ScheduleSearcher, SearchSpace,
+        SearchSpaceBuilder, SimilarityMatch, SimilarityScore, SimulatedAnnealing,
+        SimulatedAnnealingConfig, SizeInterpolator, StopReason, SwitchDecision, TemplateAutotuner,
+        TransferLearningEngine, TransferStrategy, TransferredConfig, Transform, TunableKernel,
+        WarmupStrategy, WeightedScalarization,
     };
 }

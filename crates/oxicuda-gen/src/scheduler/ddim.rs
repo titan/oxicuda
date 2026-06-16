@@ -218,20 +218,20 @@ mod tests {
 
     #[test]
     fn new_scheduler_valid() {
-        let sched = DdimScheduler::new(1000, 50, 0.0).unwrap();
+        let sched = DdimScheduler::new(1000, 50, 0.0).expect("new should succeed");
         assert_eq!(sched.num_inference_steps(), 50);
         assert_eq!(sched.eta(), 0.0);
     }
 
     #[test]
     fn timesteps_count() {
-        let sched = DdimScheduler::new(1000, 50, 0.0).unwrap();
+        let sched = DdimScheduler::new(1000, 50, 0.0).expect("new should succeed");
         assert_eq!(sched.timesteps().len(), 50);
     }
 
     #[test]
     fn timesteps_are_in_valid_range() {
-        let sched = DdimScheduler::new(1000, 50, 0.0).unwrap();
+        let sched = DdimScheduler::new(1000, 50, 0.0).expect("new should succeed");
         for &t in sched.timesteps() {
             assert!(t < 1000, "timestep {t} out of range");
         }
@@ -240,14 +240,18 @@ mod tests {
     #[test]
     fn deterministic_at_eta_zero() {
         // With eta=0 and same inputs, two calls with different noise should give same result
-        let sched = DdimScheduler::new(1000, 10, 0.0).unwrap();
+        let sched = DdimScheduler::new(1000, 10, 0.0).expect("new should succeed");
         let mut rng = make_rng();
         let eps = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
         let noise1 = randn(&mut rng, 32);
         let noise2 = randn(&mut rng, 32);
-        let out1 = sched.step(&eps, &x_t, 0, &noise1).unwrap();
-        let out2 = sched.step(&eps, &x_t, 0, &noise2).unwrap();
+        let out1 = sched
+            .step(&eps, &x_t, 0, &noise1)
+            .expect("step should succeed");
+        let out2 = sched
+            .step(&eps, &x_t, 0, &noise2)
+            .expect("step should succeed");
         let max_diff: f32 = out1
             .iter()
             .zip(&out2)
@@ -261,18 +265,20 @@ mod tests {
 
     #[test]
     fn step_output_shape() {
-        let sched = DdimScheduler::new(1000, 10, 0.5).unwrap();
+        let sched = DdimScheduler::new(1000, 10, 0.5).expect("new should succeed");
         let mut rng = make_rng();
         let eps = randn(&mut rng, 64);
         let x_t = randn(&mut rng, 64);
         let noise = randn(&mut rng, 64);
-        let out = sched.step(&eps, &x_t, 0, &noise).unwrap();
+        let out = sched
+            .step(&eps, &x_t, 0, &noise)
+            .expect("step should succeed");
         assert_eq!(out.len(), 64);
     }
 
     #[test]
     fn step_invalid_step_idx() {
-        let sched = DdimScheduler::new(1000, 10, 0.0).unwrap();
+        let sched = DdimScheduler::new(1000, 10, 0.0).expect("new should succeed");
         let eps = vec![0.0_f32; 8];
         let x_t = vec![0.0_f32; 8];
         let noise = vec![0.0_f32; 8];
@@ -284,7 +290,7 @@ mod tests {
 
     #[test]
     fn step_dimension_mismatch() {
-        let sched = DdimScheduler::new(1000, 10, 0.0).unwrap();
+        let sched = DdimScheduler::new(1000, 10, 0.0).expect("new should succeed");
         let eps = vec![0.0_f32; 8];
         let x_t = vec![0.0_f32; 4];
         let noise = vec![0.0_f32; 8];
@@ -296,13 +302,15 @@ mod tests {
 
     #[test]
     fn step_output_finite() {
-        let sched = DdimScheduler::new(1000, 10, 1.0).unwrap();
+        let sched = DdimScheduler::new(1000, 10, 1.0).expect("new should succeed");
         let mut rng = make_rng();
         let eps = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
         let noise = randn(&mut rng, 32);
         for step_idx in 0..10 {
-            let out = sched.step(&eps, &x_t, step_idx, &noise).unwrap();
+            let out = sched
+                .step(&eps, &x_t, step_idx, &noise)
+                .expect("step should succeed");
             assert!(
                 out.iter().all(|v| v.is_finite()),
                 "non-finite at step {step_idx}"
@@ -312,7 +320,7 @@ mod tests {
 
     #[test]
     fn timesteps_uniform_subsampling() {
-        let sched = DdimScheduler::new(1000, 10, 0.0).unwrap();
+        let sched = DdimScheduler::new(1000, 10, 0.0).expect("new should succeed");
         let ts = sched.timesteps();
         // Should be uniformly spaced (approximately)
         assert_eq!(ts.len(), 10);
@@ -323,14 +331,18 @@ mod tests {
     #[test]
     fn eta_one_adds_stochasticity() {
         // With eta=1, the result should depend on noise
-        let sched = DdimScheduler::new(1000, 10, 1.0).unwrap();
+        let sched = DdimScheduler::new(1000, 10, 1.0).expect("new should succeed");
         let mut rng = make_rng();
         let eps = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
         let noise1 = randn(&mut rng, 32);
         let noise2: Vec<f32> = noise1.iter().map(|v| -v).collect(); // flipped noise
-        let out1 = sched.step(&eps, &x_t, 3, &noise1).unwrap();
-        let out2 = sched.step(&eps, &x_t, 3, &noise2).unwrap();
+        let out1 = sched
+            .step(&eps, &x_t, 3, &noise1)
+            .expect("step should succeed");
+        let out2 = sched
+            .step(&eps, &x_t, 3, &noise2)
+            .expect("step should succeed");
         let max_diff: f32 = out1
             .iter()
             .zip(&out2)

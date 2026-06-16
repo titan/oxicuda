@@ -297,7 +297,9 @@ mod tests {
     fn test_known_dgp_recovery() {
         let mut rng = LcgRng::new(12345);
         let (z, d, y) = simulate_late(&mut rng, 5000, 2.0);
-        let res = LateEstimator::new().fit(&z, &d, &y).unwrap();
+        let res = LateEstimator::new()
+            .fit(&z, &d, &y)
+            .expect("fit should succeed");
         assert!(
             (res.estimate - 2.0).abs() < 0.15,
             "expected LATE near 2.0, got {}",
@@ -318,7 +320,9 @@ mod tests {
             y[i] = 0.5 + 1.5 * (z[i] as f64) + noise;
         }
         let d = z.clone();
-        let res = LateEstimator::new().fit(&z, &d, &y).unwrap();
+        let res = LateEstimator::new()
+            .fit(&z, &d, &y)
+            .expect("fit should succeed");
         assert!((res.estimate - 1.5).abs() < 0.1, "got {}", res.estimate);
         // 100% compliers => compliance rate = 1.
         assert!((res.compliance_rate - 1.0).abs() < 0.05);
@@ -386,7 +390,9 @@ mod tests {
     fn test_compliance_rate_in_unit_interval() {
         let mut rng = LcgRng::new(2025);
         let (z, d, y) = simulate_late(&mut rng, 1000, 1.0);
-        let res = LateEstimator::new().fit(&z, &d, &y).unwrap();
+        let res = LateEstimator::new()
+            .fit(&z, &d, &y)
+            .expect("fit should succeed");
         assert!((0.0..=1.0).contains(&res.compliance_rate));
     }
 
@@ -394,7 +400,9 @@ mod tests {
     fn test_population_shares_sum_to_one() {
         let mut rng = LcgRng::new(8_888);
         let (z, d, y) = simulate_late(&mut rng, 2000, 1.0);
-        let res = LateEstimator::new().fit(&z, &d, &y).unwrap();
+        let res = LateEstimator::new()
+            .fit(&z, &d, &y)
+            .expect("fit should succeed");
         let total = res.p_always_taker + res.p_never_taker + res.p_complier;
         assert!(
             (total - 1.0).abs() < 0.05,
@@ -406,7 +414,9 @@ mod tests {
     fn test_standard_error_positive_under_monotonicity() {
         let mut rng = LcgRng::new(321);
         let (z, d, y) = simulate_late(&mut rng, 1000, 1.0);
-        let res = LateEstimator::new().fit(&z, &d, &y).unwrap();
+        let res = LateEstimator::new()
+            .fit(&z, &d, &y)
+            .expect("fit should succeed");
         assert!(res.monotonicity_holds);
         assert!(res.std_err > 0.0);
     }
@@ -415,10 +425,14 @@ mod tests {
     fn test_doubling_n_halves_variance_approx() {
         let mut rng = LcgRng::new(55);
         let (z1, d1, y1) = simulate_late(&mut rng, 800, 1.0);
-        let res_small = LateEstimator::new().fit(&z1, &d1, &y1).unwrap();
+        let res_small = LateEstimator::new()
+            .fit(&z1, &d1, &y1)
+            .expect("fit should succeed");
         let mut rng2 = LcgRng::new(55);
         let (z2, d2, y2) = simulate_late(&mut rng2, 1600, 1.0);
-        let res_large = LateEstimator::new().fit(&z2, &d2, &y2).unwrap();
+        let res_large = LateEstimator::new()
+            .fit(&z2, &d2, &y2)
+            .expect("fit should succeed");
         // Var halves => SE shrinks by sqrt(2). Allow generous tolerance.
         let ratio = res_small.std_err / res_large.std_err;
         assert!(
@@ -453,7 +467,9 @@ mod tests {
         for trial in 0..trials {
             let mut rng = LcgRng::new(1_000 + trial as u64);
             let (z, d, y) = simulate_late(&mut rng, 1000, true_late);
-            let res = LateEstimator::new().fit(&z, &d, &y).unwrap();
+            let res = LateEstimator::new()
+                .fit(&z, &d, &y)
+                .expect("fit should succeed");
             let lo = res.estimate - 1.96 * res.std_err;
             let hi = res.estimate + 1.96 * res.std_err;
             if lo <= true_late && true_late <= hi {
@@ -469,8 +485,12 @@ mod tests {
         let z = vec![0u8, 1, 0, 1, 1, 0, 1, 0, 0, 1];
         let d = vec![0u8, 1, 0, 1, 0, 0, 1, 0, 1, 0];
         let y = vec![0.1_f64, 1.2, 0.0, 1.4, 0.3, -0.1, 1.1, 0.05, 0.6, 0.2];
-        let a = LateEstimator::new().fit(&z, &d, &y).unwrap();
-        let b = LateEstimator::new().fit(&z, &d, &y).unwrap();
+        let a = LateEstimator::new()
+            .fit(&z, &d, &y)
+            .expect("fit should succeed");
+        let b = LateEstimator::new()
+            .fit(&z, &d, &y)
+            .expect("fit should succeed");
         assert_eq!(a.estimate, b.estimate);
         assert_eq!(a.std_err, b.std_err);
         assert_eq!(a.compliance_rate, b.compliance_rate);

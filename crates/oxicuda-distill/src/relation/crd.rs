@@ -117,7 +117,7 @@ mod tests {
         let mut bank = CrdMemoryBank::new(10, 4, 0.9, &mut rng);
         let orig = bank.feats[0].clone();
         let new_feat = vec![1.0_f32, 0.0, 0.0, 0.0];
-        bank.update(0, &new_feat).unwrap();
+        bank.update(0, &new_feat).expect("update should succeed");
         assert_ne!(bank.feats[0], orig);
     }
 
@@ -126,7 +126,7 @@ mod tests {
         let mut rng = LcgRng::new(77);
         let bank = CrdMemoryBank::new(5, 4, 0.9, &mut rng);
         let anchor = vec![1.0_f32, 0.0, 0.0, 0.0];
-        let loss = crd_loss(&anchor, &bank, 0, &[1, 2, 3], 0.07).unwrap();
+        let loss = crd_loss(&anchor, &bank, 0, &[1, 2, 3], 0.07).expect("crd_loss should succeed");
         assert!(loss >= 0.0 && loss.is_finite());
     }
 }

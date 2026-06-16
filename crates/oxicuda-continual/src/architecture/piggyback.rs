@@ -195,21 +195,24 @@ mod tests {
     #[test]
     fn binarize_at_threshold() {
         let real_mask = vec![-1.0_f32, -0.1, 0.0, 0.1, 1.0];
-        let bin = binarize_mask(&real_mask, 0.0).unwrap();
+        let bin = binarize_mask(&real_mask, 0.0)
+            .expect("mask binarization should succeed with valid inputs");
         assert_eq!(bin, vec![0, 0, 0, 1, 1]);
     }
 
     #[test]
     fn binarize_all_above_threshold() {
         let real_mask = vec![1.0_f32, 2.0, 3.0];
-        let bin = binarize_mask(&real_mask, -5.0).unwrap();
+        let bin = binarize_mask(&real_mask, -5.0)
+            .expect("mask binarization should succeed with valid inputs");
         assert_eq!(bin, vec![1, 1, 1]);
     }
 
     #[test]
     fn binarize_all_below_threshold() {
         let real_mask = vec![-1.0_f32, -2.0, -3.0];
-        let bin = binarize_mask(&real_mask, 0.0).unwrap();
+        let bin = binarize_mask(&real_mask, 0.0)
+            .expect("mask binarization should succeed with valid inputs");
         assert_eq!(bin, vec![0, 0, 0]);
     }
 
@@ -220,7 +223,8 @@ mod tests {
             real_mask: vec![1.0, -1.0, 1.0, -1.0],
             task_id: 0,
         };
-        let effective = piggyback_forward(&weights, &mask, 0.0).unwrap();
+        let effective = piggyback_forward(&weights, &mask, 0.0)
+            .expect("piggyback forward should succeed with valid weights");
         // mask = [1, 0, 1, 0] → effective = [2, 0, 4, 0]
         assert_eq!(effective[0], 2.0);
         assert_eq!(effective[1], 0.0);
@@ -235,7 +239,8 @@ mod tests {
             real_mask: vec![1.0_f32; 4],
             task_id: 1,
         };
-        let effective = piggyback_forward(&weights, &mask, 0.0).unwrap();
+        let effective = piggyback_forward(&weights, &mask, 0.0)
+            .expect("piggyback forward should succeed with valid weights");
         for &v in &effective {
             assert!(
                 (v - 1.5).abs() < 1e-6,
@@ -296,7 +301,8 @@ mod tests {
         let mut rng = LcgRng::new(42);
         let mask = vec![0.5_f64, -1.0, 2.0, 0.0, -2.0];
         let upstream = vec![1.0_f64; 5];
-        let (bin, _) = stochastic_binary_forward(&mask, &upstream, &mut rng).unwrap();
+        let (bin, _) = stochastic_binary_forward(&mask, &upstream, &mut rng)
+            .expect("stochastic binary forward should succeed");
         // Every element must be a valid bool — this just checks length.
         assert_eq!(bin.len(), 5);
         // All values are bool by type; the assertion is implicit.
@@ -307,7 +313,8 @@ mod tests {
         let mut rng = LcgRng::new(7);
         let mask = vec![0.1_f64; 8];
         let upstream = vec![1.0_f64; 8];
-        let (_, ste) = stochastic_binary_forward(&mask, &upstream, &mut rng).unwrap();
+        let (_, ste) = stochastic_binary_forward(&mask, &upstream, &mut rng)
+            .expect("stochastic binary forward should succeed");
         assert_eq!(ste.len(), 8);
     }
 
@@ -351,7 +358,8 @@ mod tests {
         let mut rng = LcgRng::new(99);
         let mask = vec![10.0_f64; 100];
         let upstream = vec![1.0_f64; 100];
-        let (bin, _) = stochastic_binary_forward(&mask, &upstream, &mut rng).unwrap();
+        let (bin, _) = stochastic_binary_forward(&mask, &upstream, &mut rng)
+            .expect("stochastic binary forward should succeed");
         let n_true = bin.iter().filter(|&&b| b).count();
         assert!(
             n_true >= 95,
@@ -365,7 +373,8 @@ mod tests {
         let mut rng = LcgRng::new(17);
         let mask = vec![-10.0_f64; 100];
         let upstream = vec![1.0_f64; 100];
-        let (bin, _) = stochastic_binary_forward(&mask, &upstream, &mut rng).unwrap();
+        let (bin, _) = stochastic_binary_forward(&mask, &upstream, &mut rng)
+            .expect("stochastic binary forward should succeed");
         let n_false = bin.iter().filter(|&&b| !b).count();
         assert!(
             n_false >= 95,
@@ -379,7 +388,8 @@ mod tests {
         let mut rng = LcgRng::new(55);
         let mask = vec![0.0_f64, 1.0, -1.0, 3.0, -3.0];
         let upstream = vec![1.0_f64, -2.0, 3.0, -4.0, 5.0];
-        let (_, ste) = stochastic_binary_forward(&mask, &upstream, &mut rng).unwrap();
+        let (_, ste) = stochastic_binary_forward(&mask, &upstream, &mut rng)
+            .expect("stochastic binary forward should succeed");
         for (i, (&up, &st)) in upstream.iter().zip(ste.iter()).enumerate() {
             let same_sign = up * st >= 0.0;
             assert!(

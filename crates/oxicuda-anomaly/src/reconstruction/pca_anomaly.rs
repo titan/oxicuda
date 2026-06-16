@@ -356,8 +356,11 @@ mod tests {
     fn fit_score_basic_finite_nonneg() {
         let data = line_data(20);
         let mut det = PcaAnomaly::new(PcaAnomalyConfig::default());
-        det.fit(&data, 20, 2).unwrap();
-        let s = det.score(&[0.3_f32, 0.3_f32]).unwrap();
+        det.fit(&data, 20, 2)
+            .expect("fit on line data should succeed");
+        let s = det
+            .score(&[0.3_f32, 0.3_f32])
+            .expect("score should succeed after fit");
         assert!(s.is_finite(), "score must be finite, got {s}");
         assert!(s >= 0.0, "score must be non-negative, got {s}");
     }
@@ -382,10 +385,15 @@ mod tests {
             n_components: 1,
             ..Default::default()
         });
-        det.fit(&data, 30, 2).unwrap();
-        let inlier_score = det.score(&[0.5_f32, 0.5_f32]).unwrap();
+        det.fit(&data, 30, 2)
+            .expect("fit on line data should succeed");
+        let inlier_score = det
+            .score(&[0.5_f32, 0.5_f32])
+            .expect("inlier score should succeed");
         // Outlier is far off the line
-        let outlier_score = det.score(&[100.0_f32, -100.0_f32]).unwrap();
+        let outlier_score = det
+            .score(&[100.0_f32, -100.0_f32])
+            .expect("outlier score should succeed");
         assert!(
             outlier_score > inlier_score,
             "outlier ({outlier_score}) should exceed inlier ({inlier_score})"
@@ -397,11 +405,13 @@ mod tests {
     fn score_batch_correct_length() {
         let data = line_data(20);
         let mut det = PcaAnomaly::new(PcaAnomalyConfig::default());
-        det.fit(&data, 20, 2).unwrap();
+        det.fit(&data, 20, 2).expect("fit should succeed");
         let batch: Vec<f32> = (0..5)
             .flat_map(|i| vec![i as f32 * 0.1, i as f32 * 0.1])
             .collect();
-        let scores = det.score_batch(&batch, 5).unwrap();
+        let scores = det
+            .score_batch(&batch, 5)
+            .expect("batch score should succeed");
         assert_eq!(scores.len(), 5, "expected 5 scores, got {}", scores.len());
     }
 
@@ -425,7 +435,7 @@ mod tests {
     fn feature_count_mismatch_error() {
         let data = line_data(10);
         let mut det = PcaAnomaly::new(PcaAnomalyConfig::default());
-        det.fit(&data, 10, 2).unwrap();
+        det.fit(&data, 10, 2).expect("fit should succeed");
         let result = det.score(&[1.0_f32, 2.0_f32, 3.0_f32]);
         assert!(
             matches!(
@@ -448,8 +458,11 @@ mod tests {
             max_iter: 200,
             tol: 1e-6,
         });
-        det.fit(&data, 15, 2).unwrap();
-        let s = det.score(&[0.5_f32, 0.5_f32]).unwrap();
+        det.fit(&data, 15, 2)
+            .expect("fit with 1 component should succeed");
+        let s = det
+            .score(&[0.5_f32, 0.5_f32])
+            .expect("score with single component should succeed");
         assert!(
             s.is_finite(),
             "single-component score must be finite, got {s}"
@@ -468,9 +481,13 @@ mod tests {
             n_components: 1,
             ..Default::default()
         });
-        det.fit(&data, 20, 2).unwrap();
-        let inlier = det.score(&[0.5_f32, 0.0_f32]).unwrap();
-        let outlier = det.score(&[50.0_f32, 50.0_f32]).unwrap();
+        det.fit(&data, 20, 2).expect("fit should succeed");
+        let inlier = det
+            .score(&[0.5_f32, 0.0_f32])
+            .expect("inlier score should succeed");
+        let outlier = det
+            .score(&[50.0_f32, 50.0_f32])
+            .expect("outlier score should succeed");
         assert!(
             outlier > inlier,
             "distant outlier ({outlier}) should have higher score than inlier ({inlier})"
@@ -489,11 +506,16 @@ mod tests {
             max_iter: 300,
             tol: 1e-7,
         });
-        det.fit(&data, n, 2).unwrap();
+        det.fit(&data, n, 2)
+            .expect("fit on x-axis data should succeed");
         // A point on the x-axis should reconstruct with near-zero error
-        let on_axis = det.score(&[5.0_f32, 0.0_f32]).unwrap();
+        let on_axis = det
+            .score(&[5.0_f32, 0.0_f32])
+            .expect("on-axis score should succeed");
         // A point far off the x-axis should reconstruct with large error
-        let off_axis = det.score(&[5.0_f32, 1000.0_f32]).unwrap();
+        let off_axis = det
+            .score(&[5.0_f32, 1000.0_f32])
+            .expect("off-axis score should succeed");
         assert!(
             off_axis > on_axis + 1.0,
             "off-axis ({off_axis}) should dwarf on-axis ({on_axis}) error"

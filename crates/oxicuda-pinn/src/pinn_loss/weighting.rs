@@ -61,7 +61,8 @@ mod tests {
 
     #[test]
     fn adaptive_weights_initial_equal() {
-        let w = AdaptiveWeights::new(0.9).unwrap();
+        let w = AdaptiveWeights::new(0.9)
+            .expect("AdaptiveWeights construction with valid alpha 0.9 should succeed");
         assert_eq!(w.lambda_pde, 1.0);
         assert_eq!(w.lambda_bc, 1.0);
         assert_eq!(w.lambda_ic, 1.0);
@@ -69,9 +70,11 @@ mod tests {
 
     #[test]
     fn adaptive_weights_update_changes_values() {
-        let mut w = AdaptiveWeights::new(0.9).unwrap();
+        let mut w = AdaptiveWeights::new(0.9)
+            .expect("AdaptiveWeights construction with valid alpha 0.9 should succeed");
         let before = w.lambda_pde;
-        w.update(0.5, 1.0, 2.0).unwrap();
+        w.update(0.5, 1.0, 2.0)
+            .expect("loss weighting computation should succeed with finite grad norms");
         assert!(
             (w.lambda_pde - before).abs() > 1e-6,
             "Update should change lambda_pde"
@@ -80,9 +83,11 @@ mod tests {
 
     #[test]
     fn adaptive_weights_stay_positive() {
-        let mut w = AdaptiveWeights::new(0.95).unwrap();
+        let mut w = AdaptiveWeights::new(0.95)
+            .expect("AdaptiveWeights construction with valid alpha 0.95 should succeed");
         for _ in 0..10 {
-            w.update(1.0, 2.0, 0.5).unwrap();
+            w.update(1.0, 2.0, 0.5)
+                .expect("loss weighting computation should succeed with finite grad norms");
         }
         assert!(w.lambda_pde > 0.0);
         assert!(w.lambda_bc > 0.0);
@@ -91,7 +96,8 @@ mod tests {
 
     #[test]
     fn adaptive_weights_weighted_loss_finite() {
-        let w = AdaptiveWeights::new(0.8).unwrap();
+        let w = AdaptiveWeights::new(0.8)
+            .expect("AdaptiveWeights construction with valid alpha 0.8 should succeed");
         let loss = w.weighted_loss(0.5, 0.3, 0.2);
         assert!(loss.is_finite());
     }
@@ -104,7 +110,8 @@ mod tests {
 
     #[test]
     fn adaptive_weights_nan_update_error() {
-        let mut w = AdaptiveWeights::new(0.9).unwrap();
+        let mut w = AdaptiveWeights::new(0.9)
+            .expect("AdaptiveWeights construction with valid alpha 0.9 should succeed");
         let result = w.update(f32::NAN, 1.0, 1.0);
         assert!(result.is_err());
     }

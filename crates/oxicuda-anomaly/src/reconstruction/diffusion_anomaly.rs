@@ -536,7 +536,8 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..10 * d).map(|i| i as f64 * 0.1).collect();
-        let fit = diffusion_anomaly_fit(&x, 10, &cfg, 42).unwrap();
+        let fit =
+            diffusion_anomaly_fit(&x, 10, &cfg, 42).expect("fit on valid data should succeed");
         assert_eq!(fit.input_dim, d);
     }
 
@@ -550,7 +551,7 @@ mod tests {
             ..simple_cfg(d)
         };
         let x: Vec<f64> = (0..8 * d).map(|i| i as f64 * 0.05).collect();
-        let fit = diffusion_anomaly_fit(&x, 8, &cfg, 7).unwrap();
+        let fit = diffusion_anomaly_fit(&x, 8, &cfg, 7).expect("fit on valid data should succeed");
         assert_eq!(fit.score_net_w1.len(), h * (d + 1));
         assert_eq!(fit.score_net_b1.len(), h);
         assert_eq!(fit.score_net_w2.len(), h * h);
@@ -564,7 +565,8 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..10 * d).map(|i| i as f64 * 0.1).collect();
-        let fit = diffusion_anomaly_fit(&x, 10, &cfg, 99).unwrap();
+        let fit =
+            diffusion_anomaly_fit(&x, 10, &cfg, 99).expect("fit on valid data should succeed");
         for &ab in &fit.alpha_bars {
             assert!((0.0..=1.0).contains(&ab), "alpha_bar out of [0,1]: {ab}");
         }
@@ -575,10 +577,11 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let train: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.05).collect();
-        let fit = diffusion_anomaly_fit(&train, 20, &cfg, 1).unwrap();
+        let fit = diffusion_anomaly_fit(&train, 20, &cfg, 1).expect("fit should succeed");
         let test: Vec<f64> = (0..5 * d).map(|i| i as f64 * 0.1).collect();
         let mut rng = LcgRng::new(11);
-        let scores = diffusion_anomaly_score(&fit, &test, 5, &mut rng).unwrap();
+        let scores = diffusion_anomaly_score(&fit, &test, 5, &mut rng)
+            .expect("score should succeed after fit");
         assert_eq!(scores.len(), 5);
     }
 
@@ -587,10 +590,11 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let train: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.05).collect();
-        let fit = diffusion_anomaly_fit(&train, 20, &cfg, 2).unwrap();
+        let fit = diffusion_anomaly_fit(&train, 20, &cfg, 2).expect("fit should succeed");
         let test: Vec<f64> = (0..5 * d).map(|i| i as f64 * 0.1).collect();
         let mut rng = LcgRng::new(22);
-        let scores = diffusion_anomaly_score(&fit, &test, 5, &mut rng).unwrap();
+        let scores = diffusion_anomaly_score(&fit, &test, 5, &mut rng)
+            .expect("score should succeed after fit");
         for &s in &scores {
             assert!(s.is_finite(), "score not finite: {s}");
         }
@@ -601,10 +605,11 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let train: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.05).collect();
-        let fit = diffusion_anomaly_fit(&train, 20, &cfg, 3).unwrap();
+        let fit = diffusion_anomaly_fit(&train, 20, &cfg, 3).expect("fit should succeed");
         let test: Vec<f64> = (0..5 * d).map(|i| i as f64 * 0.1).collect();
         let mut rng = LcgRng::new(33);
-        let scores = diffusion_anomaly_score(&fit, &test, 5, &mut rng).unwrap();
+        let scores = diffusion_anomaly_score(&fit, &test, 5, &mut rng)
+            .expect("score should succeed after fit");
         for &s in &scores {
             assert!(s >= 0.0, "score negative: {s}");
         }
@@ -615,10 +620,11 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let train: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.05).collect();
-        let fit = diffusion_anomaly_fit(&train, 20, &cfg, 4).unwrap();
+        let fit = diffusion_anomaly_fit(&train, 20, &cfg, 4).expect("fit should succeed");
         let test: Vec<f64> = (0..7 * d).map(|i| i as f64 * 0.1).collect();
         let mut rng = LcgRng::new(44);
-        let preds = diffusion_anomaly_predict(&fit, &test, 7, 1.0, &mut rng).unwrap();
+        let preds = diffusion_anomaly_predict(&fit, &test, 7, 1.0, &mut rng)
+            .expect("predict should succeed after fit");
         assert_eq!(preds.len(), 7);
     }
 
@@ -627,7 +633,7 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = vec![0.0; 10 * d];
-        let fit = diffusion_anomaly_fit(&x, 10, &cfg, 5).unwrap();
+        let fit = diffusion_anomaly_fit(&x, 10, &cfg, 5).expect("fit on valid data should succeed");
         let bad_x = vec![0.0_f64; 3]; // wrong length for n=1, d=4
         let mut rng = LcgRng::new(55);
         let res = diffusion_anomaly_score(&fit, &bad_x, 1, &mut rng);
@@ -648,7 +654,7 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..10 * d).map(|i| i as f64 * 0.1).collect();
-        let fit = diffusion_anomaly_fit(&x, 10, &cfg, 8).unwrap();
+        let fit = diffusion_anomaly_fit(&x, 10, &cfg, 8).expect("fit should succeed");
         assert_eq!(fit.alphas.len(), cfg.n_steps);
         assert_eq!(fit.alpha_bars.len(), cfg.n_steps);
     }
@@ -668,7 +674,8 @@ mod tests {
             beta_end: 0.02,
         };
         let train: Vec<f64> = (0..50 * d).map(|_| 0.1).collect();
-        let fit = diffusion_anomaly_fit(&train, 50, &cfg, 77).unwrap();
+        let fit = diffusion_anomaly_fit(&train, 50, &cfg, 77)
+            .expect("fit on normal training data should succeed");
 
         let normal: Vec<f64> = vec![0.1; d];
         let outlier: Vec<f64> = vec![100.0; d];
@@ -679,8 +686,10 @@ mod tests {
         let mut outlier_sum = 0.0_f64;
         let mut rng = LcgRng::new(88);
         for _ in 0..n_trials {
-            let sn = diffusion_anomaly_score(&fit, &normal, 1, &mut rng).unwrap();
-            let so = diffusion_anomaly_score(&fit, &outlier, 1, &mut rng).unwrap();
+            let sn = diffusion_anomaly_score(&fit, &normal, 1, &mut rng)
+                .expect("normal score should succeed in OOD trial");
+            let so = diffusion_anomaly_score(&fit, &outlier, 1, &mut rng)
+                .expect("outlier score should succeed in OOD trial");
             normal_sum += sn[0];
             outlier_sum += so[0];
         }

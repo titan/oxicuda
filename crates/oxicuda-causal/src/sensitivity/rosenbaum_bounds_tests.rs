@@ -104,7 +104,8 @@ fn gamma_equal_one_lower_equals_upper() {
         gamma_grid: vec![1.0],
         alpha: 0.05,
     };
-    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     assert_eq!(r.len(), 1);
     assert!(
         approx(r[0].p_lower, r[0].p_upper, 1e-12),
@@ -121,7 +122,8 @@ fn lower_bound_below_or_equal_upper_bound() {
         gamma_grid: vec![1.0, 1.5, 2.0, 3.0, 5.0],
         alpha: 0.05,
     };
-    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     for row in &r {
         assert!(
             row.p_lower <= row.p_upper + 1e-9,
@@ -141,7 +143,8 @@ fn strong_positive_effect_p_lower_zero_p_upper_inflated_by_gamma() {
         gamma_grid: vec![1.0, 10.0, 50.0],
         alpha: 0.05,
     };
-    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     // At Γ = 1 the test is extremely significant: p_upper ≈ 0.
     assert!(
         r[0].p_upper < 1e-3,
@@ -173,8 +176,10 @@ fn deterministic_under_repeated_call() {
         gamma_grid: vec![1.0, 1.5, 2.0],
         alpha: 0.05,
     };
-    let r1 = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
-    let r2 = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r1 = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
+    let r2 = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     assert_eq!(r1, r2);
 }
 
@@ -187,7 +192,8 @@ fn upper_p_monotone_in_gamma() {
         gamma_grid: grid,
         alpha: 0.05,
     };
-    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     for w in r.windows(2) {
         assert!(
             w[1].p_upper >= w[0].p_upper - 1e-9,
@@ -203,7 +209,7 @@ fn upper_p_monotone_in_gamma() {
 #[test]
 fn critical_gamma_exceeds_one_for_significant_effect() {
     let diffs: Vec<f64> = (1..=30).map(|i| 0.3 * i as f64).collect();
-    let g = RosenbaumBounds::critical_gamma(&diffs, 0.05).unwrap();
+    let g = RosenbaumBounds::critical_gamma(&diffs, 0.05).expect("critical_gamma should succeed");
     assert!(g > 1.0, "critical Γ = {} (expected > 1)", g);
     assert!(g < 20.0, "critical Γ = {} (expected < 20)", g);
 }
@@ -211,7 +217,7 @@ fn critical_gamma_exceeds_one_for_significant_effect() {
 #[test]
 fn critical_gamma_returns_one_for_non_significant_effect() {
     let diffs: Vec<f64> = vec![0.1, -0.2, 0.05, -0.1, 0.15, -0.05, 0.08, -0.07];
-    let g = RosenbaumBounds::critical_gamma(&diffs, 0.05).unwrap();
+    let g = RosenbaumBounds::critical_gamma(&diffs, 0.05).expect("critical_gamma should succeed");
     assert!(approx(g, 1.0, 1e-9), "critical Γ = {} (expected 1.0)", g);
 }
 
@@ -242,9 +248,11 @@ fn exact_matches_normal_at_n_eq_20() {
         gamma_grid: vec![1.0],
         alpha: 0.05,
     };
-    let r_norm = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r_norm = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     let diffs_19 = &diffs[0..19];
-    let r_exact = RosenbaumBounds::wilcoxon_signed_rank(diffs_19, &cfg).unwrap();
+    let r_exact = RosenbaumBounds::wilcoxon_signed_rank(diffs_19, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     assert!(r_norm[0].p_upper < 1e-3, "normal p={}", r_norm[0].p_upper);
     assert!(r_exact[0].p_upper < 1e-3, "exact p={}", r_exact[0].p_upper);
 }
@@ -257,9 +265,11 @@ fn pratt_zero_differences_dropped() {
         gamma_grid: vec![1.0],
         alpha: 0.05,
     };
-    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     let non_zero: Vec<f64> = diffs.iter().copied().filter(|d| *d != 0.0).collect();
-    let r_no_zero = RosenbaumBounds::wilcoxon_signed_rank(&non_zero, &cfg).unwrap();
+    let r_no_zero = RosenbaumBounds::wilcoxon_signed_rank(&non_zero, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     assert!(approx(r[0].p_upper, r_no_zero[0].p_upper, 1e-9));
     assert!(approx(r[0].p_lower, r_no_zero[0].p_lower, 1e-9));
 }
@@ -272,7 +282,8 @@ fn ties_in_absolute_difference_handled_with_average_ranks() {
         gamma_grid: vec![1.0],
         alpha: 0.05,
     };
-    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     assert!(r[0].p_upper.is_finite());
     assert!((0.0..=1.0).contains(&r[0].p_upper));
     assert!((0.0..=1.0).contains(&r[0].p_lower));
@@ -287,7 +298,8 @@ fn p_values_are_in_closed_unit_interval() {
         gamma_grid: vec![1.0, 1.5, 2.5, 4.0],
         alpha: 0.05,
     };
-    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg).unwrap();
+    let r = RosenbaumBounds::wilcoxon_signed_rank(&diffs, &cfg)
+        .expect("wilcoxon_signed_rank should succeed");
     for row in &r {
         assert!(
             (0.0..=1.0).contains(&row.p_lower),
@@ -315,7 +327,8 @@ fn normal_cdf_basic() {
 #[test]
 fn signed_rank_ordering() {
     let diffs = vec![3.0, -1.0, 2.0, -4.0];
-    let (ranks, signs) = signed_rank_for_tests(&diffs).unwrap();
+    let (ranks, signs) =
+        signed_rank_for_tests(&diffs).expect("signed_rank_for_tests should succeed");
     // Sorted |d|: 1, 2, 3, 4 ⇒ ranks 1..4 ⇒ matches sorted order.
     // Original signs in sorted order:
     //   |d|=1 (-1.0 → negative)

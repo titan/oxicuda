@@ -10,11 +10,13 @@
 //! ├── encoding/     — Positional encoding, Instant-NGP hash grid, Mip-NeRF IPE
 //! ├── error         — NerfError / NerfResult
 //! ├── field/        — TensoRF, Instant-NGP hash field
+//! ├── generative/   — pi-GAN FiLM-SIREN generative radiance field
 //! ├── handle        — NerfHandle (SmVersion + LcgRng)
-//! ├── metrics/      — PSNR, MSE image quality metrics
+//! ├── metrics/      — PSNR, MSE, SSIM, LPIPS perceptual metric
 //! ├── network/      — NeRF MLP, TinyNeRF
 //! ├── ptx_kernels   — GPU PTX kernel strings (7 kernels × 6 SM versions)
-//! └── rendering/    — Ray, sampling, volume rendering, occupancy grid
+//! ├── rendering/    — Ray, sampling, volume rendering, Zip-NeRF, Ref-NeRF, EmerNeRF
+//! └── surface/      — Neuralangelo neural SDF surface reconstruction
 //! ```
 
 // ─── Module declarations ─────────────────────────────────────────────────────
@@ -23,11 +25,13 @@ pub mod camera;
 pub mod encoding;
 pub mod error;
 pub mod field;
+pub mod generative;
 pub mod handle;
 pub mod metrics;
 pub mod network;
 pub mod ptx_kernels;
 pub mod rendering;
+pub mod surface;
 
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
@@ -42,18 +46,44 @@ pub mod prelude {
     pub use crate::field::kplanes::{KPlanes, KPlanesConfig};
     pub use crate::field::plenoxel::{PlenoxelConfig, PlenoxelGrid};
     pub use crate::field::tensorf::{TensorRf, TensorRfConfig};
+    pub use crate::field::vm_field::{VmField, VmFieldConfig};
+    pub use crate::generative::pi_gan::{FilmParams, PiGan, PiGanConfig};
     pub use crate::handle::{LcgRng, NerfHandle, SmVersion};
     pub use crate::metrics::image_quality::{ImageMetrics, compute_image_metrics, psnr};
+    pub use crate::metrics::lpips::{Lpips, LpipsConfig};
+    pub use crate::metrics::ssim::{SsimConfig, ssim_gray, ssim_image};
     pub use crate::network::nerf_mlp::{NerfMlp, NerfMlpConfig};
     pub use crate::network::tiny_nerf::TinyNerf;
     pub use crate::ptx_kernels::{
         f32_hex, hash_grid_lookup_ptx, importance_resample_ptx, occupancy_update_ptx,
         positional_encoding_ptx, ray_march_ptx, sh_to_rgb_ptx, volume_render_ptx,
     };
+    pub use crate::rendering::aabb::{Aabb as RayAabb, AabbHit};
+    pub use crate::rendering::deformable_3dgs::{
+        DeformableGaussians, DeformationConfig, DeformationField, GaussianDelta,
+    };
+    pub use crate::rendering::emernerf::{
+        Composite, DynamicOutput, EmerNerf, EmerNerfConfig, warp,
+    };
+    pub use crate::rendering::gaussian_splat_3d::{
+        Gaussian3d, Splat2d, SplatCamera, SplatImage, SplatPixelGrad, backward_pixel,
+        project_gaussian, project_scene, quat_to_rotation, rasterize, rasterize_pixel,
+    };
+    pub use crate::rendering::ndc::{ndc_depth_to_world, ndc_ray};
     pub use crate::rendering::occupancy::OccupancyGrid;
     pub use crate::rendering::ray::{PinholeCamera as RayCamera, Ray};
+    pub use crate::rendering::ref_nerf::{
+        RefNerf, RefNerfConfig, SpatialOutputs, attenuation_per_degree, ide_encode, reflect,
+    };
     pub use crate::rendering::sampling::{importance_sample, merge_samples, stratified_sample};
     pub use crate::rendering::volume_render::{RenderResult, volume_render, volume_render_batch};
+    pub use crate::rendering::zip_nerf::{Multisample, ZipNerf, ZipNerfConfig};
+    pub use crate::surface::marching_cubes::{
+        GridSpec, TriMesh, marching_cubes, polygonize_cube, vertex_interp,
+    };
+    pub use crate::surface::neuralangelo::{
+        Neuralangelo, NeuralangeloConfig, eikonal_residual_of, laplacian_of, numerical_gradient_of,
+    };
 }
 
 // ─── End-to-end integration tests ────────────────────────────────────────────
@@ -73,7 +103,7 @@ mod e2e_tests {
         };
         let n_pts = 16;
         let input = vec![0.5_f32; n_pts * 3];
-        let out = positional_encode(&input, &cfg).unwrap();
+        let out = positional_encode(&input, &cfg).expect("positional_encode should succeed");
         assert_eq!(
             out.len(),
             n_pts * cfg.output_dim(),
@@ -91,8 +121,8 @@ mod e2e_tests {
             input_dim: 3,
         };
         let input = vec![0.1_f32, 0.5, -0.3, 0.0, 1.0, 0.7];
-        let out1 = positional_encode(&input, &cfg).unwrap();
-        let out2 = positional_encode(&input, &cfg).unwrap();
+        let out1 = positional_encode(&input, &cfg).expect("positional_encode should succeed");
+        let out2 = positional_encode(&input, &cfg).expect("positional_encode should succeed");
         assert_eq!(out1, out2, "E2E: positional encoding must be deterministic");
     }
 
@@ -108,8 +138,8 @@ mod e2e_tests {
             max_resolution: 256,
         };
         let mut rng = LcgRng::new(42);
-        let grid = HashGrid::new(cfg, &mut rng).unwrap();
-        let feat = grid.query([0.3, 0.7, 0.5]).unwrap();
+        let grid = HashGrid::new(cfg, &mut rng).expect("new should succeed");
+        let feat = grid.query([0.3, 0.7, 0.5]).expect("query should succeed");
         assert_eq!(
             feat.len(),
             grid.output_dim(),
@@ -130,9 +160,9 @@ mod e2e_tests {
             max_resolution: 32,
         };
         let mut rng = LcgRng::new(1234);
-        let grid = HashGrid::new(cfg, &mut rng).unwrap();
-        let feat_origin = grid.query([0.0, 0.0, 0.0]).unwrap();
-        let feat_far = grid.query([1.0, 1.0, 1.0]).unwrap();
+        let grid = HashGrid::new(cfg, &mut rng).expect("new should succeed");
+        let feat_origin = grid.query([0.0, 0.0, 0.0]).expect("query should succeed");
+        let feat_far = grid.query([1.0, 1.0, 1.0]).expect("query should succeed");
         // With random initialization, corners almost certainly differ
         let are_different = feat_origin
             .iter()
@@ -152,7 +182,7 @@ mod e2e_tests {
         let sigma = vec![0.0_f32; n];
         let color = vec![0.5_f32; n * 3];
         let t: Vec<f32> = (0..n).map(|i| 0.1 + i as f32 * 0.1).collect();
-        let res = volume_render(&sigma, &color, &t).unwrap();
+        let res = volume_render(&sigma, &color, &t).expect("volume_render should succeed");
         assert!(
             res.opacity < 1e-6,
             "E2E: empty scene (zero density) should have near-zero opacity, got {}",
@@ -172,7 +202,7 @@ mod e2e_tests {
         color[1] = 0.0;
         color[2] = 0.0;
         let t: Vec<f32> = (0..n).map(|i| 0.1 + i as f32 * 0.2).collect();
-        let res = volume_render(&sigma, &color, &t).unwrap();
+        let res = volume_render(&sigma, &color, &t).expect("volume_render should succeed");
         assert!(
             res.rgb[0] > 0.99,
             "E2E: opaque red first sample, expected R≈1, got {}",
@@ -193,7 +223,8 @@ mod e2e_tests {
         let t_near = 0.1_f32;
         let t_far = 5.0_f32;
         let n = 128;
-        let samples = stratified_sample(t_near, t_far, n, &mut rng).unwrap();
+        let samples = stratified_sample(t_near, t_far, n, &mut rng)
+            .expect("stratified_sample should succeed");
         assert_eq!(
             samples.len(),
             n,
@@ -215,7 +246,8 @@ mod e2e_tests {
         let coarse_t = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
         let weights = vec![0.01, 0.1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.02];
         let n_fine = 32;
-        let fine = importance_sample(&coarse_t, &weights, n_fine, &mut rng).unwrap();
+        let fine = importance_sample(&coarse_t, &weights, n_fine, &mut rng)
+            .expect("importance_sample should succeed");
         assert_eq!(
             fine.len(),
             n_fine,
@@ -233,7 +265,7 @@ mod e2e_tests {
             n_color_feat: 3,
         };
         let mut rng = LcgRng::new(2024);
-        let tf = TensorRf::new(cfg, &mut rng).unwrap();
+        let tf = TensorRf::new(cfg, &mut rng).expect("new should succeed");
 
         let test_pts: &[[f32; 3]] = &[
             [0.0, 0.0, 0.0],
@@ -243,7 +275,7 @@ mod e2e_tests {
             [0.3, -0.7, 0.9],
         ];
         for &xyz in test_pts {
-            let d = tf.query_density(xyz).unwrap();
+            let d = tf.query_density(xyz).expect("query_density should succeed");
             assert!(
                 d >= 0.0,
                 "E2E: TensoRF density should be >= 0 (got {d}) at {:?}",
@@ -259,7 +291,7 @@ mod e2e_tests {
         let mut rng = LcgRng::new(314);
         let net = TinyNerf::new(24, 64, &mut rng);
         let x = vec![0.1_f32; 24];
-        let (sigma, rgb) = net.forward(&x).unwrap();
+        let (sigma, rgb) = net.forward(&x).expect("forward should succeed");
         assert!(
             sigma.is_finite(),
             "E2E: TinyNerf sigma must be finite, got {sigma}"
@@ -282,7 +314,7 @@ mod e2e_tests {
     #[test]
     fn e2e_psnr_identity() {
         let img = vec![0.5_f32; 256 * 256 * 3];
-        let p = psnr(&img, &img).unwrap();
+        let p = psnr(&img, &img).expect("psnr should succeed");
         assert!(
             p.is_infinite() || p > 100.0,
             "E2E: psnr(x, x) should be Inf or very large, got {p}"

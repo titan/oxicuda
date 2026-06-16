@@ -633,8 +633,10 @@ mod tests {
         let k = 3_usize;
         let (logits, labels) = multiclass_dataset(30, k, 3.0);
         let cfg = vector_cfg(k);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
-        let probs = scaler.calibrate(&logits, 30).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
+        let probs = scaler
+            .calibrate(&logits, 30)
+            .expect("calibrate should succeed");
         for i in 0..30 {
             let s: f32 = probs[i * k..(i + 1) * k].iter().sum();
             assert!((s - 1.0).abs() < 1e-5, "row {i} sums to {s} instead of 1");
@@ -646,11 +648,15 @@ mod tests {
         let k = 3_usize;
         let (logits, labels) = multiclass_dataset(20, k, 3.0);
         let cfg = vector_cfg(k);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
         // Use first sample's logits.
         let single = &logits[0..k];
-        let p_one = scaler.calibrate_one(single).unwrap();
-        let p_batch = scaler.calibrate(single, 1).unwrap();
+        let p_one = scaler
+            .calibrate_one(single)
+            .expect("calibrate_one should succeed");
+        let p_batch = scaler
+            .calibrate(single, 1)
+            .expect("calibrate should succeed");
         for (a, b) in p_one.iter().zip(p_batch.iter()) {
             assert!((a - b).abs() < 1e-6, "calibrate_one vs calibrate mismatch");
         }
@@ -662,7 +668,7 @@ mod tests {
     fn vector_mode_fit_reduces_nll() {
         let (logits, labels) = overconfident_2class(100, 0.6);
         let cfg = vector_cfg(2);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
         // Compute initial NLL (identity params).
         let (init_scale, init_bias) = init_params(ScalingMode::Vector, 2);
         let nll_before = compute_nll_from_params(&init_scale, &init_bias, &logits, &labels, 2, 0.0);
@@ -677,7 +683,7 @@ mod tests {
     fn matrix_mode_fit_reduces_nll() {
         let (logits, labels) = overconfident_2class(100, 0.6);
         let cfg = matrix_cfg(2);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
         let (init_scale, init_bias) = init_params(ScalingMode::Matrix, 2);
         let nll_before = compute_nll_from_params(&init_scale, &init_bias, &logits, &labels, 2, 0.0);
         assert!(
@@ -701,7 +707,7 @@ mod tests {
             tol: 1e-6,
             l2_reg: 1e-3,
         };
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
         // Each scale should remain positive (no sign-flip).
         for &s in &scaler.scale {
             assert!(s > 0.0, "scale component turned negative: {s}");
@@ -713,8 +719,10 @@ mod tests {
         let k = 3_usize;
         let (logits, labels) = multiclass_dataset(20, k, 2.0);
         let cfg = vector_cfg(k);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
-        let (gs, gb) = scaler.nll_grad(&logits, &labels).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
+        let (gs, gb) = scaler
+            .nll_grad(&logits, &labels)
+            .expect("nll_grad should succeed");
         assert_eq!(gs.len(), k, "grad_scale must have K elements (Vector)");
         assert_eq!(gb.len(), k, "grad_bias must have K elements");
     }
@@ -724,8 +732,10 @@ mod tests {
         let k = 3_usize;
         let (logits, labels) = multiclass_dataset(20, k, 2.0);
         let cfg = matrix_cfg(k);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
-        let (gs, gb) = scaler.nll_grad(&logits, &labels).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
+        let (gs, gb) = scaler
+            .nll_grad(&logits, &labels)
+            .expect("nll_grad should succeed");
         assert_eq!(gs.len(), k * k, "grad_scale must have K² elements (Matrix)");
         assert_eq!(gb.len(), k, "grad_bias must have K elements");
     }
@@ -743,7 +753,7 @@ mod tests {
             tol: 1e-5,
             l2_reg: 1e-4,
         };
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
         assert!(
             scaler.n_iter <= max_iter,
             "n_iter={} exceeded max_iter={max_iter}",
@@ -757,8 +767,10 @@ mod tests {
         let logits = vec![1.0_f32, 2.0, 0.5];
         let labels = vec![1_usize]; // class 1 (highest logit)
         let cfg = vector_cfg(k);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
-        let probs = scaler.calibrate(&logits, 1).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
+        let probs = scaler
+            .calibrate(&logits, 1)
+            .expect("calibrate should succeed");
         let s: f32 = probs.iter().sum();
         assert!((s - 1.0).abs() < 1e-5, "probs sum to {s} not 1");
     }
@@ -840,7 +852,7 @@ mod tests {
         let k = 2_usize;
         let (logits, labels) = overconfident_2class(10, 0.6);
         let cfg = vector_cfg(k);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
         let r = scaler.nll(&[], &[]);
         assert!(matches!(r, Err(BayesError::CalibrationSetEmpty)));
     }
@@ -850,7 +862,7 @@ mod tests {
         let k = 3_usize;
         let (logits, labels) = multiclass_dataset(10, k, 2.0);
         let cfg = vector_cfg(k);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
         // Pass 5 logits when 6 (n=2, k=3) are expected.
         let r = scaler.transform_logits(&[1.0_f32, 2.0, 3.0, 4.0, 5.0], 2);
         assert!(
@@ -866,8 +878,8 @@ mod tests {
         let k = 3_usize;
         let (logits, labels) = multiclass_dataset(20, k, 2.0);
         let cfg = vector_cfg(k);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
-        let nll_val = scaler.nll(&logits, &labels).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
+        let nll_val = scaler.nll(&logits, &labels).expect("nll should succeed");
         assert!(nll_val >= 0.0, "NLL must be non-negative, got {nll_val}");
     }
 
@@ -876,10 +888,10 @@ mod tests {
         // The NLL should be lower after fitting than at the identity initialisation.
         let (logits, labels) = overconfident_2class(120, 0.5);
         let cfg = vector_cfg(2);
-        let scaler = VectorScaler::fit(&logits, &labels, cfg).unwrap();
+        let scaler = VectorScaler::fit(&logits, &labels, cfg).expect("fit should succeed");
         let (init_scale, init_bias) = init_params(ScalingMode::Vector, 2);
         let nll_before = compute_nll_from_params(&init_scale, &init_bias, &logits, &labels, 2, 0.0);
-        let nll_after = scaler.nll(&logits, &labels).unwrap();
+        let nll_after = scaler.nll(&logits, &labels).expect("nll should succeed");
         assert!(
             nll_after <= nll_before + 1e-3,
             "NLL should not increase: before={nll_before}, after={nll_after}"

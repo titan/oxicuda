@@ -145,7 +145,8 @@ mod tests {
         let g = vec![1.0_f32, 0.0, 0.0, 0.0];
         let mem_grads = vec![vec![1.0_f32, 0.0, 0.0, 0.0]];
         let margin = 0.0;
-        let g_proj = gem_project_gradient(&g, &mem_grads, margin).unwrap();
+        let g_proj = gem_project_gradient(&g, &mem_grads, margin)
+            .expect("GEM gradient projection should succeed");
         // g · mem = 1.0 >= 0 = -margin, so no change
         for (a, b) in g.iter().zip(g_proj.iter()) {
             assert!(
@@ -161,7 +162,8 @@ mod tests {
         let g = vec![-1.0_f32, 0.0];
         let mem_grads = vec![vec![1.0_f32, 0.0]];
         let margin = 0.0;
-        let g_proj = gem_project_gradient(&g, &mem_grads, margin).unwrap();
+        let g_proj = gem_project_gradient(&g, &mem_grads, margin)
+            .expect("GEM gradient projection should succeed");
         // After projection, g · mem should be ≥ -margin
         let dot_after = dot(&g_proj, &mem_grads[0]);
         assert!(
@@ -175,7 +177,8 @@ mod tests {
         let g = vec![-2.0_f32, 1.0, -1.0];
         let mem_grads = vec![vec![1.0_f32, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
         let margin = 0.1;
-        let g_proj = gem_project_gradient(&g, &mem_grads, margin).unwrap();
+        let g_proj = gem_project_gradient(&g, &mem_grads, margin)
+            .expect("GEM gradient projection should succeed");
         for mg in &mem_grads {
             let d = dot(&g_proj, mg);
             assert!(
@@ -189,7 +192,8 @@ mod tests {
     fn gem_empty_memory_returns_unchanged() {
         let g = vec![1.0_f32, 2.0, 3.0];
         let mem_grads: Vec<Vec<f32>> = vec![];
-        let g_proj = gem_project_gradient(&g, &mem_grads, 0.0).unwrap();
+        let g_proj = gem_project_gradient(&g, &mem_grads, 0.0)
+            .expect("GEM gradient projection should succeed");
         assert_eq!(g, g_proj);
     }
 

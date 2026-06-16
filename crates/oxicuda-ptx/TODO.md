@@ -6,7 +6,7 @@ Pure Rust PTX code generation DSL and intermediate representation. Generates NVI
 
 ## Implementation Status
 
-**Actual SLoC: 29,206** (48 files) (estimated 130K-230K for oxicuda-ptx portion of Vol.2)
+**Actual SLoC: 31,764** (60 files) (estimated 130K-230K for oxicuda-ptx portion of Vol.2)
 
 The PTX crate is the largest in Vol.1+2 and the core differentiator of OxiCUDA. It provides a typed IR, builder DSL, kernel templates, Tensor Core instruction helpers, validation, disk caching, atomic operations, bit manipulation, special math functions, and compiler-style analysis passes. Current coverage handles the most important instruction classes with room for significant expansion.
 
@@ -86,6 +86,8 @@ The PTX crate is the largest in Vol.1+2 and the core differentiator of OxiCUDA. 
 - [x] Shared memory bank conflict detection -- static analysis for known access patterns
 
 **Templates (P2)**
+- [ ] `cp.async` Generator Module (`templates/cp_async_gen.rs`) -- standalone `CpAsyncGenerator` producing `cp.async.cg.global.L2::128B` / `cp.async.ca.global` PTX sequences with configurable bypass size and multi-stage pipeline loop; `CpAsyncGenerator`
+- [ ] Kernel Fusion Cost Model (`analysis/fusion_cost_model.rs`) -- register-pressure + shared-memory + ILP heuristic model for deciding whether to fuse two adjacent pointwise kernels; `FusionCostModel` replacing current unconditional-fuse placeholder
 - [x] Convolution template (templates/convolution.rs) -- im2col, direct conv, 1x1 optimized, backward data/filter
 - [x] Attention template (templates/attention.rs) -- FlashAttention-style fused attention kernel
 - [x] MoE (Mixture of Experts) template (templates/moe.rs) -- top-k gating, permute, expert GEMM, unpermute
@@ -104,7 +106,7 @@ The PTX crate is the largest in Vol.1+2 and the core differentiator of OxiCUDA. 
 ## Quality Status
 
 - Warnings: 0
-- Tests: 880 passing
+- Tests: 934 passing
 - unwrap() calls: 0
 - Clippy: clean (pedantic + nursery)
 - `#![deny(unsafe_code)]` -- entire crate is safe Rust
@@ -120,7 +122,7 @@ PTX generation is CPU-bound and should be fast enough for JIT scenarios:
 ## Notes
 
 - The entire crate is `#![deny(unsafe_code)]` -- all PTX text is constructed from safe Rust
-- 48 source files across 7 subsystems (ir, builder, templates, tensor_core, emit, analysis, arch + cache/error)
+- 60 source files across 7 subsystems (ir, builder, templates, tensor_core, emit, analysis, arch + cache/error)
 - GEMM template supports configurable tile sizes but does not yet reach peak Tensor Core throughput
 - Tensor Core configs define shapes/types but full code generation integration is in progress
 - The cache uses deterministic key hashing -- same inputs always produce same PTX output

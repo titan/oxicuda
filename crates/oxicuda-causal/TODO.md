@@ -10,7 +10,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.41).
 
 ## Implementation Status
 
-- **Actual SLoC:** 4,402 total lines (3,861 code, 30 files)
+- **Actual SLoC:** 26,133 total lines (26,133 code, 80 files)
 - **Coverage:** DAG with cycle-safe add/remove and Kahn topological sort;
   d-separation via Bayes-ball with collider handling; NOTEARS linear SEM via
   augmented Lagrangian with Padé-(3,3) matrix-exponential acyclicity;
@@ -89,7 +89,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.41).
   chain, PTX non-empty × all SM versions)
 - [x] Benchmarks (`benches/causal_ops.rs`) — PTX bench group + partial
   correlation bench + DML residual bench
-- **Tests:** 43 passing
+- **Tests:** 735 passing
 
 ### Future Enhancements
 
@@ -105,7 +105,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.41).
 - [x] GFCI hybrid score+constraint variant (`discovery/gfci.rs` + `discovery/gfci_tests.rs` -- Ogarrio-Spirtes-Ramsey 2016 UAI; Phase 1 BIC-scored GES skeleton + Phase 2 PAG conversion with unshielded-triple collider orientation + Zhang R1-R4 to fixpoint)
 - [x] LiNGAM (linear non-Gaussian) ICA-based discovery (`discovery/lingam.rs` + `discovery/lingam_tests.rs` -- Shimizu-Hoyer-Hyvärinen-Kerminen 2006 JMLR 7:2003; FastICA deflationary fixed-point with g∈{tanh,gauss,cube}, inline cyclic Jacobi whitening, greedy row-permutation for diagonal maximization, B = I − W_scaled with Shimizu Algo 2 lower-triangular permutation)
 - [x] DirectLiNGAM ordering-based variant (`discovery/direct_lingam.rs` -- Shimizu et al. 2011; kurtosis-based non-Gaussianity ordering + ridge-OLS B recovery)
-- [ ] DAG-GNN / DAG-NoCurl differentiable variants
+- [x] DAG-GNN / DAG-NoCurl differentiable variants
 - [x] CD-NOD heterogeneous-data causal discovery (discovery/cd_nod.rs -- Huang et al. 2020 JMLR; surrogate domain variable C, PC skeleton over augmented {X,C}, regression-residual Fisher-Z CI, changing-mechanism detection via C-adjacency, collider+Meek orientation)
 
 #### P1 — Effect Estimation Extensions
@@ -135,12 +135,13 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.41).
 - [x] Continuous sensitivity analysis a la Cinelli & Hazlett 2020 (`sensitivity/cinelli_hazlett.rs` -- Cinelli-Hazlett 2020 JRSS-B 82:39; partial-R² OVB bounds, robustness value RV_q via quadratic formula, extreme scenario bias, grid benchmark with adjusted t-statistics)
 
 #### P2 — Counterfactual & Mediation
-- [ ] CEVAE counterfactual variational autoencoder
-- [ ] GANITE GAN-based individualized treatment effect
+- [x] CEVAE counterfactual variational autoencoder
+- [x] GANITE GAN-based individualized treatment effect
 - [x] Imai-Keele-Tingley causal mediation decomposition (`effect/mediation.rs` + `effect/mediation_tests.rs` -- Imai-Keele-Tingley 2010 Psychological Methods 15:309; mediator ridge OLS on `[1, t, X]`, outcome ridge OLS on `[1, t, m, t·m, X]` with T·M interaction, four counterfactual predictions Ŷ(t', M̂(t)), ACME = (δ̂(0)+δ̂(1))/2, ADE = (ζ̂(0)+ζ̂(1))/2, parametric-bootstrap Monte Carlo CIs via LcgRng-seeded coefficient resampling with nearest-rank quantiles)
-- [ ] Pearl mediation formula identification
+- [x] Pearl mediation formula identification
 
 #### P2 — Policy Learning
+- [x] Staggered DiD Callaway-Sant'Anna (`effect/staggered_did.rs`) — Callaway-Sant'Anna 2021 JOE: heterogeneity-robust difference-in-differences for staggered adoption with group-time ATT and doubly-robust aggregation; `StaggeredDid`
 - [x] Doubly-robust policy learning over CATE forests (forest/dr_policy.rs -- AIPW DR scores Γ_i(a)=m̂(X_i,a)+(Y_i−m̂)·𝟙{T_i=a}/ê(X_i,a) with propensity clipping, then welfare-maximizing PolicyTree fit; reuses policy_tree.rs)
 - [x] Welfare-maximizing policy trees (Athey & Wager 2021) (forest/policy_tree.rs -- exact exhaustive shallow-tree search maximizing summed doubly-robust scores with min-leaf constraint)
 - [x] Off-policy evaluation (IPS, SNIPS, doubly-robust) for bandits
@@ -158,7 +159,7 @@ emitted as strings. No oxicuda-driver / -memory / -launch dependency at this lay
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 43 passing (DAG, d-sep, NOTEARS, PC, propensity, IPW, DML, DragonNet,
+- Tests: 735 passing (DAG, d-sep, NOTEARS, PC, propensity, IPW, DML, DragonNet,
   causal forest, backdoor, PTX × 6 SM)
 - unwrap() calls: 0 in production code
 - macOS: compiles but returns `UnsupportedPlatform` at runtime when actual launch

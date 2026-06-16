@@ -50,6 +50,12 @@ pub enum BayesError {
     #[error("NaN encountered at location: {location}")]
     NanEncountered { location: &'static str },
 
+    #[error("singular or non-positive-definite matrix: {0}")]
+    SingularMatrix(String),
+
+    #[error("invalid configuration: {0}")]
+    InvalidConfig(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }

@@ -90,7 +90,9 @@ mod tests {
         let mut updater = EmaUpdater::new();
         let mut target = vec![0.0_f32, 1.0, 2.0];
         let online = vec![10.0_f32, 20.0, 30.0];
-        updater.update(&mut target, &online, 0.0).unwrap();
+        updater
+            .update(&mut target, &online, 0.0)
+            .expect("update should succeed");
         assert_eq!(target, online);
         assert!((updater.last_momentum - 0.0).abs() < 1e-7);
     }
@@ -100,7 +102,9 @@ mod tests {
         let mut updater = EmaUpdater::new();
         let mut target = vec![0.0_f32, 1.0, 2.0];
         let online = vec![10.0_f32, 20.0, 30.0];
-        updater.update(&mut target, &online, 1.0).unwrap();
+        updater
+            .update(&mut target, &online, 1.0)
+            .expect("update should succeed");
         assert_eq!(target, vec![0.0_f32, 1.0, 2.0]);
     }
 
@@ -109,7 +113,9 @@ mod tests {
         let mut updater = EmaUpdater::new();
         let mut target = vec![0.0_f32, 0.0, 0.0];
         let online = vec![2.0_f32, 4.0, 6.0];
-        updater.update(&mut target, &online, 0.5).unwrap();
+        updater
+            .update(&mut target, &online, 0.5)
+            .expect("update should succeed");
         assert_eq!(target, vec![1.0_f32, 2.0, 3.0]);
     }
 
@@ -133,21 +139,21 @@ mod tests {
 
     #[test]
     fn cosine_momentum_at_step_zero_equals_base() {
-        let m = cosine_momentum(0, 100, 0.5, 1.0).unwrap();
+        let m = cosine_momentum(0, 100, 0.5, 1.0).expect("cosine_momentum should succeed");
         assert!((m - 0.5).abs() < 1e-6);
     }
 
     #[test]
     fn cosine_momentum_at_max_step_equals_end() {
-        let m = cosine_momentum(100, 100, 0.5, 1.0).unwrap();
+        let m = cosine_momentum(100, 100, 0.5, 1.0).expect("cosine_momentum should succeed");
         assert!((m - 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn cosine_momentum_monotone() {
-        let m1 = cosine_momentum(10, 100, 0.5, 1.0).unwrap();
-        let m2 = cosine_momentum(50, 100, 0.5, 1.0).unwrap();
-        let m3 = cosine_momentum(90, 100, 0.5, 1.0).unwrap();
+        let m1 = cosine_momentum(10, 100, 0.5, 1.0).expect("cosine_momentum should succeed");
+        let m2 = cosine_momentum(50, 100, 0.5, 1.0).expect("cosine_momentum should succeed");
+        let m3 = cosine_momentum(90, 100, 0.5, 1.0).expect("cosine_momentum should succeed");
         assert!(m1 < m2);
         assert!(m2 < m3);
     }

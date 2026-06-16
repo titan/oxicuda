@@ -299,9 +299,9 @@ mod tests {
     #[test]
     fn project_shape_is_width_times_height() {
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 1.0];
-        let img = proj.project(&cfg, &pts, 2).unwrap();
+        let img = proj.project(&cfg, &pts, 2).expect("project should succeed");
         assert_eq!(img.range.len(), cfg.width * cfg.height);
         assert_eq!(img.width, cfg.width);
         assert_eq!(img.height, cfg.height);
@@ -310,8 +310,8 @@ mod tests {
     #[test]
     fn project_empty_cloud_all_infinity() {
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
-        let img = proj.project(&cfg, &[], 0).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
+        let img = proj.project(&cfg, &[], 0).expect("project should succeed");
         assert!(img.range.iter().all(|&r| r == f32::INFINITY));
         assert_eq!(img.range.len(), cfg.width * cfg.height);
     }
@@ -322,9 +322,9 @@ mod tests {
         // With az ∈ [-π, π] mapped to bins [0, width), az = 0 lands at
         // bin = floor((0 + π)/(2π) * width) = floor(width/2) = width/2.
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts = vec![1.0_f32, 0.0, 0.0];
-        let img = proj.project(&cfg, &pts, 1).unwrap();
+        let img = proj.project(&cfg, &pts, 1).expect("project should succeed");
         let expected_u = cfg.width / 2;
         let el_min_rad = cfg.elev_min_deg.to_radians();
         let el_max_rad = cfg.elev_max_deg.to_radians();
@@ -345,9 +345,9 @@ mod tests {
             elev_min_deg: -90.0,
             elev_max_deg: 90.0,
         };
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts = vec![3.0_f32, 4.0, 0.0];
-        let img = proj.project(&cfg, &pts, 1).unwrap();
+        let img = proj.project(&cfg, &pts, 1).expect("project should succeed");
         let min_r = img.range.iter().copied().fold(f32::INFINITY, f32::min);
         assert!((min_r - 5.0).abs() < 1e-4, "got min range {}", min_r);
     }
@@ -358,9 +358,9 @@ mod tests {
         // so they share a pixel. The 5-unit one must be replaced by the
         // 1-unit one.
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts = vec![5.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0];
-        let img = proj.project(&cfg, &pts, 2).unwrap();
+        let img = proj.project(&cfg, &pts, 2).expect("project should succeed");
         let expected_u = cfg.width / 2;
         let el_min_rad = cfg.elev_min_deg.to_radians();
         let el_max_rad = cfg.elev_max_deg.to_radians();
@@ -373,15 +373,19 @@ mod tests {
     #[test]
     fn project_deterministic_for_fixed_input() {
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts: Vec<f32> = (0..30)
             .flat_map(|i| {
                 let f = i as f32;
                 vec![f.cos(), f.sin() * 0.1, f.sin()]
             })
             .collect();
-        let a = proj.project(&cfg, &pts, 30).unwrap();
-        let b = proj.project(&cfg, &pts, 30).unwrap();
+        let a = proj
+            .project(&cfg, &pts, 30)
+            .expect("project should succeed");
+        let b = proj
+            .project(&cfg, &pts, 30)
+            .expect("project should succeed");
         assert_eq!(a, b, "projection must be deterministic");
     }
 
@@ -394,7 +398,7 @@ mod tests {
             elev_min_deg: -90.0,
             elev_max_deg: 90.0,
         };
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         // Use distinct (u, v) centres so the projected pixel index matches.
         let cases = [
             (10_usize, 5_usize, 3.5_f32),
@@ -404,8 +408,10 @@ mod tests {
             (63, 31, 0.7),
         ];
         for (u, v, r) in cases {
-            let p = proj.unproject_pixel(&cfg, u, v, r).unwrap();
-            let img = proj.project(&cfg, &p, 1).unwrap();
+            let p = proj
+                .unproject_pixel(&cfg, u, v, r)
+                .expect("unproject_pixel should succeed");
+            let img = proj.project(&cfg, &p, 1).expect("project should succeed");
             let idx = v * cfg.width + u;
             assert!(
                 (img.range[idx] - r).abs() < 1e-3,
@@ -426,14 +432,18 @@ mod tests {
             elev_min_deg: -90.0,
             elev_max_deg: 90.0,
         };
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         // Source point at u = 16, v = 16 centre → angle (-π/2 ish), known r.
-        let p = proj.unproject_pixel(&cfg, 16, 16, 5.0).unwrap();
-        let img = proj.project(&cfg, &p, 1).unwrap();
+        let p = proj
+            .unproject_pixel(&cfg, 16, 16, 5.0)
+            .expect("unproject_pixel should succeed");
+        let img = proj.project(&cfg, &p, 1).expect("project should succeed");
         let pixel = img.range[16 * cfg.width + 16];
         assert!((pixel - 5.0).abs() < 1e-3, "pixel range {}", pixel);
         // Unproject the projected pixel and confirm range is preserved.
-        let q = proj.unproject_pixel(&cfg, 16, 16, pixel).unwrap();
+        let q = proj
+            .unproject_pixel(&cfg, 16, 16, pixel)
+            .expect("unproject_pixel should succeed");
         let r2 = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt();
         assert!((r2 - 5.0).abs() < 1e-3, "unproject range mismatch {}", r2);
     }
@@ -496,7 +506,7 @@ mod tests {
     #[test]
     fn err_points_length_mismatch() {
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts = vec![0.0_f32, 0.0, 0.0, 1.0];
         assert!(proj.project(&cfg, &pts, 2).is_err());
     }
@@ -504,14 +514,14 @@ mod tests {
     #[test]
     fn err_unproject_u_out_of_range() {
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         assert!(proj.unproject_pixel(&cfg, cfg.width, 0, 1.0).is_err());
     }
 
     #[test]
     fn err_unproject_v_out_of_range() {
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         assert!(proj.unproject_pixel(&cfg, 0, cfg.height, 1.0).is_err());
     }
 
@@ -523,9 +533,9 @@ mod tests {
             elev_min_deg: -90.0,
             elev_max_deg: 90.0,
         };
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts = vec![1.0_f32, 0.0, 0.0, 0.5, 0.5, 0.5];
-        let img = proj.project(&cfg, &pts, 2).unwrap();
+        let img = proj.project(&cfg, &pts, 2).expect("project should succeed");
         assert_eq!(img.range.len(), 1);
         // Both points end up in the only pixel; min range wins.
         let expected_min = 1.0_f32.min((0.5_f32 * 0.5 + 0.25 + 0.25).sqrt());
@@ -543,9 +553,9 @@ mod tests {
             elev_min_deg: -90.0,
             elev_max_deg: 90.0,
         };
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts = vec![-1.0_f32, 0.0, 0.0, -2.0, 0.0, -2.0];
-        let img = proj.project(&cfg, &pts, 2).unwrap();
+        let img = proj.project(&cfg, &pts, 2).expect("project should succeed");
         let any_finite = img.range.iter().any(|r| r.is_finite());
         assert!(any_finite, "expected at least one finite pixel");
     }
@@ -556,24 +566,26 @@ mod tests {
         // restrictive FOV of [-25°, 3°] this is outside and must be dropped
         // — the image must therefore be all-infinity.
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let pts = vec![0.0_f32, 1.0, 0.0];
-        let img = proj.project(&cfg, &pts, 1).unwrap();
+        let img = proj.project(&cfg, &pts, 1).expect("project should succeed");
         assert!(img.range.iter().all(|&r| r == f32::INFINITY));
     }
 
     #[test]
     fn err_negative_range_unproject() {
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         assert!(proj.unproject_pixel(&cfg, 0, 0, -1.0).is_err());
     }
 
     #[test]
     fn unproject_zero_range_at_origin() {
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
-        let p = proj.unproject_pixel(&cfg, 0, 0, 0.0).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
+        let p = proj
+            .unproject_pixel(&cfg, 0, 0, 0.0)
+            .expect("unproject_pixel should succeed");
         assert_eq!(p, [0.0_f32, 0.0, 0.0]);
     }
 
@@ -582,7 +594,7 @@ mod tests {
         // Smoke test: a moderately sized random-ish cloud completes without
         // panicking and produces a valid image.
         let cfg = reference_cfg();
-        let proj = RangeImageProjector::new(cfg.clone()).unwrap();
+        let proj = RangeImageProjector::new(cfg.clone()).expect("value should be present");
         let n = 256;
         let mut pts = Vec::with_capacity(n * 3);
         for i in 0..n {
@@ -591,7 +603,7 @@ mod tests {
             pts.push(0.0);
             pts.push(f.sin());
         }
-        let img = proj.project(&cfg, &pts, n).unwrap();
+        let img = proj.project(&cfg, &pts, n).expect("project should succeed");
         assert_eq!(img.range.len(), cfg.width * cfg.height);
         let any_finite = img.range.iter().any(|r| r.is_finite());
         assert!(any_finite);

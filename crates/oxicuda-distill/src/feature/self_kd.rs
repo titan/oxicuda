@@ -310,7 +310,7 @@ mod tests {
         let logits_i = vec![1.5_f32, 1.5, 3.0];
         let logits_j = vec![0.5_f32, 2.5, 2.0];
         let loss = SelfKd::mixup_loss(&logits_mix, &logits_i, &logits_j, 0.6, 2, 2, &default_cfg())
-            .unwrap();
+            .expect("value should be present");
         assert!(
             loss.is_finite() && loss >= 0.0,
             "MixUp loss should be finite non-negative, got {loss}"
@@ -326,7 +326,7 @@ mod tests {
         let logits_i = vec![1.5_f32, 1.5, 3.0];
         let logits_j = vec![0.5_f32, 2.5, 2.0];
         let loss = SelfKd::mixup_loss(&logits_mix, &logits_i, &logits_j, 0.0, 0, 1, &default_cfg())
-            .unwrap();
+            .expect("value should be present");
         assert!(loss.is_finite(), "lambda=0 loss should be finite");
     }
 
@@ -339,7 +339,7 @@ mod tests {
         let logits_i = vec![1.5_f32, 1.5, 3.0];
         let logits_j = vec![0.5_f32, 2.5, 2.0];
         let loss = SelfKd::mixup_loss(&logits_mix, &logits_i, &logits_j, 1.0, 2, 1, &default_cfg())
-            .unwrap();
+            .expect("value should be present");
         assert!(loss.is_finite(), "lambda=1 loss should be finite");
     }
 
@@ -362,7 +362,7 @@ mod tests {
             label,
             &default_cfg(),
         )
-        .unwrap();
+        .expect("value should be present");
         let loss_ba = SelfKd::mixup_loss(
             &logits_mix,
             &logits_j,
@@ -372,7 +372,7 @@ mod tests {
             label,
             &default_cfg(),
         )
-        .unwrap();
+        .expect("value should be present");
         assert!(
             (loss_ab - loss_ba).abs() < 1e-4,
             "symmetric: loss_ab={loss_ab} loss_ba={loss_ba}"
@@ -389,9 +389,10 @@ mod tests {
         let logits_j = vec![0.5_f32, 2.5, 2.0];
         let lam = 0.7_f32;
         let cfg = default_cfg();
-        let mixup = SelfKd::mixup_loss(&logits_mix, &logits_i, &logits_j, lam, 2, 1, &cfg).unwrap();
-        let cutmix =
-            SelfKd::cutmix_loss(&logits_mix, &logits_i, &logits_j, lam, 2, 1, &cfg).unwrap();
+        let mixup = SelfKd::mixup_loss(&logits_mix, &logits_i, &logits_j, lam, 2, 1, &cfg)
+            .expect("mixup_loss should succeed");
+        let cutmix = SelfKd::cutmix_loss(&logits_mix, &logits_i, &logits_j, lam, 2, 1, &cfg)
+            .expect("cutmix_loss should succeed");
         assert!(
             (mixup - cutmix).abs() < 1e-6,
             "cutmix and mixup should be identical: mixup={mixup} cutmix={cutmix}"
@@ -408,7 +409,8 @@ mod tests {
             alpha: 1.0,
             ..default_cfg()
         }; // pure KD loss
-        let loss = SelfKd::mixup_loss(&logits, &logits, &logits, 0.5, 2, 2, &cfg).unwrap();
+        let loss = SelfKd::mixup_loss(&logits, &logits, &logits, 0.5, 2, 2, &cfg)
+            .expect("mixup_loss should succeed");
         assert!(
             loss.abs() < 1e-5,
             "identical logits with alpha=1 → KD term = 0, got {loss}"
@@ -436,9 +438,12 @@ mod tests {
             1_usize,
             2_usize,
         );
-        let batch_loss = SelfKd::mixup_loss_batch(&[e1.clone(), e2.clone()], &cfg).unwrap();
-        let l1 = SelfKd::mixup_loss(&e1.0, &e1.1, &e1.2, e1.3, e1.4, e1.5, &cfg).unwrap();
-        let l2 = SelfKd::mixup_loss(&e2.0, &e2.1, &e2.2, e2.3, e2.4, e2.5, &cfg).unwrap();
+        let batch_loss = SelfKd::mixup_loss_batch(&[e1.clone(), e2.clone()], &cfg)
+            .expect("value should be present");
+        let l1 = SelfKd::mixup_loss(&e1.0, &e1.1, &e1.2, e1.3, e1.4, e1.5, &cfg)
+            .expect("mixup_loss should succeed");
+        let l2 = SelfKd::mixup_loss(&e2.0, &e2.1, &e2.2, e2.3, e2.4, e2.5, &cfg)
+            .expect("mixup_loss should succeed");
         let expected = (l1 + l2) / 2.0;
         assert!(
             (batch_loss - expected).abs() < 1e-5,
@@ -487,7 +492,8 @@ mod tests {
     #[test]
     fn self_kd_feature_consistency_zero_diff() {
         let f = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let loss = SelfKd::feature_consistency_loss(&f, &f).unwrap();
+        let loss = SelfKd::feature_consistency_loss(&f, &f)
+            .expect("feature_consistency_loss should succeed");
         assert!(
             loss.abs() < 1e-10,
             "identical features → MSE = 0, got {loss}"
@@ -513,7 +519,8 @@ mod tests {
     fn self_kd_feature_consistency_finite() {
         let aug = vec![1.0_f32, 3.0, -1.0, 2.5];
         let orig = vec![0.5_f32, 2.5, 0.5, 1.5];
-        let loss = SelfKd::feature_consistency_loss(&aug, &orig).unwrap();
+        let loss = SelfKd::feature_consistency_loss(&aug, &orig)
+            .expect("feature_consistency_loss should succeed");
         assert!(
             loss.is_finite() && loss >= 0.0,
             "MSE should be finite non-negative, got {loss}"
@@ -526,7 +533,8 @@ mod tests {
     fn self_kd_mixed_ce_smooth_lambda0() {
         // λ=0 → pure CE on label_j.
         let logits = vec![1.0_f32, 2.0, 3.0];
-        let ce_j = SelfKd::mixed_ce_smooth(&logits, 0, 2, 0.0, 0.0).unwrap();
+        let ce_j = SelfKd::mixed_ce_smooth(&logits, 0, 2, 0.0, 0.0)
+            .expect("mixed_ce_smooth should succeed");
         // Compute CE(logits, label_j=2) manually via softmax + log.
         let p = softmax_with_temp(&logits, 1.0);
         let expected = -(p[2] + EPS).ln();
@@ -542,7 +550,8 @@ mod tests {
     fn self_kd_mixed_ce_smooth_lambda1() {
         // λ=1 → pure CE on label_i.
         let logits = vec![1.0_f32, 2.0, 3.0];
-        let ce_i = SelfKd::mixed_ce_smooth(&logits, 2, 0, 1.0, 0.0).unwrap();
+        let ce_i = SelfKd::mixed_ce_smooth(&logits, 2, 0, 1.0, 0.0)
+            .expect("mixed_ce_smooth should succeed");
         let p = softmax_with_temp(&logits, 1.0);
         let expected = -(p[2] + EPS).ln();
         assert!(
@@ -558,7 +567,8 @@ mod tests {
         // Uniform logits, no label smoothing → CE ≈ ln(n_classes) for any label.
         let n = 4_usize;
         let logits = vec![0.0_f32; n];
-        let loss = SelfKd::mixed_ce_smooth(&logits, 0, 1, 0.5, 0.0).unwrap();
+        let loss = SelfKd::mixed_ce_smooth(&logits, 0, 1, 0.5, 0.0)
+            .expect("mixed_ce_smooth should succeed");
         let expected = (n as f32).ln();
         // Allow generous tolerance due to EPS in log.
         assert!(

@@ -1,10 +1,12 @@
-//! Audio feature extraction: STFT, Mel filterbank, MFCC, and spectrogram.
+//! Audio feature extraction: STFT, Mel filterbank, MFCC, spectrogram, CQT.
 
+pub mod cqt;
 pub mod mel;
 pub mod mfcc;
 pub mod spectrogram;
 pub mod stft;
 
+pub use cqt::{CqtConfig, cqt_magnitude, cqt_power, cqt_reference};
 pub use mel::{MelFilterbankConfig, apply_filterbank, hz_to_mel, mel_filterbank, mel_to_hz};
 pub use mfcc::{MfccConfig, delta_features, mfcc};
 pub use spectrogram::{SpectrogramConfig, SpectrogramType, chroma_from_power, spectrogram};

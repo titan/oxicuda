@@ -10,7 +10,7 @@ metrics. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.27).
 
 ## Implementation Status
 
-- **Actual SLoC:** 4,943 (21 files)
+- **Actual SLoC:** 12,038 (39 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
@@ -70,17 +70,21 @@ metrics. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.27).
 - [x] CROWN / alpha-CROWN tighter bound propagation -- improves over IBP especially through ReLU (Zhang 2018, Xu 2021)
 - [x] Macer / SmoothAdv -- training procedures that maximise the smoothed-classifier certified radius (Salman 2019, Zhai 2020) (defenses/macer.rs -- Salman 2019 / Zhai 2020; certified L2 radius r=σ·Φ⁻¹(p̂_top) via Acklam-probit + hinge loss λ·max(0,γ−r) added to cls_loss; smoothed_predict via N(0,σ²I) averaging)
 - [x] Randomized smoothing for L_inf -- replace Gaussian noise with Laplace / exponential noise for L1 / L_inf certificates (defenses/laplace_smoothing.rs -- Teng 2020; per-coordinate Laplace(0,b) noise via inverse-CDF; L1 certified radius r=(b/2)·ln(p̂_top/(1−p̂_top)); distinct from existing Gaussian randomized_smoothing.rs)
-- [ ] LP-relaxation-based verification for small MLPs as a reference oracle for IBP tightness
+- [x] LP-relaxation-based verification for small MLPs as a reference oracle for IBP tightness
 - [x] Sparse / L0 attacks (JSMA, sparse-PGD) -- complement to the existing L_inf / L2 attacks (attacks/jsma.rs -- Papernot 2016; Jacobian saliency map, iterative most-salient-feature L0 perturbation toward target class)
 - [x] Patch attack -- bounded-support adversarial sticker as a structured threat model (attacks/patch.rs -- Brown 2017; bounded-support rectangular patch, PGD-style ascent restricted to patch region, apply_patch + patch_mask)
-- [ ] Targeted variant of every attack -- currently `fgsm_attack` / `pgd_attack_*` take a gradient closure but no explicit target-class API
+- [x] Targeted variant of every attack -- currently `fgsm_attack` / `pgd_attack_*` take a gradient closure but no explicit target-class API
 
 #### P2 -- Nice-to-Have (Evaluation & Tooling)
 - [ ] Stratified robust-accuracy reporter (per-class robust accuracy + worst-class accuracy)
-- [ ] Gradient-masking diagnostics (Athalye 2018) -- BPDA / EOT helpers to detect obfuscated gradients in custom defences
+- [x] Gradient-masking diagnostics (Athalye 2018) -- BPDA / EOT helpers to detect obfuscated gradients in custom defences
 - [ ] Loss-landscape probing utilities -- multi-restart PGD with random initialisation distance histograms
 - [ ] Transferability matrix helper -- run attack from model A on model B and tabulate success rates
 - [ ] CIFAR-10 / ImageNet-C corruption-robustness eval wrappers on top of `robust_accuracy`
+- [ ] `certified/smoothing_lp.rs` — Lp smoothing certificates (Yang 2020): randomised smoothing under Lp norm via Neyman-Pearson optimal noise; uniform/generalised Gaussian; `LpSmoothingCertifier { p: f32, sigma: f32 }`
+- [ ] `attack/square_attack.rs` — Square Attack (Andriushchenko 2020): score-based black-box attack; random-sign square perturbations + random walk; query-efficient, no gradient required; `SquareAttack { eps, n_iters, p_init }`
+- [ ] `defense/randomised_smoothing_finetune.rs` — SmoothAdv training (Salman 2019): augment PGD adversarial training with smoothing noise; PGD on noise-augmented inputs; certified + empirical accuracy balance; `SmoothAdvConfig { sigma, eps }`
+- [x] `detection/feature_squeezing.rs` — Feature Squeezing (Xu 2018): detect adversarial inputs by comparing predictions on original vs bit-depth-reduced / median-filtered inputs; `FeatureSqueezingDetector { threshold: f32 }`
 
 #### GPU Launcher Wiring
 - [ ] Wire `ptx_kernels::*` strings through `oxicuda-launch::Kernel::from_module` for end-to-end GPU execution (PTX strings are emitted but CPU reference paths are the authoritative driver in attacks / defenses)

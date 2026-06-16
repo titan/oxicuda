@@ -353,7 +353,7 @@ mod tests {
     // 4. push row of wrong length → Err.
     #[test]
     fn push_wrong_length() {
-        let mut fd = FrequentDirections::new(5, 3).unwrap();
+        let mut fd = FrequentDirections::new(5, 3).expect("new should succeed");
         let result = fd.push(&[1.0, 2.0]); // length 2 ≠ 5
         assert!(result.is_err());
     }
@@ -362,10 +362,10 @@ mod tests {
     #[test]
     fn push_fills_sketch() {
         let l = 4;
-        let mut fd = FrequentDirections::new(5, l).unwrap();
+        let mut fd = FrequentDirections::new(5, l).expect("new should succeed");
         for i in 0..(l - 1) {
             let v = i as f64;
-            fd.push(&[v, v, v, v, v]).unwrap();
+            fd.push(&[v, v, v, v, v]).expect("push should succeed");
         }
         assert_eq!(fd.n_filled, l - 1);
     }
@@ -374,10 +374,10 @@ mod tests {
     #[test]
     fn push_triggers_compression() {
         let l = 4;
-        let mut fd = FrequentDirections::new(5, l).unwrap();
+        let mut fd = FrequentDirections::new(5, l).expect("new should succeed");
         for i in 0..l {
             let v = i as f64;
-            fd.push(&[v, v, v, v, v]).unwrap();
+            fd.push(&[v, v, v, v, v]).expect("push should succeed");
         }
         // After l inserts, compress should have run and reduced n_filled.
         assert!(
@@ -393,12 +393,12 @@ mod tests {
     fn covariance_rank_one_input() {
         let d = 3;
         let l = 4;
-        let mut fd = FrequentDirections::new(d, l).unwrap();
+        let mut fd = FrequentDirections::new(d, l).expect("new should succeed");
         let v = vec![1.0, 0.0, 0.0_f64];
         for _ in 0..20 {
-            fd.push(&v).unwrap();
+            fd.push(&v).expect("push should succeed");
         }
-        let cov = fd.covariance().unwrap();
+        let cov = fd.covariance().expect("covariance should succeed");
         // cov[0,0] should be the largest entry, > 0.
         assert!(cov[0] > 0.0, "cov[0,0]={}", cov[0]);
         // Off-diagonals involving index 0 should be small (rank-1 structure).
@@ -414,17 +414,17 @@ mod tests {
     fn sketch_matrix_length_correct() {
         let d = 7;
         let l = 3;
-        let fd = FrequentDirections::new(d, l).unwrap();
+        let fd = FrequentDirections::new(d, l).expect("new should succeed");
         assert_eq!(fd.sketch_matrix().len(), l * d);
     }
 
     // 9. squared_singular_values result is non-increasing.
     #[test]
     fn squared_singular_values_sorted() {
-        let mut fd = FrequentDirections::new(5, 4).unwrap();
+        let mut fd = FrequentDirections::new(5, 4).expect("new should succeed");
         for i in 0..20u64 {
             let row: Vec<f64> = (0..5).map(|k| (i * 5 + k) as f64).collect();
-            fd.push(&row).unwrap();
+            fd.push(&row).expect("push should succeed");
         }
         let sv = fd.squared_singular_values();
         for w in sv.windows(2) {
@@ -435,10 +435,10 @@ mod tests {
     // 10. All squared_singular_values ≥ 0.
     #[test]
     fn squared_singular_values_nonneg() {
-        let mut fd = FrequentDirections::new(5, 4).unwrap();
+        let mut fd = FrequentDirections::new(5, 4).expect("new should succeed");
         for i in 0..15u64 {
             let v = i as f64;
-            fd.push(&[v, v, v, v, v]).unwrap();
+            fd.push(&[v, v, v, v, v]).expect("push should succeed");
         }
         for &v in &fd.squared_singular_values() {
             assert!(v >= 0.0, "negative squared singular value: {v}");
@@ -448,10 +448,10 @@ mod tests {
     // 11. n_rows_seen == number of push calls.
     #[test]
     fn n_rows_seen_counts_all() {
-        let mut fd = FrequentDirections::new(4, 3).unwrap();
+        let mut fd = FrequentDirections::new(4, 3).expect("new should succeed");
         for i in 0..50u64 {
             let v = i as f64;
-            fd.push(&[v, v, v, v]).unwrap();
+            fd.push(&[v, v, v, v]).expect("push should succeed");
         }
         assert_eq!(fd.n_rows_seen, 50);
     }
@@ -461,10 +461,10 @@ mod tests {
     fn streaming_many_rows() {
         let d = 20;
         let l = 5;
-        let mut fd = FrequentDirections::new(d, l).unwrap();
+        let mut fd = FrequentDirections::new(d, l).expect("new should succeed");
         for i in 0..100u64 {
             let row: Vec<f64> = (0..d).map(|k| (i + k as u64) as f64).collect();
-            fd.push(&row).unwrap();
+            fd.push(&row).expect("push should succeed");
         }
         assert!(fd.n_filled <= l);
     }
@@ -473,12 +473,12 @@ mod tests {
     #[test]
     fn covariance_symmetric() {
         let d = 4;
-        let mut fd = FrequentDirections::new(d, 3).unwrap();
+        let mut fd = FrequentDirections::new(d, 3).expect("new should succeed");
         for i in 0..30u64 {
             let row: Vec<f64> = (0..d).map(|k| (i * k as u64 + 1) as f64).collect();
-            fd.push(&row).unwrap();
+            fd.push(&row).expect("push should succeed");
         }
-        let cov = fd.covariance().unwrap();
+        let cov = fd.covariance().expect("covariance should succeed");
         for r in 0..d {
             for c in 0..d {
                 let diff = (cov[r * d + c] - cov[c * d + r]).abs();
@@ -490,9 +490,9 @@ mod tests {
     // 14. d=1, l=2; push 10 values; squared_singular_values()[0] > 0.
     #[test]
     fn single_column_dataset() {
-        let mut fd = FrequentDirections::new(1, 2).unwrap();
+        let mut fd = FrequentDirections::new(1, 2).expect("new should succeed");
         for i in 1u64..=10 {
-            fd.push(&[i as f64]).unwrap();
+            fd.push(&[i as f64]).expect("push should succeed");
         }
         let sv = fd.squared_singular_values();
         assert!(
@@ -507,11 +507,11 @@ mod tests {
     fn all_zero_rows_after_compression() {
         let d = 4;
         let l = 3;
-        let mut fd = FrequentDirections::new(d, l).unwrap();
+        let mut fd = FrequentDirections::new(d, l).expect("new should succeed");
         let v = vec![2.0; d];
         // Push exactly l identical rows to trigger compression.
         for _ in 0..l {
-            fd.push(&v).unwrap();
+            fd.push(&v).expect("push should succeed");
         }
         let sv = fd.squared_singular_values();
         // After compression of rank-1 data: top singular value should be positive.
@@ -526,12 +526,12 @@ mod tests {
     fn low_rank_preservation() {
         let d = 6;
         let l = 4;
-        let mut fd = FrequentDirections::new(d, l).unwrap();
+        let mut fd = FrequentDirections::new(d, l).expect("new should succeed");
         // All rows are the same direction (rank-1).
         let v: Vec<f64> = (1..=d as u64).map(|i| i as f64).collect();
         for scale in 1u64..=60 {
             let row: Vec<f64> = v.iter().map(|&x| x * scale as f64).collect();
-            fd.push(&row).unwrap();
+            fd.push(&row).expect("push should succeed");
         }
         let sv = fd.squared_singular_values();
         // Top singular value should dominate (ratio > 10).
@@ -553,7 +553,8 @@ mod tests {
         for i in 0..n {
             a[i * n + i] = 1.0;
         }
-        let (evals, _evecs) = jacobi_eigen(&mut a, n, 1e-12, 100).unwrap();
+        let (evals, _evecs) =
+            jacobi_eigen(&mut a, n, 1e-12, 100).expect("jacobi_eigen should succeed");
         for &ev in &evals {
             assert!((ev - 1.0).abs() < 1e-10, "eigenvalue {ev} ≠ 1.0");
         }
@@ -564,7 +565,8 @@ mod tests {
     fn jacobi_2x2() {
         let n = 2;
         let mut a = vec![2.0_f64, 1.0, 1.0, 2.0];
-        let (mut evals, _evecs) = jacobi_eigen(&mut a, n, 1e-12, 100).unwrap();
+        let (mut evals, _evecs) =
+            jacobi_eigen(&mut a, n, 1e-12, 100).expect("jacobi_eigen should succeed");
         evals.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
         assert!(
             (evals[0] - 3.0).abs() < 1e-10,

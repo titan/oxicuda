@@ -342,21 +342,22 @@ mod tests {
 
     #[test]
     fn new_scheduler_valid() {
-        let sched = DpmSolverScheduler::new(1000, 20, DpmOrder::Second).unwrap();
+        let sched =
+            DpmSolverScheduler::new(1000, 20, DpmOrder::Second).expect("new should succeed");
         assert_eq!(sched.num_inference_steps(), 20);
         assert_eq!(sched.order(), DpmOrder::Second);
     }
 
     #[test]
     fn lambdas_count_matches_train_steps() {
-        let sched = DpmSolverScheduler::new(1000, 20, DpmOrder::First).unwrap();
+        let sched = DpmSolverScheduler::new(1000, 20, DpmOrder::First).expect("new should succeed");
         assert_eq!(sched.lambdas().len(), 1000);
     }
 
     #[test]
     fn lambdas_strictly_decreasing_with_noise() {
         // λ_t should decrease as t increases (more noise = lower SNR)
-        let sched = DpmSolverScheduler::new(1000, 20, DpmOrder::First).unwrap();
+        let sched = DpmSolverScheduler::new(1000, 20, DpmOrder::First).expect("new should succeed");
         let lam = sched.lambdas();
         for w in lam.windows(2) {
             assert!(
@@ -370,7 +371,7 @@ mod tests {
 
     #[test]
     fn timesteps_in_valid_range() {
-        let sched = DpmSolverScheduler::new(1000, 20, DpmOrder::First).unwrap();
+        let sched = DpmSolverScheduler::new(1000, 20, DpmOrder::First).expect("new should succeed");
         for &t in sched.timesteps() {
             assert!(t < 1000, "timestep {t} out of range");
         }
@@ -378,50 +379,59 @@ mod tests {
 
     #[test]
     fn first_order_step_shape() {
-        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::First).unwrap();
+        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::First).expect("new should succeed");
         let mut rng = make_rng();
         let d0 = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
-        let out = sched.step_first_order(&d0, &x_t, 0).unwrap();
+        let out = sched
+            .step_first_order(&d0, &x_t, 0)
+            .expect("step_first_order should succeed");
         assert_eq!(out.len(), 32);
     }
 
     #[test]
     fn second_order_step_shape() {
-        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::Second).unwrap();
+        let sched =
+            DpmSolverScheduler::new(1000, 10, DpmOrder::Second).expect("new should succeed");
         let mut rng = make_rng();
         let d0 = randn(&mut rng, 32);
         let d_prev = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
-        let out = sched.step_second_order(&d0, &d_prev, &x_t, 1).unwrap();
+        let out = sched
+            .step_second_order(&d0, &d_prev, &x_t, 1)
+            .expect("step_second_order should succeed");
         assert_eq!(out.len(), 32);
     }
 
     #[test]
     fn step_dispatch_no_prev() {
-        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::Second).unwrap();
+        let sched =
+            DpmSolverScheduler::new(1000, 10, DpmOrder::Second).expect("new should succeed");
         let mut rng = make_rng();
         let d0 = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
         // Should fall back to first order
-        let out = sched.step(&d0, None, &x_t, 0).unwrap();
+        let out = sched.step(&d0, None, &x_t, 0).expect("step should succeed");
         assert_eq!(out.len(), 32);
     }
 
     #[test]
     fn step_dispatch_with_prev() {
-        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::Second).unwrap();
+        let sched =
+            DpmSolverScheduler::new(1000, 10, DpmOrder::Second).expect("new should succeed");
         let mut rng = make_rng();
         let d0 = randn(&mut rng, 32);
         let d_prev = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
-        let out = sched.step(&d0, Some(&d_prev), &x_t, 1).unwrap();
+        let out = sched
+            .step(&d0, Some(&d_prev), &x_t, 1)
+            .expect("value should be present");
         assert_eq!(out.len(), 32);
     }
 
     #[test]
     fn first_order_invalid_step_idx() {
-        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::First).unwrap();
+        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::First).expect("new should succeed");
         let d0 = vec![0.0_f32; 8];
         let x_t = vec![0.0_f32; 8];
         assert!(matches!(
@@ -432,12 +442,14 @@ mod tests {
 
     #[test]
     fn step_outputs_finite() {
-        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::First).unwrap();
+        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::First).expect("new should succeed");
         let mut rng = make_rng();
         let d0 = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
         for i in 0..10 {
-            let out = sched.step_first_order(&d0, &x_t, i).unwrap();
+            let out = sched
+                .step_first_order(&d0, &x_t, i)
+                .expect("step_first_order should succeed");
             assert!(out.iter().all(|v| v.is_finite()), "non-finite at step {i}");
         }
     }
@@ -455,19 +467,21 @@ mod tests {
 
     #[test]
     fn third_order_fallback() {
-        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::Third).unwrap();
+        let sched = DpmSolverScheduler::new(1000, 10, DpmOrder::Third).expect("new should succeed");
         let mut rng = make_rng();
         let d0 = randn(&mut rng, 16);
         let d_prev = randn(&mut rng, 16);
         let x_t = randn(&mut rng, 16);
-        let out = sched.step(&d0, Some(&d_prev), &x_t, 2).unwrap();
+        let out = sched
+            .step(&d0, Some(&d_prev), &x_t, 2)
+            .expect("value should be present");
         assert_eq!(out.len(), 16);
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
     #[test]
     fn dimension_mismatch_rejected() {
-        let sched = DpmSolverScheduler::new(100, 10, DpmOrder::First).unwrap();
+        let sched = DpmSolverScheduler::new(100, 10, DpmOrder::First).expect("new should succeed");
         let d0 = vec![0.0_f32; 8];
         let x_t = vec![0.0_f32; 4];
         assert!(matches!(

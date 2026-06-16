@@ -107,7 +107,7 @@ mod tests {
     fn project_l_inf_clamps() {
         let orig = vec![0.5_f32, 0.5];
         let x = vec![1.5_f32, -1.5];
-        let p = project_l_inf(&x, &orig, 0.3, 0.0, 1.0).unwrap();
+        let p = project_l_inf(&x, &orig, 0.3, 0.0, 1.0).expect("project_l_inf should succeed");
         assert!((p[0] - 0.8).abs() < 1e-5); // 0.5 + 0.3
         assert!((p[1] - 0.2).abs() < 1e-5); // 0.5 - 0.3
     }
@@ -116,7 +116,7 @@ mod tests {
     fn project_l_inf_outer_clamp() {
         let orig = vec![0.95_f32];
         let x = vec![10.0_f32];
-        let p = project_l_inf(&x, &orig, 0.3, 0.0, 1.0).unwrap();
+        let p = project_l_inf(&x, &orig, 0.3, 0.0, 1.0).expect("project_l_inf should succeed");
         // 0.95 + 0.3 = 1.25 → clamped to 1.0
         assert!((p[0] - 1.0).abs() < 1e-6);
     }
@@ -125,7 +125,7 @@ mod tests {
     fn project_l_inf_zero_eps_keeps_orig() {
         let orig = vec![0.5_f32, 0.7];
         let x = vec![10.0_f32, -10.0];
-        let p = project_l_inf(&x, &orig, 0.0, 0.0, 1.0).unwrap();
+        let p = project_l_inf(&x, &orig, 0.0, 0.0, 1.0).expect("project_l_inf should succeed");
         assert!((p[0] - 0.5).abs() < 1e-6);
         assert!((p[1] - 0.7).abs() < 1e-6);
     }
@@ -149,7 +149,7 @@ mod tests {
     fn project_l2_inside_ball_is_identity() {
         let orig = vec![0.0_f32, 0.0];
         let x = vec![0.1_f32, 0.0];
-        let p = project_l2(&x, &orig, 1.0, -10.0, 10.0).unwrap();
+        let p = project_l2(&x, &orig, 1.0, -10.0, 10.0).expect("project_l2 should succeed");
         assert!((p[0] - 0.1).abs() < 1e-6);
         assert!((p[1] - 0.0).abs() < 1e-6);
     }
@@ -159,7 +159,7 @@ mod tests {
         let orig = vec![0.0_f32, 0.0];
         let x = vec![3.0_f32, 4.0];
         // ‖x‖ = 5; ε = 1 → factor = 0.2 → result ≈ (0.6, 0.8)
-        let p = project_l2(&x, &orig, 1.0, -10.0, 10.0).unwrap();
+        let p = project_l2(&x, &orig, 1.0, -10.0, 10.0).expect("project_l2 should succeed");
         assert!((p[0] - 0.6).abs() < 1e-5);
         assert!((p[1] - 0.8).abs() < 1e-5);
         // L2 norm of result equals 1.
@@ -171,7 +171,7 @@ mod tests {
         let orig = vec![0.9_f32];
         let x = vec![10.0_f32];
         // ‖x − orig‖ = 9.1; ε = 5 → projected x = 0.9 + 5·1·sign = 5.9 → clamped to 1.0
-        let p = project_l2(&x, &orig, 5.0, 0.0, 1.0).unwrap();
+        let p = project_l2(&x, &orig, 5.0, 0.0, 1.0).expect("project_l2 should succeed");
         assert!((p[0] - 1.0).abs() < 1e-6);
     }
 

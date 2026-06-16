@@ -369,8 +369,9 @@ mod tests {
             b.ref_chosen_logps.clone(),
             b.ref_rejected_logps.clone(),
         );
-        let sdpo = sdpo_total_loss(std::slice::from_ref(&b), &sdpo_cfg).unwrap();
-        let dpo = dpo_loss(&single, &dpo_cfg).unwrap();
+        let sdpo =
+            sdpo_total_loss(std::slice::from_ref(&b), &sdpo_cfg).expect("value should be present");
+        let dpo = dpo_loss(&single, &dpo_cfg).expect("dpo_loss should succeed");
         assert!(
             (sdpo - dpo).abs() < 1e-6,
             "single-stage sDPO {sdpo} must equal dpo_loss {dpo}"
@@ -387,8 +388,9 @@ mod tests {
             vec![-1.0, -1.0],
         );
         let beta = 0.15_f32;
-        let stage = sdpo_stage_loss(&b, &SdpoConfig { beta, n_stages: 1 }).unwrap();
-        let dpo = dpo_loss(&b, &DpoConfig { beta }).unwrap();
+        let stage = sdpo_stage_loss(&b, &SdpoConfig { beta, n_stages: 1 })
+            .expect("sdpo_stage_loss should succeed");
+        let dpo = dpo_loss(&b, &DpoConfig { beta }).expect("dpo_loss should succeed");
         assert!((stage - dpo).abs() < 1e-6, "stage {stage} vs dpo {dpo}");
     }
 
@@ -405,10 +407,13 @@ mod tests {
     // 4. After run_stage, the held reference equals the just-passed policy logps.
     #[test]
     fn run_stage_hands_off_reference() {
-        let mut driver = StagedDpo::new(0.2, vec![-1.0, -1.0], vec![-1.0, -1.0]).unwrap();
+        let mut driver =
+            StagedDpo::new(0.2, vec![-1.0, -1.0], vec![-1.0, -1.0]).expect("new should succeed");
         let policy_chosen = vec![-0.4, -0.6];
         let policy_rejected = vec![-2.4, -2.6];
-        let _ = driver.run_stage(&policy_chosen, &policy_rejected).unwrap();
+        let _ = driver
+            .run_stage(&policy_chosen, &policy_rejected)
+            .expect("run_stage should succeed");
         assert_eq!(
             driver.ref_chosen_logps(),
             policy_chosen.as_slice(),
@@ -429,27 +434,33 @@ mod tests {
         let init_ref_rejected = vec![-1.0, -1.2];
         let policy_chosen = vec![-0.5, -0.7];
         let policy_rejected = vec![-2.5, -2.7];
-        let mut driver =
-            StagedDpo::new(beta, init_ref_chosen.clone(), init_ref_rejected.clone()).unwrap();
-        let loss = driver.run_stage(&policy_chosen, &policy_rejected).unwrap();
+        let mut driver = StagedDpo::new(beta, init_ref_chosen.clone(), init_ref_rejected.clone())
+            .expect("value should be present");
+        let loss = driver
+            .run_stage(&policy_chosen, &policy_rejected)
+            .expect("run_stage should succeed");
         let equiv = batch(
             policy_chosen.clone(),
             policy_rejected.clone(),
             init_ref_chosen,
             init_ref_rejected,
         );
-        let dpo = dpo_loss(&equiv, &DpoConfig { beta }).unwrap();
+        let dpo = dpo_loss(&equiv, &DpoConfig { beta }).expect("dpo_loss should succeed");
         assert!((loss - dpo).abs() < 1e-6, "first stage {loss} vs dpo {dpo}");
     }
 
     // 6. stages_run increments per call.
     #[test]
     fn stages_run_increments() {
-        let mut driver = StagedDpo::new(0.1, vec![-1.0], vec![-1.0]).unwrap();
+        let mut driver = StagedDpo::new(0.1, vec![-1.0], vec![-1.0]).expect("new should succeed");
         assert_eq!(driver.stages_run(), 0);
-        let _ = driver.run_stage(&[-0.5], &[-2.0]).unwrap();
+        let _ = driver
+            .run_stage(&[-0.5], &[-2.0])
+            .expect("run_stage should succeed");
         assert_eq!(driver.stages_run(), 1);
-        let _ = driver.run_stage(&[-0.4], &[-2.5]).unwrap();
+        let _ = driver
+            .run_stage(&[-0.4], &[-2.5])
+            .expect("run_stage should succeed");
         assert_eq!(driver.stages_run(), 2);
     }
 
@@ -457,7 +468,7 @@ mod tests {
     #[test]
     fn improving_policy_gives_monotonic_decreasing_loss() {
         let beta = 0.5_f32;
-        let mut driver = StagedDpo::new(beta, vec![-1.0], vec![-1.0]).unwrap();
+        let mut driver = StagedDpo::new(beta, vec![-1.0], vec![-1.0]).expect("new should succeed");
         // Stage configs: chosen logp rises (toward 0), rejected logp falls.
         let stages = [
             (-0.9_f32, -1.1_f32),
@@ -467,7 +478,11 @@ mod tests {
         ];
         let mut losses = Vec::new();
         for &(c, r) in &stages {
-            losses.push(driver.run_stage(&[c], &[r]).unwrap());
+            losses.push(
+                driver
+                    .run_stage(&[c], &[r])
+                    .expect("run_stage should succeed"),
+            );
         }
         for w in losses.windows(2) {
             assert!(
@@ -489,7 +504,7 @@ mod tests {
                 n_stages: 1,
             },
         )
-        .unwrap();
+        .expect("value should be present");
         assert!(m > 0.0, "chosen up-weighted → positive margin, got {m}");
     }
 
@@ -504,7 +519,7 @@ mod tests {
                 n_stages: 1,
             },
         )
-        .unwrap();
+        .expect("value should be present");
         assert!(m < 0.0, "rejected up-weighted → negative margin, got {m}");
     }
 
@@ -515,9 +530,9 @@ mod tests {
         let cfg = SdpoConfig { beta, n_stages: 2 };
         let s0 = batch(vec![-0.5], vec![-2.0], vec![-1.0], vec![-1.0]);
         let s1 = batch(vec![-0.4], vec![-2.5], vec![-0.5], vec![-2.0]);
-        let l0 = sdpo_stage_loss(&s0, &cfg).unwrap();
-        let l1 = sdpo_stage_loss(&s1, &cfg).unwrap();
-        let total = sdpo_total_loss(&[s0, s1], &cfg).unwrap();
+        let l0 = sdpo_stage_loss(&s0, &cfg).expect("sdpo_stage_loss should succeed");
+        let l1 = sdpo_stage_loss(&s1, &cfg).expect("sdpo_stage_loss should succeed");
+        let total = sdpo_total_loss(&[s0, s1], &cfg).expect("sdpo_total_loss should succeed");
         assert!(
             (total - (l0 + l1) / 2.0).abs() < 1e-6,
             "total {total} vs mean {}",
@@ -620,7 +635,8 @@ mod tests {
     // 17. run_stage rejects per-stage policy length mismatch.
     #[test]
     fn run_stage_rejects_policy_length_mismatch() {
-        let mut driver = StagedDpo::new(0.1, vec![-1.0, -1.0], vec![-1.0, -1.0]).unwrap();
+        let mut driver =
+            StagedDpo::new(0.1, vec![-1.0, -1.0], vec![-1.0, -1.0]).expect("new should succeed");
         assert!(matches!(
             driver.run_stage(&[-0.5, -0.6], &[-2.0]),
             Err(RlhfError::MismatchedPairLength { .. })
@@ -630,7 +646,8 @@ mod tests {
     // 18. run_stage rejects policy/reference length mismatch.
     #[test]
     fn run_stage_rejects_ref_length_mismatch() {
-        let mut driver = StagedDpo::new(0.1, vec![-1.0, -1.0], vec![-1.0, -1.0]).unwrap();
+        let mut driver =
+            StagedDpo::new(0.1, vec![-1.0, -1.0], vec![-1.0, -1.0]).expect("new should succeed");
         assert!(matches!(
             driver.run_stage(&[-0.5], &[-2.0]),
             Err(RlhfError::DimensionMismatch { .. })
@@ -640,7 +657,7 @@ mod tests {
     // 19. run_stage rejects empty policy input.
     #[test]
     fn run_stage_rejects_empty_policy() {
-        let mut driver = StagedDpo::new(0.1, vec![], vec![]).unwrap();
+        let mut driver = StagedDpo::new(0.1, vec![], vec![]).expect("new should succeed");
         assert!(matches!(
             driver.run_stage(&[], &[]),
             Err(RlhfError::EmptyInput)
@@ -651,21 +668,25 @@ mod tests {
     #[test]
     fn second_stage_trains_against_first_policy() {
         let beta = 0.4_f32;
-        let mut driver = StagedDpo::new(beta, vec![-1.0], vec![-1.0]).unwrap();
+        let mut driver = StagedDpo::new(beta, vec![-1.0], vec![-1.0]).expect("new should succeed");
         let p0_chosen = vec![-0.6];
         let p0_rejected = vec![-2.0];
-        let _ = driver.run_stage(&p0_chosen, &p0_rejected).unwrap();
+        let _ = driver
+            .run_stage(&p0_chosen, &p0_rejected)
+            .expect("run_stage should succeed");
         // Stage 1: reference is now p0; loss computed manually must match.
         let p1_chosen = vec![-0.4];
         let p1_rejected = vec![-2.6];
-        let loss1 = driver.run_stage(&p1_chosen, &p1_rejected).unwrap();
+        let loss1 = driver
+            .run_stage(&p1_chosen, &p1_rejected)
+            .expect("run_stage should succeed");
         let equiv = batch(
             p1_chosen.clone(),
             p1_rejected.clone(),
             p0_chosen.clone(),
             p0_rejected.clone(),
         );
-        let manual = dpo_loss(&equiv, &DpoConfig { beta }).unwrap();
+        let manual = dpo_loss(&equiv, &DpoConfig { beta }).expect("dpo_loss should succeed");
         assert!(
             (loss1 - manual).abs() < 1e-6,
             "stage-1 loss {loss1} must use stage-0 policy as reference (manual {manual})"
@@ -675,7 +696,7 @@ mod tests {
     // 21. NaN policy logp → NanEncountered from run_stage.
     #[test]
     fn run_stage_nan_returns_error() {
-        let mut driver = StagedDpo::new(0.1, vec![-1.0], vec![-1.0]).unwrap();
+        let mut driver = StagedDpo::new(0.1, vec![-1.0], vec![-1.0]).expect("new should succeed");
         assert!(matches!(
             driver.run_stage(&[f32::NAN], &[-2.0]),
             Err(RlhfError::NanEncountered)
@@ -693,7 +714,7 @@ mod tests {
                 n_stages: 1,
             },
         )
-        .unwrap();
+        .expect("value should be present");
         assert!(
             (loss - std::f32::consts::LN_2).abs() < 1e-6,
             "zero-margin loss should be ln 2, got {loss}"

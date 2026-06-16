@@ -564,7 +564,8 @@ mod tests {
     fn test_history_length_equals_n_epochs() {
         let cfg = default_config();
         let mut rng = LcgRng::new(42);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         assert_eq!(result.history.len(), cfg.n_epochs);
     }
 
@@ -572,7 +573,8 @@ mod tests {
     fn test_island_bests_length_equals_n_islands() {
         let cfg = default_config();
         let mut rng = LcgRng::new(7);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         assert_eq!(result.island_bests.len(), cfg.n_islands);
     }
 
@@ -584,7 +586,8 @@ mod tests {
         cfg.pop_per_island = 30;
         cfg.sigma_mut = 0.5;
         let mut rng = LcgRng::new(13);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         assert!(
             result.best_fitness < 1.0,
             "Ring/Sphere 2D did not converge: best = {}",
@@ -599,7 +602,12 @@ mod tests {
         let mut rng = LcgRng::new(55);
         let result = island_model_run(&cfg, sphere, &mut rng);
         assert!(result.is_ok());
-        assert!(result.unwrap().best_fitness.is_finite());
+        assert!(
+            result
+                .expect("result should be present")
+                .best_fitness
+                .is_finite()
+        );
     }
 
     #[test]
@@ -615,7 +623,8 @@ mod tests {
     fn test_best_genome_within_bounds() {
         let cfg = default_config();
         let mut rng = LcgRng::new(21);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         for &g in &result.best_genome {
             assert!(
                 g >= cfg.lb && g <= cfg.ub,
@@ -630,7 +639,8 @@ mod tests {
     fn test_best_genome_length_equals_n_dims() {
         let cfg = default_config();
         let mut rng = LcgRng::new(33);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         assert_eq!(result.best_genome.len(), cfg.n_dims);
     }
 
@@ -638,7 +648,8 @@ mod tests {
     fn test_history_is_non_increasing() {
         let cfg = default_config();
         let mut rng = LcgRng::new(4);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         for w in result.history.windows(2) {
             assert!(
                 w[1] <= w[0] + 1e-14,
@@ -656,7 +667,8 @@ mod tests {
         cfg.n_epochs = 30;
         cfg.n_islands = 3;
         let mut rng = LcgRng::new(77);
-        let result = island_model_run(&cfg, rastrigin, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, rastrigin, &mut rng).expect("island_model_run should succeed");
         assert!(result.best_fitness.is_finite());
     }
 
@@ -666,7 +678,8 @@ mod tests {
         // We verify this indirectly via island_bests length and that n_islands is respected.
         let cfg = default_config();
         let mut rng = LcgRng::new(9);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         assert_eq!(result.island_bests.len(), cfg.n_islands);
         // All island bests must be finite.
         for &b in &result.island_bests {
@@ -679,7 +692,8 @@ mod tests {
         let mut cfg = default_config();
         cfg.n_epochs = 1;
         let mut rng = LcgRng::new(88);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         assert_eq!(result.history.len(), 1);
         assert!(result.best_fitness.is_finite());
     }
@@ -692,7 +706,8 @@ mod tests {
         cfg.pop_per_island = 25;
         cfg.migration_rate = 0.2;
         let mut rng = LcgRng::new(123);
-        let result = island_model_run(&cfg, sphere, &mut rng).unwrap();
+        let result =
+            island_model_run(&cfg, sphere, &mut rng).expect("island_model_run should succeed");
         assert!(result.best_fitness.is_finite());
     }
 }

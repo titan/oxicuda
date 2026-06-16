@@ -6,7 +6,7 @@ High-level DAG-based computation graph engine that sits above the raw CUDA drive
 
 ## Implementation Status
 
-**Actual: 6,624 SLoC across 17 files**
+**Actual: 6,563 SLoC across 28 files**
 
 Vol.7 models GPU workloads as directed acyclic graphs (DAGs) of kernel
 launches, memcopies, and event syncs. It runs a suite of analysis and
@@ -62,6 +62,12 @@ integration with the rest of the Vol.3–Vol.6 kernel crates.
 - [x] Memset, host-function, and stream-sync nodes
 - [x] `chain(&[node_a, node_b, ...])` convenience for linear pipelines
 
+#### P2 — Algorithmic Extensions
+- [x] Hyperbolic graph embedding (`embed/hyperbolic_embed.rs`) — Nickel 2017 NIPS: Riemannian SGD optimisation on the Poincaré disk for hierarchical graph structure embedding; `PoincareEmbedding`
+- [x] Resistance distance matrix (`metric/resistance_distance.rs`) — Klein-Randic 1993: effective resistance between node pairs via pseudo-inverse of the graph Laplacian; `ResistanceDistance`
+- [x] Stochastic Block Model fitting (`community/sbm_fit.rs`) — Holland 1983: EM fitting of SBM community membership + inter-community edge probability matrix; `SbmFitter`
+- [x] Min-cost flow (`flow/min_cost_flow.rs`) — Successive Shortest Path algorithm with Bellman-Ford: find minimum-cost feasible flow satisfying supply/demand constraints; `MinCostFlow`
+
 #### Outstanding — Hardware Verification & Integration
 - [ ] (P0) End-to-end test: build a Vol.3 GEMM + Vol.6 softmax pipeline as a `ComputeGraph`, capture to driver graph, launch on Linux + NVIDIA
 - [ ] (P1) Benchmark CUDA-graph submission overhead vs. naive stream submission for repeated launches (target: ≥ 5× reduction in launch overhead for graphs with 10+ nodes)
@@ -82,7 +88,7 @@ integration with the rest of the Vol.3–Vol.6 kernel crates.
 ## Quality Status
 
 - Warnings: 0 (clippy + rustdoc clean)
-- Tests: 175 passing
+- Tests: 241 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` enforced crate-wide
 - All public APIs return `GraphResult<T>` for fallible paths

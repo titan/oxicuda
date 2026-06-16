@@ -269,11 +269,11 @@ mod tests {
             rank,
             ParallelismConfig { tp: 1, sp, ep: 1 },
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     fn bex(sp: usize, rank: usize, total: usize, hd: usize, nh: usize) -> BoundaryExchange {
-        BoundaryExchange::new(handle_sp(sp, rank), total, hd, nh).unwrap()
+        BoundaryExchange::new(handle_sp(sp, rank), total, hd, nh).expect("value should be present")
     }
 
     #[test]
@@ -285,7 +285,9 @@ mod tests {
         // Each rank's chunk is filled with its rank index as float
         let chunks: Vec<Vec<f32>> = (0..sp).map(|r| vec![r as f32; (total / sp) * hd]).collect();
         let b = bex(sp, 0, total, hd, nh);
-        let full = b.pre_attn_all_gather(&chunks).unwrap();
+        let full = b
+            .pre_attn_all_gather(&chunks)
+            .expect("pre_attn_all_gather should succeed");
         // First half = 0s, second half = 1s
         let chunk_elems = (total / sp) * hd;
         assert_eq!(&full[..chunk_elems], chunks[0].as_slice());
@@ -302,7 +304,9 @@ mod tests {
         let part = vec![1.0_f32; total * hd];
         let partials = vec![part; sp];
         let b = bex(sp, 2, total, hd, nh); // rank 2
-        let local = b.post_attn_reduce_scatter(&partials).unwrap();
+        let local = b
+            .post_attn_reduce_scatter(&partials)
+            .expect("post_attn_reduce_scatter should succeed");
         // sum of sp=4 ones per element = 4.0, chunk_len=1, hd=2
         assert_eq!(local, vec![4.0_f32; hd]);
     }
@@ -318,7 +322,9 @@ mod tests {
         let cl = b.chunk_len();
         let q = vec![1.0_f32; cl * hd];
         let kv = vec![1.0_f32; total * hd];
-        let out = b.local_attention(&q, &kv, &kv, false).unwrap();
+        let out = b
+            .local_attention(&q, &kv, &kv, false)
+            .expect("local_attention should succeed");
         // Uniform softmax → output = weighted sum of V = 1.0 * V = 1.0 per dim
         for &v in &out {
             assert!((v - 1.0).abs() < 1e-5, "expected ≈1.0, got {v}");
@@ -345,7 +351,9 @@ mod tests {
         // K[1] = V[1] = 2.0 (causal should mask this for token 0)
         k[hd..2 * hd].iter_mut().for_each(|x| *x = 2.0);
         v[hd..2 * hd].iter_mut().for_each(|x| *x = 2.0);
-        let out = b.local_attention(&q, &k, &v, true).unwrap();
+        let out = b
+            .local_attention(&q, &k, &v, true)
+            .expect("local_attention should succeed");
         // Token 0 attends only to K[0]/V[0] → output = 1.0
         for &o in &out[..hd] {
             assert!((o - 1.0).abs() < 1e-5, "causal token0 got {o}");

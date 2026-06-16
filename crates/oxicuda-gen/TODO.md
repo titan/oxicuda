@@ -9,8 +9,8 @@ LoRA adapters, and score-network building blocks. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 7,596 (25 files, Rust 5,685 code + 1,056 comments + 855 blanks)
-- **Tests:** 221 passing (#[test] count in src/)
+- **Actual SLoC:** 13,605 (47 files, Rust 5,685 code + 1,056 comments + 855 blanks)
+- **Tests:** 520 passing (#[test] count in src/)
 - **Crate:** `oxicuda-gen` -- Vol.17 Generative AI Primitives
 
 ### Completed [x]
@@ -85,17 +85,17 @@ LoRA adapters, and score-network building blocks. Part of
 ### Future Enhancements [ ]
 
 #### P0 -- Critical (Correctness / Mainstream Diffusion Coverage)
-- [ ] DPM-Solver++ 3rd-order multi-step (currently `DpmOrder::First/Second`)
+- [x] DPM-Solver++ 3rd-order multi-step (currently `DpmOrder::First/Second`)
 - [x] EDM (Karras et al. 2022) sigma-schedule + preconditioning helpers — scheduler/edm.rs (c_skip/c_out/c_in/c_noise, Heun's ODE, log-normal σ sampling, full trajectory sampler)
-- [ ] DDPM/DDIM `step()` GPU dispatch via `ddpm_step_ptx` (currently CPU helper only)
-- [ ] Classifier-Guidance (gradient-of-classifier) as alternative to CFG
+- [x] DDPM/DDIM `step()` GPU dispatch via `ddpm_step_ptx` (currently CPU helper only)
+- [x] Classifier-Guidance (gradient-of-classifier) as alternative to CFG
 
 #### P1 -- Important (Model-Architecture Coverage)
 - [ ] Cross-attention KV-cache for fast sampling (1-step text-conditioning reuse)
 - [ ] Rotary positional embedding (RoPE) variant of `SelfAttentionBlock`
 - [ ] FlashAttention-style fused softmax block (link with oxicuda-dnn fused MHA)
 - [ ] `VqCodebook::ema_decay` warm-up schedule + dead-code (unused entry) reinit
-- [ ] `Decoder::forward` reference path + test against `Encoder` round-trip
+- [x] `Decoder::forward` reference path + test against `Encoder` round-trip
 - [ ] Mixed-rank LoRA: per-layer-different `r` selection
 
 #### P2 -- Nice-to-Have (Advanced / Research)
@@ -105,6 +105,10 @@ LoRA adapters, and score-network building blocks. Part of
 - [ ] QLoRA NF4 quantised base-weight path
 - [x] Stochastic Interpolants generalisation of flow matching (scheduler/stochastic_interpolant.rs -- Albergo-Vanden-Eijnden 2023; X_t=α(t)x0+β(t)x1+σ(t)z unifying framework, target velocity α'x0+β'x1; LinearFlow/TrigInterpolant/NoisyLinear kinds; Euler ODE sample)
 - [x] V-prediction parameterisation (scheduler/v_prediction.rs -- Salimans & Ho 2022; v=α_t ε−σ_t x orthonormal-rotation parameterization with exact predict_x0/predict_eps inverses, SNR, constant loss weight)
+- [x] `diffusion/flow_matching.rs` — Conditional Flow Matching (Lipman 2022): simple velocity field u_t|x₁=x₁-x₀; Gaussian conditional probability path; simulation-free training; `CfmConfig { sigma_min: f32 }`
+- [ ] `diffusion/consistency.rs` — Consistency Models (Song 2023): learn self-consistency property f(x_t,t)=x₀; consistency distillation from diffusion teacher; one/two-step generation; `ConsistencyModel { steps: usize }`
+- [x] `vae/vq_vae2.rs` — VQ-VAE-2 (Razavi 2019): hierarchical two-level discrete codes (top + bottom); PixelSnail prior on top codes; commitment loss + EMA codebook updates
+- [ ] `gan/stylegan3.rs` — StyleGAN3 alias-free operations (Karras 2021): equivariant generator with sinc-filtered up/downsampling; rotation/translation equivariance; `StyleGan3Config { c_dim, w_dim }`
 
 ## Dependencies
 
@@ -119,7 +123,7 @@ through the oxicuda-driver runtime loader (`libcuda.so` / `nvcuda.dll`).
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 221 passing
+- Tests: 520 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All (largest is `ptx_kernels.rs` at ~890 lines)
 - Pure-Rust default features: Yes (Pure Rust Policy)

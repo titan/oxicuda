@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn value_relation_shape() {
         let v: Vec<f32> = (0..12).map(|i| i as f32).collect(); // 3 × 4
-        let mat = value_relation_matrix(&v, 3, 4).unwrap();
+        let mat = value_relation_matrix(&v, 3, 4).expect("value_relation_matrix should succeed");
         assert_eq!(mat.len(), 9);
     }
 
@@ -86,7 +86,7 @@ mod tests {
     fn value_relation_loss_finite() {
         let s: Vec<f32> = (0..12).map(|i| i as f32 * 0.1).collect();
         let t: Vec<f32> = (0..12).map(|i| i as f32 * 0.11).collect();
-        let loss = value_relation_loss(&s, &t, 3, 4).unwrap();
+        let loss = value_relation_loss(&s, &t, 3, 4).expect("value_relation_loss should succeed");
         assert!(loss.is_finite() && loss >= 0.0);
     }
 }

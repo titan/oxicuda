@@ -320,7 +320,7 @@ mod tests {
         let logits = vec![2.0_f32, 0.5_f32];
         let result = dlr_loss(&logits, 0);
         assert!(result.is_some(), "expected Some for 2-class");
-        let val = result.unwrap();
+        let val = result.expect("result should be present");
         assert!(
             val < 0.0,
             "correctly classified 2-class DLR should be negative, got {val}"
@@ -340,7 +340,7 @@ mod tests {
         // denom = logits[0] - logits[2] = 3-0 = 3.
         // loss = -(3 - 1) / 3 = -2/3 ≈ -0.6667 (negative = correctly classified).
         let logits = vec![3.0_f32, 1.0_f32, 0.0_f32];
-        let val = dlr_loss(&logits, 0).unwrap();
+        let val = dlr_loss(&logits, 0).expect("dlr_loss should succeed");
         assert!(
             val < 0.0,
             "correctly classified 3-class DLR should be negative, got {val}"
@@ -364,7 +364,7 @@ mod tests {
         // denom = logits[1] - logits[0] = 3 - 0 = 3.
         // loss = -(logits[0] - logits[1]) / 3 = -(0-3)/3 = 1.0 (positive = misclassified).
         let logits = vec![0.0_f32, 3.0_f32, 1.0_f32];
-        let val = dlr_loss(&logits, 0).unwrap();
+        let val = dlr_loss(&logits, 0).expect("dlr_loss should succeed");
         assert!(
             val > 0.0,
             "misclassified 3-class DLR should be positive, got {val}"
@@ -420,7 +420,7 @@ mod tests {
         let result = autoattack(
             &x, true_class, n_classes, loss_grad, logit_fn, score_fn, &cfg, &mut rng,
         )
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(result.len(), dim);
     }
 
@@ -457,7 +457,7 @@ mod tests {
         let result = autoattack(
             &x, true_class, n_classes, loss_grad, logit_fn, score_fn, &cfg, &mut rng,
         )
-        .unwrap();
+        .expect("value should be present");
         for (r, &xi) in result.iter().zip(x.iter()) {
             assert!(
                 (r - xi).abs() <= eps + 1e-5,
@@ -500,7 +500,7 @@ mod tests {
         let result = autoattack(
             &x, true_class, n_classes, loss_grad, logit_fn, score_fn, &cfg, &mut rng,
         )
-        .unwrap();
+        .expect("value should be present");
         for &v in &result {
             assert!(
                 (lo - 1e-5..=hi + 1e-5).contains(&v),
@@ -546,8 +546,8 @@ mod tests {
         let result = autoattack(
             &x, true_class, n_classes, loss_grad, logit_fn, score_fn, &cfg, &mut rng,
         )
-        .unwrap();
-        let final_logits = logit_fn3(&result).unwrap();
+        .expect("value should be present");
+        let final_logits = logit_fn3(&result).expect("logit_fn3 should succeed");
         let final_class = argmax_usize(&final_logits);
         assert_ne!(
             final_class, true_class,
@@ -587,7 +587,7 @@ mod tests {
             &x, true_class, n_classes, loss_grad, logit_fn, score_fn, &cfg, &mut rng,
         );
         assert!(result.is_ok(), "autoattack should complete without error");
-        assert_eq!(result.unwrap().len(), dim);
+        assert_eq!(result.expect("result should be present").len(), dim);
     }
 
     // ── Test 10 ───────────────────────────────────────────────────────────────
@@ -663,11 +663,11 @@ mod tests {
         let res1 = autoattack(
             &x, true_class, n_classes, loss_grad1, logit_fn1, score_fn1, &cfg, &mut rng1,
         )
-        .unwrap();
+        .expect("value should be present");
         let res2 = autoattack(
             &x, true_class, n_classes, loss_grad2, logit_fn2, score_fn2, &cfg, &mut rng2,
         )
-        .unwrap();
+        .expect("value should be present");
 
         for (a, b) in res1.iter().zip(res2.iter()) {
             assert!((a - b).abs() < 1e-6, "same seed should produce same result");
@@ -786,7 +786,7 @@ mod tests {
         let result = autoattack(
             &x, true_class, n_classes, loss_grad, logit_fn, score_fn, &cfg, &mut rng,
         )
-        .unwrap();
+        .expect("value should be present");
         for &v in &result {
             assert!(v.is_finite(), "result contains non-finite value: {v}");
         }
@@ -833,7 +833,7 @@ mod tests {
             result.is_ok(),
             "should return a result even when APGD fails to fool"
         );
-        assert_eq!(result.unwrap().len(), dim);
+        assert_eq!(result.expect("result should be present").len(), dim);
     }
 
     // ── Test 18 ───────────────────────────────────────────────────────────────
@@ -844,7 +844,7 @@ mod tests {
         let logits = vec![1000.0_f32, 500.0_f32, 100.0_f32];
         let result = dlr_loss(&logits, 0);
         assert!(result.is_some(), "large logits should give Some");
-        let val = result.unwrap();
+        let val = result.expect("result should be present");
         assert!(
             val.is_finite(),
             "DLR with large logits should be finite, got {val}"

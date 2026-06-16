@@ -245,7 +245,8 @@ mod tests {
     #[test]
     fn distill_loss_identical_logits_is_zero() {
         let logits = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let loss = lwf_distill_loss(&logits, &logits, &default_cfg()).unwrap();
+        let loss = lwf_distill_loss(&logits, &logits, &default_cfg())
+            .expect("LwF distillation loss should compute with valid logits");
         assert!(
             loss.abs() < 1e-5,
             "expected ~0 for identical logits, got {loss}"
@@ -257,7 +258,8 @@ mod tests {
     fn distill_loss_different_logits_is_positive() {
         let teacher = vec![10.0_f32, -10.0, -10.0];
         let student = vec![-10.0_f32, 10.0, -10.0];
-        let loss = lwf_distill_loss(&teacher, &student, &default_cfg()).unwrap();
+        let loss = lwf_distill_loss(&teacher, &student, &default_cfg())
+            .expect("LwF distillation loss should compute with valid logits");
         assert!(loss > 0.0, "expected positive KL loss, got {loss}");
     }
 
@@ -274,15 +276,18 @@ mod tests {
             alpha: 0.5,
         };
 
-        let loss_close = lwf_distill_loss(&teacher, &close_student, &cfg).unwrap();
-        let loss_far = lwf_distill_loss(&teacher, &far_student, &cfg).unwrap();
+        let loss_close = lwf_distill_loss(&teacher, &close_student, &cfg)
+            .expect("LwF distillation loss should compute with valid logits");
+        let loss_far = lwf_distill_loss(&teacher, &far_student, &cfg)
+            .expect("LwF distillation loss should compute with valid logits");
 
         assert!(
             loss_far > loss_close,
             "larger divergence must give higher loss: close={loss_close}, far={loss_far}"
         );
         // Identical teacher and close student → close-to-zero loss
-        let loss_identical = lwf_distill_loss(&teacher, &teacher, &cfg).unwrap();
+        let loss_identical = lwf_distill_loss(&teacher, &teacher, &cfg)
+            .expect("LwF distillation loss should compute with valid logits");
         assert!(
             loss_identical < loss_close,
             "identical logits must give smaller loss than close logits: identical={loss_identical}, close={loss_close}"
@@ -298,7 +303,8 @@ mod tests {
             temperature: 2.0,
             alpha: 0.0,
         };
-        let combined = lwf_combined_loss(&logits, &logits, task_loss, &cfg).unwrap();
+        let combined = lwf_combined_loss(&logits, &logits, task_loss, &cfg)
+            .expect("LwF combined loss should compute with valid inputs");
         assert!(
             (combined - task_loss).abs() < 1e-6,
             "alpha=0 should return task_loss unchanged, got {combined}"
@@ -315,8 +321,10 @@ mod tests {
             temperature: 2.0,
             alpha: 1.0,
         };
-        let combined = lwf_combined_loss(&teacher, &student, task_loss, &cfg).unwrap();
-        let distill_only = lwf_distill_loss(&teacher, &student, &cfg).unwrap();
+        let combined = lwf_combined_loss(&teacher, &student, task_loss, &cfg)
+            .expect("LwF combined loss should compute with valid inputs");
+        let distill_only = lwf_distill_loss(&teacher, &student, &cfg)
+            .expect("LwF distillation loss should compute with valid logits");
         assert!(
             (combined - distill_only).abs() < 1e-5,
             "alpha=1 should equal distill loss: combined={combined}, distill={distill_only}"
@@ -330,8 +338,10 @@ mod tests {
         let student = vec![0.5_f32, 1.5, 0.0];
         let cfg = default_cfg();
 
-        let single = lwf_distill_loss(&teacher, &student, &cfg).unwrap();
-        let batch = lwf_distill_loss_batch(&teacher, &student, 1, 3, &cfg).unwrap();
+        let single = lwf_distill_loss(&teacher, &student, &cfg)
+            .expect("LwF distillation loss should compute with valid logits");
+        let batch = lwf_distill_loss_batch(&teacher, &student, 1, 3, &cfg)
+            .expect("LwF batch distillation loss should compute");
 
         assert!(
             (single - batch).abs() < 1e-6,

@@ -8,7 +8,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.39).
 
 ## Implementation Status
 
-- **Actual SLoC:** 3,094 total lines (2,624 code, 38 files)
+- **Actual SLoC:** 13,332 total lines (13,332 code, 59 files)
 - **Coverage:** brute-force flat index baseline, bounded top-K heap selection,
   mini-batch k-means++ trainer, Product Quantization (PQ) with asymmetric distance
   computation (ADC), IVF coarse quantizer, IVFPQ coarse-prune + re-rank, HNSW
@@ -80,7 +80,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.39).
   NN-Descent quality, PTX non-empty × all SM versions)
 - [x] Benchmarks (`benches/ann_ops.rs`) — 7 PTX kernel groups × 4 SM
   + 5 algorithm benches
-- **Tests:** 32 passing
+- **Tests:** 353 passing
 
 ### Future Enhancements
 
@@ -98,24 +98,34 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.39).
 - [x] NGT (Neighborhood Graph and Tree) build / search (ngt/index.rs -- ANNG incremental approx-kNN-graph build + ε-relaxed greedy best-first graph search with deterministic seeds; reuses distance::l2)
 - [x] HNSW-PQ — codes stored in the graph nodes (compressed HNSW) (hnsw_pq.rs -- PQ codes stored per HNSW node + Asymmetric Distance Computation (ADC) table lookup during search; reuses HnswGraph + PqCodebook)
 - [ ] FreshDiskANN — incremental updates to an on-disk graph
+- [x] `ivf/ivfadc.rs` — IVFADC residual coding (Jégou 2011): per-inverted-list global rotation + residual PQ encoding; refine with ADC lookup during search; reduces quantisation error 2–4 dB vs plain IVFPQ
+- [x] `lsh/pqfastscan.rs` — PQFastScan (André 2015): SIMD-friendly 4-bit LUT scan; pack 32 PQ codes into 128-bit registers; 16-lane vectorised accumulation; 4–5× faster than scalar ADC
+- [ ] `ivf/spann.rs` — SPANN (Chen 2021): partition + posting list with SSD-resident vectors; on-device anchor graph for centroid routing; billion-scale with sub-100ms P99 latency
+- [ ] `hnsw/fresh_diskann.rs` — FreshDiskANN (Singh 2021): incremental graph updates (insert/delete) to an on-disk Vamana index; in-place node slot reuse + consolidated repair passes
 
 #### P1 — Distance & Quantization
 - [x] Mahalanobis distance with learned positive-definite metric (distance/mahalanobis.rs -- M=LLᵀ Cholesky-parameterized PSD metric; contrastive margin-loss gradient descent on similar/dissimilar pairs)
-- [ ] Inner-product MIPS via L2 transformation (XBox / Bachrach)
-- [ ] Additive quantization (AQ) / Composite quantization beyond PQ
+- [x] Inner-product MIPS via L2 transformation (XBox / Bachrach)
+- [x] Additive quantization (AQ) / Composite quantization beyond PQ
 - [x] Residual quantization for higher-bit-rate codes (pq/residual_quant.rs -- Chen 2010 / Liu 2019 multi-stage VQ; greedy stage-wise k-means on residuals + monotone-refinement MSE guarantee)
 - [ ] Binary quantization (PQ-1bit / hyperplane sketches)
+- [x] `quantize/aq.rs` — Additive Quantization (Babenko 2014): iteratively assign each vector to a sum of M codebook entries via beam search; lower distortion than PQ at same bits; O(Mn²) training
+- [x] `quantize/binary_pq.rs` — Binary PQ (1-bit per sub-vector): threshold each sub-vector at its centroid mean; Hamming distance via popcount; 64× memory reduction vs float32; asymmetric score via soft-decode
+- [x] `distance/mips_transform.rs` — MIPS-to-L2 transformation (Shrivastava-Li 2014, XBox): augment d-dim vector with one extra coordinate to convert maximum inner-product search to L2 search; O(1) preprocessing per query
 
 #### P1 — Approximate Search Strategy
 - [x] Multi-probe LSH (Lv et al.) (lsh/multi_probe_lsh.rs -- Lv et al. VLDB 2007 E2LSH ⌊(a·x+b)/w⌋ keys + probe sequences ordered by expected perturbation distance s_j / w−s_j)
-- [ ] PQFastScan (SIMD-friendly 4-bit PQ scan)
-- [ ] Refined HNSW pruning policies (NSG, HCNNG, alpha-RNG)
-- [ ] IVF residual coding (IVFADC) — per-list rotation + residual PQ
+- [x] PQFastScan (SIMD-friendly 4-bit PQ scan)
+- [x] Refined HNSW pruning policies (NSG, HCNNG, alpha-RNG)
+- [x] IVF residual coding (IVFADC) — per-list rotation + residual PQ
 
 #### P2 — Tooling
 - [ ] Recall-at-K / latency Pareto plot helpers
 - [ ] Index-on-disk serializer (oxicode-based, no zip/bincode)
 - [ ] GPU streaming construction for HNSW (out-of-core build)
+- [ ] `bench/recall_latency.rs` — Recall@K / latency Pareto curve helper: sweep nprobe/ef_search, record (recall, latency) pairs, compute Pareto front, serialize to CSV for external plotting
+- [ ] `index/serializer.rs` — Pure-Rust index serialiser: flat binary format for HNSW/IVF/PQ indexes; magic bytes + version header + section offsets; no zip/bincode dependency; mmap-compatible layout
+- [ ] `hnsw/streaming_build.rs` — GPU streaming HNSW construction: batch-insert chunks of 64K vectors via device-side neighbour search; avoids host-device transfer bottleneck for billion-scale builds
 
 ## Dependencies
 
@@ -131,7 +141,7 @@ integrators perform the actual GPU launch.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 32 passing (Flat, k-means, PQ, IVF, HNSW recall, LSH, MinHash,
+- Tests: 353 passing (Flat, k-means, PQ, IVF, HNSW recall, LSH, MinHash,
   NN-Descent, PTX × 6 SM)
 - unwrap() calls: 0 in production code
 - macOS: compiles but returns `UnsupportedPlatform` at runtime when actual launch

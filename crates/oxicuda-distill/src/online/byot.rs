@@ -121,7 +121,7 @@ mod tests {
             vec![1.5_f32, 1.5, 3.0],
             vec![0.5_f32, 2.5, 3.5], // teacher (deepest)
         ];
-        let loss = byot_loss(&branches, 2, 4.0).unwrap();
+        let loss = byot_loss(&branches, 2, 4.0).expect("byot_loss should succeed");
         assert!(loss.is_finite() && loss >= 0.0);
     }
 

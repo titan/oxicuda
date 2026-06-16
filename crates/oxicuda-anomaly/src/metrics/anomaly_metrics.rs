@@ -227,7 +227,8 @@ mod tests {
     fn auc_roc_perfect() {
         let scores = vec![0.9_f32, 0.8, 0.2, 0.1];
         let labels = vec![true, true, false, false];
-        let auc = auc_roc_anomaly(&scores, &labels).unwrap();
+        let auc =
+            auc_roc_anomaly(&scores, &labels).expect("anomaly metrics AUC-ROC should compute");
         assert!((auc - 1.0).abs() < 0.01, "auc={auc}");
     }
 
@@ -237,7 +238,8 @@ mod tests {
         let labels = vec![
             true, false, true, false, true, false, true, false, true, false,
         ];
-        let auc = auc_roc_anomaly(&scores, &labels).unwrap();
+        let auc =
+            auc_roc_anomaly(&scores, &labels).expect("anomaly metrics AUC-ROC should compute");
         assert!((0.0..=1.0).contains(&auc), "auc={auc}");
     }
 
@@ -245,7 +247,7 @@ mod tests {
     fn f1_threshold_basic() {
         let scores = vec![0.9_f32, 0.8, 0.2, 0.1];
         let labels = vec![true, true, false, false];
-        let f1 = f1_at_threshold(&scores, &labels, 0.5).unwrap();
+        let f1 = f1_at_threshold(&scores, &labels, 0.5).expect("anomaly metrics F1 should compute");
         assert!((f1 - 1.0).abs() < 0.01, "f1={f1}");
     }
 
@@ -253,7 +255,8 @@ mod tests {
     fn compute_all_metrics_finite() {
         let scores = vec![0.9_f32, 0.7, 0.3, 0.1, 0.8, 0.2];
         let labels = vec![true, true, false, false, true, false];
-        let m = compute_detection_metrics(&scores, &labels).unwrap();
+        let m =
+            compute_detection_metrics(&scores, &labels).expect("anomaly metrics should compute");
         assert!(m.auc_roc.is_finite());
         assert!(m.auc_pr.is_finite());
         assert!(m.best_f1.is_finite());

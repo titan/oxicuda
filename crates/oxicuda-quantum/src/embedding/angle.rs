@@ -29,7 +29,8 @@ mod tests {
     #[test]
     fn angle_embedding_norm_preserved() {
         let data = [0.5_f32, 1.2, 0.3];
-        let sv = angle_embedding(&data).unwrap();
+        let sv = angle_embedding(&data)
+            .expect("data is non-empty with valid f32 angles, so angle_embedding returns Ok");
         let norm = sv.norm_sq();
         assert!((norm - 1.0).abs() < 1e-5, "norm={norm}");
     }

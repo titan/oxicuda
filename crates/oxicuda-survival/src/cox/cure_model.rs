@@ -1071,7 +1071,7 @@ mod tests {
             );
         }
         // S(last observable time) > 0 — positive plateau due to cure fraction
-        let s_end = *surv.last().unwrap();
+        let s_end = *surv.last().expect("last should succeed");
         assert!(
             s_end > 0.0,
             "S at last time={s_end} should be positive (cure plateau)"

@@ -1,5 +1,6 @@
 //! End-to-end integration tests for `oxicuda-pde`.
 
+use crate::dg::dg_2d::{Dg2dSpace, DgBoundary, dg_2d_advect, dg_2d_burgers};
 use crate::dg::dg1d::{Dg1dSpace, lax_friedrichs_flux, lgl_nodes, lgl_weights, upwind_flux};
 use crate::fdm::advection_1d::{lax_wendroff_step_1d, upwind_step_1d};
 use crate::fdm::heat_1d::{backward_euler_step, crank_nicolson_step, forward_euler_step};
@@ -10,6 +11,7 @@ use crate::fdm::poisson_2d::{
 use crate::fdm::wave_1d::{WaveState1d, leapfrog_step_1d};
 use crate::fem::dirichlet_apply::apply_dirichlet_csr;
 use crate::fem::mass_stiffness::{assemble_load_centroid, assemble_mass_stiffness};
+use crate::fem::mixed_poisson::{MixedBoundary, element_divergence, mixed_poisson_rt0};
 use crate::handle::LcgRng;
 use crate::mesh::{Mesh1d, Mesh2d, TriMesh2d};
 use crate::metrics::metrics::{convergence_order, h1_seminorm_1d, l2_norm_1d, max_norm};
@@ -22,6 +24,7 @@ use crate::solver::cg::cg_solve;
 use crate::solver::pcg::{pcg_ilu0, pcg_jacobi, pcg_ssor};
 use crate::solver::sparse::SparseCsr;
 use crate::spectral::chebyshev::solve_poisson_chebyshev;
+use crate::spectral::chebyshev_2d::{Rectangle, chebyshev_2d_grid, chebyshev_2d_poisson};
 use crate::spectral::fft_spectral::periodic_poisson_solve;
 use crate::time::rk4::rk4_step;
 
@@ -423,4 +426,146 @@ fn dg1d_space_construction() {
     // Each element has mass = h_e (since LGL integrates 1 to 2 on [-1,1] * (h_e/2) -> h_e per element)
     // total mass over domain = 1.0 (length)
     assert!((total_mass - 1.0).abs() < 1e-10);
+}
+
+// 23. Tensor-product Chebyshev 2D Poisson: SPECTRAL accuracy on a smooth
+// manufactured solution (max nodal error ≤ 1e-8 at moderate N — far beyond O(h²)).
+#[test]
+fn chebyshev_2d_poisson_spectral_accuracy() {
+    let pi = std::f64::consts::PI;
+    let domain = Rectangle::new(0.0, 1.0, 0.0, 1.0).expect("ok");
+    let n = 20;
+    let (x, y) = chebyshev_2d_grid(n, n, &domain);
+    let n1 = n + 1;
+    let mut f = vec![0.0; n1 * n1];
+    let mut exact = vec![0.0; n1 * n1];
+    for (iy, &yy) in y.iter().enumerate() {
+        for (ix, &xx) in x.iter().enumerate() {
+            let u = (pi * xx).sin() * (pi * yy).sin();
+            exact[iy * n1 + ix] = u;
+            f[iy * n1 + ix] = 2.0 * pi * pi * u; // -Δu = 2π² u
+        }
+    }
+    let bc = vec![0.0; n1 * n1];
+    let u = chebyshev_2d_poisson(n, n, &domain, &f, &bc).expect("ok");
+    let err = u
+        .iter()
+        .zip(&exact)
+        .fold(0.0_f64, |m, (a, b)| m.max((a - b).abs()));
+    assert!(err < 1e-8, "Chebyshev-2D spectral error {err}");
+}
+
+// 24. RT0/P0 mixed Poisson: LOCAL CONSERVATION — ∫_T div σ_h = ∫_T f exactly,
+// element by element (the defining property of the lowest-order mixed method).
+#[test]
+fn mixed_rt0_local_conservation() {
+    let mesh = TriMesh2d::rect_grid(0.0, 1.0, 0.0, 1.0, 6, 6).expect("ok");
+    let n_tri = mesh.n_tri();
+    let mut f = vec![0.0; n_tri];
+    for (e, fe) in f.iter_mut().enumerate() {
+        *fe = 0.5 + 0.27 * e as f64; // spatially varying forcing
+    }
+    let sol = mixed_poisson_rt0(&mesh, &f, &MixedBoundary::Dirichlet(|_, _| 0.0)).expect("ok");
+    let div = element_divergence(&mesh, &sol).expect("ok");
+    for e in 0..n_tri {
+        let area = mesh.area(e).expect("area");
+        let int_div = div[e] * area; // ∫_T div σ_h
+        let int_f = f[e] * area; // ∫_T f
+        assert!(
+            (int_div - int_f).abs() < 1e-10,
+            "elem {e}: ∫div σ_h={int_div} ∫f={int_f}"
+        );
+    }
+}
+
+// 25. DG-2D linear advection: discrete MASS conservation under periodic BC to
+// ~1e-12, plus a smooth Gaussian advected one full period returns ≈ itself.
+#[test]
+fn dg_2d_advection_mass_and_transport() {
+    let mesh = TriMesh2d::rect_grid(0.0, 1.0, 0.0, 1.0, 13, 13).expect("ok");
+    let bc = DgBoundary::Periodic {
+        x0: 0.0,
+        x1: 1.0,
+        y0: 0.0,
+        y1: 1.0,
+    };
+    let space = Dg2dSpace::new(&mesh, bc).expect("ok");
+    let mut u0 = vec![0.0; space.n_dofs()];
+    for e in 0..space.n_elem {
+        let v = space.element_vertices(e).expect("v");
+        for i in 0..3 {
+            let dx = v[i][0] - 0.5;
+            let dy = v[i][1] - 0.5;
+            u0[3 * e + i] = (-30.0 * (dx * dx + dy * dy)).exp();
+        }
+    }
+    let m0 = space.total_mass(&u0);
+    let beta = (1.0, 0.0);
+    let dt0 = 0.3 * space.cfl_dt(beta.0, beta.1, 1.0);
+    let nsteps = (1.0 / dt0).ceil() as usize;
+    let dt = 1.0 / nsteps as f64; // land exactly on one period T=1
+    let u = dg_2d_advect(&mesh, &u0, beta, dt, nsteps, bc, false).expect("ok");
+    let m1 = space.total_mass(&u);
+    assert!((m1 - m0).abs() < 1e-12, "DG-2D mass drift {m0} -> {m1}");
+    // one period ⇒ near-identity for exact transport (high order, no limiter).
+    let mut err2 = 0.0;
+    let mut nrm2 = 0.0;
+    for e in 0..space.n_elem {
+        let area = space.area(e).expect("a");
+        for i in 0..3 {
+            let d = u[3 * e + i] - u0[3 * e + i];
+            err2 += area / 3.0 * d * d;
+            nrm2 += area / 3.0 * u0[3 * e + i] * u0[3 * e + i];
+        }
+    }
+    assert!(
+        (err2 / nrm2).sqrt() < 0.15,
+        "DG-2D one-period L2 error too large"
+    );
+}
+
+// 26. DG-2D inviscid Burgers Riemann step (uL>uR) with the slope limiter ON:
+// the shock travels at the Rankine-Hugoniot speed s=(uL+uR)/2 and the solution
+// stays monotone within [uR, uL].
+#[test]
+fn dg_2d_burgers_rankine_hugoniot() {
+    let nx = 81;
+    let ny = 3;
+    let mesh = TriMesh2d::rect_grid(-1.0, 3.0, 0.0, 0.1, nx, ny).expect("ok");
+    let bc = DgBoundary::Compact { far_field: 0.0 };
+    let space = Dg2dSpace::new(&mesh, bc).expect("ok");
+    let mut u0 = vec![0.0; space.n_dofs()];
+    for e in 0..space.n_elem {
+        let v = space.element_vertices(e).expect("v");
+        for i in 0..3 {
+            u0[3 * e + i] = if v[i][0] < 1.0 { 1.0 } else { 0.0 };
+        }
+    }
+    let t_final = 1.0;
+    let dt0 = 0.4 * space.cfl_dt(1.0, 0.0, 1.0);
+    let nsteps = (t_final / dt0).ceil() as usize;
+    let dt = t_final / nsteps as f64;
+    let u = dg_2d_burgers(&mesh, &u0, 1.0, dt, nsteps, bc, true).expect("ok");
+    // monotonicity: solution stays within [0, 1].
+    let umax = u.iter().cloned().fold(f64::MIN, f64::max);
+    let umin = u.iter().cloned().fold(f64::MAX, f64::min);
+    assert!(
+        umax < 1.0 + 1e-9 && umin > -1e-9,
+        "Burgers not monotone [{umin},{umax}]"
+    );
+    // shock front: largest centroid-x with cell mean > 0.5; RH speed s=0.5.
+    let mut front = f64::MIN;
+    for e in 0..space.n_elem {
+        if space.cell_mean(&u, e) > 0.5 {
+            let c = space.centroid(e).expect("c");
+            if c[0] > front {
+                front = c[0];
+            }
+        }
+    }
+    let analytic = 1.0 + 0.5 * t_final;
+    assert!(
+        (front - analytic).abs() < 0.1,
+        "shock front {front} vs RH {analytic}"
+    );
 }

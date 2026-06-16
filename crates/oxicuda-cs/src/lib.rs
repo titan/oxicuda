@@ -52,5 +52,76 @@ pub mod tv;
 pub use error::{CsError, CsResult};
 pub use handle::{CsHandle, LcgRng, SmVersion};
 
+// Wave AAA+58 re-exports.
+pub use greedy::{Lista, ListaConfig};
+pub use lasso::{Slope, SlopeConfig, sorted_l1_prox};
+pub use robust_pca::{RpcaGd, RpcaGdConfig};
+
+// Wave AAA+68 re-exports.
+pub use dictionary::{CoupledDictionary, CoupledDlConfig, couple_code, coupled_dl};
+pub use measurement::{CodedDiffraction, MaskKind, WirtingerConfig, phase_aligned_error};
+pub use sbl::{Rvm, RvmConfig, RvmFit, RvmKernel, rvm_fit_design};
+
 #[cfg(test)]
 mod e2e_tests;
+
+#[cfg(test)]
+mod wave_aaa58_e2e {
+    use super::*;
+
+    #[test]
+    fn e2e_lista_sparse_coding() {
+        let n = 8_usize;
+        let m = 12_usize;
+        let mut dict = vec![0.0_f64; m * n];
+        for i in 0..m {
+            for j in 0..n {
+                dict[i * n + j] = if (i + j) % 3 == 0 { 0.5 } else { -0.1 };
+            }
+        }
+        let cfg = ListaConfig {
+            n_measurements: n,
+            n_atoms: m,
+            threshold: 0.1,
+            n_layers: 10,
+        };
+        let lista = Lista::from_dict(&dict, cfg).expect("ok");
+        let y = vec![0.5_f64; n];
+        let code = lista.encode(&y).expect("ok");
+        assert_eq!(code.len(), m);
+        assert!(code.iter().all(|v| v.is_finite()), "all finite");
+        let nnz = code.iter().filter(|&&v| v.abs() > 1e-6).count();
+        assert!(nnz <= m, "nnz {nnz} <= {m}");
+    }
+
+    #[test]
+    fn e2e_rpca_gd_low_rank_recovery() {
+        let m = 10_usize;
+        let n = 8_usize;
+        let u_true: Vec<f64> = (0..m).map(|i| (i + 1) as f64 * 0.1).collect();
+        let v_true: Vec<f64> = (0..n).map(|j| (j + 1) as f64 * 0.1).collect();
+        let mut mat = vec![0.0_f64; m * n];
+        for i in 0..m {
+            for j in 0..n {
+                mat[i * n + j] = u_true[i] * v_true[j];
+            }
+        }
+        mat[0] += 1.0;
+
+        let cfg = RpcaGdConfig {
+            rank: 1,
+            sparsity_fraction: 0.05,
+            max_iter: 200,
+            lr: 0.01,
+            tol: 1e-4,
+        };
+        let mut rng = LcgRng::new(58);
+        let mut rpca = RpcaGd::new(m, n, cfg, &mut rng).expect("ok");
+        rpca.fit(&mat).expect("ok");
+        let l_hat = rpca.low_rank();
+        assert_eq!(l_hat.len(), m * n);
+        assert!(l_hat.iter().all(|v| v.is_finite()), "L finite");
+        let resid = rpca.residual_norm(&mat);
+        assert!(resid.is_finite(), "residual finite");
+    }
+}

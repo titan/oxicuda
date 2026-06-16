@@ -284,7 +284,8 @@ mod tests {
             max_passes: 1,
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         assert_eq!(result.perturbation.len(), dim);
     }
 
@@ -307,7 +308,8 @@ mod tests {
             max_passes: 3,
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         for &vi in &result.perturbation {
             assert!(vi.abs() <= xi + 1e-6, "L∞ violated: |{vi}| > {xi}");
         }
@@ -329,7 +331,8 @@ mod tests {
             max_passes: 2,
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         assert!(
             result.fool_rate >= 0.0 && result.fool_rate <= 1.0,
             "fool_rate out of range: {}",
@@ -354,7 +357,8 @@ mod tests {
             max_passes: 2,
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         assert_eq!(result.perturbation.len(), dim);
         assert!(
             result.fool_rate == 0.0 || result.fool_rate == 1.0,
@@ -381,7 +385,8 @@ mod tests {
             max_passes: 2,
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         assert_eq!(result.perturbation.len(), dim);
     }
 
@@ -406,7 +411,8 @@ mod tests {
             target_fool_rate: 1.1, // never stop early
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         let nonzero = result.perturbation.iter().any(|&v| v.abs() > 1e-9);
         assert!(nonzero, "perturbation should be non-zero after 2 passes");
     }
@@ -496,7 +502,8 @@ mod tests {
             target_fool_rate: 1.1, // never stop early
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         assert!(
             result.n_passes <= max_passes,
             "n_passes={} > max_passes={}",
@@ -544,7 +551,8 @@ mod tests {
             deepfool_max_iter: 20,
             deepfool_overshoot: 0.02,
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         // fool_rate should be in [0, 1].
         assert!(
             result.fool_rate >= 0.0 && result.fool_rate <= 1.0,
@@ -570,7 +578,8 @@ mod tests {
             max_passes: 2,
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         assert_eq!(
             result.perturbation.len(),
             dim,
@@ -636,7 +645,8 @@ mod tests {
             max_passes: 2,
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         for &vi in &result.perturbation {
             assert!(
                 vi.is_finite(),
@@ -672,7 +682,8 @@ mod tests {
             deepfool_max_iter: 30,
             deepfool_overshoot: 0.02,
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         assert!(result.fool_rate >= 0.0 && result.fool_rate <= 1.0);
         assert!(result.n_passes <= 3);
     }
@@ -707,7 +718,8 @@ mod tests {
             target_fool_rate: 0.99,
             ..Default::default()
         };
-        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg).unwrap();
+        let result = uap_attack(&inputs, n_inputs, dim, n_classes, oracle, &cfg)
+            .expect("uap_attack should succeed");
         assert_eq!(
             result.fool_rate, 1.0,
             "expected fool_rate=1.0, got {}",

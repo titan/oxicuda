@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_config_new_valid() {
-        let cfg = MopsoConfig::new(30, 100, 2).unwrap();
+        let cfg = MopsoConfig::new(30, 100, 2).expect("new should succeed");
         assert_eq!(cfg.n_particles, 30);
         assert_eq!(cfg.n_gen, 100);
         assert_eq!(cfg.n_obj, 2);
@@ -643,7 +643,7 @@ mod tests {
             c2: 2.0,
             seed: 42,
         };
-        let state = mopso_run(sch, 1, &bounds, &cfg).unwrap();
+        let state = mopso_run(sch, 1, &bounds, &cfg).expect("mopso_run should succeed");
         assert!(!state.archive.is_empty(), "archive should be non-empty");
         assert_eq!(state.generation, 50);
     }
@@ -662,7 +662,7 @@ mod tests {
             c2: 2.0,
             seed: 7,
         };
-        let state = mopso_run(zdt1, 3, &bounds, &cfg).unwrap();
+        let state = mopso_run(zdt1, 3, &bounds, &cfg).expect("mopso_run should succeed");
         assert!(
             state.archive.len() <= 20,
             "archive size {} exceeds max_archive 20",
@@ -684,7 +684,7 @@ mod tests {
             c2: 2.0,
             seed: 11,
         };
-        let state = mopso_run(bi_sphere, 2, &bounds, &cfg).unwrap();
+        let state = mopso_run(bi_sphere, 2, &bounds, &cfg).expect("mopso_run should succeed");
         // Verify pairwise non-domination in archive.
         let n = state.archive_obj.len();
         for i in 0..n {
@@ -713,7 +713,7 @@ mod tests {
             c2: 2.0,
             seed: 5,
         };
-        let state = mopso_run(sch, 1, &bounds, &cfg).unwrap();
+        let state = mopso_run(sch, 1, &bounds, &cfg).expect("mopso_run should succeed");
         let front = mopso_pareto_front(&state);
         assert_eq!(front.len(), state.archive.len());
         for (i, (x, obj)) in front.iter().enumerate() {
@@ -738,7 +738,7 @@ mod tests {
             c2: 2.0,
             seed: 33,
         };
-        let state = mopso_run(zdt1, 5, &bounds, &cfg).unwrap();
+        let state = mopso_run(zdt1, 5, &bounds, &cfg).expect("mopso_run should succeed");
         // At least some archive member should have f1 < 0.9.
         let has_low_f1 = state.archive_obj.iter().any(|obj| obj[0] < 0.9);
         assert!(has_low_f1, "expected low-f1 solutions in archive");
@@ -758,8 +758,8 @@ mod tests {
             c2: 2.0,
             seed: 999,
         };
-        let s1 = mopso_run(bi_sphere, 2, &bounds, &cfg).unwrap();
-        let s2 = mopso_run(bi_sphere, 2, &bounds, &cfg).unwrap();
+        let s1 = mopso_run(bi_sphere, 2, &bounds, &cfg).expect("mopso_run should succeed");
+        let s2 = mopso_run(bi_sphere, 2, &bounds, &cfg).expect("mopso_run should succeed");
         assert_eq!(
             s1.archive.len(),
             s2.archive.len(),
@@ -770,7 +770,7 @@ mod tests {
     #[test]
     fn test_mopso_run_error_bounds_mismatch() {
         let bounds = vec![(-1.0_f64, 1.0_f64); 3]; // 3 bounds but n_var = 2
-        let cfg = MopsoConfig::new(10, 10, 2).unwrap();
+        let cfg = MopsoConfig::new(10, 10, 2).expect("new should succeed");
         assert!(mopso_run(bi_sphere, 2, &bounds, &cfg).is_err());
     }
 
@@ -788,7 +788,7 @@ mod tests {
             c2: 2.0,
             seed: 1,
         };
-        let state = mopso_run(sch, 1, &bounds, &cfg).unwrap();
+        let state = mopso_run(sch, 1, &bounds, &cfg).expect("mopso_run should succeed");
         assert_eq!(state.generation, 25);
     }
 

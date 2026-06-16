@@ -88,7 +88,7 @@ mod tests {
         let z: Vec<f32> = (0..n * n_z).map(|i| i as f32 / (n * n_z) as f32).collect();
         let t: Vec<f32> = (0..n).map(|i| z[i * n_z] + 0.1).collect();
         let y: Vec<f32> = (0..n).map(|i| t[i] * 2.0 + 0.5).collect();
-        let result = TwoSls::fit(&y, &t, &z, n, n_z).unwrap();
+        let result = TwoSls::fit(&y, &t, &z, n, n_z).expect("fit should succeed");
         assert!(result.coef[0].is_finite());
     }
 }

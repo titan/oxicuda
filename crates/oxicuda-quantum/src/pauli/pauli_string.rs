@@ -104,15 +104,19 @@ mod tests {
 
     #[test]
     fn pauli_op_from_char() {
-        assert_eq!(PauliOp::from_char('X').unwrap(), PauliOp::X);
+        assert_eq!(PauliOp::from_char('X').expect("'X' is a valid Pauli operator character; from_char only errors on unknown characters"), PauliOp::X);
         assert!(PauliOp::from_char('Q').is_err());
     }
 
     #[test]
     fn z_on_zero_state_no_change() {
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let sv = StateVector::new_zero_state(1).expect(
+            "1 is a valid qubit count; new_zero_state never fails for positive qubit counts",
+        );
         let ps = PauliString::new(1.0, vec![PauliOp::Z]);
-        let out = ps.apply_to_state(&sv).unwrap();
+        let out = ps
+            .apply_to_state(&sv)
+            .expect("apply_to_state should succeed");
         // Z|0⟩ = |0⟩
         assert!((out.amps[0].re - 1.0).abs() < 1e-6);
     }

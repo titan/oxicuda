@@ -287,17 +287,19 @@ mod tests {
 
     #[test]
     fn saliency_map_length_matches_features() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let n_features = 4;
         // 3 classes × 4 features.
         let jac = vec![0.0_f32; 3 * n_features];
-        let s = jsma.saliency_map(&jac, n_features).unwrap();
+        let s = jsma
+            .saliency_map(&jac, n_features)
+            .expect("saliency_map should succeed");
         assert_eq!(s.len(), n_features);
     }
 
     #[test]
     fn saliency_map_non_negative() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let n_features = 3;
         // Arbitrary mixed-sign Jacobian.
         let jac = vec![
@@ -305,13 +307,15 @@ mod tests {
             -0.3, 0.4, -0.7, // class 1
             0.1, -0.8, 0.2, // class 2
         ];
-        let s = jsma.saliency_map(&jac, n_features).unwrap();
+        let s = jsma
+            .saliency_map(&jac, n_features)
+            .expect("saliency_map should succeed");
         assert!(s.iter().all(|&v| v >= 0.0));
     }
 
     #[test]
     fn saliency_zero_when_alpha_nonpositive() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let n_features = 2;
         // Feature 0: alpha = -1 (≤ 0) → score 0 even though beta < 0.
         let jac = vec![
@@ -319,13 +323,15 @@ mod tests {
             -1.0_f32, -1.0, // class 1
             -1.0_f32, -1.0, // class 2
         ];
-        let s = jsma.saliency_map(&jac, n_features).unwrap();
+        let s = jsma
+            .saliency_map(&jac, n_features)
+            .expect("saliency_map should succeed");
         assert!((s[0]).abs() < 1e-9);
     }
 
     #[test]
     fn saliency_zero_when_beta_nonnegative() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let n_features = 2;
         // Feature 1: alpha = 1 (> 0) but beta = +2 (≥ 0) → score 0.
         let jac = vec![
@@ -333,13 +339,15 @@ mod tests {
             1.0_f32, 1.0, // class 1
             1.0_f32, 1.0, // class 2
         ];
-        let s = jsma.saliency_map(&jac, n_features).unwrap();
+        let s = jsma
+            .saliency_map(&jac, n_features)
+            .expect("saliency_map should succeed");
         assert!((s[1]).abs() < 1e-9);
     }
 
     #[test]
     fn saliency_score_is_alpha_times_abs_beta() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let n_features = 1;
         // alpha = 2, beta = (-1) + (-3) = -4 → score = 2 * 4 = 8.
         let jac = vec![
@@ -347,13 +355,15 @@ mod tests {
             -1.0_f32, // class 1
             -3.0_f32, // class 2
         ];
-        let s = jsma.saliency_map(&jac, n_features).unwrap();
+        let s = jsma
+            .saliency_map(&jac, n_features)
+            .expect("saliency_map should succeed");
         assert!((s[0] - 8.0).abs() < 1e-5);
     }
 
     #[test]
     fn saliency_picks_most_salient_feature() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let n_features = 3;
         // Feature 2 has the strongest (alpha>0, beta<0) signal.
         let jac = vec![
@@ -361,13 +371,15 @@ mod tests {
             -0.1, -0.5, -1.0, // class 1
             -0.1, -0.5, -1.0, // class 2
         ];
-        let s = jsma.saliency_map(&jac, n_features).unwrap();
+        let s = jsma
+            .saliency_map(&jac, n_features)
+            .expect("saliency_map should succeed");
         let argmax = s
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).expect("partial_cmp should succeed"))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(argmax, 2);
     }
 
@@ -375,7 +387,7 @@ mod tests {
 
     #[test]
     fn attack_output_length_equals_input() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let input = vec![0.5_f32; 5];
         // Jacobian: feature 0 salient for target. Never predicts target → runs.
         let jac = vec![
@@ -383,7 +395,9 @@ mod tests {
             -1.0, 0.0, 0.0, 0.0, 0.0, // class 1
             -1.0, 0.0, 0.0, 0.0, 0.0, // class 2
         ];
-        let y = jsma.attack(&input, const_jac(jac), |_x| 1_usize).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), |_x| 1_usize)
+            .expect("value should be present");
         assert_eq!(y.len(), input.len());
     }
 
@@ -393,7 +407,7 @@ mod tests {
             theta: 0.5,
             ..cfg_target0()
         };
-        let jsma = Jsma::new(cfg).unwrap();
+        let jsma = Jsma::new(cfg).expect("new should succeed");
         let input = vec![0.9_f32; 3];
         // All features salient for the target.
         let jac = vec![
@@ -401,7 +415,9 @@ mod tests {
             -1.0, -1.0, -1.0, // class 1
             -1.0, -1.0, -1.0, // class 2
         ];
-        let y = jsma.attack(&input, const_jac(jac), |_x| 1_usize).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), |_x| 1_usize)
+            .expect("value should be present");
         for &v in &y {
             assert!((0.0..=1.0).contains(&v), "out of [0,1]: {v}");
         }
@@ -409,7 +425,7 @@ mod tests {
 
     #[test]
     fn attack_increases_feature_zero_on_linear_model() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let input = vec![0.1_f32; 4];
         // Only feature 0 has positive target gradient and negative rest gradient.
         let jac = vec![
@@ -417,7 +433,9 @@ mod tests {
             -1.0, 0.0, 0.0, 0.0, // class 1
             -1.0, 0.0, 0.0, 0.0, // class 2
         ];
-        let y = jsma.attack(&input, const_jac(jac), |_x| 2_usize).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), |_x| 2_usize)
+            .expect("value should be present");
         assert!(y[0] > input[0], "feature 0 should increase");
         // Other features untouched.
         for f in 1..4 {
@@ -428,14 +446,16 @@ mod tests {
     #[test]
     fn attack_monotone_perturbation_direction() {
         // Every modified feature only ever moves up by +theta (never down).
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let input = vec![0.2_f32, 0.2, 0.2];
         let jac = vec![
             1.0_f32, 1.0, 1.0, // target
             -1.0, -1.0, -1.0, // class 1
             -1.0, -1.0, -1.0, // class 2
         ];
-        let y = jsma.attack(&input, const_jac(jac), |_x| 1_usize).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), |_x| 1_usize)
+            .expect("value should be present");
         for (a, b) in y.iter().zip(input.iter()) {
             assert!(*a >= *b - 1e-9, "feature moved downward");
         }
@@ -443,11 +463,13 @@ mod tests {
 
     #[test]
     fn attack_stops_when_prediction_already_target() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let input = vec![0.3_f32; 4];
         let jac = vec![1.0_f32; 3 * 4];
         // predict already returns the target class → no modification.
-        let y = jsma.attack(&input, const_jac(jac), |_x| 0_usize).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), |_x| 0_usize)
+            .expect("value should be present");
         assert_eq!(y, input);
     }
 
@@ -459,10 +481,12 @@ mod tests {
             target_class: 2,
             ..cfg_target0()
         };
-        let jsma = Jsma::new(cfg).unwrap();
+        let jsma = Jsma::new(cfg).expect("new should succeed");
         let input = vec![0.4_f32, 0.6, 0.1];
         let jac = vec![1.0_f32; 3 * 3];
-        let y = jsma.attack(&input, const_jac(jac), |_x| 2_usize).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), |_x| 2_usize)
+            .expect("value should be present");
         assert_eq!(y, input);
     }
 
@@ -474,7 +498,7 @@ mod tests {
             theta: 0.1,
             ..cfg_target0()
         };
-        let jsma = Jsma::new(cfg).unwrap();
+        let jsma = Jsma::new(cfg).expect("new should succeed");
         let input = vec![0.1_f32; 4];
         // All features salient; predictor never reaches target so the budget
         // is the binding stop condition.
@@ -483,7 +507,9 @@ mod tests {
             -1.0, -1.0, -1.0, -1.0, // class 1
             -1.0, -1.0, -1.0, -1.0, // class 2
         ];
-        let y = jsma.attack(&input, const_jac(jac), |_x| 1_usize).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), |_x| 1_usize)
+            .expect("value should be present");
         let changed = y
             .iter()
             .zip(input.iter())
@@ -495,17 +521,19 @@ mod tests {
 
     #[test]
     fn attack_stops_when_no_positive_saliency() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let input = vec![0.5_f32; 3];
         // All-zero Jacobian → no salient feature → immediate stop, unchanged.
         let jac = vec![0.0_f32; 3 * 3];
-        let y = jsma.attack(&input, const_jac(jac), |_x| 1_usize).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), |_x| 1_usize)
+            .expect("value should be present");
         assert_eq!(y, input);
     }
 
     #[test]
     fn attack_deterministic_given_fixed_closures() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let input = vec![0.1_f32, 0.2, 0.3, 0.4];
         let jac = vec![
             1.0_f32, 0.5, 0.2, 0.1, // target
@@ -514,8 +542,10 @@ mod tests {
         ];
         let y1 = jsma
             .attack(&input, const_jac(jac.clone()), |_x| 1_usize)
-            .unwrap();
-        let y2 = jsma.attack(&input, const_jac(jac), |_x| 1_usize).unwrap();
+            .expect("value should be present");
+        let y2 = jsma
+            .attack(&input, const_jac(jac), |_x| 1_usize)
+            .expect("value should be present");
         assert_eq!(y1, y2);
     }
 
@@ -529,7 +559,7 @@ mod tests {
             theta: 0.25,
             ..cfg_target0()
         };
-        let jsma = Jsma::new(cfg).unwrap();
+        let jsma = Jsma::new(cfg).expect("new should succeed");
         let input = vec![0.0_f32; 2];
         let jac = vec![
             1.0_f32, 0.0, // target
@@ -540,7 +570,9 @@ mod tests {
         let predict = |x: &[f32]| {
             if x[0] > 1e-6 { 0_usize } else { 1_usize }
         };
-        let y = jsma.attack(&input, const_jac(jac), predict).unwrap();
+        let y = jsma
+            .attack(&input, const_jac(jac), predict)
+            .expect("value should be present");
         // Exactly one +theta step applied to feature 0; feature 1 untouched.
         assert!((y[0] - 0.25).abs() < 1e-6, "feature 0 = {}", y[0]);
         assert!((y[1]).abs() < 1e-9);
@@ -632,7 +664,7 @@ mod tests {
 
     #[test]
     fn err_jacobian_wrong_length() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         // 3 classes × 4 features expected = 12; supply 11.
         let jac = vec![0.0_f32; 11];
         assert!(matches!(
@@ -643,7 +675,7 @@ mod tests {
 
     #[test]
     fn err_empty_input() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let input: Vec<f32> = vec![];
         assert_eq!(
             jsma.attack(&input, const_jac(vec![]), |_x| 0_usize)
@@ -654,7 +686,7 @@ mod tests {
 
     #[test]
     fn err_saliency_zero_features() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         assert!(matches!(
             jsma.saliency_map(&[], 0).unwrap_err(),
             AdvError::Internal(_)
@@ -663,7 +695,7 @@ mod tests {
 
     #[test]
     fn err_saliency_nan_jacobian() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let jac = vec![f32::NAN, 0.0, 0.0, 0.0, 0.0, 0.0];
         assert!(matches!(
             jsma.saliency_map(&jac, 2).unwrap_err(),
@@ -673,7 +705,7 @@ mod tests {
 
     #[test]
     fn attack_propagates_jacobian_dim_mismatch() {
-        let jsma = Jsma::new(cfg_target0()).unwrap();
+        let jsma = Jsma::new(cfg_target0()).expect("value should be present");
         let input = vec![0.5_f32; 4];
         // Jacobian closure returns the wrong length → DimensionMismatch.
         let bad = |_x: &[f32]| vec![0.0_f32; 5];
@@ -697,7 +729,7 @@ mod tests {
     #[test]
     fn config_accessor_round_trips() {
         let cfg = cfg_target0();
-        let jsma = Jsma::new(cfg).unwrap();
+        let jsma = Jsma::new(cfg).expect("new should succeed");
         assert_eq!(jsma.config().n_classes, cfg.n_classes);
         assert_eq!(jsma.config().target_class, cfg.target_class);
     }

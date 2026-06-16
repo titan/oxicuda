@@ -521,9 +521,9 @@ mod tests {
             ffn_hidden: 16,
             n_classes: 3,
         };
-        let model = SaintLayer::new(cfg, &mut rng).unwrap();
+        let model = SaintLayer::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.1_f32; 2 * 4 * 8]; // 2 samples, 4 features, embed_dim=8
-        let out = model.forward(&x, 2).unwrap();
+        let out = model.forward(&x, 2).expect("forward should succeed");
         assert_eq!(out.len(), 2 * 3);
     }
 
@@ -532,7 +532,7 @@ mod tests {
         let q = vec![0.1_f32; 4 * 8];
         let k = vec![0.1_f32; 4 * 8];
         let v = vec![0.1_f32; 4 * 8];
-        let out = self_attention(&q, &k, &v, 4, 8).unwrap();
+        let out = self_attention(&q, &k, &v, 4, 8).expect("self_attention should succeed");
         assert_eq!(out.len(), 4 * 8);
     }
 }

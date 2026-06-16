@@ -199,7 +199,8 @@ mod tests {
             init_scale,
         };
         let mut h = make_handle(seed);
-        Ia3AdapterLayer::new(cfg, &mut h).unwrap()
+        Ia3AdapterLayer::new(cfg, &mut h)
+            .expect("Ia3AdapterLayer construction should succeed with valid config")
     }
 
     fn make_hybrid(size: usize, bottleneck: usize, init_scale: f32, seed: u64) -> Ia3AdapterLayer {
@@ -210,7 +211,8 @@ mod tests {
             init_scale,
         };
         let mut h = make_handle(seed);
-        Ia3AdapterLayer::new(cfg, &mut h).unwrap()
+        Ia3AdapterLayer::new(cfg, &mut h)
+            .expect("Ia3AdapterLayer construction should succeed with valid config")
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -220,7 +222,9 @@ mod tests {
     fn pure_ia3_identity() {
         let layer = make_pure(4, 1.0, 1);
         let x = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let out = layer.forward(&x).unwrap();
+        let out = layer
+            .forward(&x)
+            .expect("forward should succeed with correctly sized input");
         for (o, xi) in out.iter().zip(x.iter()) {
             assert!((o - xi).abs() < 1e-6, "{o} != {xi}");
         }
@@ -233,7 +237,9 @@ mod tests {
     fn pure_ia3_scale_zero() {
         let layer = make_pure(4, 0.0, 2);
         let x = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let out = layer.forward(&x).unwrap();
+        let out = layer
+            .forward(&x)
+            .expect("forward should succeed with correctly sized input");
         for &o in &out {
             assert!(o.abs() < 1e-6, "expected 0, got {o}");
         }
@@ -246,7 +252,9 @@ mod tests {
     fn pure_ia3_scale_two() {
         let layer = make_pure(4, 2.0, 3);
         let x = vec![0.5_f32, 1.5, -1.0, 3.0];
-        let out = layer.forward(&x).unwrap();
+        let out = layer
+            .forward(&x)
+            .expect("forward should succeed with correctly sized input");
         for (o, xi) in out.iter().zip(x.iter()) {
             assert!((o - 2.0 * xi).abs() < 1e-5, "{o} != {}", 2.0 * xi);
         }
@@ -260,7 +268,9 @@ mod tests {
         let layer = make_hybrid(4, 2, 1.0, 4);
         // up is zero-init so u_pre=0, output = scaled + 0 = scaled.
         let x = vec![1.0_f32, -1.0, 2.0, 0.5];
-        let out = layer.forward(&x).unwrap();
+        let out = layer
+            .forward(&x)
+            .expect("forward should succeed with correctly sized input");
         let scaled = layer.ia3_vec.apply(&x);
         for (o, s) in out.iter().zip(scaled.iter()) {
             assert!((o - s).abs() < 1e-5, "hybrid zero-up: {o} != {s}");
@@ -338,7 +348,8 @@ mod tests {
             init_scale: 1.0,
         };
         let mut h = make_handle(11);
-        let layer = Ia3AdapterLayer::new(cfg, &mut h).unwrap();
+        let layer = Ia3AdapterLayer::new(cfg, &mut h)
+            .expect("Ia3AdapterLayer construction should succeed with valid config");
         assert_eq!(layer.ia3_vec.placement, Ia3Placement::Value);
     }
 
@@ -359,7 +370,9 @@ mod tests {
     fn bottleneck_1_works() {
         let layer = make_hybrid(4, 1, 1.0, 13);
         let x = vec![0.1_f32, 0.2, -0.3, 0.4];
-        let out = layer.forward(&x).unwrap();
+        let out = layer
+            .forward(&x)
+            .expect("forward should succeed with correctly sized input");
         assert_eq!(out.len(), 4);
     }
 
@@ -381,8 +394,12 @@ mod tests {
         let x = vec![0.4_f32, -0.2, 0.8, -0.6];
         let layer_a = make_hybrid(4, 2, 1.0, 42);
         let layer_b = make_hybrid(4, 2, 1.0, 42);
-        let out_a = layer_a.forward(&x).unwrap();
-        let out_b = layer_b.forward(&x).unwrap();
+        let out_a = layer_a
+            .forward(&x)
+            .expect("forward should succeed with correctly sized input");
+        let out_b = layer_b
+            .forward(&x)
+            .expect("forward should succeed with correctly sized input");
         assert_eq!(out_a, out_b);
     }
 
@@ -394,7 +411,10 @@ mod tests {
         let size = 8usize;
         let layer = make_hybrid(size, 4, 1.0, 16);
         let bound = (6.0_f32 / size as f32).sqrt() + 1e-5;
-        let down = layer.down.as_ref().unwrap();
+        let down = layer
+            .down
+            .as_ref()
+            .expect("down weight should be present when bottleneck > 0");
         for &v in down {
             assert!(
                 v.abs() <= bound,
@@ -418,7 +438,10 @@ mod tests {
     #[test]
     fn up_zero_init() {
         let layer = make_hybrid(4, 2, 1.0, 18);
-        let up = layer.up.as_ref().unwrap();
+        let up = layer
+            .up
+            .as_ref()
+            .expect("up weight should be present when bottleneck > 0");
         for &v in up {
             assert!(v == 0.0, "up should be zero-init, got {v}");
         }

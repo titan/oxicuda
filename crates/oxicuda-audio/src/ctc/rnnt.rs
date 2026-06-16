@@ -295,7 +295,8 @@ mod tests {
         let v = 5_usize;
         let lp = pseudo_log_probs(t, u + 1, v, 0xDEAD_BEEF);
         let labels = [1_usize, 2];
-        let result = rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).unwrap();
+        let result =
+            rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).expect("value should be present");
         assert!(
             result.loss.is_finite(),
             "loss must be finite: {}",
@@ -311,7 +312,8 @@ mod tests {
         let v = 6_usize;
         let lp = uniform_log_probs(t, u + 1, v);
         let labels = [1_usize, 2];
-        let result = rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).unwrap();
+        let result =
+            rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).expect("value should be present");
         assert!(
             result.loss > 0.0,
             "loss should be positive; got {}",
@@ -332,7 +334,8 @@ mod tests {
         let lp_val = -(v as f32).ln();
         let lp = vec![lp_val; t * (u + 1) * v];
         let labels = [0_usize];
-        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: blank }).unwrap();
+        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: blank })
+            .expect("rnnt_loss should succeed");
 
         // Manual:
         //   α(0,0) = 0
@@ -363,7 +366,8 @@ mod tests {
             .collect();
         let lp: Vec<f32> = (0..t * (u + 1)).flat_map(|_| row.clone()).collect();
         let labels = [1_usize];
-        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: blank }).unwrap();
+        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: blank })
+            .expect("rnnt_loss should succeed");
         assert!(
             result.loss.is_finite(),
             "loss must be finite: {}",
@@ -381,7 +385,8 @@ mod tests {
         let v = 4_usize;
         let lp = uniform_log_probs(t, u + 1, v);
         let labels = [1_usize, 2, 3];
-        let result = rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).unwrap();
+        let result =
+            rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).expect("value should be present");
         assert!(result.loss.is_finite());
         assert!(result.loss > 0.0);
     }
@@ -393,7 +398,8 @@ mod tests {
         let v = 6_usize;
         let lp = pseudo_log_probs(t, u + 1, v, 12345);
         let labels = [1_usize, 2, 3];
-        let result = rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).unwrap();
+        let result =
+            rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).expect("value should be present");
         assert!(result.loss.is_finite());
         assert_eq!(result.n_frames, t);
         assert_eq!(result.n_labels, u);
@@ -418,7 +424,8 @@ mod tests {
         //   α(0,1)=0+lp(0,0,label[0]=0) = lp_val + lp_val ... wait, label 0 maps to vocab[0]
         // We use labels = [0,1] (non-blank).
         let labels = [0_usize, 1];
-        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: blank }).unwrap();
+        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: blank })
+            .expect("rnnt_loss should succeed");
 
         // All rows are uniform → loss must be finite and positive.
         assert!(result.loss.is_finite(), "loss finite: {}", result.loss);
@@ -452,7 +459,8 @@ mod tests {
         let v = 4_usize;
         let lp = pseudo_log_probs(t, u + 1, v, 999);
         let labels = [2_usize]; // non-blank label
-        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: 0 }).unwrap();
+        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: 0 })
+            .expect("rnnt_loss should succeed");
         assert!(result.loss.is_finite());
         assert!(result.loss > 0.0);
     }
@@ -464,7 +472,8 @@ mod tests {
         let v = 8_usize;
         let lp = pseudo_log_probs(t, u + 1, v, 0xABCD);
         let labels = [1_usize, 2, 3, 4, 5];
-        let result = rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).unwrap();
+        let result =
+            rnnt_loss(&lp, &labels, t, u, v, &cfg_last(v)).expect("value should be present");
         assert!(result.loss.is_finite(), "loss should be finite for T=20");
     }
 
@@ -476,8 +485,8 @@ mod tests {
         let lp = pseudo_log_probs(t, u + 1, v, 77777);
         let labels = [1_usize, 2];
         let cfg = cfg_last(v);
-        let r1 = rnnt_loss(&lp, &labels, t, u, v, &cfg).unwrap();
-        let r2 = rnnt_loss(&lp, &labels, t, u, v, &cfg).unwrap();
+        let r1 = rnnt_loss(&lp, &labels, t, u, v, &cfg).expect("rnnt_loss should succeed");
+        let r2 = rnnt_loss(&lp, &labels, t, u, v, &cfg).expect("rnnt_loss should succeed");
         assert_eq!(r1.loss, r2.loss, "rnnt_loss must be deterministic");
     }
 
@@ -493,7 +502,8 @@ mod tests {
         let labels = [1_usize, 2];
         // We compute the full forward lattice here to check boundaries.
         // For a minimal sanity check: run the full loss and check it's correct.
-        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: blank }).unwrap();
+        let result = rnnt_loss(&lp, &labels, t, u, v, &RnntConfig { blank_id: blank })
+            .expect("rnnt_loss should succeed");
 
         // Manually compute α(1,0) from boundary rule: 0 + lp(0,0,blank) = lp_val.
         // The only term that uses α(1,0) is in the general cell (1,1):
@@ -515,7 +525,7 @@ mod tests {
             v,
             &RnntConfig { blank_id: blank },
         )
-        .unwrap();
+        .expect("value should be present");
         // α(0,0)=0, α(0,1)=lp_val, terminal=α(0,1)+lp(0,1,blank)=2*lp_val
         // loss = -2*lp_val = 2*ln(V)
         let expected = 2.0_f32 * (v as f32).ln();

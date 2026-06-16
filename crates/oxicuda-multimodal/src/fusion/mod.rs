@@ -3,3 +3,7 @@
 pub mod attention_fusion;
 pub mod bilinear_fusion;
 pub mod concat_fusion;
+pub mod film;
+pub mod gmu;
+pub mod lowrank_fusion;
+pub mod tensor_fusion;

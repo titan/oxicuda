@@ -236,19 +236,23 @@ mod tests {
     #[test]
     fn quantile_range_in_01() {
         let data = vec![1.0_f32, 2.0, 3.0, 4.0, 1.5, 2.5, 3.5, 4.5];
-        let (norm, out) = QuantileNormalizer::fit_transform(&data, 4, 2).unwrap();
+        let (norm, out) =
+            QuantileNormalizer::fit_transform(&data, 4, 2).expect("fit_transform should succeed");
         assert!(out.iter().all(|&v| (0.0_f32..=1.0).contains(&v)));
         // Transform training values should also be in range
         let row = &data[0..2];
-        let t = norm.transform(row).unwrap();
+        let t = norm.transform(row).expect("transform should succeed");
         assert!(t.iter().all(|&v| (0.0_f32..=1.0).contains(&v)));
     }
 
     #[test]
     fn standard_normalizer_zero_mean() {
         let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let (norm, _) = StandardNormalizer::fit_transform(&data, 3, 2).unwrap();
-        let t = norm.transform(&[3.0_f32, 4.0]).unwrap();
+        let (norm, _) =
+            StandardNormalizer::fit_transform(&data, 3, 2).expect("fit_transform should succeed");
+        let t = norm
+            .transform(&[3.0_f32, 4.0])
+            .expect("transform should succeed");
         assert!(t[0].abs() < 1.0); // roughly centred
         let _ = t;
     }
@@ -256,8 +260,10 @@ mod tests {
     #[test]
     fn minmax_range() {
         let data = vec![0.0_f32, 0.0, 5.0, 10.0, 10.0, 10.0];
-        let norm = MinMaxNormalizer::fit(&data, 3, 2).unwrap();
-        let t = norm.transform(&[5.0_f32, 5.0]).unwrap();
+        let norm = MinMaxNormalizer::fit(&data, 3, 2).expect("fit should succeed");
+        let t = norm
+            .transform(&[5.0_f32, 5.0])
+            .expect("transform should succeed");
         assert!((t[0] - 0.5).abs() < 1e-5);
         assert!((t[1] - 0.5).abs() < 1e-5);
     }

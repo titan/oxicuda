@@ -690,9 +690,9 @@ mod tests {
         let mut rng = make_rng();
         let cfg = small_cfg();
         let ed = cfg.embed_dim;
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let feats = random_features(20, cfg.feat_dim, 1);
-        let out = net.forward(&feats, 20).unwrap();
+        let out = net.forward(&feats, 20).expect("forward should succeed");
         assert_eq!(out.len(), ed, "embedding length must equal embed_dim");
     }
 
@@ -702,9 +702,9 @@ mod tests {
     fn ecapa_forward_finite() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let feats = random_features(30, cfg.feat_dim, 2);
-        let out = net.forward(&feats, 30).unwrap();
+        let out = net.forward(&feats, 30).expect("forward should succeed");
         assert!(
             out.iter().all(|v| v.is_finite()),
             "embedding must be finite"
@@ -717,9 +717,9 @@ mod tests {
     fn ecapa_embedding_nonzero() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let feats = random_features(15, cfg.feat_dim, 3);
-        let out = net.forward(&feats, 15).unwrap();
+        let out = net.forward(&feats, 15).expect("forward should succeed");
         let norm: f32 = out.iter().map(|v| v * v).sum::<f32>().sqrt();
         assert!(norm > 1e-6, "embedding must be non-zero, norm={norm}");
     }
@@ -730,14 +730,14 @@ mod tests {
     fn ecapa_different_inputs_differ() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let t = 20_usize;
         // Use maximally different inputs: all positive constant vs all negative constant.
         // After TDNN+ReLU the two inputs produce clearly different activations.
         let feats_a = vec![1.0_f32; t * cfg.feat_dim];
         let feats_b = vec![-1.0_f32; t * cfg.feat_dim];
-        let out_a = net.forward(&feats_a, t).unwrap();
-        let out_b = net.forward(&feats_b, t).unwrap();
+        let out_a = net.forward(&feats_a, t).expect("forward should succeed");
+        let out_b = net.forward(&feats_b, t).expect("forward should succeed");
         let diff: f32 = out_a
             .iter()
             .zip(out_b.iter())
@@ -755,11 +755,11 @@ mod tests {
     fn ecapa_deterministic() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let t = 18_usize;
         let feats = random_features(t, cfg.feat_dim, 5);
-        let out1 = net.forward(&feats, t).unwrap();
-        let out2 = net.forward(&feats, t).unwrap();
+        let out1 = net.forward(&feats, t).expect("forward should succeed");
+        let out2 = net.forward(&feats, t).expect("forward should succeed");
         assert_eq!(out1, out2, "forward must be deterministic");
     }
 
@@ -777,9 +777,9 @@ mod tests {
             asp_hidden_dim: 8,
         };
         let mut rng = LcgRng::new(99);
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let feats = random_features(10, cfg.feat_dim, 6);
-        let out = net.forward(&feats, 10).unwrap();
+        let out = net.forward(&feats, 10).expect("forward should succeed");
         assert_eq!(out.len(), cfg.embed_dim);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -790,10 +790,10 @@ mod tests {
     fn ecapa_long_sequence() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let t = 200_usize;
         let feats = random_features(t, cfg.feat_dim, 7);
-        let out = net.forward(&feats, t).unwrap();
+        let out = net.forward(&feats, t).expect("forward should succeed");
         assert_eq!(out.len(), cfg.embed_dim);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -804,10 +804,10 @@ mod tests {
     fn ecapa_short_sequence() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let t = 5_usize;
         let feats = random_features(t, cfg.feat_dim, 8);
-        let out = net.forward(&feats, t).unwrap();
+        let out = net.forward(&feats, t).expect("forward should succeed");
         assert_eq!(out.len(), cfg.embed_dim);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -817,7 +817,7 @@ mod tests {
     #[test]
     fn ecapa_n_params_positive() {
         let mut rng = make_rng();
-        let net = EcapaTdnn::new(small_cfg(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(small_cfg(), &mut rng).expect("value should be present");
         assert!(net.n_params() > 0, "must have at least one parameter");
     }
 
@@ -827,7 +827,9 @@ mod tests {
     fn ecapa_n_params_scale_with_channels() {
         let mut rng_a = LcgRng::new(1);
         let cfg_small = small_cfg();
-        let n_small = EcapaTdnn::new(cfg_small, &mut rng_a).unwrap().n_params();
+        let n_small = EcapaTdnn::new(cfg_small, &mut rng_a)
+            .expect("new should succeed")
+            .n_params();
 
         let mut rng_b = LcgRng::new(2);
         let cfg_large = EcapaTdnnConfig {
@@ -835,7 +837,9 @@ mod tests {
             embed_dim: 32,
             ..small_cfg()
         };
-        let n_large = EcapaTdnn::new(cfg_large, &mut rng_b).unwrap().n_params();
+        let n_large = EcapaTdnn::new(cfg_large, &mut rng_b)
+            .expect("new should succeed")
+            .n_params();
 
         assert!(
             n_large > n_small,
@@ -869,7 +873,7 @@ mod tests {
     fn ecapa_err_empty_input() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg, &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg, &mut rng).expect("new should succeed");
         let err = net.forward(&[], 0).unwrap_err();
         assert!(matches!(err, AudioError::EmptyInput { .. }));
     }
@@ -880,7 +884,7 @@ mod tests {
     fn ecapa_err_dim_mismatch() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         // Provide wrong number of features.
         let feats = vec![0.0_f32; 5]; // T=3, feat_dim=16 → expected 48, got 5.
         let err = net.forward(&feats, 3).unwrap_err();
@@ -944,9 +948,9 @@ mod tests {
             asp_hidden_dim: 8,
         };
         let mut rng = LcgRng::new(66);
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let feats = random_features(10, cfg.feat_dim, 9);
-        let out = net.forward(&feats, 10).unwrap();
+        let out = net.forward(&feats, 10).expect("forward should succeed");
         assert_eq!(out.len(), cfg.embed_dim);
     }
 
@@ -964,9 +968,9 @@ mod tests {
             asp_hidden_dim: 8,
         };
         let mut rng = LcgRng::new(33);
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let feats = random_features(12, cfg.feat_dim, 11);
-        let out = net.forward(&feats, 12).unwrap();
+        let out = net.forward(&feats, 12).expect("forward should succeed");
         assert_eq!(out.len(), cfg.embed_dim);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -977,9 +981,9 @@ mod tests {
     fn ecapa_single_frame() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let feats = random_features(1, cfg.feat_dim, 12);
-        let out = net.forward(&feats, 1).unwrap();
+        let out = net.forward(&feats, 1).expect("forward should succeed");
         assert_eq!(out.len(), cfg.embed_dim);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -990,9 +994,9 @@ mod tests {
     fn ecapa_embedding_bounded() {
         let mut rng = make_rng();
         let cfg = small_cfg();
-        let net = EcapaTdnn::new(cfg.clone(), &mut rng).unwrap();
+        let net = EcapaTdnn::new(cfg.clone(), &mut rng).expect("value should be present");
         let feats = random_features(25, cfg.feat_dim, 13);
-        let out = net.forward(&feats, 25).unwrap();
+        let out = net.forward(&feats, 25).expect("forward should succeed");
         let norm_sq: f32 = out.iter().map(|v| v * v).sum();
         let norm = norm_sq.sqrt();
         assert!(

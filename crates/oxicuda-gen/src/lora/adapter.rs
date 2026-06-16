@@ -353,7 +353,8 @@ mod tests {
 
     #[test]
     fn lora_config_valid() {
-        let config = LoraConfig::new(4, 8.0).unwrap();
+        let config =
+            LoraConfig::new(4, 8.0).expect("rank=4 and alpha=8.0 are valid LoRA config parameters");
         assert_eq!(config.rank, 4);
         assert!((config.alpha - 8.0).abs() < 1e-6);
         assert!((config.scaling() - 2.0).abs() < 1e-6); // 8/4 = 2
@@ -381,9 +382,11 @@ mod tests {
 
     #[test]
     fn lora_linear_new_valid() {
-        let config = LoraConfig::new(4, 4.0).unwrap();
+        let config =
+            LoraConfig::new(4, 4.0).expect("rank=4 and alpha=4.0 are valid LoRA config parameters");
         let mut rng = make_rng();
-        let lora = LoraLinear::new(16, 32, &config, &mut rng).unwrap();
+        let lora = LoraLinear::new(16, 32, &config, &mut rng)
+            .expect("creating LoraLinear with valid in=16, out=32, rank=4 should succeed");
         assert_eq!(lora.in_features(), 16);
         assert_eq!(lora.out_features(), 32);
         assert_eq!(lora.rank(), 4);
@@ -393,9 +396,11 @@ mod tests {
 
     #[test]
     fn lora_b_init_is_zero() {
-        let config = LoraConfig::new(4, 4.0).unwrap();
+        let config =
+            LoraConfig::new(4, 4.0).expect("rank=4 and alpha=4.0 are valid LoRA config parameters");
         let mut rng = make_rng();
-        let lora = LoraLinear::new(16, 32, &config, &mut rng).unwrap();
+        let lora = LoraLinear::new(16, 32, &config, &mut rng)
+            .expect("creating LoraLinear with valid in=16, out=32, rank=4 should succeed");
         // B should be zero-initialised
         for &v in lora.matrix_b() {
             assert_eq!(v, 0.0, "B matrix should be zero-initialised");
@@ -404,13 +409,17 @@ mod tests {
 
     #[test]
     fn lora_zero_b_gives_base_output() {
-        let config = LoraConfig::new(4, 4.0).unwrap();
+        let config =
+            LoraConfig::new(4, 4.0).expect("rank=4 and alpha=4.0 are valid LoRA config parameters");
         let mut rng = make_rng();
-        let lora = LoraLinear::new(8, 16, &config, &mut rng).unwrap();
+        let lora = LoraLinear::new(8, 16, &config, &mut rng)
+            .expect("creating LoraLinear with valid in=8, out=16, rank=4 should succeed");
         // With B=0, forward should return base_output unchanged
         let x = vec![1.0_f32; 8]; // batch=1
         let base_output = vec![0.5_f32; 16];
-        let out = lora.forward(&x, &base_output, 1).unwrap();
+        let out = lora
+            .forward(&x, &base_output, 1)
+            .expect("forward pass with B=0, batch=1, in=8, out=16 dimensions should succeed");
         for (&o, &b) in out.iter().zip(&base_output) {
             assert!(
                 (o - b).abs() < 1e-5,
@@ -421,16 +430,20 @@ mod tests {
 
     #[test]
     fn lora_forward_output_shape() {
-        let config = LoraConfig::new(2, 2.0).unwrap();
+        let config =
+            LoraConfig::new(2, 2.0).expect("rank=2 and alpha=2.0 are valid LoRA config parameters");
         let mut rng = make_rng();
-        let mut lora = LoraLinear::new(8, 16, &config, &mut rng).unwrap();
+        let mut lora = LoraLinear::new(8, 16, &config, &mut rng)
+            .expect("creating LoraLinear with valid in=8, out=16, rank=2 should succeed");
         // Set B to something nonzero
         for v in lora.matrix_b_mut() {
             *v = 0.1;
         }
         let x = vec![1.0_f32; 3 * 8]; // batch=3
         let base = vec![0.0_f32; 3 * 16];
-        let out = lora.forward(&x, &base, 3).unwrap();
+        let out = lora
+            .forward(&x, &base, 3)
+            .expect("forward pass with batch=3, in=8, out=16 dimensions should succeed");
         assert_eq!(out.len(), 3 * 16);
     }
 
@@ -459,10 +472,12 @@ mod tests {
         a[0] = 1.0; // A = [[1, 0, 0, 0]]
         let mut b = vec![0.0_f32; out_f * rank];
         b[0] = 1.0; // B = [[1], [0], [0], [0]]
-        let lora = LoraLinear::from_matrices(in_f, out_f, rank, alpha, a, b).unwrap();
+        let lora = LoraLinear::from_matrices(in_f, out_f, rank, alpha, a, b).expect(
+            "constructing LoraLinear from correctly sized identity-like matrices should succeed",
+        );
         let x = vec![1.0_f32, 0.0, 0.0, 0.0];
         let base = vec![0.0_f32; out_f];
-        let out = lora.forward(&x, &base, 1).unwrap();
+        let out = lora.forward(&x, &base, 1).expect("forward should succeed");
         // Expected: scaling * x[0] = (alpha/rank) * 1 = 2 * 1 = 2
         assert!((out[0] - 2.0).abs() < 1e-5, "expected 2.0, got {}", out[0]);
         // All other outputs should be 0
@@ -473,10 +488,10 @@ mod tests {
 
     #[test]
     fn lora_model_add_and_get() {
-        let config = LoraConfig::new(4, 4.0).unwrap();
+        let config = LoraConfig::new(4, 4.0).expect("new should succeed");
         let mut model = LoraModel::new(config.clone());
         let mut rng = make_rng();
-        let adapter = LoraLinear::new(16, 32, &config, &mut rng).unwrap();
+        let adapter = LoraLinear::new(16, 32, &config, &mut rng).expect("new should succeed");
         model.add_adapter("attn.q_proj", adapter);
         assert_eq!(model.adapter_count(), 1);
         assert!(model.get_adapter("attn.q_proj").is_some());
@@ -485,9 +500,9 @@ mod tests {
 
     #[test]
     fn delta_weight_shape() {
-        let config = LoraConfig::new(4, 4.0).unwrap();
+        let config = LoraConfig::new(4, 4.0).expect("new should succeed");
         let mut rng = make_rng();
-        let lora = LoraLinear::new(8, 16, &config, &mut rng).unwrap();
+        let lora = LoraLinear::new(8, 16, &config, &mut rng).expect("new should succeed");
         let delta = lora.delta_weight();
         assert_eq!(delta.len(), 16 * 8);
         // B=0 → delta should be all zeros
@@ -499,9 +514,9 @@ mod tests {
     #[test]
     fn lora_a_not_zero() {
         // A should NOT be zero after Gaussian init
-        let config = LoraConfig::new(4, 4.0).unwrap();
+        let config = LoraConfig::new(4, 4.0).expect("new should succeed");
         let mut rng = make_rng();
-        let lora = LoraLinear::new(16, 32, &config, &mut rng).unwrap();
+        let lora = LoraLinear::new(16, 32, &config, &mut rng).expect("new should succeed");
         let sum: f32 = lora.matrix_a().iter().map(|v| v.abs()).sum();
         assert!(
             sum > 1e-5,

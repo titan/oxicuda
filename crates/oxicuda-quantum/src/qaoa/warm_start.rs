@@ -200,9 +200,12 @@ mod tests {
 
     #[test]
     fn continuous_relax_output_length_and_range() {
-        let ws = QaoaWarmStart::new(default_cfg(4)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(4))
+            .expect("valid config should construct without error");
         let edges = vec![(0, 1, 1.0_f32), (1, 2, 0.5), (2, 3, 0.3)];
-        let c = ws.continuous_relax(&edges).unwrap();
+        let c = ws
+            .continuous_relax(&edges)
+            .expect("valid edges should relax successfully");
         assert_eq!(c.len(), 4);
         for &ci in &c {
             assert!((0.0..=1.0).contains(&ci), "ci={ci} not in [0,1]");
@@ -227,11 +230,13 @@ mod tests {
             lr: 0.2,
             mixing_angle: 0.0,
         };
-        let ws = QaoaWarmStart::new(cfg).unwrap();
+        let ws = QaoaWarmStart::new(cfg).expect("valid config should construct without error");
         let edges = vec![(0, 1, 1.0_f32)];
         // From the saddle point, the gradient is identically zero and the
         // solver stays at the saddle.
-        let c_saddle = ws.continuous_relax(&edges).unwrap();
+        let c_saddle = ws
+            .continuous_relax(&edges)
+            .expect("valid edges should relax successfully");
         assert!((c_saddle[0] - 0.5).abs() < 1e-6 && (c_saddle[1] - 0.5).abs() < 1e-6);
 
         // Verify the saddle is indeed where the gradient is zero and the
@@ -247,8 +252,11 @@ mod tests {
 
     #[test]
     fn continuous_relax_no_edges_stays_at_init() {
-        let ws = QaoaWarmStart::new(default_cfg(3)).unwrap();
-        let c = ws.continuous_relax(&[]).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(3))
+            .expect("valid config should construct without error");
+        let c = ws
+            .continuous_relax(&[])
+            .expect("valid edges should relax successfully");
         for &ci in &c {
             assert!((ci - 0.5).abs() < 1e-7, "ci={ci}");
         }
@@ -272,9 +280,11 @@ mod tests {
             lr: 0.3,
             mixing_angle: 0.0,
         };
-        let ws = QaoaWarmStart::new(cfg).unwrap();
+        let ws = QaoaWarmStart::new(cfg).expect("valid config should construct without error");
         let edges = vec![(0, 1, 1.0_f32), (1, 2, 1.0), (0, 2, 1.0)];
-        let c = ws.continuous_relax(&edges).unwrap();
+        let c = ws
+            .continuous_relax(&edges)
+            .expect("valid edges should relax successfully");
         // Closed-form objective evaluator for K_3 with unit weights.
         let f = |c: &[f32]| -> f32 {
             edges
@@ -295,15 +305,21 @@ mod tests {
 
     #[test]
     fn arcsin_init_zero_gives_zero() {
-        let ws = QaoaWarmStart::new(default_cfg(1)).unwrap();
-        let theta = ws.arcsin_init(&[0.0]).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(1))
+            .expect("valid config should construct without error");
+        let theta = ws
+            .arcsin_init(&[0.0])
+            .expect("valid c values in [0,1] should map to arcsin angles");
         assert!(theta[0].abs() < 1e-7, "theta={}", theta[0]);
     }
 
     #[test]
     fn arcsin_init_one_gives_pi() {
-        let ws = QaoaWarmStart::new(default_cfg(1)).unwrap();
-        let theta = ws.arcsin_init(&[1.0]).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(1))
+            .expect("valid config should construct without error");
+        let theta = ws
+            .arcsin_init(&[1.0])
+            .expect("valid c values in [0,1] should map to arcsin angles");
         assert!(
             (theta[0] - std::f32::consts::PI).abs() < 1e-6,
             "theta={}",
@@ -314,8 +330,11 @@ mod tests {
     #[test]
     fn arcsin_init_half_gives_pi_over_two() {
         // c = 0.5  ⇒  √c = √(1/2)  ⇒  arcsin(√(1/2)) = π/4  ⇒  θ = π/2.
-        let ws = QaoaWarmStart::new(default_cfg(1)).unwrap();
-        let theta = ws.arcsin_init(&[0.5]).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(1))
+            .expect("valid config should construct without error");
+        let theta = ws
+            .arcsin_init(&[0.5])
+            .expect("valid c values in [0,1] should map to arcsin angles");
         assert!(
             (theta[0] - std::f32::consts::FRAC_PI_2).abs() < 1e-6,
             "theta={}",
@@ -325,9 +344,12 @@ mod tests {
 
     #[test]
     fn arcsin_init_range_in_zero_pi() {
-        let ws = QaoaWarmStart::new(default_cfg(5)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(5))
+            .expect("valid config should construct without error");
         let c = vec![0.0, 0.1, 0.4, 0.7, 1.0];
-        let theta = ws.arcsin_init(&c).unwrap();
+        let theta = ws
+            .arcsin_init(&c)
+            .expect("valid c values in [0,1] should map to arcsin angles");
         for &t in &theta {
             assert!(
                 (0.0..=std::f32::consts::PI).contains(&t),
@@ -342,19 +364,25 @@ mod tests {
 
     #[test]
     fn warm_start_circuit_params_length() {
-        let ws = QaoaWarmStart::new(default_cfg(4)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(4))
+            .expect("valid config should construct without error");
         let c = vec![0.1_f32, 0.4, 0.6, 0.9];
-        let params = ws.warm_start_circuit_params(&c, 3).unwrap();
+        let params = ws
+            .warm_start_circuit_params(&c, 3)
+            .expect("valid c and nonzero depth should produce params");
         // n_qubits + 2 * depth = 4 + 6 = 10.
         assert_eq!(params.len(), 4 + 2 * 3);
     }
 
     #[test]
     fn warm_start_circuit_params_gammas_betas_zero() {
-        let ws = QaoaWarmStart::new(default_cfg(3)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(3))
+            .expect("valid config should construct without error");
         let c = vec![0.2_f32, 0.5, 0.8];
         let depth = 2;
-        let params = ws.warm_start_circuit_params(&c, depth).unwrap();
+        let params = ws
+            .warm_start_circuit_params(&c, depth)
+            .expect("valid c and nonzero depth should produce params");
         for (i, &val) in params.iter().enumerate().skip(3).take(2 * depth) {
             assert!(
                 val.abs() < 1e-12,
@@ -362,7 +390,9 @@ mod tests {
             );
         }
         // The first three entries are the warm-start angles.
-        let theta = ws.arcsin_init(&c).unwrap();
+        let theta = ws
+            .arcsin_init(&c)
+            .expect("valid c values in [0,1] should map to arcsin angles");
         for (i, &t) in theta.iter().enumerate() {
             assert!((params[i] - t).abs() < 1e-7);
         }
@@ -370,11 +400,17 @@ mod tests {
 
     #[test]
     fn deterministic_relax() {
-        let ws_a = QaoaWarmStart::new(default_cfg(3)).unwrap();
-        let ws_b = QaoaWarmStart::new(default_cfg(3)).unwrap();
+        let ws_a = QaoaWarmStart::new(default_cfg(3))
+            .expect("valid config should construct without error");
+        let ws_b = QaoaWarmStart::new(default_cfg(3))
+            .expect("valid config should construct without error");
         let edges = vec![(0, 1, 0.7_f32), (1, 2, 0.3), (0, 2, 0.5)];
-        let a = ws_a.continuous_relax(&edges).unwrap();
-        let b = ws_b.continuous_relax(&edges).unwrap();
+        let a = ws_a
+            .continuous_relax(&edges)
+            .expect("valid edges should relax successfully");
+        let b = ws_b
+            .continuous_relax(&edges)
+            .expect("valid edges should relax successfully");
         assert_eq!(a, b);
     }
 
@@ -438,7 +474,8 @@ mod tests {
 
     #[test]
     fn err_edge_index_out_of_range() {
-        let ws = QaoaWarmStart::new(default_cfg(3)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(3))
+            .expect("valid config should construct without error");
         let edges = vec![(0, 5, 1.0_f32)];
         assert!(ws.continuous_relax(&edges).is_err());
         let edges2 = vec![(7, 1, 1.0_f32)];
@@ -447,7 +484,8 @@ mod tests {
 
     #[test]
     fn err_arcsin_init_wrong_length() {
-        let ws = QaoaWarmStart::new(default_cfg(3)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(3))
+            .expect("valid config should construct without error");
         let r = ws.arcsin_init(&[0.5, 0.5]);
         assert!(r.is_err());
         let r2 = ws.arcsin_init(&[0.5, 0.5, 0.5, 0.5]);
@@ -456,7 +494,8 @@ mod tests {
 
     #[test]
     fn err_arcsin_init_c_out_of_range() {
-        let ws = QaoaWarmStart::new(default_cfg(2)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(2))
+            .expect("valid config should construct without error");
         let r_neg = ws.arcsin_init(&[-0.1, 0.5]);
         assert!(r_neg.is_err());
         let r_big = ws.arcsin_init(&[0.5, 1.1]);
@@ -465,7 +504,8 @@ mod tests {
 
     #[test]
     fn err_depth_zero() {
-        let ws = QaoaWarmStart::new(default_cfg(3)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(3))
+            .expect("valid config should construct without error");
         let c = vec![0.5_f32, 0.5, 0.5];
         let r = ws.warm_start_circuit_params(&c, 0);
         assert!(r.is_err());
@@ -473,7 +513,8 @@ mod tests {
 
     #[test]
     fn err_warm_start_circuit_params_wrong_c_length() {
-        let ws = QaoaWarmStart::new(default_cfg(4)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(4))
+            .expect("valid config should construct without error");
         let c = vec![0.5_f32, 0.5]; // wrong length
         let r = ws.warm_start_circuit_params(&c, 2);
         assert!(r.is_err());
@@ -481,7 +522,8 @@ mod tests {
 
     #[test]
     fn empty_edges_allowed_in_continuous_relax() {
-        let ws = QaoaWarmStart::new(default_cfg(2)).unwrap();
+        let ws = QaoaWarmStart::new(default_cfg(2))
+            .expect("valid config should construct without error");
         let r = ws.continuous_relax(&[]);
         assert!(r.is_ok());
     }
@@ -496,11 +538,13 @@ mod tests {
             lr: 100.0,
             mixing_angle: 0.0,
         };
-        let ws = QaoaWarmStart::new(cfg).unwrap();
+        let ws = QaoaWarmStart::new(cfg).expect("valid config should construct without error");
         // From the saddle the gradient is zero, so seed asymmetry through
         // an asymmetric weighted edge structure.
         let edges = vec![(0, 1, 1.0_f32)];
-        let c = ws.continuous_relax(&edges).unwrap();
+        let c = ws
+            .continuous_relax(&edges)
+            .expect("valid edges should relax successfully");
         for &ci in &c {
             assert!(
                 (0.0..=1.0).contains(&ci),
@@ -517,7 +561,7 @@ mod tests {
             lr: 0.25,
             mixing_angle: 0.1,
         };
-        let ws = QaoaWarmStart::new(cfg).unwrap();
+        let ws = QaoaWarmStart::new(cfg).expect("valid config should construct without error");
         let inner = ws.config();
         assert_eq!(inner.n_qubits, 5);
         assert_eq!(inner.n_iter, 7);
@@ -535,10 +579,14 @@ mod tests {
             lr: 0.2,
             mixing_angle: std::f32::consts::FRAC_PI_4,
         };
-        let ws = QaoaWarmStart::new(cfg).unwrap();
+        let ws = QaoaWarmStart::new(cfg).expect("valid config should construct without error");
         let edges = vec![(0, 1, 1.0_f32), (1, 2, 1.0)];
-        let c = ws.continuous_relax(&edges).unwrap();
-        let params = ws.warm_start_circuit_params(&c, 4).unwrap();
+        let c = ws
+            .continuous_relax(&edges)
+            .expect("valid edges should relax successfully");
+        let params = ws
+            .warm_start_circuit_params(&c, 4)
+            .expect("valid c and nonzero depth should produce params");
         assert_eq!(params.len(), 3 + 2 * 4);
         // All variational params zero.
         for &p in &params[3..] {

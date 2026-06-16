@@ -214,7 +214,7 @@ impl Wno {
         let res_scale = (2.0_f32 / (in_c as f32).max(1.0)).sqrt();
         let mut residual_w = Vec::with_capacity(out_c * in_c);
         for _ in 0..(out_c * in_c) {
-            let u = (rng.next_u32() as f32) / ((1u64 << 31) as f32);
+            let u = (rng.next_u32() as f32) / ((1u64 << 32) as f32);
             residual_w.push((u * 2.0 - 1.0) * res_scale);
         }
         let residual_b = vec![0.0_f32; out_c];
@@ -520,14 +520,19 @@ mod tests {
             seq_len: 16,
             n_levels: 3,
         };
-        let wno = Wno::new(cfg.clone(), &mut rng).unwrap();
+        let wno = Wno::new(cfg.clone(), &mut rng)
+            .expect("WNO construction with valid config should succeed");
         // Generate a random input independent of model weights.
         let mut x = vec![0.0_f32; cfg.in_channels * cfg.seq_len];
         for v in x.iter_mut() {
             *v = rng.next_f32() * 2.0 - 1.0;
         }
-        let (approx, details) = wno.haar_decompose(&x).unwrap();
-        let back = wno.haar_reconstruct(&approx, &details).unwrap();
+        let (approx, details) = wno
+            .haar_decompose(&x)
+            .expect("Haar decomposition should succeed for valid input");
+        let back = wno
+            .haar_reconstruct(&approx, &details)
+            .expect("Haar reconstruction should succeed after decomposition");
         assert_eq!(back.len(), x.len());
         for (a, b) in x.iter().zip(back.iter()) {
             assert!((a - b).abs() < 1e-5, "Haar round-trip mismatch: {a} vs {b}");
@@ -539,7 +544,9 @@ mod tests {
         let wno = make(2, default_cfg());
         let cfg = wno.config().clone();
         let x = vec![0.5_f32; cfg.in_channels * cfg.seq_len];
-        let (approx, _details) = wno.haar_decompose(&x).unwrap();
+        let (approx, _details) = wno
+            .haar_decompose(&x)
+            .expect("Haar decomposition should succeed for constant input");
         let coarsest = cfg.seq_len >> cfg.n_levels;
         assert_eq!(approx.len(), cfg.in_channels * coarsest);
     }
@@ -554,7 +561,9 @@ mod tests {
         };
         let wno = make(3, cfg.clone());
         let x = vec![1.0_f32; cfg.in_channels * cfg.seq_len];
-        let (_a, details) = wno.haar_decompose(&x).unwrap();
+        let (_a, details) = wno
+            .haar_decompose(&x)
+            .expect("Haar decomposition should return details at correct lengths");
         assert_eq!(details.len(), cfg.n_levels);
         // Index 0 is the finest level → length seq_len / 2.
         for (l, d) in details.iter().enumerate() {
@@ -574,7 +583,9 @@ mod tests {
         };
         let wno = make(4, cfg.clone());
         let x = vec![1.25_f32; cfg.in_channels * cfg.seq_len];
-        let (_a, details) = wno.haar_decompose(&x).unwrap();
+        let (_a, details) = wno
+            .haar_decompose(&x)
+            .expect("Haar decomposition of constant input should produce zero details");
         for (l, d) in details.iter().enumerate() {
             for &v in d.iter() {
                 assert!(
@@ -597,7 +608,9 @@ mod tests {
         };
         let wno = make(5, cfg.clone());
         let x = vec![0.1_f32; cfg.in_channels * cfg.seq_len];
-        let y = wno.forward(&x).unwrap();
+        let y = wno
+            .forward(&x)
+            .expect("WNO forward pass should succeed for valid input");
         assert_eq!(y.len(), cfg.out_channels * cfg.seq_len);
     }
 
@@ -609,7 +622,9 @@ mod tests {
         for (i, v) in x.iter_mut().enumerate() {
             *v = ((i as f32) * 0.13).sin();
         }
-        let y = wno.forward(&x).unwrap();
+        let y = wno
+            .forward(&x)
+            .expect("WNO forward pass should produce finite values");
         assert!(y.iter().all(|v| v.is_finite()));
     }
 
@@ -630,7 +645,9 @@ mod tests {
         for (i, v) in x.iter_mut().enumerate() {
             *v = (i as f32 - 5.0) * 0.3;
         }
-        let y = wno.forward(&x).unwrap();
+        let y = wno
+            .forward(&x)
+            .expect("WNO forward with identity residual and zero spectral should succeed");
         for i in 0..x.len() {
             assert!(
                 (y[i] - x[i]).abs() < 1e-5,
@@ -656,9 +673,13 @@ mod tests {
         // Pure constant input: details vanish, so only the approx-level
         // weight matters; bump it and the output magnitude must change.
         let x = vec![0.7_f32; cfg.in_channels * cfg.seq_len];
-        let y0 = wno.forward(&x).unwrap();
+        let y0 = wno
+            .forward(&x)
+            .expect("WNO forward before spectral weight change should succeed");
         wno.approx_weight[0] += 1.5;
-        let y1 = wno.forward(&x).unwrap();
+        let y1 = wno
+            .forward(&x)
+            .expect("WNO forward after spectral weight change should succeed");
         let diff: f32 = y0.iter().zip(y1.iter()).map(|(a, b)| (a - b).abs()).sum();
         assert!(
             diff > 1e-6,
@@ -697,13 +718,19 @@ mod tests {
         };
         let mut rng_a = LcgRng::new(123);
         let mut rng_b = LcgRng::new(123);
-        let a = Wno::new(cfg.clone(), &mut rng_a).unwrap();
-        let b = Wno::new(cfg.clone(), &mut rng_b).unwrap();
+        let a = Wno::new(cfg.clone(), &mut rng_a)
+            .expect("WNO construction with seed 123 should succeed");
+        let b = Wno::new(cfg.clone(), &mut rng_b)
+            .expect("WNO construction with same seed 123 should succeed");
         let x: Vec<f32> = (0..cfg.in_channels * cfg.seq_len)
             .map(|i| (i as f32) * 0.07)
             .collect();
-        let ya = a.forward(&x).unwrap();
-        let yb = b.forward(&x).unwrap();
+        let ya = a
+            .forward(&x)
+            .expect("WNO forward pass should be deterministic for given seed");
+        let yb = b
+            .forward(&x)
+            .expect("WNO forward pass should produce identical result for same seed");
         for i in 0..ya.len() {
             assert!((ya[i] - yb[i]).abs() < 1e-8, "Determinism at {i}");
         }
@@ -733,10 +760,18 @@ mod tests {
         let sum: Vec<f32> = a.iter().zip(b.iter()).map(|(x, y)| x + y).collect();
         let scaled: Vec<f32> = a.iter().map(|x| x * 2.5).collect();
 
-        let ya = wno.forward(&a).unwrap();
-        let yb = wno.forward(&b).unwrap();
-        let ysum = wno.forward(&sum).unwrap();
-        let yscaled = wno.forward(&scaled).unwrap();
+        let ya = wno
+            .forward(&a)
+            .expect("WNO forward on input a should succeed");
+        let yb = wno
+            .forward(&b)
+            .expect("WNO forward on input b should succeed");
+        let ysum = wno
+            .forward(&sum)
+            .expect("WNO forward on sum of inputs should succeed");
+        let yscaled = wno
+            .forward(&scaled)
+            .expect("WNO forward on scaled input should succeed");
 
         for i in 0..ya.len() {
             let lhs = ysum[i];
@@ -770,7 +805,9 @@ mod tests {
         };
         let wno = make(11, cfg.clone());
         let x = vec![1.0_f32, -1.0];
-        let y = wno.forward(&x).unwrap();
+        let y = wno
+            .forward(&x)
+            .expect("WNO forward on minimal seq_len=2 input should succeed");
         assert_eq!(y.len(), 2);
         assert!(y.iter().all(|v| v.is_finite()));
     }

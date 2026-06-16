@@ -3,6 +3,7 @@ pub mod ensemble;
 pub mod ext_iforest;
 pub mod federated;
 pub mod loda;
+pub mod lscp;
 pub mod suod;
 
 pub use federated::{

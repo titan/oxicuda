@@ -131,8 +131,8 @@ mod tests {
 
     #[test]
     fn from_axis_angle_90deg_z() {
-        let tf =
-            RigidTransform::from_axis_angle([0.0, 0.0, 1.0], std::f32::consts::PI / 2.0).unwrap();
+        let tf = RigidTransform::from_axis_angle([0.0, 0.0, 1.0], std::f32::consts::PI / 2.0)
+            .expect("from_axis_angle should succeed");
         let p = [1.0_f32, 0.0, 0.0];
         let q = tf.apply_point(p);
         // 90° around z: [1,0,0] → [0,1,0]
@@ -143,7 +143,8 @@ mod tests {
 
     #[test]
     fn inverse_compose_is_identity() {
-        let tf = RigidTransform::from_axis_angle([1.0, 0.5, 0.3], 0.7).unwrap();
+        let tf = RigidTransform::from_axis_angle([1.0, 0.5, 0.3], 0.7)
+            .expect("from_axis_angle should succeed");
         let tf_inv = tf.inverse();
         let composed = tf.compose(&tf_inv);
         let id = RigidTransform::identity();
@@ -158,8 +159,8 @@ mod tests {
     #[test]
     fn compose_applies_correctly() {
         // Two 90° z-rotations = 180° rotation
-        let half =
-            RigidTransform::from_axis_angle([0.0, 0.0, 1.0], std::f32::consts::PI / 2.0).unwrap();
+        let half = RigidTransform::from_axis_angle([0.0, 0.0, 1.0], std::f32::consts::PI / 2.0)
+            .expect("from_axis_angle should succeed");
         let full = half.compose(&half);
         let p = [1.0_f32, 0.0, 0.0];
         let q = full.apply_point(p);

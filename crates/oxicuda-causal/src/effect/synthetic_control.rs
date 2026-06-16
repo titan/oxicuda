@@ -440,7 +440,8 @@ mod tests {
             step_size: 5e-3,
             tol: 1e-12,
         };
-        let res = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
+        let res =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
         assert_eq!(res.weights.len(), 2);
         let s: f64 = res.weights.iter().sum();
         assert!((s - 1.0).abs() < 1e-6, "weights sum = {s}");
@@ -485,7 +486,8 @@ mod tests {
             step_size: 5e-3,
             tol: 1e-12,
         };
-        let res = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
+        let res =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
         // Each post-treatment effect should be ≈ +shock.
         for &e in &res.effects {
             assert!((e - shock).abs() < 0.20, "effect = {e} expected ~{shock}");
@@ -510,7 +512,8 @@ mod tests {
         }
         let (y, n_u, n_t) = build_panel(&rows);
         let cfg = SyntheticControlConfig::default();
-        let res = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
+        let res =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
         for &w in &res.weights {
             assert!(w >= -1e-12, "negative weight: {w}");
         }
@@ -530,8 +533,10 @@ mod tests {
         }
         let (y, n_u, n_t) = build_panel(&rows);
         let cfg = SyntheticControlConfig::default();
-        let r1 = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
-        let r2 = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
+        let r1 =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
+        let r2 =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
         assert_eq!(r1.weights, r2.weights);
         assert_eq!(r1.effects, r2.effects);
         assert_eq!(r1.synthetic, r2.synthetic);
@@ -559,8 +564,10 @@ mod tests {
             step_size: 5e-3,
             tol: 1e-30,
         };
-        let r_few = synthetic_control(&y, n_u, n_t, t0, &cfg_few).unwrap();
-        let r_many = synthetic_control(&y, n_u, n_t, t0, &cfg_many).unwrap();
+        let r_few = synthetic_control(&y, n_u, n_t, t0, &cfg_few)
+            .expect("synthetic_control should succeed");
+        let r_many = synthetic_control(&y, n_u, n_t, t0, &cfg_many)
+            .expect("synthetic_control should succeed");
         assert!(
             r_many.pretreatment_rmse <= r_few.pretreatment_rmse + 1e-9,
             "RMSE did not decrease: few = {}, many = {}",
@@ -582,7 +589,8 @@ mod tests {
         let (y, n_u, n_t) =
             build_panel(&[vec![1.0; t_total], vec![1.0; t_total], vec![2.0; t_total]]);
         let cfg = SyntheticControlConfig::default();
-        let res = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
+        let res =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
         assert_eq!(res.synthetic.len(), n_t);
         assert_eq!(res.effects.len(), n_t - t0);
     }
@@ -597,7 +605,8 @@ mod tests {
             vec![1.0, 2.0, 3.0, 3.0],
         ]);
         let cfg = SyntheticControlConfig::default();
-        let res = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
+        let res =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
         assert_eq!(res.effects.len(), 1);
         assert_eq!(res.synthetic.len(), n_t);
         assert!(res.effects[0].is_finite());
@@ -635,7 +644,8 @@ mod tests {
             step_size: 5e-3,
             tol: 1e-10,
         };
-        let res = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
+        let res =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
         assert_eq!(res.weights.len(), n_donors);
         let s: f64 = res.weights.iter().sum();
         assert!((s - 1.0).abs() < 1e-5, "weights sum = {s}");
@@ -667,7 +677,8 @@ mod tests {
             step_size: 5e-3,
             tol: 1e-12,
         };
-        let res = synthetic_control(&y, n_u, n_t, t0, &cfg).unwrap();
+        let res =
+            synthetic_control(&y, n_u, n_t, t0, &cfg).expect("synthetic_control should succeed");
         // Verify synthetic[t] = w_1·donor1[t] + w_2·donor2[t] for every t.
         for t in 0..t_total {
             let expected = res.weights[0] * donor1[t] + res.weights[1] * donor2[t];

@@ -67,7 +67,7 @@ mod tests {
         let y = vec![1.0_f32, 0.0, 1.0, 0.0];
         let t = vec![1.0_f32, 1.0, 0.0, 0.0];
         let pi = vec![0.6_f32, 0.6, 0.4, 0.4];
-        let ate = ipw_ate(&y, &t, &pi).unwrap();
+        let ate = ipw_ate(&y, &t, &pi).expect("ipw_ate should succeed for valid inputs");
         assert!(ate.is_finite());
     }
 }

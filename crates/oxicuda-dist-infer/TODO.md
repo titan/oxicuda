@@ -6,7 +6,7 @@ Distributed multi-GPU inference engine with three orthogonal parallelism axes (T
 
 ## Implementation Status
 
-**Actual: 4,553 SLoC across 19 files (includes Markdown doc-comments) / 3,279 pure Rust SLoC**
+**Actual: 4,374 SLoC across 26 files (includes Markdown doc-comments) / 3,279 pure Rust SLoC**
 
 Production-grade distributed inference infrastructure for OxiCUDA. Implements three orthogonal
 parallelism strategies and the distributed KV-cache / request-routing infrastructure needed to
@@ -85,6 +85,10 @@ The three degrees multiply to `world_size = tp * sp * ep`.
 
 #### P2 -- Nice-to-Have (Scaling / Observability)
 - [x] Load-balance CV metric for MoE router (`expert_parallel/router.rs::load_balance_cv`)
+- [x] Medusa speculative decoding (`speculative/medusa.rs`) — Cai 2024: multiple decoding heads predicting k future tokens simultaneously with tree-structured candidate verification; `MedusaDecoder`
+- [x] Radix-tree prefix-sharing KV cache (`distributed_cache/radix_cache.rs`) — Zheng 2023 vLLM: radix-tree (trie) structure for sharing common prefix KV blocks across requests with LRU eviction; `RadixCache`
+- [x] FP8 inference quantisation (`quantisation/fp8_infer.rs`) — Micikevicius 2022: per-tensor E4M3/E5M2 scaling factors with delayed-scaling recipe for transformer weight + activation quantisation; `Fp8InferQuantiser`
+- [ ] Disaggregated prefill-decode (`scheduler/disagg_pd.rs`) — Zhong 2024 SOSP: separate prefill and decode worker pools with KV-cache migration over interconnect; `DisaggPdScheduler`
 - [x] Per-policy router metrics with prefix hit-rate (`router/policy.rs::RouterMetrics`)
 - [ ] (P2) Real NCCL-equivalent collective backend (currently simulated via in-process function calls)
 - [ ] (P2) Pipeline parallelism axis (PP) for very deep models -- intentionally out of scope of v1
@@ -101,7 +105,7 @@ The three degrees multiply to `world_size = tp * sp * ep`.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 80 passing (root TODO.md count)
+- Tests: 133 passing (root TODO.md count)
 - unwrap() calls: 0 (production code; test helpers use `.unwrap()` on infallible handle construction)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference simulations work; runtime collective backend returns `UnsupportedPlatform`

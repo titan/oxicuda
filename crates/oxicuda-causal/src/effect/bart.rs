@@ -553,8 +553,11 @@ mod tests {
             n_iter: 1,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
-        let pred = model.predict(&features[..d]).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg)
+            .expect("fit should succeed with valid single-tree depth-0 config");
+        let pred = model
+            .predict(&features[..d])
+            .expect("predict should succeed with correctly-sized input");
         assert!(
             (pred - 0.5 * mean_y).abs() < 1e-5,
             "pred={pred}, expected {}",
@@ -574,8 +577,11 @@ mod tests {
             n_iter: 2,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
-        let preds = model.predict_batch(&features, n, d).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg)
+            .expect("fit should succeed with valid 3-tree depth-2 config");
+        let preds = model
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed on training data");
         assert_eq!(preds.len(), n);
         for &p in &preds {
             assert!(p.is_finite());
@@ -595,8 +601,11 @@ mod tests {
             n_iter: 6,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
-        let preds = model.predict_batch(&features, n, d).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg)
+            .expect("fit should succeed for identity target test");
+        let preds = model
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed on training data");
         let m = mse(&preds, &y);
         assert!(m < 0.02, "MSE = {m} (expected < 0.02 for identity target)");
     }
@@ -620,10 +629,22 @@ mod tests {
             n_iter: 5,
             shrinkage: 0.5,
         };
-        let m_shallow = Bart::fit(&features, &y, n, d, cfg_shallow).unwrap();
-        let m_deep = Bart::fit(&features, &y, n, d, cfg_deep).unwrap();
-        let s_mse = mse(&m_shallow.predict_batch(&features, n, d).unwrap(), &y);
-        let d_mse = mse(&m_deep.predict_batch(&features, n, d).unwrap(), &y);
+        let m_shallow = Bart::fit(&features, &y, n, d, cfg_shallow)
+            .expect("fit with shallow config should succeed");
+        let m_deep =
+            Bart::fit(&features, &y, n, d, cfg_deep).expect("fit with deep config should succeed");
+        let s_mse = mse(
+            &m_shallow
+                .predict_batch(&features, n, d)
+                .expect("shallow predict_batch should succeed"),
+            &y,
+        );
+        let d_mse = mse(
+            &m_deep
+                .predict_batch(&features, n, d)
+                .expect("deep predict_batch should succeed"),
+            &y,
+        );
         assert!(
             d_mse < s_mse,
             "deep mse {d_mse} should beat shallow mse {s_mse}"
@@ -647,8 +668,11 @@ mod tests {
             n_iter: 50,
             shrinkage: 0.5,
         };
-        let m_many = Bart::fit(&features, &y, n, d, cfg_many).unwrap();
-        let preds = m_many.predict_batch(&features, n, d).unwrap();
+        let m_many = Bart::fit(&features, &y, n, d, cfg_many)
+            .expect("fit with many iterations should succeed");
+        let preds = m_many
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed after many iterations");
         let p_max = preds.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
         for &p in &preds {
             assert!(p.is_finite(), "prediction {p} not finite");
@@ -677,10 +701,16 @@ mod tests {
             shrinkage: 1.0,
             ..cfg_a.clone()
         };
-        let m_a = Bart::fit(&features, &y, n, d, cfg_a).unwrap();
-        let m_b = Bart::fit(&features, &y, n, d, cfg_b).unwrap();
-        let pa = m_a.predict(&features[..d]).unwrap();
-        let pb = m_b.predict(&features[..d]).unwrap();
+        let m_a =
+            Bart::fit(&features, &y, n, d, cfg_a).expect("fit with shrinkage 0.5 should succeed");
+        let m_b =
+            Bart::fit(&features, &y, n, d, cfg_b).expect("fit with shrinkage 1.0 should succeed");
+        let pa = m_a
+            .predict(&features[..d])
+            .expect("predict on model_a should succeed");
+        let pb = m_b
+            .predict(&features[..d])
+            .expect("predict on model_b should succeed");
         // For depth-0 / n_iter=1 / n_trees=1 the relationship is exactly
         // pa == 0.5 · mean(y), pb == 1.0 · mean(y).
         assert!(
@@ -713,10 +743,22 @@ mod tests {
             n_iter: 1,
             shrinkage: 0.5,
         };
-        let m_one = Bart::fit(&features, &y, n, d, cfg_one).unwrap();
-        let m_many = Bart::fit(&features, &y, n, d, cfg_many).unwrap();
-        let one_mse = mse(&m_one.predict_batch(&features, n, d).unwrap(), &y);
-        let many_mse = mse(&m_many.predict_batch(&features, n, d).unwrap(), &y);
+        let m_one =
+            Bart::fit(&features, &y, n, d, cfg_one).expect("fit with one tree should succeed");
+        let m_many =
+            Bart::fit(&features, &y, n, d, cfg_many).expect("fit with four trees should succeed");
+        let one_mse = mse(
+            &m_one
+                .predict_batch(&features, n, d)
+                .expect("predict_batch on one-tree model should succeed"),
+            &y,
+        );
+        let many_mse = mse(
+            &m_many
+                .predict_batch(&features, n, d)
+                .expect("predict_batch on many-tree model should succeed"),
+            &y,
+        );
         assert!(
             many_mse < one_mse,
             "M=4 mse {many_mse} not less than M=1 mse {one_mse}"
@@ -735,7 +777,7 @@ mod tests {
             n_iter: 2,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg).expect("fit with n_trees=2 should succeed");
         assert_eq!(model.n_trees(), 2);
         assert_eq!(model.trees.len(), 2);
     }
@@ -753,7 +795,8 @@ mod tests {
             n_iter: 2,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg)
+            .expect("fit should succeed for min_leaf_samples test");
         let rows: Vec<usize> = (0..n).collect();
         for tree in &model.trees {
             let smallest = min_leaf_size(&tree.root, &rows, &features, d);
@@ -776,10 +819,16 @@ mod tests {
             n_iter: 3,
             shrinkage: 0.5,
         };
-        let a = Bart::fit(&features, &y, n, d, cfg.clone()).unwrap();
-        let b = Bart::fit(&features, &y, n, d, cfg).unwrap();
-        let pa = a.predict_batch(&features, n, d).unwrap();
-        let pb = b.predict_batch(&features, n, d).unwrap();
+        let a = Bart::fit(&features, &y, n, d, cfg.clone())
+            .expect("first fit should succeed for determinism test");
+        let b = Bart::fit(&features, &y, n, d, cfg)
+            .expect("second fit should succeed for determinism test");
+        let pa = a
+            .predict_batch(&features, n, d)
+            .expect("first predict_batch should succeed");
+        let pb = b
+            .predict_batch(&features, n, d)
+            .expect("second predict_batch should succeed");
         assert_eq!(pa, pb);
     }
 
@@ -982,7 +1031,7 @@ mod tests {
             n_iter: 2,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg).expect("fit should succeed");
         // At least one tree must have a split (otherwise the test is trivial).
         let has_split = model
             .trees
@@ -1008,8 +1057,10 @@ mod tests {
             n_iter: 4,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
-        let preds = model.predict_batch(&features, n, d).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg).expect("fit should succeed");
+        let preds = model
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed");
         let first = preds[0];
         for &p in &preds {
             assert!(
@@ -1032,15 +1083,17 @@ mod tests {
             n_iter: 3,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
-        let p = model.predict(&features).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg).expect("fit should succeed");
+        let p = model.predict(&features).expect("predict should succeed");
         assert!(p.is_finite());
         // With a single sample no split is feasible (needs 2·min_leaf_samples
         // rows), so every tree is a depth-0 leaf with value shrinkage · y.
         // After convergence the sum should equal y exactly when shrinkage
         // satisfies M · shrinkage · y == y mod backfitting — we only require
         // finiteness here and check the batch interface.
-        let pb = model.predict_batch(&features, n, d).unwrap();
+        let pb = model
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed");
         assert_eq!(pb.len(), 1);
         assert!((pb[0] - p).abs() < 1e-6);
     }
@@ -1057,11 +1110,13 @@ mod tests {
             n_iter: 3,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
-        let batch = model.predict_batch(&features, n, d).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg).expect("fit should succeed");
+        let batch = model
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed");
         for i in 0..n {
             let row = &features[i * d..(i + 1) * d];
-            let single = model.predict(row).unwrap();
+            let single = model.predict(row).expect("predict should succeed");
             assert!(
                 (single - batch[i]).abs() < 1e-6,
                 "row {i}: single {single} vs batch {}",
@@ -1082,7 +1137,7 @@ mod tests {
             n_iter: 1,
             shrinkage: 0.5,
         };
-        let model = Bart::fit(&features, &y, n, d, cfg).unwrap();
+        let model = Bart::fit(&features, &y, n, d, cfg).expect("fit should succeed");
         let bad = vec![0.0_f32; n * d + 1];
         assert!(matches!(
             model.predict_batch(&bad, n, d),

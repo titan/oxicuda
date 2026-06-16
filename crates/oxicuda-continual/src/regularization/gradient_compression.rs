@@ -507,7 +507,8 @@ mod tests {
     #[test]
     fn grad_comp_new_correct_dims() {
         let cfg = make_cfg();
-        let state = grad_comp_new(&cfg, 1).unwrap();
+        let state = grad_comp_new(&cfg, 1)
+            .expect("gradient compression state should initialize with valid config");
         let expected_params = cfg.hidden_dim * cfg.input_dim
             + cfg.hidden_dim
             + cfg.output_dim * cfg.hidden_dim
@@ -521,18 +522,21 @@ mod tests {
     #[test]
     fn grad_comp_new_weights_finite() {
         let cfg = make_cfg();
-        let state = grad_comp_new(&cfg, 2).unwrap();
+        let state = grad_comp_new(&cfg, 2)
+            .expect("gradient compression state should initialize with valid config");
         assert!(state.weights.iter().all(|v| v.is_finite()));
     }
 
     #[test]
     fn grad_comp_fit_task_returns_finite_loss() {
         let cfg = make_cfg();
-        let mut state = grad_comp_new(&cfg, 3).unwrap();
+        let mut state = grad_comp_new(&cfg, 3)
+            .expect("gradient compression state should initialize with valid config");
         let x: Vec<f64> = (0..4 * 5).map(|i| i as f64 * 0.05).collect();
         let y = vec![0_usize, 1, 2, 0, 1];
         let mut rng = LcgRng::new(10);
-        let loss = grad_comp_fit_task(&mut state, &x, &y, 5, 0, &mut rng).unwrap();
+        let loss = grad_comp_fit_task(&mut state, &x, &y, 5, 0, &mut rng)
+            .expect("gradient compression task fitting should succeed");
         assert!(loss.is_finite());
         assert!(loss >= 0.0);
     }
@@ -540,11 +544,13 @@ mod tests {
     #[test]
     fn grad_comp_fit_task_stores_memory() {
         let cfg = make_cfg();
-        let mut state = grad_comp_new(&cfg, 4).unwrap();
+        let mut state = grad_comp_new(&cfg, 4)
+            .expect("gradient compression state should initialize with valid config");
         let x: Vec<f64> = (0..4 * 4).map(|i| i as f64 * 0.1).collect();
         let y = vec![0_usize, 1, 2, 0];
         let mut rng = LcgRng::new(20);
-        grad_comp_fit_task(&mut state, &x, &y, 4, 0, &mut rng).unwrap();
+        grad_comp_fit_task(&mut state, &x, &y, 4, 0, &mut rng)
+            .expect("gradient compression task fitting should succeed");
         assert_eq!(state.memories.len(), 1);
         assert_eq!(state.memories[0].task_id, 0);
         assert_eq!(state.memories[0].gradient_directions.len(), 2);
@@ -554,12 +560,14 @@ mod tests {
     #[test]
     fn grad_comp_n_memories_accumulates() {
         let cfg = make_cfg();
-        let mut state = grad_comp_new(&cfg, 5).unwrap();
+        let mut state = grad_comp_new(&cfg, 5)
+            .expect("gradient compression state should initialize with valid config");
         let mut rng = LcgRng::new(30);
         for task in 0..3 {
             let x: Vec<f64> = (0..4 * 3).map(|i| (i + task) as f64 * 0.1).collect();
             let y = vec![0_usize, 1, 2];
-            grad_comp_fit_task(&mut state, &x, &y, 3, task, &mut rng).unwrap();
+            grad_comp_fit_task(&mut state, &x, &y, 3, task, &mut rng)
+                .expect("gradient compression task fitting should succeed");
         }
         // 3 tasks × 2 memories each = 6
         assert_eq!(grad_comp_n_memories(&state), 6);
@@ -568,12 +576,15 @@ mod tests {
     #[test]
     fn grad_comp_predict_valid_class() {
         let cfg = make_cfg();
-        let mut state = grad_comp_new(&cfg, 6).unwrap();
+        let mut state = grad_comp_new(&cfg, 6)
+            .expect("gradient compression state should initialize with valid config");
         let x: Vec<f64> = (0..4 * 4).map(|i| i as f64 * 0.1).collect();
         let y = vec![0_usize, 1, 2, 0];
         let mut rng = LcgRng::new(40);
-        grad_comp_fit_task(&mut state, &x, &y, 4, 0, &mut rng).unwrap();
-        let pred = grad_comp_predict(&state, &[0.5, 0.3, 0.1, 0.9]).unwrap();
+        grad_comp_fit_task(&mut state, &x, &y, 4, 0, &mut rng)
+            .expect("gradient compression task fitting should succeed");
+        let pred = grad_comp_predict(&state, &[0.5, 0.3, 0.1, 0.9])
+            .expect("gradient compression prediction should succeed");
         assert!(pred < 3);
     }
 
@@ -607,19 +618,22 @@ mod tests {
     #[test]
     fn grad_comp_multi_task_no_conflict_after_projection() {
         let cfg = make_cfg();
-        let mut state = grad_comp_new(&cfg, 7).unwrap();
+        let mut state = grad_comp_new(&cfg, 7)
+            .expect("gradient compression state should initialize with valid config");
         let mut rng = LcgRng::new(50);
 
         // Task 0
         let x0: Vec<f64> = (0..4 * 4).map(|i| i as f64 * 0.05).collect();
         let y0 = vec![0_usize, 1, 2, 0];
-        grad_comp_fit_task(&mut state, &x0, &y0, 4, 0, &mut rng).unwrap();
+        grad_comp_fit_task(&mut state, &x0, &y0, 4, 0, &mut rng)
+            .expect("gradient compression task fitting should succeed");
         assert_eq!(state.n_tasks, 1);
 
         // Task 1
         let x1: Vec<f64> = (0..4 * 4).map(|i| (i as f64 + 2.0) * 0.03).collect();
         let y1 = vec![1_usize, 2, 0, 1];
-        let loss1 = grad_comp_fit_task(&mut state, &x1, &y1, 4, 1, &mut rng).unwrap();
+        let loss1 = grad_comp_fit_task(&mut state, &x1, &y1, 4, 1, &mut rng)
+            .expect("gradient compression task fitting should succeed");
         assert!(loss1.is_finite());
         assert_eq!(state.n_tasks, 2);
     }
@@ -627,7 +641,8 @@ mod tests {
     #[test]
     fn grad_comp_fit_task_empty_data_errors() {
         let cfg = make_cfg();
-        let mut state = grad_comp_new(&cfg, 8).unwrap();
+        let mut state = grad_comp_new(&cfg, 8)
+            .expect("gradient compression state should initialize with valid config");
         let mut rng = LcgRng::new(60);
         let res = grad_comp_fit_task(&mut state, &[], &[], 0, 0, &mut rng);
         assert!(res.is_err());
@@ -636,7 +651,8 @@ mod tests {
     #[test]
     fn grad_comp_predict_wrong_dim_errors() {
         let cfg = make_cfg();
-        let state = grad_comp_new(&cfg, 9).unwrap();
+        let state = grad_comp_new(&cfg, 9)
+            .expect("gradient compression state should initialize with valid config");
         let res = grad_comp_predict(&state, &[0.1, 0.2]); // wrong dim
         assert!(res.is_err());
     }
@@ -662,12 +678,14 @@ mod tests {
     #[test]
     fn grad_comp_weights_change_after_training() {
         let cfg = make_cfg();
-        let mut state = grad_comp_new(&cfg, 12).unwrap();
+        let mut state = grad_comp_new(&cfg, 12)
+            .expect("gradient compression state should initialize with valid config");
         let before = state.weights.clone();
         let x: Vec<f64> = (0..4 * 5).map(|i| i as f64 * 0.1).collect();
         let y = vec![0_usize, 1, 2, 0, 1];
         let mut rng = LcgRng::new(70);
-        grad_comp_fit_task(&mut state, &x, &y, 5, 0, &mut rng).unwrap();
+        grad_comp_fit_task(&mut state, &x, &y, 5, 0, &mut rng)
+            .expect("gradient compression task fitting should succeed");
         let changed = before
             .iter()
             .zip(state.weights.iter())
@@ -678,11 +696,13 @@ mod tests {
     #[test]
     fn grad_comp_gradient_vectors_have_correct_len() {
         let cfg = make_cfg();
-        let mut state = grad_comp_new(&cfg, 13).unwrap();
+        let mut state = grad_comp_new(&cfg, 13)
+            .expect("gradient compression state should initialize with valid config");
         let x: Vec<f64> = (0..4 * 3).map(|i| i as f64 * 0.1).collect();
         let y = vec![0_usize, 1, 2];
         let mut rng = LcgRng::new(80);
-        grad_comp_fit_task(&mut state, &x, &y, 3, 0, &mut rng).unwrap();
+        grad_comp_fit_task(&mut state, &x, &y, 3, 0, &mut rng)
+            .expect("gradient compression task fitting should succeed");
         let n_params = state.weights.len();
         for dir in &state.memories[0].gradient_directions {
             assert_eq!(dir.len(), n_params, "gradient direction length mismatch");

@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn simsiam_loss_aligned_gives_minus_one() {
         let v = vec![1.0_f32, 0.0, 0.0, 0.0];
-        let l = simsiam_loss(&v, &v, 1, 4).unwrap();
+        let l = simsiam_loss(&v, &v, 1, 4).expect("simsiam_loss should succeed");
         assert!((l + 1.0).abs() < 1e-5, "loss = {l}");
     }
 
@@ -281,7 +281,7 @@ mod tests {
     fn simsiam_loss_orthogonal_gives_zero() {
         let p = vec![1.0_f32, 0.0];
         let z = vec![0.0_f32, 1.0];
-        let l = simsiam_loss(&p, &z, 1, 2).unwrap();
+        let l = simsiam_loss(&p, &z, 1, 2).expect("simsiam_loss should succeed");
         assert!(l.abs() < 1e-5, "loss = {l}");
     }
 
@@ -290,7 +290,7 @@ mod tests {
     fn simsiam_loss_antiparallel_gives_plus_one() {
         let p = vec![1.0_f32, 0.0];
         let z = vec![-1.0_f32, 0.0];
-        let l = simsiam_loss(&p, &z, 1, 2).unwrap();
+        let l = simsiam_loss(&p, &z, 1, 2).expect("simsiam_loss should succeed");
         assert!((l - 1.0).abs() < 1e-5, "loss = {l}");
     }
 
@@ -304,7 +304,8 @@ mod tests {
         let p2 = vec![0.0_f32, 1.0]; // ⊥ z1
         let z1 = vec![1.0_f32, 0.0];
 
-        let sym = simsiam_loss_batch(&p1, &z2, &p2, &z1, 1, 2).unwrap();
+        let sym = simsiam_loss_batch(&p1, &z2, &p2, &z1, 1, 2)
+            .expect("simsiam_loss_batch should succeed");
         let expected = (-1.0_f32 + 0.0_f32) * 0.5;
         assert!((sym - expected).abs() < 1e-5, "sym = {sym}");
     }
@@ -314,8 +315,9 @@ mod tests {
     fn simsiam_loss_batch_equals_single_when_symmetric_inputs() {
         let p: Vec<f32> = (0..12).map(|i| i as f32 * 0.1 + 0.5).collect();
         let z: Vec<f32> = (0..12).map(|i| (12 - i) as f32 * 0.1 + 0.3).collect();
-        let single = simsiam_loss(&p, &z, 3, 4).unwrap();
-        let batch = simsiam_loss_batch(&p, &z, &p, &z, 3, 4).unwrap();
+        let single = simsiam_loss(&p, &z, 3, 4).expect("simsiam_loss should succeed");
+        let batch =
+            simsiam_loss_batch(&p, &z, &p, &z, 3, 4).expect("simsiam_loss_batch should succeed");
         assert!(
             (single - batch).abs() < 1e-5,
             "single={single} batch={batch}"
@@ -332,9 +334,10 @@ mod tests {
             d_proj: 16,
             d_pred: 8,
         };
-        let pred = SimSiamPredictor::from_config(&cfg, &mut rng).unwrap();
+        let pred =
+            SimSiamPredictor::from_config(&cfg, &mut rng).expect("from_config should succeed");
         let z = vec![0.5_f32; 16];
-        let p = pred.forward(&z).unwrap();
+        let p = pred.forward(&z).expect("forward should succeed");
         assert_eq!(p.len(), 16, "output dim must equal d_proj");
     }
 
@@ -349,7 +352,7 @@ mod tests {
         let z: Vec<f32> = (0..n * d)
             .map(|idx| if idx % d == 0 { 1.0_f32 } else { 0.0_f32 })
             .collect();
-        let collapsed = is_collapsed(&z, n, d, 0.1).unwrap();
+        let collapsed = is_collapsed(&z, n, d, 0.1).expect("is_collapsed should succeed");
         assert!(
             collapsed,
             "constant projections must be detected as collapsed"
@@ -366,7 +369,7 @@ mod tests {
         for i in 0..n {
             z[i * d + i] = 1.0;
         }
-        let collapsed = is_collapsed(&z, n, d, 0.1).unwrap();
+        let collapsed = is_collapsed(&z, n, d, 0.1).expect("is_collapsed should succeed");
         assert!(
             !collapsed,
             "orthogonal projections must not be detected as collapsed"
@@ -400,7 +403,7 @@ mod tests {
     fn single_sample_valid() {
         let p = vec![0.6_f32, 0.8]; // already unit
         let z = vec![0.8_f32, 0.6];
-        let l = simsiam_loss(&p, &z, 1, 2).unwrap();
+        let l = simsiam_loss(&p, &z, 1, 2).expect("simsiam_loss should succeed");
         assert!(l.is_finite(), "loss must be finite for n=1");
     }
 }

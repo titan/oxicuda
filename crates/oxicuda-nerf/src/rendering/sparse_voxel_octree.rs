@@ -560,7 +560,7 @@ mod tests {
     use crate::handle::LcgRng;
 
     fn unit_box() -> Aabb {
-        Aabb::new([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap()
+        Aabb::new([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).expect("new should succeed")
     }
 
     fn cfg_depth(max_depth: usize, density_threshold: f32) -> SparseVoxelOctreeConfig {
@@ -583,7 +583,7 @@ mod tests {
     fn aabb_ray_intersects_simple() {
         let b = unit_box();
         let hit = b.ray_intersect([0.5, 0.5, -1.0], [0.0, 0.0, 1.0]);
-        let (t_enter, t_exit) = hit.unwrap();
+        let (t_enter, t_exit) = hit.expect("hit should be present");
         assert!((t_enter - 1.0).abs() < 1e-5);
         assert!((t_exit - 2.0).abs() < 1e-5);
     }
@@ -599,7 +599,7 @@ mod tests {
     fn aabb_ray_origin_inside() {
         let b = unit_box();
         let hit = b.ray_intersect([0.5, 0.5, 0.5], [1.0, 0.0, 0.0]);
-        let (t_enter, t_exit) = hit.unwrap();
+        let (t_enter, t_exit) = hit.expect("hit should be present");
         assert!(t_enter <= 1e-6);
         assert!((t_exit - 0.5).abs() < 1e-5);
     }
@@ -609,7 +609,7 @@ mod tests {
         let b = unit_box();
         // Ray along x with origin already inside y and z slabs.
         let hit = b.ray_intersect([-1.0, 0.5, 0.5], [1.0, 0.0, 0.0]);
-        let (t_enter, t_exit) = hit.unwrap();
+        let (t_enter, t_exit) = hit.expect("hit should be present");
         assert!((t_enter - 1.0).abs() < 1e-5);
         assert!((t_exit - 2.0).abs() < 1e-5);
     }
@@ -619,7 +619,8 @@ mod tests {
         let n = 4;
         let grid = vec![0.0_f32; n * n * n];
         let cfg = cfg_depth(4, 0.1);
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg)
+            .expect("value should be present");
         assert_eq!(oct.n_nodes(), 1);
         assert_eq!(oct.n_leaves(), 1);
         assert_eq!(oct.n_occupied_leaves(), 0);
@@ -634,7 +635,8 @@ mod tests {
         let n = 4usize;
         let grid = vec![1.0_f32; n * n * n];
         let cfg = cfg_depth(2, 0.0);
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg)
+            .expect("value should be present");
         // All voxels above threshold ⇒ all leaves occupied.
         assert_eq!(oct.n_occupied_leaves(), oct.n_leaves());
         assert!(oct.n_leaves() >= 1);
@@ -649,13 +651,16 @@ mod tests {
         let stride_y = n;
         grid[stride_z + stride_y + 1] = 1.0;
         let cfg = cfg_depth(4, 0.1);
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg)
+            .expect("value should be present");
         assert_eq!(oct.n_occupied_leaves(), 1);
 
         // Shoot a ray that passes through the occupied voxel along +z.
         // Voxel coords (1, 1, 1) inside unit box [0,1]³ at grid resolution 4
         // ⇒ x ∈ [0.25, 0.5], y ∈ [0.25, 0.5], z ∈ [0.25, 0.5].
-        let hits = oct.traverse_ray([0.3, 0.3, -1.0], [0.0, 0.0, 1.0]).unwrap();
+        let hits = oct
+            .traverse_ray([0.3, 0.3, -1.0], [0.0, 0.0, 1.0])
+            .expect("traverse_ray should succeed");
         assert_eq!(hits.len(), 1);
         assert!(hits[0].t_enter < hits[0].t_exit);
         assert!((hits[0].density - 1.0).abs() < 1e-6);
@@ -666,9 +671,12 @@ mod tests {
         let n = 4usize;
         let grid = vec![1.0_f32; n * n * n];
         let cfg = cfg_depth(2, 0.0);
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg)
+            .expect("value should be present");
         // Ray nowhere near the unit box.
-        let hits = oct.traverse_ray([5.0, 5.0, 5.0], [1.0, 0.0, 0.0]).unwrap();
+        let hits = oct
+            .traverse_ray([5.0, 5.0, 5.0], [1.0, 0.0, 0.0])
+            .expect("traverse_ray should succeed");
         assert!(hits.is_empty());
     }
 
@@ -683,8 +691,11 @@ mod tests {
             grid[z * stride_z + stride_y + 1] = 1.0;
         }
         let cfg = cfg_depth(4, 0.5);
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg).unwrap();
-        let hits = oct.traverse_ray([0.3, 0.3, -1.0], [0.0, 0.0, 1.0]).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg)
+            .expect("value should be present");
+        let hits = oct
+            .traverse_ray([0.3, 0.3, -1.0], [0.0, 0.0, 1.0])
+            .expect("traverse_ray should succeed");
         assert_eq!(hits.len(), 3);
         for w in hits.windows(2) {
             assert!(
@@ -706,10 +717,10 @@ mod tests {
         let n = 4usize;
         let grid_empty = vec![0.0_f32; n * n * n];
         let grid_full = vec![1.0_f32; n * n * n];
-        let pruned =
-            SparseVoxelOctree::build_from_grid(&grid_empty, (n, n, n), cfg_depth(2, 0.1)).unwrap();
-        let expanded =
-            SparseVoxelOctree::build_from_grid(&grid_full, (n, n, n), cfg_depth(2, 0.0)).unwrap();
+        let pruned = SparseVoxelOctree::build_from_grid(&grid_empty, (n, n, n), cfg_depth(2, 0.1))
+            .expect("value should be present");
+        let expanded = SparseVoxelOctree::build_from_grid(&grid_full, (n, n, n), cfg_depth(2, 0.0))
+            .expect("value should be present");
         assert_eq!(pruned.n_nodes(), 1);
         assert!(
             expanded.n_nodes() > pruned.n_nodes(),
@@ -732,7 +743,8 @@ mod tests {
             grid[z * stride_z + y * stride_y + x] = 1.0;
         }
         // max_depth = log2(4) = 2; full resolution.
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg_depth(2, 0.5)).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg_depth(2, 0.5))
+            .expect("value should be present");
         assert_eq!(oct.n_occupied_leaves(), coords.len());
     }
 
@@ -745,8 +757,11 @@ mod tests {
         for v in 0..n {
             grid[v * stride_z + stride_y + 1] = 0.5 + v as f32 * 0.1;
         }
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg_depth(2, 0.0)).unwrap();
-        let hits = oct.traverse_ray([0.4, 0.4, -1.0], [0.0, 0.0, 1.0]).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg_depth(2, 0.0))
+            .expect("value should be present");
+        let hits = oct
+            .traverse_ray([0.4, 0.4, -1.0], [0.0, 0.0, 1.0])
+            .expect("traverse_ray should succeed");
         assert!(!hits.is_empty());
         for h in hits {
             assert!(
@@ -767,8 +782,10 @@ mod tests {
         }
         let cfg1 = cfg_depth(2, 0.5);
         let cfg2 = cfg_depth(2, 0.5);
-        let a = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg1).unwrap();
-        let b = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg2).unwrap();
+        let a = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg1)
+            .expect("value should be present");
+        let b = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg2)
+            .expect("value should be present");
         let mut va: Vec<(bool, f32)> = Vec::new();
         let mut vb: Vec<(bool, f32)> = Vec::new();
         a.visit_preorder(|node| {
@@ -830,7 +847,8 @@ mod tests {
     #[test]
     fn err_zero_dir_traverse() {
         let grid = vec![1.0_f32; 4 * 4 * 4];
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (4, 4, 4), cfg_depth(2, 0.0)).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (4, 4, 4), cfg_depth(2, 0.0))
+            .expect("value should be present");
         let res = oct.traverse_ray([0.5, 0.5, 0.5], [0.0, 0.0, 0.0]);
         assert!(res.is_err());
     }
@@ -861,8 +879,11 @@ mod tests {
         let n = 4usize;
         let grid = vec![1.0_f32; n * n * n];
         let cfg = cfg_depth(2, 0.0);
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg).unwrap();
-        let hits = oct.traverse_ray([-1.0, 0.3, 0.3], [1.0, 0.0, 0.0]).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (n, n, n), cfg)
+            .expect("value should be present");
+        let hits = oct
+            .traverse_ray([-1.0, 0.3, 0.3], [1.0, 0.0, 0.0])
+            .expect("traverse_ray should succeed");
         assert_eq!(hits.len(), n);
         for w in hits.windows(2) {
             assert!(w[1].t_enter > w[0].t_enter);
@@ -873,7 +894,8 @@ mod tests {
     fn single_voxel_grid_builds_leaf() {
         let grid = vec![1.0_f32; 1];
         let cfg = cfg_depth(0, 0.5);
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (1, 1, 1), cfg).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (1, 1, 1), cfg)
+            .expect("value should be present");
         assert_eq!(oct.n_nodes(), 1);
         assert_eq!(oct.n_leaves(), 1);
         assert_eq!(oct.n_occupied_leaves(), 1);
@@ -888,7 +910,8 @@ mod tests {
             scene_bounds: unit_box(),
             density_threshold: 0.5,
         };
-        let oct = SparseVoxelOctree::build_from_grid(&grid, (1, 1, 1), cfg).unwrap();
+        let oct = SparseVoxelOctree::build_from_grid(&grid, (1, 1, 1), cfg)
+            .expect("value should be present");
         assert_eq!(oct.n_nodes(), 1);
         assert_eq!(oct.n_occupied_leaves(), 0);
     }

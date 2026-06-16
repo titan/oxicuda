@@ -356,7 +356,7 @@ mod tests {
             step_size: 0.3,
             ..default_config()
         };
-        let res = ot_feature_flow(&source, &target, &cfg).unwrap();
+        let res = ot_feature_flow(&source, &target, &cfg).expect("ot_feature_flow should succeed");
         for w in res.cost_history.windows(2) {
             assert!(w[1] <= w[0] + 1e-6, "cost increased: {} → {}", w[0], w[1]);
         }
@@ -369,7 +369,7 @@ mod tests {
         let source: Vec<Vec<f64>> = (0..4).map(|i| vec![i as f64, 0.0]).collect();
         let target: Vec<Vec<f64>> = (0..4).map(|i| vec![0.0, i as f64]).collect();
         let cfg = default_config();
-        let res = ot_feature_flow(&source, &target, &cfg).unwrap();
+        let res = ot_feature_flow(&source, &target, &cfg).expect("ot_feature_flow should succeed");
         assert_eq!(res.transported_features.len(), source.len());
         for row in &res.transported_features {
             assert_eq!(row.len(), source[0].len());
@@ -386,7 +386,7 @@ mod tests {
             n_steps: 0,
             ..default_config()
         };
-        let res = ot_feature_flow(&source, &target, &cfg).unwrap();
+        let res = ot_feature_flow(&source, &target, &cfg).expect("ot_feature_flow should succeed");
         assert_eq!(res.transported_features, source);
         assert!(res.cost_history.is_empty());
     }
@@ -401,7 +401,8 @@ mod tests {
     fn discrepancy_zero_identical() {
         let pts: Vec<Vec<f64>> = (0..5).map(|i| vec![i as f64]).collect();
         // Use small eps to minimise entropic bias.
-        let d = domain_discrepancy(&pts, &pts, 0.01, 500).unwrap();
+        let d =
+            domain_discrepancy(&pts, &pts, 0.01, 500).expect("domain_discrepancy should succeed");
         assert!(
             d < 1e-2,
             "discrepancy {d} should be near-zero for identical sets"
@@ -414,7 +415,8 @@ mod tests {
     fn discrepancy_positive_separated() {
         let source: Vec<Vec<f64>> = (0..5).map(|i| vec![i as f64]).collect();
         let target: Vec<Vec<f64>> = (0..5).map(|i| vec![100.0 + i as f64]).collect();
-        let d = domain_discrepancy(&source, &target, 0.1, 100).unwrap();
+        let d = domain_discrepancy(&source, &target, 0.1, 100)
+            .expect("domain_discrepancy should succeed");
         assert!(
             d > 1.0,
             "discrepancy {d} should be large for separated sets"
@@ -427,8 +429,10 @@ mod tests {
     fn discrepancy_symmetric() {
         let source: Vec<Vec<f64>> = vec![vec![0.0], vec![1.0], vec![2.0]];
         let target: Vec<Vec<f64>> = vec![vec![5.0], vec![6.0], vec![7.0]];
-        let d1 = domain_discrepancy(&source, &target, 0.5, 200).unwrap();
-        let d2 = domain_discrepancy(&target, &source, 0.5, 200).unwrap();
+        let d1 = domain_discrepancy(&source, &target, 0.5, 200)
+            .expect("domain_discrepancy should succeed");
+        let d2 = domain_discrepancy(&target, &source, 0.5, 200)
+            .expect("domain_discrepancy should succeed");
         assert!(
             approx(d1, d2, 1e-4),
             "discrepancy not symmetric: {d1} vs {d2}"
@@ -447,7 +451,7 @@ mod tests {
             ..default_config()
         };
         let dist_before = mean_sq_dist_to_centroid(&source, &target);
-        let res = ot_feature_flow(&source, &target, &cfg).unwrap();
+        let res = ot_feature_flow(&source, &target, &cfg).expect("ot_feature_flow should succeed");
         let dist_after = mean_sq_dist_to_centroid(&res.transported_features, &target);
         assert!(
             dist_after < dist_before,
@@ -466,7 +470,7 @@ mod tests {
             n_steps,
             ..default_config()
         };
-        let res = ot_feature_flow(&source, &target, &cfg).unwrap();
+        let res = ot_feature_flow(&source, &target, &cfg).expect("ot_feature_flow should succeed");
         assert_eq!(res.cost_history.len(), n_steps);
     }
 
@@ -481,7 +485,7 @@ mod tests {
             n_steps: 10,
             ..default_config()
         };
-        let res = ot_feature_flow(&source, &target, &cfg).unwrap();
+        let res = ot_feature_flow(&source, &target, &cfg).expect("ot_feature_flow should succeed");
         assert_eq!(res.transported_features, source);
     }
 
@@ -548,9 +552,11 @@ mod tests {
             step_size: 0.3,
             ..default_config()
         };
-        let d_before = domain_discrepancy(&source, &target, 0.1, 100).unwrap();
-        let res = ot_feature_flow(&source, &target, &cfg).unwrap();
-        let d_after = domain_discrepancy(&res.transported_features, &target, 0.1, 100).unwrap();
+        let d_before = domain_discrepancy(&source, &target, 0.1, 100)
+            .expect("domain_discrepancy should succeed");
+        let res = ot_feature_flow(&source, &target, &cfg).expect("ot_feature_flow should succeed");
+        let d_after = domain_discrepancy(&res.transported_features, &target, 0.1, 100)
+            .expect("domain_discrepancy should succeed");
         assert!(
             d_after < d_before,
             "discrepancy did not decrease: {d_before} → {d_after}"

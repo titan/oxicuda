@@ -195,7 +195,7 @@ mod tests {
         let ts = [0.0_f32];
         let te = [0.5_f32];
         let w = [1.0_f32];
-        let loss = distortion_loss(&ts, &te, &w).unwrap();
+        let loss = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
         // double_sum = 0, width_sum = 1^2 * 0.5 / 3 = 1/6
         assert_close(loss, 1.0 / 6.0, 1e-6, "single sample loss");
     }
@@ -206,7 +206,7 @@ mod tests {
         let ts = [0.0_f32, 1.0, 2.0, 3.0];
         let te = [1.0_f32, 2.0, 3.0, 4.0];
         let w = [0.25_f32; 4];
-        let loss = distortion_loss(&ts, &te, &w).unwrap();
+        let loss = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
         assert!(loss.is_finite(), "loss must be finite");
         assert!(loss > 0.0, "uniform weights → positive loss");
     }
@@ -217,7 +217,7 @@ mod tests {
         let ts = [0.0_f32, 1.0, 2.0];
         let te = [1.0_f32, 2.0, 3.0];
         let w = [0.0_f32, 1.0, 0.0];
-        let loss = distortion_loss(&ts, &te, &w).unwrap();
+        let loss = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
         // double_sum = 0 (only one non-zero weight, no cross terms)
         // width_sum = 1^2 * 1.0 / 3 = 1/3
         assert_close(loss, 1.0 / 3.0, 1e-6, "concentrated weight");
@@ -237,7 +237,7 @@ mod tests {
         let ts = [0.0_f32, 1.0];
         let te = [1.0_f32, 2.0];
         let w = [0.5_f32, 0.5];
-        let loss = distortion_loss(&ts, &te, &w).unwrap();
+        let loss = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
         let expected = 0.5 + (0.5 / 3.0);
         assert_close(loss, expected, 1e-6, "two-sample manual check");
     }
@@ -248,7 +248,7 @@ mod tests {
         let ts = [0.0_f32, 1.0, 2.0];
         let te = [1.0_f32, 2.0, 3.0];
         let w = [0.0_f32; 3];
-        let loss = distortion_loss(&ts, &te, &w).unwrap();
+        let loss = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
         assert_close(loss, 0.0, 1e-9, "zero weights");
     }
 
@@ -261,7 +261,7 @@ mod tests {
             (&[0.0, 0.5], &[0.5, 1.0], &[0.6, 0.4]),
         ];
         for &(ts, te, w) in cases {
-            let loss = distortion_loss(ts, te, w).unwrap();
+            let loss = distortion_loss(ts, te, w).expect("distortion_loss should succeed");
             assert!(loss >= 0.0, "loss must be non-negative, got {loss}");
         }
     }
@@ -276,7 +276,7 @@ mod tests {
         let te = [1.0_f32, 2.0, 3.0, 4.0];
         let w = [0.1_f32, 0.4, 0.4, 0.1];
 
-        let loss = distortion_loss(&ts, &te, &w).unwrap();
+        let loss = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
 
         // Brute-force: O(N²) reference
         let n = ts.len();
@@ -314,8 +314,8 @@ mod tests {
         // The loss function Σ_i Σ_j w_i w_j |t̄_i - t̄_j| is NOT generally invariant
         // under weight permutation unless the interval positions are also permuted.
         // Verify each is non-negative and finite.
-        let l2 = distortion_loss(&ts, &te, &w2).unwrap();
-        let l2r = distortion_loss(&ts, &te, &w2_rev).unwrap();
+        let l2 = distortion_loss(&ts, &te, &w2).expect("distortion_loss should succeed");
+        let l2r = distortion_loss(&ts, &te, &w2_rev).expect("distortion_loss should succeed");
         assert!(l2 >= 0.0 && l2.is_finite(), "loss w2 non-negative finite");
         assert!(
             l2r >= 0.0 && l2r.is_finite(),
@@ -329,9 +329,9 @@ mod tests {
         let ts = [0.0_f32, 1.0, 2.0];
         let te = [1.0_f32, 2.0, 3.0];
         let w = [0.2_f32, 0.5, 0.3];
-        let single = distortion_loss(&ts, &te, &w).unwrap();
+        let single = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
         let rays: &[(&[f32], &[f32], &[f32])] = &[(&ts, &te, &w), (&ts, &te, &w), (&ts, &te, &w)];
-        let batch = distortion_loss_batch(rays).unwrap();
+        let batch = distortion_loss_batch(rays).expect("distortion_loss_batch should succeed");
         assert_close(single, batch, 1e-6, "batch of identical rays == single");
     }
 
@@ -344,11 +344,11 @@ mod tests {
         let ts2 = [0.0_f32, 2.0, 4.0];
         let te2 = [2.0_f32, 4.0, 6.0];
         let w2 = [0.3_f32, 0.4, 0.3];
-        let l1 = distortion_loss(&ts1, &te1, &w1).unwrap();
-        let l2 = distortion_loss(&ts2, &te2, &w2).unwrap();
+        let l1 = distortion_loss(&ts1, &te1, &w1).expect("distortion_loss should succeed");
+        let l2 = distortion_loss(&ts2, &te2, &w2).expect("distortion_loss should succeed");
         let expected = (l1 + l2) / 2.0;
         let rays: &[(&[f32], &[f32], &[f32])] = &[(&ts1, &te1, &w1), (&ts2, &te2, &w2)];
-        let batch = distortion_loss_batch(rays).unwrap();
+        let batch = distortion_loss_batch(rays).expect("distortion_loss_batch should succeed");
         assert_close(expected, batch, 1e-6, "batch mean of two different rays");
     }
 
@@ -360,8 +360,9 @@ mod tests {
         let w = [0.3_f32, 0.5, 0.2];
         let ts = [0.0_f32, 0.5, 1.5];
         let te = [0.5_f32, 1.5, 2.5];
-        let loss_explicit = distortion_loss(&ts, &te, &w).unwrap();
-        let loss_mid = distortion_loss_midpoints(&midpoints, &w).unwrap();
+        let loss_explicit = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
+        let loss_mid = distortion_loss_midpoints(&midpoints, &w)
+            .expect("distortion_loss_midpoints should succeed");
         assert_close(loss_explicit, loss_mid, 1e-6, "midpoints vs explicit");
     }
 
@@ -370,11 +371,12 @@ mod tests {
     fn distortion_loss_midpoints_two() {
         let midpoints = [0.5_f32, 1.5];
         let w = [0.6_f32, 0.4];
-        let loss = distortion_loss_midpoints(&midpoints, &w).unwrap();
+        let loss = distortion_loss_midpoints(&midpoints, &w)
+            .expect("distortion_loss_midpoints should succeed");
         // Explicit: ts=[0,0.5], te=[0.5,1.5], w=[0.6,0.4]
         let ts = [0.0_f32, 0.5];
         let te = [0.5_f32, 1.5];
-        let expected = distortion_loss(&ts, &te, &w).unwrap();
+        let expected = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
         assert_close(loss, expected, 1e-6, "midpoints N=2");
     }
 
@@ -458,7 +460,7 @@ mod tests {
         let ts = [1.0_f32, 1.0, 1.0];
         let te = [1.0_f32, 1.0, 1.0];
         let w = [0.3_f32, 0.4, 0.3];
-        let loss = distortion_loss(&ts, &te, &w).unwrap();
+        let loss = distortion_loss(&ts, &te, &w).expect("distortion_loss should succeed");
         // cross-terms all zero, width terms zero → total = 0
         assert_close(loss, 0.0, 1e-9, "zero-width intervals → zero loss");
     }

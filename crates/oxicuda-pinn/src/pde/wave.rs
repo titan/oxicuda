@@ -83,13 +83,14 @@ mod tests {
         let u = wave_analytic(x, t, C);
         let u_tt = -C * C * pi * pi * u;
         let u_xx = -pi * pi * u;
-        let r = wave_residual(u_tt, u_xx, C).unwrap();
+        let r = wave_residual(u_tt, u_xx, C).expect("wave_residual should succeed for analytic D'Alembert derivatives with valid wave speed c");
         assert!(r.abs() < 1e-3, "Wave residual on analytic solution: {r}");
     }
 
     #[test]
     fn wave_residual_check_passes() {
-        let ok = wave_residual_check(0.4, 0.2, C, 1e-3).unwrap();
+        let ok = wave_residual_check(0.4, 0.2, C, 1e-3)
+            .expect("wave_residual_check should succeed for valid wave speed c at (x=0.4, t=0.2)");
         assert!(ok);
     }
 

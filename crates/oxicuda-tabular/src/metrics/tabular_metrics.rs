@@ -186,7 +186,7 @@ mod tests {
     fn binary_accuracy_perfect() {
         let preds = vec![0.9_f32, 0.1, 0.8, 0.2];
         let labels = vec![1u32, 0, 1, 0];
-        let acc = binary_accuracy(&preds, &labels, 0.5).unwrap();
+        let acc = binary_accuracy(&preds, &labels, 0.5).expect("binary_accuracy should succeed");
         assert!((acc - 1.0).abs() < 1e-5);
     }
 
@@ -194,7 +194,7 @@ mod tests {
     fn auc_roc_perfect() {
         let scores = vec![0.9_f32, 0.8, 0.3, 0.2];
         let labels = vec![1u32, 1, 0, 0];
-        let auc = auc_roc(&scores, &labels).unwrap();
+        let auc = auc_roc(&scores, &labels).expect("auc_roc should succeed");
         assert!((auc - 1.0).abs() < 1e-5);
     }
 
@@ -202,7 +202,7 @@ mod tests {
     fn rmse_zero_for_perfect() {
         let preds = vec![1.0_f32, 2.0, 3.0];
         let targets = vec![1.0_f32, 2.0, 3.0];
-        let r = rmse(&preds, &targets).unwrap();
+        let r = rmse(&preds, &targets).expect("rmse should succeed");
         assert!(r < 1e-6);
     }
 
@@ -210,7 +210,7 @@ mod tests {
     fn mae_known_value() {
         let preds = vec![1.0_f32, 3.0];
         let targets = vec![0.0_f32, 0.0];
-        let m = mae(&preds, &targets).unwrap();
+        let m = mae(&preds, &targets).expect("mae should succeed");
         assert!((m - 2.0).abs() < 1e-5);
     }
 }

@@ -460,7 +460,7 @@ mod tests {
         let n = 1024;
         let data = make_chain_two(n, 0.5, 1234);
         let cfg = DirectLingamConfig::default();
-        let r = direct_lingam(&data, n, 2, &cfg).unwrap();
+        let r = direct_lingam(&data, n, 2, &cfg).expect("direct_lingam should succeed");
         assert_eq!(r.ordering, vec![0, 1]);
     }
 
@@ -470,7 +470,7 @@ mod tests {
         let n = 2048;
         let data = make_chain_two(n, 0.5, 9876);
         let cfg = DirectLingamConfig::default();
-        let r = direct_lingam(&data, n, 2, &cfg).unwrap();
+        let r = direct_lingam(&data, n, 2, &cfg).expect("direct_lingam should succeed");
         let beta = r.b[2]; // B[1, 0]
         assert!(
             (beta - 0.5).abs() < 0.05,
@@ -498,7 +498,7 @@ mod tests {
             data[i * 3 + 2] = 0.4 * data[i * 3 + 1] + u3;
         }
         let cfg = DirectLingamConfig::default();
-        let r = direct_lingam(&data, n, 3, &cfg).unwrap();
+        let r = direct_lingam(&data, n, 3, &cfg).expect("direct_lingam should succeed");
         // Ordering: 0 must precede 1, which must precede 2.
         let pos: Vec<usize> = {
             let mut p = vec![0_usize; 3];
@@ -528,7 +528,7 @@ mod tests {
             swapped[i * 2 + 1] = base[i * 2];
         }
         let cfg = DirectLingamConfig::default();
-        let r = direct_lingam(&swapped, n, 2, &cfg).unwrap();
+        let r = direct_lingam(&swapped, n, 2, &cfg).expect("direct_lingam should succeed");
         // The exogenous variable is now column 1 (originally x1).
         assert_eq!(r.ordering, vec![1, 0]);
         let beta = r.b[1]; // B[0, 1]
@@ -544,8 +544,8 @@ mod tests {
         let n = 256;
         let data = make_chain_two(n, 0.5, 31415);
         let cfg = DirectLingamConfig::default();
-        let r1 = direct_lingam(&data, n, 2, &cfg).unwrap();
-        let r2 = direct_lingam(&data, n, 2, &cfg).unwrap();
+        let r1 = direct_lingam(&data, n, 2, &cfg).expect("direct_lingam should succeed");
+        let r2 = direct_lingam(&data, n, 2, &cfg).expect("direct_lingam should succeed");
         assert_eq!(r1.ordering, r2.ordering);
         assert_eq!(r1.b, r2.b);
     }
@@ -559,7 +559,7 @@ mod tests {
         let cfg = DirectLingamConfig::default();
         let r = direct_lingam(&data, n, d, &cfg);
         assert!(r.is_ok(), "ridge OLS must not blow up at n=d+1");
-        let r = r.unwrap();
+        let r = r.expect("r should be present");
         assert_eq!(r.ordering.len(), 2);
         assert_eq!(r.b.len(), 4);
         for v in &r.b {
@@ -572,7 +572,7 @@ mod tests {
         let n = 4096;
         let data = make_chain_two(n, 0.5, 55555);
         let cfg = DirectLingamConfig::default();
-        let r = direct_lingam(&data, n, 2, &cfg).unwrap();
+        let r = direct_lingam(&data, n, 2, &cfg).expect("direct_lingam should succeed");
         assert_eq!(r.ordering, vec![0, 1]);
         let beta = r.b[2]; // B[1, 0]
         assert!((beta - 0.5).abs() < 0.03, "large-n β = {beta}");
@@ -606,7 +606,7 @@ mod tests {
         let n = 1024;
         let data = make_chain_two(n, 0.5, 67890);
         let cfg = DirectLingamConfig::default();
-        let r = direct_lingam(&data, n, 2, &cfg).unwrap();
+        let r = direct_lingam(&data, n, 2, &cfg).expect("direct_lingam should succeed");
         let d = 2_usize;
         for k in 0..d {
             for m in k..d {

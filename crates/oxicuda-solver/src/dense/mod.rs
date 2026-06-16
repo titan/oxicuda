@@ -6,6 +6,7 @@
 
 pub mod band;
 pub mod batched;
+pub mod block_tridiagonal;
 pub mod cholesky;
 pub mod dc_svd;
 pub mod det;
@@ -26,6 +27,7 @@ pub mod tridiagonal;
 // Re-exports of primary types and functions.
 pub use band::{BandMatrix, band_cholesky, band_lu, band_solve};
 pub use batched::{BatchAlgorithm, BatchConfig, BatchedResult, BatchedSolver};
+pub use block_tridiagonal::block_tridiagonal_solve;
 pub use cholesky::{cholesky, cholesky_solve};
 pub use dc_svd::{DcSvdConfig, dc_svd};
 pub use det::{determinant, log_determinant};

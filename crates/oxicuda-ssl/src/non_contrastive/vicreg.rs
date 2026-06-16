@@ -184,9 +184,9 @@ mod tests {
         let n = 8;
         let d = 4;
         let z: Vec<f32> = (0..n * d).map(|i| i as f32 * 0.1).collect();
-        let cfg = VicRegConfig::new(1.0, 0.0, 0.0, 1.0).unwrap();
+        let cfg = VicRegConfig::new(1.0, 0.0, 0.0, 1.0).expect("new should succeed");
         // Identical inputs → MSE = 0 → loss = 0.
-        let l = vicreg_loss(&z, &z, n, d, &cfg).unwrap();
+        let l = vicreg_loss(&z, &z, n, d, &cfg).expect("vicreg_loss should succeed");
         assert!(l.abs() < 1e-5);
     }
 
@@ -197,7 +197,7 @@ mod tests {
         let z_a: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.013).sin()).collect();
         let z_b: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.027).cos()).collect();
         let cfg = VicRegConfig::default();
-        let l = vicreg_loss(&z_a, &z_b, n, d, &cfg).unwrap();
+        let l = vicreg_loss(&z_a, &z_b, n, d, &cfg).expect("vicreg_loss should succeed");
         assert!(l.is_finite() && l >= 0.0);
     }
 
@@ -207,8 +207,8 @@ mod tests {
         let n = 16;
         let d = 4;
         let z = vec![1.0_f32; n * d];
-        let cfg = VicRegConfig::new(0.0, 1.0, 0.0, 1.0).unwrap();
-        let l = vicreg_loss(&z, &z, n, d, &cfg).unwrap();
+        let cfg = VicRegConfig::new(0.0, 1.0, 0.0, 1.0).expect("new should succeed");
+        let l = vicreg_loss(&z, &z, n, d, &cfg).expect("vicreg_loss should succeed");
         // Every column has zero variance → variance hinge per column ≈ γ = 1.
         // Both halves contribute, mean ≈ 1.
         assert!(l > 0.5, "l = {l}");

@@ -622,7 +622,8 @@ mod tests {
         let k_shot = 2;
         let feat_dim = 8;
         let support = vec![0.0_f32; n_way * k_shot * feat_dim];
-        let protos = Can::compute_prototypes(&support, n_way, k_shot, feat_dim).unwrap();
+        let protos = Can::compute_prototypes(&support, n_way, k_shot, feat_dim)
+            .expect("compute_prototypes should succeed");
         assert_eq!(protos.len(), n_way * feat_dim);
     }
 
@@ -632,7 +633,8 @@ mod tests {
         let n_way = 2;
         let k_shot = 1;
         let support = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        let protos = Can::compute_prototypes(&support, n_way, k_shot, feat_dim).unwrap();
+        let protos = Can::compute_prototypes(&support, n_way, k_shot, feat_dim)
+            .expect("compute_prototypes should succeed");
         assert_eq!(protos.len(), n_way * feat_dim);
         for (a, b) in protos.iter().zip(support.iter()) {
             assert!(
@@ -654,8 +656,8 @@ mod tests {
         let support: Vec<f32> = (0..n_support * cfg.feat_dim)
             .map(|_| rng.next_f32())
             .collect();
-        let (out, _attn) =
-            Can::cross_attend(&weights, &query, &support, n_support, cfg.scale).unwrap();
+        let (out, _attn) = Can::cross_attend(&weights, &query, &support, n_support, cfg.scale)
+            .expect("cross_attend should succeed");
         assert_eq!(
             out.len(),
             cfg.feat_dim,
@@ -673,8 +675,8 @@ mod tests {
         let support: Vec<f32> = (0..n_support * cfg.feat_dim)
             .map(|_| rng.next_f32())
             .collect();
-        let (_out, attn) =
-            Can::cross_attend(&weights, &query, &support, n_support, cfg.scale).unwrap();
+        let (_out, attn) = Can::cross_attend(&weights, &query, &support, n_support, cfg.scale)
+            .expect("cross_attend should succeed");
         let sum: f32 = attn.iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-5,
@@ -701,7 +703,7 @@ mod tests {
             cfg.feat_dim,
             cfg.scale,
         )
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(out.attended_prototypes.len(), cfg.n_way * cfg.feat_dim);
     }
 
@@ -722,7 +724,7 @@ mod tests {
             cfg.feat_dim,
             cfg.scale,
         )
-        .unwrap();
+        .expect("value should be present");
         assert_eq!(out.attention_weights.len(), cfg.n_way * cfg.k_shot);
     }
 
@@ -738,7 +740,8 @@ mod tests {
             0.0, 1.0, 0.0, 0.0, // class 1
             0.0, 0.0, 1.0, 0.0, // class 2
         ];
-        let logits = Can::classify(&query, &protos, n_way, feat_dim).unwrap();
+        let logits =
+            Can::classify(&query, &protos, n_way, feat_dim).expect("classify should succeed");
         assert_eq!(logits.len(), n_way);
     }
 
@@ -752,13 +755,14 @@ mod tests {
             0.0, 1.0, 0.0, 0.0, // class 1
             0.0, 0.0, 1.0, 0.0, // class 2
         ];
-        let logits = Can::classify(&query, &protos, n_way, feat_dim).unwrap();
+        let logits =
+            Can::classify(&query, &protos, n_way, feat_dim).expect("classify should succeed");
         let best = logits
             .iter()
             .enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(
             best, 0,
             "identical query should have highest cosine sim to class 0"
@@ -770,21 +774,25 @@ mod tests {
     #[test]
     fn predict_episode_returns_n_query_preds() {
         let cfg = default_config();
-        let can = Can::new(cfg.clone()).unwrap();
+        let can = Can::new(cfg.clone()).expect("value should be present");
         let weights = make_weights(&cfg);
         let n_query = 3;
         let episode = make_episode(cfg.n_way, cfg.k_shot, n_query, cfg.feat_dim);
-        let preds = can.predict_episode(&weights, &episode).unwrap();
+        let preds = can
+            .predict_episode(&weights, &episode)
+            .expect("predict_episode should succeed");
         assert_eq!(preds.len(), cfg.n_way * n_query);
     }
 
     #[test]
     fn episode_accuracy_in_range() {
         let cfg = default_config();
-        let can = Can::new(cfg.clone()).unwrap();
+        let can = Can::new(cfg.clone()).expect("value should be present");
         let weights = make_weights(&cfg);
         let episode = make_episode(cfg.n_way, cfg.k_shot, 2, cfg.feat_dim);
-        let acc = can.episode_accuracy(&weights, &episode).unwrap();
+        let acc = can
+            .episode_accuracy(&weights, &episode)
+            .expect("episode_accuracy should succeed");
         assert!((0.0..=1.0).contains(&acc), "accuracy must be in [0,1]");
     }
 
@@ -799,10 +807,12 @@ mod tests {
             attention_heads: 1,
             scale: 0.35,
         };
-        let can = Can::new(cfg.clone()).unwrap();
+        let can = Can::new(cfg.clone()).expect("value should be present");
         let weights = make_weights(&cfg);
         let episode = make_episode(cfg.n_way, cfg.k_shot, 2, cfg.feat_dim);
-        let acc = can.episode_accuracy(&weights, &episode).unwrap();
+        let acc = can
+            .episode_accuracy(&weights, &episode)
+            .expect("episode_accuracy should succeed");
         assert!((0.0..=1.0).contains(&acc));
     }
 
@@ -815,10 +825,12 @@ mod tests {
             attention_heads: 4,
             scale: 0.5,
         };
-        let can = Can::new(cfg.clone()).unwrap();
+        let can = Can::new(cfg.clone()).expect("value should be present");
         let weights = make_weights(&cfg);
         let episode = make_episode(cfg.n_way, cfg.k_shot, 2, cfg.feat_dim);
-        let acc = can.episode_accuracy(&weights, &episode).unwrap();
+        let acc = can
+            .episode_accuracy(&weights, &episode)
+            .expect("episode_accuracy should succeed");
         assert!((0.0..=1.0).contains(&acc));
     }
 
@@ -831,10 +843,12 @@ mod tests {
             attention_heads: 2,
             scale: 0.5,
         };
-        let can = Can::new(cfg.clone()).unwrap();
+        let can = Can::new(cfg.clone()).expect("value should be present");
         let weights = make_weights(&cfg);
         let episode = make_episode(cfg.n_way, cfg.k_shot, 2, cfg.feat_dim);
-        let acc = can.episode_accuracy(&weights, &episode).unwrap();
+        let acc = can
+            .episode_accuracy(&weights, &episode)
+            .expect("episode_accuracy should succeed");
         assert!((0.0..=1.0).contains(&acc));
     }
 
@@ -847,10 +861,12 @@ mod tests {
             attention_heads: 2,
             scale: 0.5,
         };
-        let can = Can::new(cfg.clone()).unwrap();
+        let can = Can::new(cfg.clone()).expect("value should be present");
         let weights = make_weights(&cfg);
         let episode = make_episode(cfg.n_way, cfg.k_shot, 2, cfg.feat_dim);
-        let acc = can.episode_accuracy(&weights, &episode).unwrap();
+        let acc = can
+            .episode_accuracy(&weights, &episode)
+            .expect("episode_accuracy should succeed");
         assert!((0.0..=1.0).contains(&acc));
     }
 
@@ -876,9 +892,11 @@ mod tests {
             .map(|_| rng.next_f32())
             .collect();
         let (_out_sharp, attn_sharp) =
-            Can::cross_attend(&weights, &query, &support, n_support, cfg_sharp.scale).unwrap();
+            Can::cross_attend(&weights, &query, &support, n_support, cfg_sharp.scale)
+                .expect("cross_attend should succeed");
         let (_out_flat, attn_flat) =
-            Can::cross_attend(&weights, &query, &support, n_support, cfg_flat.scale).unwrap();
+            Can::cross_attend(&weights, &query, &support, n_support, cfg_flat.scale)
+                .expect("cross_attend should succeed");
         let max_sharp = attn_sharp.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let max_flat = attn_flat.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         // Higher scale → sharper distribution → higher max weight

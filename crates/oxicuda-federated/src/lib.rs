@@ -34,11 +34,28 @@ pub mod selection;
 
 /// Convenience re-exports for common federated learning types.
 pub mod prelude {
+    pub use crate::algorithm::centered_clipping::{
+        CenteredClippingConfig, CenteredClippingResult, centered_clipping,
+        centered_clipping_at_mean,
+    };
     pub use crate::algorithm::fedadam::{FedAdamState, ServerOptimizerKind};
     pub use crate::algorithm::fedavg::{FedAvgConfig, FedAvgState};
     pub use crate::algorithm::fedbuff::{BufferedUpdate, FedBuffConfig, FedBuffState};
+    pub use crate::algorithm::feddf::{
+        FedDf, FedDfConfig, LinearModel, argmax, softmax_with_temperature,
+    };
+    pub use crate::algorithm::feddyn::{FedDyn, FedDynClientState, FedDynConfig, FedDynState};
     pub use crate::algorithm::fedprox::{
         FedProxConfig, fedprox_client_loss_correction, proximal_gradient, proximal_loss,
+    };
+    pub use crate::algorithm::flute::{
+        Flute, FluteClientUpdate, FluteConfig, FluteModel, FluteSample,
+    };
+    pub use crate::algorithm::geometric_median::{
+        GeometricMedianConfig, GeometricMedianResult, geometric_median,
+    };
+    pub use crate::algorithm::moon::{
+        MoonConfig, moon_contrastive_grad, moon_contrastive_loss, moon_total_loss,
     };
     pub use crate::algorithm::scaffold::{
         ScaffoldClientState, ScaffoldState, scaffold_client_update, scaffold_server_aggregate,
@@ -58,6 +75,9 @@ pub mod prelude {
     pub use crate::privacy::dp_ftrl::{DpFtrl, DpFtrlConfig, DpFtrlResult, DpFtrlState};
     pub use crate::privacy::gaussian::GaussianMechanism;
     pub use crate::privacy::laplacian::{LaplacianMechanism, add_laplacian_noise};
+    pub use crate::privacy::ldp_fl::{
+        LdpFlConfig, LdpMechanism, amplified_epsilon, ldp_fl_aggregate, privatize_update,
+    };
     pub use crate::privacy::moments::MomentsAccountant;
     pub use crate::privacy::pate::{PateConfig, data_dependent_epsilon, noisy_voting};
     pub use crate::privacy::randomized_response::{RandomizedResponse, RandomizedResponseConfig};
@@ -93,7 +113,7 @@ mod e2e_tests {
             (vec![7.0_f32, 8.0, 9.0], 1.0_f32),
         ];
         let mut state = FedAvgState::new(3);
-        state.aggregate(&updates).unwrap();
+        state.aggregate(&updates).expect("aggregate should succeed");
         // Mean of (1,3,5,7), (2,4,6,8), (3,5,7,9) = 4, 5, 6
         assert!((state.global_params[0] - 4.0).abs() < 1e-5);
         assert!((state.global_params[1] - 5.0).abs() < 1e-5);
@@ -106,10 +126,11 @@ mod e2e_tests {
         let global = vec![0.0_f32, 0.0, 0.0];
         let local = vec![1.0_f32, 1.0, 1.0];
         let mu = 0.1;
-        let loss = proximal_loss(&local, &global, mu).unwrap();
+        let loss = proximal_loss(&local, &global, mu).expect("proximal_loss should succeed");
         // 0.5 · μ · ‖local − global‖² = 0.5 · 0.1 · 3 = 0.15
         assert!((loss - 0.15).abs() < 1e-5);
-        let grad = proximal_gradient(&local, &global, mu).unwrap();
+        let grad =
+            proximal_gradient(&local, &global, mu).expect("proximal_gradient should succeed");
         for g in &grad {
             assert!((g - 0.1).abs() < 1e-6);
         }
@@ -119,9 +140,9 @@ mod e2e_tests {
     fn e2e_topk_sparsify_with_error_feedback_compensates_loss() {
         let grad = vec![0.5_f32, -0.4, 0.3, -0.2, 0.1, -0.05, 0.02];
         let mut residual = vec![0.0_f32; grad.len()];
-        let (sparse, _norm_lost) = topk_sparsify(&grad, 3).unwrap();
+        let (sparse, _norm_lost) = topk_sparsify(&grad, 3).expect("topk_sparsify should succeed");
         // Update error-feedback residual.
-        error_feedback(&mut residual, &grad, &sparse).unwrap();
+        error_feedback(&mut residual, &grad, &sparse).expect("error_feedback should succeed");
         // Residual should hold the dropped entries → restoring them would recover grad.
         let mut combined = sparse.clone();
         for (c, &r) in combined.iter_mut().zip(residual.iter()) {
@@ -142,8 +163,9 @@ mod e2e_tests {
         let mut sum = vec![0.0_f64; grad.len()];
         let trials = 1024;
         for _ in 0..trials {
-            let q = stochastic_quantize(&grad, s, handle.rng_mut()).unwrap();
-            let dq = dequantize(&q, norm, s).unwrap();
+            let q =
+                stochastic_quantize(&grad, s, handle.rng_mut()).expect("value should be present");
+            let dq = dequantize(&q, norm, s).expect("dequantize should succeed");
             for (acc, &v) in sum.iter_mut().zip(dq.iter()) {
                 *acc += v as f64;
             }
@@ -159,9 +181,10 @@ mod e2e_tests {
     #[test]
     fn e2e_gaussian_dp_noise_adds_calibrated_variance() {
         let mut handle = FedHandle::default_handle();
-        let mech = GaussianMechanism::new(1.0, 1.0, 1e-5).unwrap();
+        let mech = GaussianMechanism::new(1.0, 1.0, 1e-5).expect("new should succeed");
         let mut data = vec![0.0_f32; 1024];
-        mech.add_noise(&mut data, handle.rng_mut()).unwrap();
+        mech.add_noise(&mut data, handle.rng_mut())
+            .expect("value should be present");
         // Empirical std should be > 0.5 with such a budget.
         let mean: f32 = data.iter().sum::<f32>() / data.len() as f32;
         let var: f32 = data.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / data.len() as f32;
@@ -173,36 +196,40 @@ mod e2e_tests {
     fn e2e_rdp_gaussian_composition_grows_linearly_in_steps() {
         let alpha = 2.0_f32;
         let sigma = 1.0_f32;
-        let r1 = compose_rdp(alpha, sigma, 1).unwrap();
-        let r10 = compose_rdp(alpha, sigma, 10).unwrap();
+        let r1 = compose_rdp(alpha, sigma, 1).expect("compose_rdp should succeed");
+        let r10 = compose_rdp(alpha, sigma, 10).expect("compose_rdp should succeed");
         assert!((r10 - 10.0 * r1).abs() < 1e-3);
         // Conversion to (ε, δ)-DP yields finite ε.
-        let eps = rdp_to_dp(alpha, r10, 1e-5).unwrap();
+        let eps = rdp_to_dp(alpha, r10, 1e-5).expect("rdp_to_dp should succeed");
         assert!(eps.is_finite() && eps > 0.0);
     }
 
     #[test]
     fn e2e_shamir_secure_aggregation_round_trip() {
         let mut handle = FedHandle::default_handle();
-        let cfg = ShamirConfig::new(3, 5).unwrap();
+        let cfg = ShamirConfig::new(3, 5).expect("new should succeed");
         let secret = 12345_u64;
-        let shares = share_scalar(secret, &cfg, handle.rng_mut()).unwrap();
+        let shares = share_scalar(secret, &cfg, handle.rng_mut()).expect("value should be present");
         // Reconstruct from any 3 of 5 shares.
-        let recovered = reconstruct_scalar(&shares[0..3], 3).unwrap();
+        let recovered =
+            reconstruct_scalar(&shares[0..3], 3).expect("reconstruct_scalar should succeed");
         assert_eq!(recovered, secret);
-        let recovered2 = reconstruct_scalar(&shares[2..5], 3).unwrap();
+        let recovered2 =
+            reconstruct_scalar(&shares[2..5], 3).expect("reconstruct_scalar should succeed");
         assert_eq!(recovered2, secret);
     }
 
     #[test]
     fn e2e_shamir_gradient_round_trip() {
         let mut handle = FedHandle::default_handle();
-        let cfg = ShamirConfig::new(3, 5).unwrap();
+        let cfg = ShamirConfig::new(3, 5).expect("new should succeed");
         let grad = vec![1.5_f32, -2.5, 0.0, 0.001, -100.0];
-        let shares = share_gradient(&grad, &cfg, handle.rng_mut()).unwrap();
+        let shares =
+            share_gradient(&grad, &cfg, handle.rng_mut()).expect("value should be present");
         // Reconstruct from a 3-of-5 subset of shares per element.
         let subset: Vec<Vec<(usize, u64)>> = shares.iter().map(|s| s[..3].to_vec()).collect();
-        let recovered = reconstruct_gradient(&subset, 3).unwrap();
+        let recovered =
+            reconstruct_gradient(&subset, 3).expect("reconstruct_gradient should succeed");
         for (a, &b) in recovered.iter().zip(grad.iter()) {
             assert!((a - b).abs() < 1e-2, "recovered {a} != {b}");
         }
@@ -211,7 +238,7 @@ mod e2e_tests {
     #[test]
     fn e2e_random_select_returns_unique_indices() {
         let mut handle = FedHandle::default_handle();
-        let selected = random_select(20, 5, handle.rng_mut()).unwrap();
+        let selected = random_select(20, 5, handle.rng_mut()).expect("value should be present");
         assert_eq!(selected.len(), 5);
         let mut copy = selected.clone();
         copy.sort_unstable();

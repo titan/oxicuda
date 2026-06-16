@@ -6,7 +6,7 @@ GPU-accelerated matrix decompositions and linear solvers, serving as a pure Rust
 
 ## Implementation Status
 
-**Actual: 15,804 SLoC (40 files) -- Estimated: 76K-122K SLoC (estimation.md Vol.5 solver portion)**
+**Actual: 19,297 SLoC (47 files) -- Estimated: 76K-122K SLoC (estimation.md Vol.5 solver portion)**
 
 Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD, eigendecomposition, inverse, determinant, least squares), four iterative sparse solvers (CG, BiCGSTAB, GMRES, direct), and helper utilities (pivoting, condition number estimation).
 
@@ -46,6 +46,10 @@ Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD,
 - [x] Nested dissection ordering -- Graph-based fill-reducing ordering for sparse direct solvers (P2)
 - [x] Tensor decomposition (tensor_decomp.rs) -- CP, Tucker, and Tensor-Train decompositions for multi-dimensional arrays on GPU (P1)
 - [x] ODE/PDE solver (ode_pde.rs) -- Runge-Kutta (RK4/RK45), implicit Euler, and method-of-lines PDE solver with GPU-accelerated right-hand-side evaluation (P1)
+- [ ] SuperLU left-looking sparse LU (`sparse/superlu_left_looking.rs`) — Li-Demmel 2003 ACM TOMS: left-looking column-by-column sparse LU with supernode detection and dense sub-block BLAS; distinct from existing multifrontal right-looking path; `LeftLookingLu` (P1)
+- [ ] PARDISO-compatible sparse direct solver interface (`sparse/pardiso_compat.rs`) — Schenk-Gärtner 2004: reordering + symbolic factorisation + numerical factorisation + solve pipeline with nested-dissection and AMD ordering; `PardisoCompatSolver` (P1)
+- [x] Block tridiagonal solver (`dense/block_tridiagonal.rs`) — block-LU factorisation for block-tridiagonal matrices arising from 2D/3D finite-difference PDE discretisations; distinct from scalar tridiagonal already done; `BlockTridiagonalSolver` (P2)
+- [x] Iterative refinement with mixed precision (`helpers/iterative_refinement.rs`) — Langou 2006: outer solve in FP32 + residual computed in FP64 + correction solve for improved accuracy; `IterativeRefinement` (P2)
 
 ## Dependencies
 
@@ -62,7 +66,7 @@ Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD,
 
 ## Quality Status
 
-- Tests: 387 passing
+- Tests: 447 passing
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
@@ -73,8 +77,8 @@ Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD,
 
 | Metric | Estimated (Vol.5 solver) | Actual |
 |--------|-------------------------|--------|
-| SLoC | 76K-122K | 13,981 |
-| Files | ~15-20 | 40 |
+| SLoC | 76K-122K | 19,297 |
+| Files | ~15-20 | 47 |
 | Coverage | Full cuSOLVER parity | Core decompositions + iterative |
 | Ratio | -- | ~3.4% of estimate |
 

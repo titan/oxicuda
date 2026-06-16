@@ -8,9 +8,9 @@ CGAL / Boost.Geometry / shapely-style 2D geometry libraries. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 5,910 (75 files, tokei measurement)
+- **Actual SLoC:** 10,028 (84 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 6,620
-- **Tests:** 190 passing
+- **Tests:** 282 passing
 - **Vol.61 scope:** Foundational 2D computational geometry (primitives, predicates,
   convex hulls, triangulation, Voronoi, polygon clipping, sweepline intersection,
   spatial indexing). Complements oxicuda-graph and oxicuda-numeric by providing the
@@ -86,6 +86,20 @@ CGAL / Boost.Geometry / shapely-style 2D geometry libraries. Part of
 - [x] `clipping/weiler_atherton.rs` -- Weiler-Atherton non-convex polygon clipping
 - [x] `clipping/line_clip_cohen_sutherland.rs` -- Cohen-Sutherland bit-coded line-vs-AABB
 - [x] `clipping/liang_barsky.rs` -- Liang-Barsky parametric line clipping
+- [x] `clipping/greiner_hormann.rs` -- Greiner-Hormann generalised Boolean clipping
+  (union / intersection / difference / xor) on arbitrary non-convex polygons via
+  doubly-linked intersection rings + entry/exit labelling; holes via winding,
+  query-perturbation degeneracy handling
+
+#### Alpha Shapes
+- [x] `alpha_shape/alpha_shape.rs` -- 2D alpha shapes (Edelsbrunner-Kirkpatrick-Seidel)
+  over the Delaunay triangulation; radius convention, alpha-complex triangles,
+  boundary edges, `alpha_spectrum` + `alpha_shape_auto` connectivity threshold
+
+#### Half-Plane Intersection
+- [x] `halfplane/half_plane_intersection.rs` -- Intersection of N half-planes via
+  the sorted-deque (incremental) algorithm; bounded polygon / `Empty` /
+  `Unbounded` detection with a sentinel bounding box
 
 #### Polygon Operations
 - [x] `polygon_ops/area_shoelace.rs` -- Shoelace
@@ -155,8 +169,13 @@ CGAL / Boost.Geometry / shapely-style 2D geometry libraries. Part of
 - [ ] Exact-arithmetic predicates (Shewchuk-style adaptive precision) for robust
   degenerate-input handling
 - [ ] 3D extensions (Vol.62 candidate): 3D convex hull, 3D Delaunay, 3D point location
-- [ ] Generalised polygon Boolean operations (union / intersection / difference)
-  on non-convex polygons via Vatti or Bentley-Ottmann
+- [x] Generalised polygon Boolean operations (union / intersection / difference /
+  xor) on non-convex polygons -- implemented via Greiner-Hormann in
+  `clipping/greiner_hormann.rs` (entry/exit ring tracing). Full shared-collinear-
+  edge robustness (Foster-Hormann ON-vertex handling) remains future work.
+- [x] 2D alpha shapes over Delaunay -- `alpha_shape/alpha_shape.rs`
+- [x] Half-plane intersection (bounded / empty / unbounded) --
+  `halfplane/half_plane_intersection.rs`
 - [ ] Streaming sweepline for very large segment sets (out-of-core reporting)
 
 ## Dependencies
@@ -175,7 +194,7 @@ clippings, and spatial indices are implemented natively.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 190 passing (unit + 20 e2e cross-module)
+- Tests: 282 passing (unit + 20 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns
@@ -235,9 +254,9 @@ tuning is currently uniform; targeted tuning is tracked under Future Enhancement
 
 | Metric | Estimated (estimation.md Vol.61) | Actual |
 |--------|----------------------------------|--------|
-| SLoC | 70K-120K (median ~95K) | 5,910 |
-| Files | ~40-60 algorithm modules | 75 |
-| Tests | algorithm-grade coverage | 190 |
+| SLoC | 70K-120K (median ~95K) | 10,028 |
+| Files | ~40-60 algorithm modules | 84 |
+| Tests | algorithm-grade coverage | 282 |
 
 The gap to the median estimate reflects the estimation targeting full
 CGAL-grade production parity including exact-arithmetic kernels, full 3D extensions,

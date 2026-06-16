@@ -482,7 +482,7 @@ mod tests {
             output_dim: 4,
             ..Default::default()
         };
-        online_ewc_new(&cfg, 42).unwrap()
+        online_ewc_new(&cfg, 42).expect("Online EWC state should initialize with valid config")
     }
 
     fn make_xy(n: usize, d_in: usize, n_classes: usize) -> (Vec<f64>, Vec<usize>) {
@@ -509,7 +509,8 @@ mod tests {
         let mut state = make_state();
         let mut rng = LcgRng::new(1);
         let (x, y) = make_xy(16, 8, 4);
-        online_ewc_fit_task(&mut state, &x, &y, 16, &mut rng).unwrap();
+        online_ewc_fit_task(&mut state, &x, &y, 16, &mut rng)
+            .expect("Online EWC task fitting should succeed with valid data");
 
         // After task 1, Fisher is set. Perturb weights slightly so penalty > 0.
         for w in state.weights.iter_mut() {
@@ -527,7 +528,8 @@ mod tests {
     fn predict_valid_class_index() {
         let state = make_state();
         let x = vec![0.5_f64; 8];
-        let pred = online_ewc_predict(&state, &x).unwrap();
+        let pred = online_ewc_predict(&state, &x)
+            .expect("Online EWC prediction should succeed on valid input");
         assert!(pred < 4, "Prediction {pred} should be in [0,4)");
     }
 
@@ -545,7 +547,8 @@ mod tests {
         let mut state = make_state();
         let mut rng = LcgRng::new(2);
         let (x, y) = make_xy(16, 8, 4);
-        online_ewc_fit_task(&mut state, &x, &y, 16, &mut rng).unwrap();
+        online_ewc_fit_task(&mut state, &x, &y, 16, &mut rng)
+            .expect("Online EWC task fitting should succeed with valid data");
         let fisher_sum: f64 = state.running_fisher.iter().sum();
         assert!(
             fisher_sum > 0.0,
@@ -560,10 +563,12 @@ mod tests {
         let mut rng = LcgRng::new(3);
         assert_eq!(state.n_tasks, 0);
         let (x, y) = make_xy(8, 8, 4);
-        online_ewc_fit_task(&mut state, &x, &y, 8, &mut rng).unwrap();
+        online_ewc_fit_task(&mut state, &x, &y, 8, &mut rng)
+            .expect("Online EWC task fitting should succeed with valid data");
         assert_eq!(state.n_tasks, 1);
         let (x2, y2) = make_xy(8, 8, 4);
-        online_ewc_fit_task(&mut state, &x2, &y2, 8, &mut rng).unwrap();
+        online_ewc_fit_task(&mut state, &x2, &y2, 8, &mut rng)
+            .expect("Online EWC task fitting should succeed with valid data");
         assert_eq!(state.n_tasks, 2);
     }
 
@@ -591,7 +596,8 @@ mod tests {
         let mut state = make_state();
         let mut rng = LcgRng::new(6);
         let (x, y) = make_xy(8, 8, 4);
-        online_ewc_fit_task(&mut state, &x, &y, 8, &mut rng).unwrap();
+        online_ewc_fit_task(&mut state, &x, &y, 8, &mut rng)
+            .expect("Online EWC task fitting should succeed with valid data");
         for (w, ts) in state.weights.iter().zip(state.running_theta_star.iter()) {
             assert!(
                 (w - ts).abs() < 1e-15,
@@ -606,10 +612,12 @@ mod tests {
         let mut state = make_state();
         let mut rng = LcgRng::new(7);
         let (x1, y1) = make_xy(8, 8, 4);
-        online_ewc_fit_task(&mut state, &x1, &y1, 8, &mut rng).unwrap();
+        online_ewc_fit_task(&mut state, &x1, &y1, 8, &mut rng)
+            .expect("Online EWC task fitting should succeed with valid data");
         let fisher1: Vec<f64> = state.running_fisher.clone();
         let (x2, y2) = make_xy(8, 8, 4);
-        online_ewc_fit_task(&mut state, &x2, &y2, 8, &mut rng).unwrap();
+        online_ewc_fit_task(&mut state, &x2, &y2, 8, &mut rng)
+            .expect("Online EWC task fitting should succeed with valid data");
         // running_fisher after task 2 = γ * fisher1 + F_new.
         // The old fisher1 entries were decayed by γ.
         // We verify at least some entries changed (decayed from task1).
@@ -647,7 +655,8 @@ mod tests {
         let mut state = make_state();
         let mut rng = LcgRng::new(9);
         let (x, y) = make_xy(16, 8, 4);
-        let loss = online_ewc_fit_task(&mut state, &x, &y, 16, &mut rng).unwrap();
+        let loss = online_ewc_fit_task(&mut state, &x, &y, 16, &mut rng)
+            .expect("Online EWC task fitting should succeed with valid data");
         assert!(loss.is_finite(), "Task loss must be finite, got {loss}");
         assert!(loss >= 0.0, "Task loss must be non-negative");
     }
@@ -657,8 +666,10 @@ mod tests {
     fn predict_deterministic() {
         let state = make_state();
         let x = vec![0.7_f64; 8];
-        let p1 = online_ewc_predict(&state, &x).unwrap();
-        let p2 = online_ewc_predict(&state, &x).unwrap();
+        let p1 = online_ewc_predict(&state, &x)
+            .expect("Online EWC prediction should succeed on valid input");
+        let p2 = online_ewc_predict(&state, &x)
+            .expect("Online EWC prediction should succeed on valid input");
         assert_eq!(p1, p2);
     }
 

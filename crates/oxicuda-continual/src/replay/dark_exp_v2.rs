@@ -304,7 +304,8 @@ mod tests {
             capacity: 8,
             ..Default::default()
         };
-        let mut buf = DerV2Buffer::new(&cfg).unwrap();
+        let mut buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
         for i in 0..50_usize {
             buf.add(vec![i as f64], vec![0.0, 1.0], i % 2, &mut rng);
         }
@@ -318,12 +319,15 @@ mod tests {
     fn fused_loss_finite_and_non_negative() {
         let mut rng = make_rng();
         let cfg = DerV2Config::default();
-        let mut buf = DerV2Buffer::new(&cfg).unwrap();
+        let mut buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
         buf.add(vec![0.5, -0.5], vec![1.2, -0.3], 0, &mut rng);
         buf.add(vec![-0.3, 0.7], vec![-0.1, 0.8], 1, &mut rng);
 
         let cur = vec![vec![0.9_f64, -0.1], vec![0.2_f64, 0.6]];
-        let loss = buf.fused_loss(&cur, &cfg).unwrap();
+        let loss = buf
+            .fused_loss(&cur, &cfg)
+            .expect("DER v2 fused loss should compute with valid inputs");
         assert!(loss.is_finite(), "loss should be finite, got {loss}");
         assert!(loss >= 0.0, "loss should be non-negative, got {loss}");
     }
@@ -339,11 +343,14 @@ mod tests {
             gamma: 0.0,
             ..Default::default()
         };
-        let mut buf = DerV2Buffer::new(&cfg).unwrap();
+        let mut buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
         buf.add(vec![1.0], vec![0.5, -0.5], 0, &mut rng);
 
         let cur = vec![vec![0.3_f64, 0.7]];
-        let loss = buf.fused_loss(&cur, &cfg).unwrap();
+        let loss = buf
+            .fused_loss(&cur, &cfg)
+            .expect("DER v2 fused loss should compute with valid inputs");
         assert!(
             loss.abs() < 1e-12,
             "zero-weight loss should be 0, got {loss}"
@@ -361,13 +368,16 @@ mod tests {
             gamma: 0.0,
             ..Default::default()
         };
-        let mut buf = DerV2Buffer::new(&cfg).unwrap();
+        let mut buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
         let stored = vec![1.0_f64, 0.0];
         buf.add(vec![0.0], stored.clone(), 0, &mut rng);
 
         let current = vec![0.0_f64, 1.0]; // differs from stored
         let expected_mse = ((1.0_f64 - 0.0).powi(2) + (0.0_f64 - 1.0).powi(2)) / 2.0;
-        let loss = buf.fused_loss(&[current], &cfg).unwrap();
+        let loss = buf
+            .fused_loss(&[current], &cfg)
+            .expect("DER v2 fused loss should compute with valid inputs");
         assert!(
             (loss - expected_mse).abs() < 1e-10,
             "MSE-only loss should equal expected_mse={expected_mse}, got {loss}"
@@ -385,12 +395,15 @@ mod tests {
             gamma: 0.0,
             ..Default::default()
         };
-        let mut buf = DerV2Buffer::new(&cfg).unwrap();
+        let mut buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
         buf.add(vec![0.0], uniform_logits(3), 1, &mut rng);
 
         let logits = vec![0.0_f64, 10.0, 0.0]; // confident in class 1
         // CE = -log(softmax(logits)[1]) ≈ 0 (very confident)
-        let loss = buf.fused_loss(&[logits], &cfg).unwrap();
+        let loss = buf
+            .fused_loss(&[logits], &cfg)
+            .expect("DER v2 fused loss should compute with valid inputs");
         assert!(
             loss >= 0.0 && loss.is_finite(),
             "CE-only loss should be valid"
@@ -465,8 +478,11 @@ mod tests {
     #[test]
     fn empty_buffer_fused_loss_returns_zero() {
         let cfg = DerV2Config::default();
-        let buf = DerV2Buffer::new(&cfg).unwrap();
-        let loss = buf.fused_loss(&[], &cfg).unwrap();
+        let buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
+        let loss = buf
+            .fused_loss(&[], &cfg)
+            .expect("DER v2 fused loss should compute with valid inputs");
         assert_eq!(loss, 0.0, "empty buffer should return loss=0");
     }
 
@@ -479,7 +495,8 @@ mod tests {
             capacity: 10,
             ..Default::default()
         };
-        let mut buf = DerV2Buffer::new(&cfg).unwrap();
+        let mut buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
         for i in 0..200_usize {
             buf.add(vec![i as f64], vec![0.0, 1.0, 2.0], i % 3, &mut rng);
         }
@@ -504,7 +521,8 @@ mod tests {
     fn logit_count_mismatch_returns_error() {
         let mut rng = make_rng();
         let cfg = DerV2Config::default();
-        let mut buf = DerV2Buffer::new(&cfg).unwrap();
+        let mut buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
         buf.add(vec![0.0], vec![0.5, 0.5], 0, &mut rng);
 
         // current_logits has 3 classes but stored has 2
@@ -521,7 +539,8 @@ mod tests {
     fn batch_length_mismatch_returns_error() {
         let mut rng = make_rng();
         let cfg = DerV2Config::default();
-        let mut buf = DerV2Buffer::new(&cfg).unwrap();
+        let mut buf =
+            DerV2Buffer::new(&cfg).expect("DER v2 buffer should initialize with valid config");
         buf.add(vec![0.0], vec![0.5, 0.5], 0, &mut rng);
         buf.add(vec![1.0], vec![0.6, 0.4], 1, &mut rng);
 

@@ -25,6 +25,26 @@
 //!
 //! - [`fn@preconditioner::ilu0`] -- Incomplete LU(0) for general systems
 //! - [`fn@preconditioner::ic0`] -- Incomplete Cholesky(0) for SPD systems
+//! - [`fn@preconditioner::ic_k`] -- Incomplete Cholesky with level-of-fill (IC(k))
+//! - [`preconditioner::amg`] -- Smoothed-aggregation algebraic multigrid (setup,
+//!   V-cycle, and a standalone solver)
+//!
+//! ## Eigensolvers
+//!
+//! - [`fn@eig::lobpcg`] -- LOBPCG for the smallest eigenpairs of a sparse SPD
+//!   matrix, with an optional diagonal (Jacobi) preconditioner
+//! - [`fn@eig::shift_invert`] -- shift-invert power iteration for the eigenvalue
+//!   closest to a target shift (interior eigenvalues)
+//!
+//! ## Compatibility shims
+//!
+//! - [`compat::cusparse_compat`] -- a cuSPARSE-flavoured drop-in surface
+//!   (`cusparse_spmv` / `cusparse_spgemm` / `cusparse_spsv`) over the host CSR
+//!   type, for porting cuSPARSE code with minimal churn
+//!
+//! These advanced solvers operate on the host-resident [`host_csr::HostCsr`]
+//! representation, which can be lifted from a [`CsrMatrix`] via
+//! [`HostCsr::from_gpu`](host_csr::HostCsr::from_gpu).
 //!
 //! ## Example
 //!
@@ -35,9 +55,12 @@
 #![warn(clippy::all)]
 #![warn(missing_docs)]
 
+pub mod compat;
+pub mod eig;
 pub mod error;
 pub mod format;
 pub mod handle;
+pub mod host_csr;
 pub mod ops;
 pub mod preconditioner;
 pub(crate) mod ptx_helpers;
@@ -51,12 +74,17 @@ pub use handle::SparseHandle;
 
 /// Prelude for convenient imports.
 pub mod prelude {
+    pub use crate::compat::{
+        CusparseCompatHandle, CusparsePointerMode, cusparse_spgemm, cusparse_spmv, cusparse_spsv,
+    };
+    pub use crate::eig::{LobpcgResult, ShiftInvertResult, lobpcg, shift_invert};
     pub use crate::error::{SparseError, SparseResult};
     pub use crate::format::{
         BsrMatrix, CooMatrix, CscMatrix, Csr5Matrix, CsrMatrix, EllMatrix, HybMatrix, HybPartition,
         HybStatistics, amd_ordering, inverse_permutation, permute_csr, rcm_ordering,
     };
     pub use crate::handle::SparseHandle;
+    pub use crate::host_csr::HostCsr;
     pub use crate::ops::{
         BatchScheduler, BatchedSpGEMM, BatchedSpMV, BatchedSpMVPlan, BatchedTriSolve,
         RecommendedFormat, SpMVAlgo, SpMatFormat, Strategy, UniformBatchedSpMV, analyze_sparsity,
@@ -68,6 +96,11 @@ pub mod prelude {
         EdgeFeatures, GnnSparseConfig, MessagePassingOp, add_self_loops, compute_degree_matrix,
         gather, scatter_reduce, sparse_attention_message, sparse_message_passing,
         sparse_row_softmax, symmetric_normalize,
+    };
+    pub use crate::ops::{SymbolicPattern, spgemm_symbolic_pattern};
+    pub use crate::preconditioner::{
+        AmgHierarchy, AmgLevel, AmgOptions, IncompleteCholeskyK, amg_setup, amg_solve, amg_v_cycle,
+        ic_k,
     };
     pub use crate::preconditioner::{IlukConfig, IlukFactorization};
 }

@@ -86,7 +86,7 @@ mod tests {
         let f = ConcatFusion::zeros(4, 8, 16);
         let a = vec![0.5_f32; 3 * 4];
         let b = vec![0.3_f32; 3 * 8];
-        let out = f.forward(&a, &b, 3).unwrap();
+        let out = f.forward(&a, &b, 3).expect("forward should succeed");
         assert_eq!(out.len(), 3 * 16);
     }
 
@@ -96,7 +96,7 @@ mod tests {
         f.bias = vec![2.5_f32; 4];
         let a = vec![1.0_f32; 2 * 4];
         let b = vec![1.0_f32; 2 * 4];
-        let out = f.forward(&a, &b, 2).unwrap();
+        let out = f.forward(&a, &b, 2).expect("forward should succeed");
         for &v in &out {
             assert!((v - 2.5).abs() < 1e-6);
         }
@@ -130,7 +130,7 @@ mod tests {
         }
         let a = vec![1.0_f32, 2.0]; // batch=1
         let b = vec![3.0_f32, 4.0];
-        let out = f.forward(&a, &b, 1).unwrap();
+        let out = f.forward(&a, &b, 1).expect("forward should succeed");
         // expect [1, 2, 3, 4]
         assert!((out[0] - 1.0).abs() < 1e-6);
         assert!((out[1] - 2.0).abs() < 1e-6);

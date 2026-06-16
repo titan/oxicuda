@@ -98,8 +98,10 @@ mod tests {
     fn embedder_normalize_cont() {
         let mut emb = FeatureEmbedder::new(2, vec![3, 4]);
         let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        emb.fit_cont(&data, 3).unwrap();
-        let out = emb.normalize_cont(&[3.0_f32, 4.0]).unwrap();
+        emb.fit_cont(&data, 3).expect("fit_cont should succeed");
+        let out = emb
+            .normalize_cont(&[3.0_f32, 4.0])
+            .expect("normalize_cont should succeed");
         assert_eq!(out.len(), 2);
     }
 

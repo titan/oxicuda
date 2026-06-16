@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn er_buffer_bounded_by_capacity() {
         let mut rng = LcgRng::new(42);
-        let mut buf = er_buffer_new(10).unwrap();
+        let mut buf = er_buffer_new(10).expect("ER buffer should initialize with valid capacity");
         for i in 0..50_usize {
             er_add(&mut buf, vec![i as f32], i as u32, &mut rng);
         }
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn er_buffer_fills_before_capacity() {
         let mut rng = LcgRng::new(7);
-        let mut buf = er_buffer_new(20).unwrap();
+        let mut buf = er_buffer_new(20).expect("should succeed with valid test inputs");
         for i in 0..15_usize {
             er_add(&mut buf, vec![i as f32], i as u32, &mut rng);
         }
@@ -112,11 +112,12 @@ mod tests {
     #[test]
     fn er_sample_batch_size_respected() {
         let mut rng = LcgRng::new(13);
-        let mut buf = er_buffer_new(50).unwrap();
+        let mut buf = er_buffer_new(50).expect("should succeed with valid test inputs");
         for i in 0..30_usize {
             er_add(&mut buf, vec![i as f32], i as u32, &mut rng);
         }
-        let (batch, labels) = er_sample_batch(&buf, 8, &mut rng).unwrap();
+        let (batch, labels) =
+            er_sample_batch(&buf, 8, &mut rng).expect("should succeed with valid test inputs");
         assert_eq!(batch.len(), 8);
         assert_eq!(labels.len(), 8);
     }
@@ -124,11 +125,12 @@ mod tests {
     #[test]
     fn er_sample_no_duplicates_small_buffer() {
         let mut rng = LcgRng::new(99);
-        let mut buf = er_buffer_new(5).unwrap();
+        let mut buf = er_buffer_new(5).expect("should succeed with valid test inputs");
         for i in 0..5_usize {
             er_add(&mut buf, vec![i as f32], i as u32, &mut rng);
         }
-        let (batch, _) = er_sample_batch(&buf, 5, &mut rng).unwrap();
+        let (batch, _) =
+            er_sample_batch(&buf, 5, &mut rng).expect("should succeed with valid test inputs");
         let mut seen = batch.iter().map(|v| v[0] as usize).collect::<Vec<_>>();
         seen.sort_unstable();
         assert_eq!(
@@ -141,14 +143,14 @@ mod tests {
     #[test]
     fn er_sample_empty_returns_err() {
         let mut rng = LcgRng::new(1);
-        let buf = er_buffer_new(10).unwrap();
+        let buf = er_buffer_new(10).expect("should succeed with valid test inputs");
         assert!(er_sample_batch(&buf, 1, &mut rng).is_err());
     }
 
     #[test]
     fn er_sample_exceeds_buffer_returns_err() {
         let mut rng = LcgRng::new(2);
-        let mut buf = er_buffer_new(10).unwrap();
+        let mut buf = er_buffer_new(10).expect("should succeed with valid test inputs");
         er_add(&mut buf, vec![1.0], 0, &mut rng);
         assert!(er_sample_batch(&buf, 5, &mut rng).is_err());
     }
@@ -164,7 +166,7 @@ mod tests {
         // each original slot should be replaced with probability ~10/100.
         // We just verify the buffer contains valid indices.
         let mut rng = LcgRng::new(55);
-        let mut buf = er_buffer_new(10).unwrap();
+        let mut buf = er_buffer_new(10).expect("should succeed with valid test inputs");
         for i in 0..100_usize {
             er_add(&mut buf, vec![i as f32], i as u32, &mut rng);
         }

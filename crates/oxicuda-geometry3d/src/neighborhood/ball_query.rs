@@ -73,7 +73,7 @@ mod tests {
     fn ball_query_basic() {
         let pts: Vec<f32> = (0..10).flat_map(|i| vec![i as f32, 0.0, 0.0]).collect();
         let q = vec![4.5_f32, 0.0, 0.0];
-        let (idx, cnt) = ball_query(&q, 1, &pts, 10, 10, 2.0).unwrap();
+        let (idx, cnt) = ball_query(&q, 1, &pts, 10, 10, 2.0).expect("ball_query should succeed");
         assert_eq!(cnt[0], 4); // 3,4,5,6 are within 2.0
         assert!(idx[..cnt[0]].iter().all(|&i| i != usize::MAX));
     }
@@ -96,7 +96,7 @@ mod tests {
     fn ball_query_empty_sentinels() {
         let pts: Vec<f32> = vec![10.0, 10.0, 10.0];
         let q = vec![0.0_f32, 0.0, 0.0];
-        let (idx, cnt) = ball_query(&q, 1, &pts, 1, 5, 1.0).unwrap();
+        let (idx, cnt) = ball_query(&q, 1, &pts, 1, 5, 1.0).expect("ball_query should succeed");
         assert_eq!(cnt[0], 0);
         assert!(idx.iter().all(|&i| i == usize::MAX));
     }
@@ -106,7 +106,7 @@ mod tests {
         let pts: Vec<f32> = (0..20).flat_map(|_| vec![0.0_f32, 0.0, 0.0]).collect();
         let q = vec![0.0_f32, 0.0, 0.0];
         let k = 5;
-        let (_, cnt) = ball_query(&q, 1, &pts, 20, k, 1.0).unwrap();
+        let (_, cnt) = ball_query(&q, 1, &pts, 20, k, 1.0).expect("ball_query should succeed");
         assert!(cnt[0] <= k, "count must not exceed k_max");
     }
 }

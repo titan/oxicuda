@@ -708,7 +708,8 @@ mod tests {
         let kd = rand_unit(hw, c, 4, cfg.eps);
         let queue = rand_unit(16, d, 5, cfg.eps);
 
-        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg).unwrap();
+        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg)
+            .expect("dense_cl_loss should succeed");
         assert!(res.total_loss.is_finite(), "total_loss not finite");
         assert!(
             res.total_loss >= 0.0,
@@ -734,7 +735,8 @@ mod tests {
         let kd = rand_unit(hw, c, 13, cfg.eps);
         let queue = rand_unit(8, d, 14, cfg.eps);
 
-        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg).unwrap();
+        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg)
+            .expect("dense_cl_loss should succeed");
         assert!(
             (res.total_loss - res.global_loss).abs() < 1e-5,
             "total={} global={}",
@@ -760,7 +762,8 @@ mod tests {
         let kd = rand_unit(hw, c, 23, cfg.eps);
         let queue = rand_unit(8, d, 24, cfg.eps);
 
-        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg).unwrap();
+        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg)
+            .expect("dense_cl_loss should succeed");
         assert!(
             (res.total_loss - res.dense_loss).abs() < 1e-5,
             "total={} dense={}",
@@ -806,7 +809,8 @@ mod tests {
         let kd = rand_unit(hw, c, 53, cfg.eps);
         let queue = rand_unit(4, d, 54, cfg.eps);
 
-        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg).unwrap();
+        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg)
+            .expect("dense_cl_loss should succeed");
         assert!(
             res.mean_correspondence_sim >= -1.0 - 1e-5 && res.mean_correspondence_sim <= 1.0 + 1e-5,
             "mean_corr_sim = {}",
@@ -831,7 +835,8 @@ mod tests {
         let kd = qd.clone();
         let queue: Vec<f32> = vec![];
 
-        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg).unwrap();
+        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg)
+            .expect("dense_cl_loss should succeed");
         assert!(
             res.mean_correspondence_sim > 0.99,
             "expected ~1.0, got {}",
@@ -848,7 +853,8 @@ mod tests {
         let q = rand_unit(hw, c, 70, 1e-8);
         let pk = rand_unit(hw, c, 71, 1e-8);
         let all_q = rand_unit(hw * batch, c, 72, 1e-8);
-        let loss = dense_infonce(&q, &pk, &all_q, hw, batch, c, 0.2).unwrap();
+        let loss = dense_infonce(&q, &pk, &all_q, hw, batch, c, 0.2)
+            .expect("dense_infonce should succeed");
         assert!(loss.is_finite(), "loss = {loss}");
     }
 
@@ -860,7 +866,7 @@ mod tests {
         let cfg = PixProConfig::default();
         let qd = rand_unit(hw, c, 80, cfg.eps);
         let kd = rand_unit(hw, c, 81, cfg.eps);
-        let loss = pixpro_loss(&qd, &kd, hw, c, &cfg).unwrap();
+        let loss = pixpro_loss(&qd, &kd, hw, c, &cfg).expect("pixpro_loss should succeed");
         assert!(loss.is_finite(), "loss not finite");
         // cosine loss in [0, 2], so mean ∈ [0, 2] ≤ 4.
         assert!(loss >= 0.0, "loss = {loss} < 0");
@@ -907,12 +913,13 @@ mod tests {
         let kd = rand_unit(hw, c, 103, cfg.eps);
         let queue = rand_unit(4, d, 104, cfg.eps);
 
-        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg).unwrap();
+        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg)
+            .expect("dense_cl_loss should succeed");
         assert!(res.total_loss.is_finite());
         assert_eq!(res.n_positions, 1);
 
         let px_cfg = PixProConfig::default();
-        let pl = pixpro_loss(&qd, &kd, hw, c, &px_cfg).unwrap();
+        let pl = pixpro_loss(&qd, &kd, hw, c, &px_cfg).expect("pixpro_loss should succeed");
         assert!(pl.is_finite());
     }
 
@@ -929,11 +936,13 @@ mod tests {
 
         let batch_small = 1usize;
         let all_q_small = rand_unit(hw * batch_small, c, 112, 1e-8);
-        let l_small = dense_infonce(&q, &pk, &all_q_small, hw, batch_small, c, 0.2).unwrap();
+        let l_small = dense_infonce(&q, &pk, &all_q_small, hw, batch_small, c, 0.2)
+            .expect("dense_infonce should succeed");
 
         let batch_large = 4usize;
         let all_q_large = rand_unit(hw * batch_large, c, 113, 1e-8);
-        let l_large = dense_infonce(&q, &pk, &all_q_large, hw, batch_large, c, 0.2).unwrap();
+        let l_large = dense_infonce(&q, &pk, &all_q_large, hw, batch_large, c, 0.2)
+            .expect("dense_infonce should succeed");
 
         assert!(l_small.is_finite());
         assert!(l_large.is_finite());
@@ -959,7 +968,8 @@ mod tests {
         let kd = rand_unit(hw, c, 123, cfg.eps);
         let queue = rand_unit(8, d, 124, cfg.eps);
 
-        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg).unwrap();
+        let res = dense_cl_loss(&qg, &kg, &qd, &kd, &queue, hw, d, c, &cfg)
+            .expect("dense_cl_loss should succeed");
 
         let expected = 0.7 * res.global_loss + 0.3 * res.dense_loss;
         assert!(
@@ -982,7 +992,7 @@ mod tests {
         };
         let qd = rand_unit(hw, c, 130, cfg.eps);
         let kd = rand_unit(hw, c, 131, cfg.eps);
-        let loss = pixpro_loss(&qd, &kd, hw, c, &cfg).unwrap();
+        let loss = pixpro_loss(&qd, &kd, hw, c, &cfg).expect("pixpro_loss should succeed");
         assert!(loss.is_finite());
         assert!((0.0..=4.0).contains(&loss));
     }

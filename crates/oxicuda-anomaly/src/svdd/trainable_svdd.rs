@@ -472,7 +472,8 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 1).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 1).expect("DeepSVDD fit on 20 samples should succeed");
         assert_eq!(fit.w1.len(), cfg.hidden1 * d);
         assert_eq!(fit.w2.len(), cfg.hidden2 * cfg.hidden1);
         assert_eq!(fit.w3.len(), cfg.latent_dim * cfg.hidden2);
@@ -486,7 +487,8 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 2).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 2).expect("DeepSVDD fit on 20 samples should succeed");
         assert_eq!(
             fit.loss_history.len(),
             cfg.n_epochs,
@@ -499,7 +501,8 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 3).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 3).expect("DeepSVDD fit on 20 samples should succeed");
         for &l in fit.loss_history() {
             assert!(l.is_finite(), "loss not finite: {l}");
         }
@@ -510,9 +513,11 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 4).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 4).expect("DeepSVDD fit on 20 samples should succeed");
         let test: Vec<f64> = (0..7 * d).map(|i| i as f64 * 0.1).collect();
-        let scores = trainable_svdd_score(&fit, &test, 7).unwrap();
+        let scores =
+            trainable_svdd_score(&fit, &test, 7).expect("scoring 7 test samples should succeed");
         assert_eq!(scores.len(), 7);
     }
 
@@ -521,9 +526,11 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 5).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 5).expect("DeepSVDD fit on 20 samples should succeed");
         let test: Vec<f64> = vec![0.1_f64; d];
-        let scores = trainable_svdd_score(&fit, &test, 1).unwrap();
+        let scores = trainable_svdd_score(&fit, &test, 1)
+            .expect("scoring a single test sample should succeed");
         assert!(scores[0].is_finite(), "score not finite: {}", scores[0]);
     }
 
@@ -532,9 +539,11 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 6).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 6).expect("DeepSVDD fit on 20 samples should succeed");
         let test: Vec<f64> = (0..5 * d).map(|i| i as f64 * 0.05).collect();
-        let scores = trainable_svdd_score(&fit, &test, 5).unwrap();
+        let scores =
+            trainable_svdd_score(&fit, &test, 5).expect("scoring 5 test samples should succeed");
         for &s in &scores {
             assert!(s >= 0.0, "negative score: {s}");
         }
@@ -545,9 +554,11 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 7).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 7).expect("DeepSVDD fit on 20 samples should succeed");
         let test: Vec<f64> = (0..6 * d).map(|i| i as f64 * 0.1).collect();
-        let preds = trainable_svdd_predict(&fit, &test, 6, 1.0).unwrap();
+        let preds = trainable_svdd_predict(&fit, &test, 6, 1.0)
+            .expect("predict on 6 test samples should succeed");
         assert_eq!(preds.len(), 6);
     }
 
@@ -556,7 +567,8 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 8).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 8).expect("DeepSVDD fit on 20 samples should succeed");
         let norm: f64 = fit.center.iter().map(|v| v * v).sum::<f64>().sqrt();
         assert!(
             norm >= COLLAPSE_EPS,
@@ -578,13 +590,16 @@ mod tests {
             warm_up_epochs: 5,
         };
         let x: Vec<f64> = (0..50 * d).map(|_| 0.1_f64).collect();
-        let fit = trainable_svdd_fit(&x, 50, &cfg, 77).unwrap();
+        let fit = trainable_svdd_fit(&x, 50, &cfg, 77)
+            .expect("DeepSVDD fit on 50 constant samples should succeed");
 
         let normal: Vec<f64> = vec![0.1; d];
         let outlier: Vec<f64> = vec![100.0; d];
 
-        let s_normal = trainable_svdd_score(&fit, &normal, 1).unwrap()[0];
-        let s_outlier = trainable_svdd_score(&fit, &outlier, 1).unwrap()[0];
+        let s_normal = trainable_svdd_score(&fit, &normal, 1)
+            .expect("scoring a normal point should succeed")[0];
+        let s_outlier = trainable_svdd_score(&fit, &outlier, 1)
+            .expect("scoring an outlier point should succeed")[0];
 
         assert!(
             s_outlier > s_normal,
@@ -597,7 +612,8 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 9).unwrap();
+        let fit =
+            trainable_svdd_fit(&x, 20, &cfg, 9).expect("DeepSVDD fit on 20 samples should succeed");
         let hist = trainable_svdd_loss_history(&fit);
         assert_eq!(hist.len(), cfg.n_epochs);
     }
@@ -614,7 +630,8 @@ mod tests {
         let d = 4_usize;
         let cfg = simple_cfg(d);
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 11).unwrap();
+        let fit = trainable_svdd_fit(&x, 20, &cfg, 11)
+            .expect("DeepSVDD fit on 20 samples should succeed");
         let bad_test = vec![0.0_f64; 3]; // wrong length for d=4, n=1
         let res = trainable_svdd_score(&fit, &bad_test, 1);
         assert!(res.is_err(), "expected DimensionMismatch error");
@@ -630,7 +647,8 @@ mod tests {
             ..simple_cfg(d)
         };
         let x: Vec<f64> = (0..20 * d).map(|i| i as f64 * 0.01).collect();
-        let fit = trainable_svdd_fit(&x, 20, &cfg, 12).unwrap();
+        let fit = trainable_svdd_fit(&x, 20, &cfg, 12)
+            .expect("DeepSVDD fit with warm_up_epochs > n_epochs should succeed");
         // Centre should still be non-trivial
         let norm: f64 = fit.center.iter().map(|v| v * v).sum::<f64>().sqrt();
         assert!(norm.is_finite(), "centre norm is not finite: {norm}");

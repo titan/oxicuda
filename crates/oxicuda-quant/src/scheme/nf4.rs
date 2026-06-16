@@ -243,10 +243,10 @@ mod tests {
     fn encode_decode_round_trip() {
         let q = Nf4Quantizer::new(64);
         let t: Vec<f32> = (0..128).map(|i| (i as f32 / 64.0) - 1.0).collect();
-        let (packed, absmaxs) = q.encode(&t).unwrap();
+        let (packed, absmaxs) = q.encode(&t).expect("encode should succeed");
         assert_eq!(packed.len(), 64);
         assert_eq!(absmaxs.len(), 2);
-        let decoded = q.decode(&packed, &absmaxs).unwrap();
+        let decoded = q.decode(&packed, &absmaxs).expect("decode should succeed");
         // NF4 is lossy; error should be small but non-zero.
         let mse = t
             .iter()
@@ -261,10 +261,10 @@ mod tests {
     fn all_zeros_encodes_cleanly() {
         let q = Nf4Quantizer::default();
         let t = vec![0.0_f32; 64];
-        let (packed, absmaxs) = q.encode(&t).unwrap();
+        let (packed, absmaxs) = q.encode(&t).expect("encode should succeed");
         // With all-zero input, absmax = 1e-8, codes all map to index 7 (value 0).
         assert_eq!(absmaxs.len(), 1);
-        let decoded = q.decode(&packed, &absmaxs).unwrap();
+        let decoded = q.decode(&packed, &absmaxs).expect("decode should succeed");
         for v in decoded {
             assert!(v.abs() < 1e-5, "decoded zero should be near zero");
         }
@@ -282,7 +282,9 @@ mod tests {
                 2.0 * u - 1.0
             })
             .collect();
-        let mse = q.quantization_mse(&t).unwrap();
+        let mse = q
+            .quantization_mse(&t)
+            .expect("quantization_mse should succeed");
         assert!(mse < 0.05, "NF4 MSE unexpectedly large: {mse}");
     }
 

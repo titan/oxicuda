@@ -400,10 +400,10 @@ mod tests {
     fn encoder_pair_output_len() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(1);
-        let enc = CnpEncoder::new(&cfg, &mut rng).unwrap();
+        let enc = CnpEncoder::new(&cfg, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32];
         let y = vec![1.0_f32];
-        let r = enc.encode_pair(&x, &y).unwrap();
+        let r = enc.encode_pair(&x, &y).expect("encode_pair should succeed");
         assert_eq!(r.len(), cfg.r_dim);
     }
 
@@ -411,10 +411,12 @@ mod tests {
     fn encoder_context_output_len() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(2);
-        let enc = CnpEncoder::new(&cfg, &mut rng).unwrap();
+        let enc = CnpEncoder::new(&cfg, &mut rng).expect("new should succeed");
         let xs = vec![0.0_f32, 1.0_f32];
         let ys = vec![0.5_f32, 1.5_f32];
-        let r = enc.encode_context(&xs, &ys, 2).unwrap();
+        let r = enc
+            .encode_context(&xs, &ys, 2)
+            .expect("encode_context should succeed");
         assert_eq!(r.len(), cfg.r_dim);
     }
 
@@ -422,11 +424,13 @@ mod tests {
     fn encoder_context_single() {
         let cfg = default_cfg();
         let mut rng1 = LcgRng::new(3);
-        let enc = CnpEncoder::new(&cfg, &mut rng1).unwrap();
+        let enc = CnpEncoder::new(&cfg, &mut rng1).expect("new should succeed");
         let x = vec![0.7_f32];
         let y = vec![0.3_f32];
-        let r_pair = enc.encode_pair(&x, &y).unwrap();
-        let r_ctx = enc.encode_context(&x, &y, 1).unwrap();
+        let r_pair = enc.encode_pair(&x, &y).expect("encode_pair should succeed");
+        let r_ctx = enc
+            .encode_context(&x, &y, 1)
+            .expect("encode_context should succeed");
         for (a, b) in r_pair.iter().zip(r_ctx.iter()) {
             assert!((a - b).abs() < 1e-5);
         }
@@ -436,10 +440,10 @@ mod tests {
     fn decoder_output_len() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(4);
-        let dec = CnpDecoder::new(&cfg, &mut rng).unwrap();
+        let dec = CnpDecoder::new(&cfg, &mut rng).expect("new should succeed");
         let x = vec![0.5_f32];
         let r = vec![0.1_f32, 0.2_f32, 0.3_f32, 0.4_f32];
-        let (mu, ls) = dec.decode(&x, &r).unwrap();
+        let (mu, ls) = dec.decode(&x, &r).expect("decode should succeed");
         assert_eq!(mu.len(), cfg.y_dim);
         assert_eq!(ls.len(), cfg.y_dim);
     }
@@ -456,11 +460,13 @@ mod tests {
     fn cnp_forward_mu_len() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(6);
-        let cnp = Cnp::new(cfg.clone(), &mut rng).unwrap();
+        let cnp = Cnp::new(cfg.clone(), &mut rng).expect("value should be present");
         let ctx_x = vec![0.0_f32, 1.0_f32];
         let ctx_y = vec![0.5_f32, 1.5_f32];
         let tgt_x = vec![0.3_f32, 0.7_f32, 0.9_f32];
-        let (mu, _) = cnp.forward(&ctx_x, &ctx_y, 2, &tgt_x, 3).unwrap();
+        let (mu, _) = cnp
+            .forward(&ctx_x, &ctx_y, 2, &tgt_x, 3)
+            .expect("forward should succeed");
         assert_eq!(mu.len(), 3 * cfg.y_dim);
     }
 
@@ -468,11 +474,13 @@ mod tests {
     fn cnp_forward_log_sigma_len() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(7);
-        let cnp = Cnp::new(cfg.clone(), &mut rng).unwrap();
+        let cnp = Cnp::new(cfg.clone(), &mut rng).expect("value should be present");
         let ctx_x = vec![0.0_f32, 1.0_f32];
         let ctx_y = vec![0.5_f32, 1.5_f32];
         let tgt_x = vec![0.3_f32, 0.7_f32, 0.9_f32];
-        let (_, log_sigma) = cnp.forward(&ctx_x, &ctx_y, 2, &tgt_x, 3).unwrap();
+        let (_, log_sigma) = cnp
+            .forward(&ctx_x, &ctx_y, 2, &tgt_x, 3)
+            .expect("forward should succeed");
         assert_eq!(log_sigma.len(), 3 * cfg.y_dim);
     }
 
@@ -480,13 +488,13 @@ mod tests {
     fn cnp_forward_2ctx_3tgt() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(8);
-        let cnp = Cnp::new(cfg.clone(), &mut rng).unwrap();
+        let cnp = Cnp::new(cfg.clone(), &mut rng).expect("value should be present");
         let ctx_x = vec![0.1_f32, 0.9_f32];
         let ctx_y = vec![0.2_f32, 0.8_f32];
         let tgt_x = vec![0.3_f32, 0.5_f32, 0.7_f32];
         let result = cnp.forward(&ctx_x, &ctx_y, 2, &tgt_x, 3);
         assert!(result.is_ok());
-        let (mu, ls) = result.unwrap();
+        let (mu, ls) = result.expect("result should be present");
         assert_eq!(mu.len(), 3);
         assert_eq!(ls.len(), 3);
     }
@@ -495,11 +503,11 @@ mod tests {
     fn nll_loss_finite() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(9);
-        let cnp = Cnp::new(cfg, &mut rng).unwrap();
+        let cnp = Cnp::new(cfg, &mut rng).expect("new should succeed");
         let mu = vec![0.5_f32, 1.0_f32, 1.5_f32];
         let ls = vec![0.0_f32, 0.0_f32, 0.0_f32];
         let y = vec![0.6_f32, 0.9_f32, 1.4_f32];
-        let loss = cnp.nll_loss(&mu, &ls, &y).unwrap();
+        let loss = cnp.nll_loss(&mu, &ls, &y).expect("nll_loss should succeed");
         assert!(loss.is_finite());
     }
 
@@ -510,13 +518,17 @@ mod tests {
         // With small log_sigma (negative), we get smaller than with random mu
         let cfg = default_cfg();
         let mut rng = LcgRng::new(10);
-        let cnp = Cnp::new(cfg, &mut rng).unwrap();
+        let cnp = Cnp::new(cfg, &mut rng).expect("new should succeed");
         let mu = vec![1.0_f32, 2.0_f32];
         let ls_small = vec![-3.0_f32, -3.0_f32]; // tight prediction
         let ls_large = vec![3.0_f32, 3.0_f32]; // broad prediction
         let y = vec![1.0_f32, 2.0_f32]; // matches mu exactly
-        let loss_small = cnp.nll_loss(&mu, &ls_small, &y).unwrap();
-        let loss_large = cnp.nll_loss(&mu, &ls_large, &y).unwrap();
+        let loss_small = cnp
+            .nll_loss(&mu, &ls_small, &y)
+            .expect("nll_loss should succeed");
+        let loss_large = cnp
+            .nll_loss(&mu, &ls_large, &y)
+            .expect("nll_loss should succeed");
         // Tighter sigma (smaller log_sigma) yields lower NLL when prediction is accurate
         assert!(loss_small < loss_large);
     }
@@ -525,7 +537,7 @@ mod tests {
     fn nll_loss_dim_mismatch() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(11);
-        let cnp = Cnp::new(cfg, &mut rng).unwrap();
+        let cnp = Cnp::new(cfg, &mut rng).expect("new should succeed");
         let mu = vec![0.5_f32, 1.0_f32];
         let ls = vec![0.0_f32];
         let y = vec![0.6_f32, 0.9_f32];
@@ -543,7 +555,7 @@ mod tests {
             decoder_hidden: 8,
         };
         let mut rng = LcgRng::new(12);
-        let cnp = Cnp::new(cfg.clone(), &mut rng).unwrap();
+        let cnp = Cnp::new(cfg.clone(), &mut rng).expect("value should be present");
 
         // Encoder: W1: enc_hidden × (x+y), b1: enc_hidden, W2: r_dim × enc_hidden, b2: r_dim
         let enc_w1 = cfg.encoder_hidden * (cfg.x_dim + cfg.y_dim);
@@ -582,7 +594,7 @@ mod tests {
     fn zero_context_err() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(14);
-        let enc = CnpEncoder::new(&cfg, &mut rng).unwrap();
+        let enc = CnpEncoder::new(&cfg, &mut rng).expect("new should succeed");
         let result = enc.encode_context(&[], &[], 0);
         assert!(matches!(result, Err(MetaError::EmptySupport)));
     }
@@ -591,7 +603,7 @@ mod tests {
     fn ctx_x_dim_mismatch() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(15);
-        let cnp = Cnp::new(cfg.clone(), &mut rng).unwrap();
+        let cnp = Cnp::new(cfg.clone(), &mut rng).expect("value should be present");
         // ctx_x has wrong length (3 instead of 2*x_dim=2)
         let ctx_x = vec![0.0_f32, 0.5_f32, 1.0_f32];
         let ctx_y = vec![0.0_f32, 1.0_f32];
@@ -604,7 +616,7 @@ mod tests {
     fn target_x_dim_mismatch() {
         let cfg = default_cfg();
         let mut rng = LcgRng::new(16);
-        let cnp = Cnp::new(cfg.clone(), &mut rng).unwrap();
+        let cnp = Cnp::new(cfg.clone(), &mut rng).expect("value should be present");
         let ctx_x = vec![0.0_f32, 1.0_f32];
         let ctx_y = vec![0.5_f32, 1.5_f32];
         // target_x wrong length (3 instead of 2*x_dim=2)
@@ -618,15 +630,19 @@ mod tests {
         let cfg = default_cfg();
         let mut rng1 = LcgRng::new(42);
         let mut rng2 = LcgRng::new(42);
-        let cnp1 = Cnp::new(cfg.clone(), &mut rng1).unwrap();
-        let cnp2 = Cnp::new(cfg, &mut rng2).unwrap();
+        let cnp1 = Cnp::new(cfg.clone(), &mut rng1).expect("value should be present");
+        let cnp2 = Cnp::new(cfg, &mut rng2).expect("new should succeed");
 
         let ctx_x = vec![0.3_f32];
         let ctx_y = vec![0.7_f32];
         let tgt_x = vec![0.5_f32, 0.8_f32];
 
-        let (mu1, ls1) = cnp1.forward(&ctx_x, &ctx_y, 1, &tgt_x, 2).unwrap();
-        let (mu2, ls2) = cnp2.forward(&ctx_x, &ctx_y, 1, &tgt_x, 2).unwrap();
+        let (mu1, ls1) = cnp1
+            .forward(&ctx_x, &ctx_y, 1, &tgt_x, 2)
+            .expect("forward should succeed");
+        let (mu2, ls2) = cnp2
+            .forward(&ctx_x, &ctx_y, 1, &tgt_x, 2)
+            .expect("forward should succeed");
 
         for (a, b) in mu1.iter().zip(mu2.iter()) {
             assert!((a - b).abs() < 1e-7);
@@ -646,7 +662,7 @@ mod tests {
             decoder_hidden: 16,
         };
         let mut rng = LcgRng::new(99);
-        let cnp = Cnp::new(cfg.clone(), &mut rng).unwrap();
+        let cnp = Cnp::new(cfg.clone(), &mut rng).expect("value should be present");
 
         // n_ctx=2, n_tgt=3
         let ctx_x = vec![0.1_f32; 2 * cfg.x_dim];
@@ -655,7 +671,7 @@ mod tests {
 
         let result = cnp.forward(&ctx_x, &ctx_y, 2, &tgt_x, 3);
         assert!(result.is_ok());
-        let (mu, ls) = result.unwrap();
+        let (mu, ls) = result.expect("result should be present");
         assert_eq!(mu.len(), 3 * cfg.y_dim);
         assert_eq!(ls.len(), 3 * cfg.y_dim);
     }

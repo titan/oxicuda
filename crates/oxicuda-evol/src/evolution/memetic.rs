@@ -439,7 +439,7 @@ mod tests {
     fn test_lamarckian_history_length_equals_n_gens() {
         let cfg = default_config();
         let mut rng = LcgRng::new(42);
-        let result = memetic_run(&cfg, sphere, &mut rng).unwrap();
+        let result = memetic_run(&cfg, sphere, &mut rng).expect("memetic_run should succeed");
         assert_eq!(result.history.len(), cfg.n_gens);
     }
 
@@ -448,7 +448,7 @@ mod tests {
         let mut cfg = default_config();
         cfg.inheritance = Inheritance::Baldwinian;
         let mut rng = LcgRng::new(99);
-        let result = memetic_run(&cfg, sphere, &mut rng).unwrap();
+        let result = memetic_run(&cfg, sphere, &mut rng).expect("memetic_run should succeed");
         assert_eq!(result.history.len(), cfg.n_gens);
         assert!(result.best_fitness.is_finite());
     }
@@ -457,7 +457,7 @@ mod tests {
     fn test_history_is_non_increasing() {
         let cfg = default_config();
         let mut rng = LcgRng::new(13);
-        let result = memetic_run(&cfg, sphere, &mut rng).unwrap();
+        let result = memetic_run(&cfg, sphere, &mut rng).expect("memetic_run should succeed");
         for w in result.history.windows(2) {
             assert!(
                 w[1] <= w[0] + 1e-14,
@@ -477,7 +477,7 @@ mod tests {
         cfg.local_search_iters = 50;
         cfg.local_search_step = 0.01;
         let mut rng = LcgRng::new(7);
-        let result = memetic_run(&cfg, sphere, &mut rng).unwrap();
+        let result = memetic_run(&cfg, sphere, &mut rng).expect("memetic_run should succeed");
         assert!(
             result.best_fitness < 1e-3,
             "Sphere 5D did not converge: best = {}",
@@ -489,7 +489,7 @@ mod tests {
     fn test_best_genome_within_bounds() {
         let cfg = default_config();
         let mut rng = LcgRng::new(21);
-        let result = memetic_run(&cfg, sphere, &mut rng).unwrap();
+        let result = memetic_run(&cfg, sphere, &mut rng).expect("memetic_run should succeed");
         for &g in &result.best_genome {
             assert!(
                 g >= cfg.lb && g <= cfg.ub,
@@ -504,7 +504,7 @@ mod tests {
     fn test_best_genome_length_equals_n_dims() {
         let cfg = default_config();
         let mut rng = LcgRng::new(33);
-        let result = memetic_run(&cfg, sphere, &mut rng).unwrap();
+        let result = memetic_run(&cfg, sphere, &mut rng).expect("memetic_run should succeed");
         assert_eq!(result.best_genome.len(), cfg.n_dims);
     }
 
@@ -536,7 +536,7 @@ mod tests {
         cfg.local_search_iters = 0;
         let mut rng = LcgRng::new(77);
         // Should complete normally — 0 iters of local search == pure GA.
-        let result = memetic_run(&cfg, sphere, &mut rng).unwrap();
+        let result = memetic_run(&cfg, sphere, &mut rng).expect("memetic_run should succeed");
         assert!(result.best_fitness.is_finite());
     }
 
@@ -545,7 +545,7 @@ mod tests {
         let mut cfg = default_config();
         cfg.n_gens = 1;
         let mut rng = LcgRng::new(88);
-        let result = memetic_run(&cfg, sphere, &mut rng).unwrap();
+        let result = memetic_run(&cfg, sphere, &mut rng).expect("memetic_run should succeed");
         assert_eq!(result.history.len(), 1);
     }
 }

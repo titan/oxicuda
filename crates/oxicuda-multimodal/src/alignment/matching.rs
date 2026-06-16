@@ -125,7 +125,9 @@ mod tests {
     fn itm_head_output_scalar() {
         let head = ItmHead::zeros(8, 16);
         let x = vec![1.0_f32; 8];
-        let logit = head.forward_single(&x).unwrap();
+        let logit = head
+            .forward_single(&x)
+            .expect("forward_single should succeed");
         assert!(logit.is_finite());
     }
 
@@ -133,7 +135,7 @@ mod tests {
     fn itm_head_batched_shape() {
         let head = ItmHead::zeros(8, 16);
         let x = vec![0.5_f32; 4 * 8];
-        let logits = head.forward(&x, 4).unwrap();
+        let logits = head.forward(&x, 4).expect("forward should succeed");
         assert_eq!(logits.len(), 4);
     }
 
@@ -141,7 +143,9 @@ mod tests {
     fn itm_head_zero_weights_zero_logit() {
         let head = ItmHead::zeros(8, 4);
         let x = vec![1.0_f32; 8];
-        let logit = head.forward_single(&x).unwrap();
+        let logit = head
+            .forward_single(&x)
+            .expect("forward_single should succeed");
         assert!((logit - 0.0).abs() < 1e-6);
     }
 
@@ -158,7 +162,7 @@ mod tests {
         // Very large positive logit for label=1 → near-zero loss
         let logits = vec![100.0_f32, 100.0];
         let labels = vec![1.0_f32, 1.0];
-        let loss = itm_loss(&logits, &labels).unwrap();
+        let loss = itm_loss(&logits, &labels).expect("itm_loss should succeed");
         assert!(loss < 0.01, "loss should be near zero: {loss}");
     }
 
@@ -167,7 +171,7 @@ mod tests {
         // Very large negative logit for label=0 → near-zero loss
         let logits = vec![-100.0_f32, -100.0];
         let labels = vec![0.0_f32, 0.0];
-        let loss = itm_loss(&logits, &labels).unwrap();
+        let loss = itm_loss(&logits, &labels).expect("itm_loss should succeed");
         assert!(loss < 0.01, "loss should be near zero: {loss}");
     }
 
@@ -175,7 +179,7 @@ mod tests {
     fn itm_loss_nonnegative() {
         let logits = vec![0.1_f32, -0.2, 0.5, -1.0];
         let labels = vec![1.0_f32, 0.0, 1.0, 0.0];
-        let loss = itm_loss(&logits, &labels).unwrap();
+        let loss = itm_loss(&logits, &labels).expect("itm_loss should succeed");
         assert!(loss >= 0.0, "BCE loss must be >= 0, got {loss}");
     }
 
@@ -185,7 +189,7 @@ mod tests {
         let labels: Vec<f32> = (0..16)
             .map(|i| if i % 2 == 0 { 1.0 } else { 0.0 })
             .collect();
-        let loss = itm_loss(&logits, &labels).unwrap();
+        let loss = itm_loss(&logits, &labels).expect("itm_loss should succeed");
         assert!(loss.is_finite());
     }
 

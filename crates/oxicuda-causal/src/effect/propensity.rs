@@ -107,8 +107,8 @@ mod tests {
         let mut model = PropensityModel::new(3, &mut rng);
         let x = vec![0.1_f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
         let t = vec![1.0_f32, 0.0, 1.0];
-        model.fit(&x, &t, 3, 0.01, 100).unwrap();
-        let preds = model.predict(&x, 3).unwrap();
+        model.fit(&x, &t, 3, 0.01, 100).expect("fit should succeed");
+        let preds = model.predict(&x, 3).expect("predict should succeed");
         for &p in &preds {
             assert!((0.05..=0.95).contains(&p));
         }

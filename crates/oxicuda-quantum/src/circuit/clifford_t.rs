@@ -590,7 +590,8 @@ mod tests {
 
     #[test]
     fn decompose_rz_exact_pi4() {
-        let seq = CliffordTDecomposer::decompose_rz(FRAC_PI_4, 3, 1e-3).unwrap();
+        let seq = CliffordTDecomposer::decompose_rz(FRAC_PI_4, 3, 1e-3)
+            .expect("Rz(π/4) is an exact T gate match within the Clifford+T set, max_depth=3 > 0");
         let result = CliffordTDecomposer::sequence_to_su2(&seq);
         let target = Su2::from_rz(FRAC_PI_4);
         let dist = CliffordTDecomposer::unitary_distance(&result, &target);
@@ -599,7 +600,8 @@ mod tests {
 
     #[test]
     fn decompose_rz_zero_is_identity() {
-        let seq = CliffordTDecomposer::decompose_rz(0.0, 4, 1e-3).unwrap();
+        let seq = CliffordTDecomposer::decompose_rz(0.0, 4, 1e-3)
+            .expect("Rz(0) is an exact identity match within the Clifford+T set, max_depth=4 > 0");
         let result = CliffordTDecomposer::sequence_to_su2(&seq);
         let dist = CliffordTDecomposer::unitary_distance(&result, &Su2::identity());
         assert!(dist < 1e-3, "dist={dist}");
@@ -608,7 +610,8 @@ mod tests {
     #[test]
     fn decompose_rz_result_close_to_target() {
         let theta = 0.7f32;
-        let seq = CliffordTDecomposer::decompose_rz(theta, 6, 0.3).unwrap();
+        let seq = CliffordTDecomposer::decompose_rz(theta, 6, 0.3)
+            .expect("decompose_rz only errors if max_depth == 0; max_depth=6 is valid");
         let result = CliffordTDecomposer::sequence_to_su2(&seq);
         let target = Su2::from_rz(theta);
         let dist = CliffordTDecomposer::unitary_distance(&result, &target);
@@ -618,7 +621,8 @@ mod tests {
     #[test]
     fn decompose_ry_via_rz() {
         let theta = 1.1f32;
-        let seq = CliffordTDecomposer::decompose_ry(theta, 6, 0.4).unwrap();
+        let seq =
+            CliffordTDecomposer::decompose_ry(theta, 6, 0.4).expect("decompose_ry should succeed");
         let result = CliffordTDecomposer::sequence_to_su2(&seq);
         let target = Su2::from_ry(theta);
         let dist = CliffordTDecomposer::unitary_distance(&result, &target);
@@ -631,7 +635,8 @@ mod tests {
         circ.add_gate(GateOp::H);
         circ.add_gate(GateOp::T);
         circ.add_gate(GateOp::Cnot { ctrl: 0, tgt: 1 });
-        let transpiled = CliffordTDecomposer::transpile(&circ, 4, 1e-3).unwrap();
+        let transpiled =
+            CliffordTDecomposer::transpile(&circ, 4, 1e-3).expect("transpile should succeed");
         let has_parametric = transpiled
             .ops
             .iter()
@@ -646,7 +651,8 @@ mod tests {
     fn transpile_circuit_with_rz() {
         let mut circ = QuantumCircuit::new(1);
         circ.add_gate(GateOp::Rz(1.0));
-        let transpiled = CliffordTDecomposer::transpile(&circ, 5, 0.4).unwrap();
+        let transpiled =
+            CliffordTDecomposer::transpile(&circ, 5, 0.4).expect("transpile should succeed");
         let has_rz = transpiled
             .ops
             .iter()

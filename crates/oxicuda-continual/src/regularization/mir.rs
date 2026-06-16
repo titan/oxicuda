@@ -625,9 +625,9 @@ mod tests {
     #[test]
     fn predict_valid_class() {
         let cfg = make_cfg(100);
-        let state = mir_new(&cfg, 42).unwrap();
+        let state = mir_new(&cfg, 42).expect("MIR state should initialize with valid config");
         let x = vec![0.5_f64; 8];
-        let pred = mir_predict(&state, &x).unwrap();
+        let pred = mir_predict(&state, &x).expect("MIR prediction should succeed on valid input");
         assert!(pred < 4, "prediction {pred} must be in [0,4)");
     }
 
@@ -636,7 +636,7 @@ mod tests {
     #[test]
     fn predict_wrong_dim_err() {
         let cfg = make_cfg(100);
-        let state = mir_new(&cfg, 42).unwrap();
+        let state = mir_new(&cfg, 42).expect("MIR state should initialize with valid config");
         let x = vec![0.0_f64; 5]; // wrong
         assert!(mir_predict(&state, &x).is_err());
     }
@@ -646,11 +646,12 @@ mod tests {
     #[test]
     fn buffer_grows() {
         let cfg = make_cfg(200);
-        let mut state = mir_new(&cfg, 1).unwrap();
+        let mut state = mir_new(&cfg, 1).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(10);
         let (x, y) = make_xy(30, 8, 4, 100);
         assert_eq!(mir_buffer_size(&state), 0);
-        mir_fit_task(&mut state, &x, &y, 30, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x, &y, 30, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
         assert_eq!(mir_buffer_size(&state), 30);
     }
 
@@ -660,10 +661,11 @@ mod tests {
     fn buffer_bounded_by_capacity() {
         let cap = 20_usize;
         let cfg = make_cfg(cap);
-        let mut state = mir_new(&cfg, 2).unwrap();
+        let mut state = mir_new(&cfg, 2).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(11);
         let (x, y) = make_xy(100, 8, 4, 200);
-        mir_fit_task(&mut state, &x, &y, 100, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x, &y, 100, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
         assert_eq!(
             mir_buffer_size(&state),
             cap,
@@ -676,18 +678,20 @@ mod tests {
     #[test]
     fn buffer_has_samples_from_two_tasks() {
         let cfg = make_cfg(100);
-        let mut state = mir_new(&cfg, 3).unwrap();
+        let mut state = mir_new(&cfg, 3).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(12);
 
         // Task 1: label 0 only (n_classes=1 for easy detection)
         let x1: Vec<f64> = vec![1.0_f64; 8 * 10];
         let y1: Vec<usize> = vec![0_usize; 10];
-        mir_fit_task(&mut state, &x1, &y1, 10, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x1, &y1, 10, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
 
         // Task 2: label 1 only
         let x2: Vec<f64> = vec![2.0_f64; 8 * 10];
         let y2: Vec<usize> = vec![1_usize; 10];
-        mir_fit_task(&mut state, &x2, &y2, 10, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x2, &y2, 10, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
 
         let has_0 = state.buffer.y.contains(&0);
         let has_1 = state.buffer.y.contains(&1);
@@ -700,11 +704,12 @@ mod tests {
     #[test]
     fn retrieval_returns_k_indices() {
         let cfg = make_cfg(100);
-        let mut state = mir_new(&cfg, 4).unwrap();
+        let mut state = mir_new(&cfg, 4).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(13);
 
         let (x, y) = make_xy(50, 8, 4, 300);
-        mir_fit_task(&mut state, &x, &y, 50, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x, &y, 50, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
 
         let x_new: Vec<f64> = vec![0.3_f64; 8];
         let retrieved = mir_retrieve(&state, &x_new, 1, 5, &mut rng);
@@ -716,11 +721,12 @@ mod tests {
     #[test]
     fn retrieved_indices_in_range() {
         let cfg = make_cfg(100);
-        let mut state = mir_new(&cfg, 5).unwrap();
+        let mut state = mir_new(&cfg, 5).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(14);
 
         let (x, y) = make_xy(40, 8, 4, 400);
-        mir_fit_task(&mut state, &x, &y, 40, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x, &y, 40, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
 
         let buf_len = mir_buffer_size(&state);
         let x_new: Vec<f64> = vec![0.9_f64; 8];
@@ -735,7 +741,7 @@ mod tests {
     #[test]
     fn empty_buffer_retrieval_empty() {
         let cfg = make_cfg(100);
-        let state = mir_new(&cfg, 6).unwrap();
+        let state = mir_new(&cfg, 6).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(15);
         let x_new = vec![0.5_f64; 8];
         let retrieved = mir_retrieve(&state, &x_new, 1, 5, &mut rng);
@@ -750,10 +756,11 @@ mod tests {
     #[test]
     fn fit_task_returns_finite_loss() {
         let cfg = make_cfg(100);
-        let mut state = mir_new(&cfg, 7).unwrap();
+        let mut state = mir_new(&cfg, 7).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(16);
         let (x, y) = make_xy(20, 8, 4, 500);
-        let loss = mir_fit_task(&mut state, &x, &y, 20, &mut rng).unwrap();
+        let loss = mir_fit_task(&mut state, &x, &y, 20, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
         assert!(loss.is_finite(), "loss must be finite, got {loss}");
         assert!(loss >= 0.0, "loss must be non-negative");
     }
@@ -763,7 +770,7 @@ mod tests {
     #[test]
     fn fit_task_empty_err() {
         let cfg = make_cfg(100);
-        let mut state = mir_new(&cfg, 8).unwrap();
+        let mut state = mir_new(&cfg, 8).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(17);
         assert!(mir_fit_task(&mut state, &[], &[], 0, &mut rng).is_err());
     }
@@ -776,10 +783,11 @@ mod tests {
             n_epochs: 10,
             ..make_cfg(100)
         };
-        let mut state = mir_new(&cfg, 9).unwrap();
+        let mut state = mir_new(&cfg, 9).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(18);
         let (x, y) = make_xy(30, 8, 4, 600);
-        let loss = mir_fit_task(&mut state, &x, &y, 30, &mut rng).unwrap();
+        let loss = mir_fit_task(&mut state, &x, &y, 30, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
         // Initial random loss for 4-class classification ≈ ln(4) ≈ 1.39.
         // After 10 epochs the loss should be reasonable.
         assert!(
@@ -793,14 +801,16 @@ mod tests {
     #[test]
     fn n_tasks_increments() {
         let cfg = make_cfg(100);
-        let mut state = mir_new(&cfg, 10).unwrap();
+        let mut state = mir_new(&cfg, 10).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(19);
         assert_eq!(state.n_tasks, 0);
         let (x1, y1) = make_xy(10, 8, 4, 700);
-        mir_fit_task(&mut state, &x1, &y1, 10, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x1, &y1, 10, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
         assert_eq!(state.n_tasks, 1);
         let (x2, y2) = make_xy(10, 8, 4, 800);
-        mir_fit_task(&mut state, &x2, &y2, 10, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x2, &y2, 10, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
         assert_eq!(state.n_tasks, 2);
     }
 
@@ -815,13 +825,14 @@ mod tests {
             buffer_size: 100,
             ..make_cfg(100)
         };
-        let mut state = mir_new(&cfg, 11).unwrap();
+        let mut state = mir_new(&cfg, 11).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(20);
 
         // Task 1: all positive inputs → class 0
         let x1: Vec<f64> = (0..8 * 20).map(|_| 1.0_f64).collect();
         let y1: Vec<usize> = vec![0_usize; 20];
-        mir_fit_task(&mut state, &x1, &y1, 20, &mut rng).unwrap();
+        mir_fit_task(&mut state, &x1, &y1, 20, &mut rng)
+            .expect("MIR task fitting should succeed with valid data");
 
         // Compute pre-loss for a task-1 exemplar.
         let exemplar_x = vec![1.0_f64; 8];
@@ -861,7 +872,7 @@ mod tests {
     #[test]
     fn fit_task_dimension_mismatch_err() {
         let cfg = make_cfg(100);
-        let mut state = mir_new(&cfg, 12).unwrap();
+        let mut state = mir_new(&cfg, 12).expect("MIR state should initialize with valid config");
         let mut rng = LcgRng::new(21);
         // x has only 1 sample (8 values) but n=2.
         let x = vec![0.0_f64; 8];

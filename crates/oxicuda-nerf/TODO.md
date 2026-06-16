@@ -6,7 +6,7 @@ Neural Radiance Fields and neural rendering primitives (NeRF, Instant-NGP, Mip-N
 
 ## Implementation Status
 
-**Actual: 3,898 SLoC (23 source files + 1 benches file) -- Coverage: NeRF / Instant-NGP / Mip-NeRF / TensoRF reference pipeline**
+**Actual: 12,510 SLoC (47 source files + 1 benches file) -- Coverage: NeRF / Instant-NGP / Mip-NeRF / TensoRF reference pipeline**
 
 Current implementation covers NeRF positional encoding (sin/cos with L frequency levels, configurable include_input), Instant-NGP multi-resolution hash grid (L levels, T buckets, F features per entry, spatial hashing with primes pi2=2654435761, pi3=805459861, trilinear interpolation over 8 corners), Mip-NeRF integrated positional encoding (Gaussian attenuation `exp(-omega^2 * sigma^2 / 2)` for anti-aliasing), TensoRF CP decomposition (rank-R factored density and color field with 1D axis interpolation), volume rendering (alpha compositing `alpha_i = 1 - exp(-sigma_i * delta_i)`, transmittance, early termination at `T < 1e-4`), stratified sampling, importance resampling (inverse-CDF), pinhole camera ray generation (c2w 3x4 matrix), occupancy-grid acceleration, and PSNR/MSE image-quality metrics.
 
@@ -68,12 +68,16 @@ Current implementation covers NeRF positional encoding (sin/cos with L frequency
 #### P1 -- Important Features
 - [x] Spherical harmonics directional encoding (L = 0..4) for view-dependent color (currently L = 0..3 in PTX kernel)
 - [x] Plenoxel grid (sparse voxel SH coefficients) field (field/plenoxel.rs -- Yu 2022; voxel grid with density + SH coeffs, trilinear interpolation, SH view-dir color eval, no MLP; reuses encoding::spherical_harmonics)
-- [ ] DVGO / TensoRF-VM variant -- vector-matrix tensor decomposition
+- [x] DVGO / TensoRF-VM variant -- vector-matrix tensor decomposition
 - [x] K-Planes (Fridovich-Keil et al. 2023) -- factorised hyperplane encoding for 4D dynamic scenes (field/kplanes.rs -- 3 factorized coordinate planes xy/xz/yz, bilinear interpolation + Hadamard combine -> density/color heads, SH view-dependent color)
 - [ ] InstantAvatar / human-NeRF skeleton-driven canonical-space mapping
 - [ ] LPIPS metric (perceptual image quality) alongside PSNR / MSE
 
 #### P2 -- Advanced / Research
+- [ ] Zip-NeRF anti-aliased hash-grid rendering (`rendering/zip_nerf.rs`) — Barron 2023 ICCV: multisampling along conical frustums over hash-grid features with linear interpolation; `ZipNerf`
+- [ ] Neuralangelo high-fidelity surface reconstruction (`surface/neuralangelo.rs`) — Li 2023 CVPR: numerical gradient of SDF via hash-grid + coarse-to-fine level scheduling + curvature regularisation; `Neuralangelo`
+- [ ] Deformable 3D Gaussian Splatting (`rendering/deformable_3dgs.rs`) — Yang 2023: per-Gaussian deformation MLP conditioned on time embedding for dynamic scene reconstruction; `Deformable3dGs`
+- [ ] EmerNeRF emergent spatial-temporal decomposition (`rendering/emernerf.rs`) — Yang 2023: flow-based dynamic / static decomposition with lifting of 2D flow to 3D scene flow for autonomous driving scenes; `EmerNeRF`
 - [ ] 3D Gaussian Splatting differentiable rasterizer (Kerbl et al. 2023)
 - [ ] BakedSDF / NeuS isosurface extraction for mesh export
 - [ ] Generative NeRF (GIRAFFE / pi-GAN) latent-code conditioning
@@ -92,11 +96,11 @@ Current implementation covers NeRF positional encoding (sin/cos with L frequency
 
 ## Quality Status
 
-- Tests: 62+ passing (12 e2e in lib.rs + module unit tests)
+- Tests: 358 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
-- Files: 23 source `.rs` files, all under 2000 lines
+- Files: 47 source `.rs` files, all under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS compiles but returns `UnsupportedPlatform` at runtime
 
@@ -120,9 +124,9 @@ Target: hash-grid + volume-render forward latency comparable to Instant-NGP CUDA
 
 | Metric | Description | Actual |
 |--------|-------------|--------|
-| Files | source `.rs` files under `src/` | 23 |
-| SLoC | code lines (tokei) | ~3,898 |
-| Tests | e2e + unit | 62+ |
+| Files | source `.rs` files under `src/` | 47 |
+| SLoC | code lines (tokei) | ~12,510 |
+| Tests | e2e + unit | 358 |
 | Coverage | PTX kernels x SM versions | 7 x 6 = 42 entry-point variants |
 
 The current implementation provides a reference NeRF / Instant-NGP / Mip-NeRF / TensoRF inference pipeline. P0/P1 items extend toward Mip-NeRF 360, K-Planes, and full trainability with gradient kernels; P2 items cover Gaussian Splatting and generative variants.

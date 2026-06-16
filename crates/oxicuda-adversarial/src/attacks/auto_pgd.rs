@@ -275,18 +275,19 @@ mod tests {
         for w in cps.windows(2) {
             assert!(w[0] < w[1]);
         }
-        assert!(*cps.last().unwrap() == 100);
+        assert!(*cps.last().expect("last should succeed") == 100);
     }
 
     #[test]
     fn smoke_increases_loss() {
         let target = vec![1.0_f32; 4];
         let x = vec![0.5_f32; 4];
-        let cfg = AutoPgdConfig::new(0.2, 30, 0.22).unwrap();
+        let cfg = AutoPgdConfig::new(0.2, 30, 0.22).expect("new should succeed");
         let mut rng = LcgRng::new(7);
-        let l_initial = quad(target.clone())(&x).unwrap().0;
-        let y = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut rng, quad(target.clone())).unwrap();
-        let l_final = quad(target)(&y).unwrap().0;
+        let l_initial = quad(target.clone())(&x).expect("value should be present").0;
+        let y = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut rng, quad(target.clone()))
+            .expect("value should be present");
+        let l_final = quad(target)(&y).expect("value should be present").0;
         // Loss must strictly increase (we maximise).
         assert!(l_final >= l_initial);
     }
@@ -295,9 +296,10 @@ mod tests {
     fn projection_enforced() {
         let target = vec![10.0_f32; 6];
         let x = vec![0.5_f32; 6];
-        let cfg = AutoPgdConfig::new(0.05, 60, 0.22).unwrap();
+        let cfg = AutoPgdConfig::new(0.05, 60, 0.22).expect("new should succeed");
         let mut rng = LcgRng::new(99);
-        let y = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut rng, quad(target)).unwrap();
+        let y = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut rng, quad(target))
+            .expect("value should be present");
         let delta: Vec<f32> = y.iter().zip(x.iter()).map(|(a, b)| a - b).collect();
         assert!(l_inf_norm(&delta) <= 0.05 + 1e-5);
         for v in &y {
@@ -308,7 +310,7 @@ mod tests {
     #[test]
     fn empty_input_rejected() {
         let x: Vec<f32> = vec![];
-        let cfg = AutoPgdConfig::new(0.1, 5, 0.22).unwrap();
+        let cfg = AutoPgdConfig::new(0.1, 5, 0.22).expect("new should succeed");
         let mut rng = LcgRng::new(0);
         let cls = |_x: &[f32]| Ok((0.0_f32, vec![]));
         assert_eq!(
@@ -320,7 +322,7 @@ mod tests {
     #[test]
     fn nan_loss_caught() {
         let x = vec![0.0_f32; 3];
-        let cfg = AutoPgdConfig::new(0.1, 5, 0.22).unwrap();
+        let cfg = AutoPgdConfig::new(0.1, 5, 0.22).expect("new should succeed");
         let mut rng = LcgRng::new(0);
         let cls = |_x: &[f32]| Ok((f32::NAN, vec![1.0_f32; 3]));
         assert!(matches!(
@@ -332,7 +334,7 @@ mod tests {
     #[test]
     fn dim_mismatch_caught() {
         let x = vec![0.0_f32; 4];
-        let cfg = AutoPgdConfig::new(0.1, 5, 0.22).unwrap();
+        let cfg = AutoPgdConfig::new(0.1, 5, 0.22).expect("new should succeed");
         let mut rng = LcgRng::new(0);
         let cls = |_x: &[f32]| Ok((0.0_f32, vec![1.0_f32; 3]));
         assert!(matches!(
@@ -347,7 +349,7 @@ mod tests {
         // since we always track best-so-far.
         let target = vec![1.0_f32; 5];
         let x = vec![0.0_f32; 5];
-        let cfg = AutoPgdConfig::new(0.3, 20, 0.22).unwrap();
+        let cfg = AutoPgdConfig::new(0.3, 20, 0.22).expect("new should succeed");
         let mut rng = LcgRng::new(123);
         // Initial random start loss.
         let mut rng_init = LcgRng::new(123);
@@ -355,9 +357,12 @@ mod tests {
             .iter()
             .map(|&xi| (xi + (2.0 * rng_init.next_f32() - 1.0) * cfg.eps).clamp(-10.0, 10.0))
             .collect();
-        let l_init = quad(target.clone())(&init).unwrap().0;
-        let y = auto_pgd_attack(&x, -10.0, 10.0, &cfg, &mut rng, quad(target.clone())).unwrap();
-        let l_final = quad(target)(&y).unwrap().0;
+        let l_init = quad(target.clone())(&init)
+            .expect("value should be present")
+            .0;
+        let y = auto_pgd_attack(&x, -10.0, 10.0, &cfg, &mut rng, quad(target.clone()))
+            .expect("value should be present");
+        let l_final = quad(target)(&y).expect("value should be present").0;
         assert!(l_final >= l_init - 1e-5);
     }
 
@@ -365,11 +370,13 @@ mod tests {
     fn deterministic_with_same_seed() {
         let target = vec![1.0_f32; 4];
         let x = vec![0.5_f32; 4];
-        let cfg = AutoPgdConfig::new(0.1, 15, 0.22).unwrap();
+        let cfg = AutoPgdConfig::new(0.1, 15, 0.22).expect("new should succeed");
         let mut r1 = LcgRng::new(2024);
         let mut r2 = LcgRng::new(2024);
-        let y1 = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut r1, quad(target.clone())).unwrap();
-        let y2 = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut r2, quad(target)).unwrap();
+        let y1 = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut r1, quad(target.clone()))
+            .expect("value should be present");
+        let y2 = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut r2, quad(target))
+            .expect("value should be present");
         for (a, b) in y1.iter().zip(y2.iter()) {
             assert!((a - b).abs() < 1e-6);
         }
@@ -380,9 +387,10 @@ mod tests {
         // Gradient ascent on −½‖x − target‖² ⇒ should move toward target.
         let target = vec![0.7_f32; 3];
         let x = vec![0.5_f32; 3];
-        let cfg = AutoPgdConfig::new(0.3, 30, 0.22).unwrap();
+        let cfg = AutoPgdConfig::new(0.3, 30, 0.22).expect("new should succeed");
         let mut rng = LcgRng::new(7);
-        let y = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut rng, neg_quad(target.clone())).unwrap();
+        let y = auto_pgd_attack(&x, 0.0, 1.0, &cfg, &mut rng, neg_quad(target.clone()))
+            .expect("value should be present");
         let dist_before: f32 = x
             .iter()
             .zip(target.iter())

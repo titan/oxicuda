@@ -79,7 +79,8 @@ mod tests {
     fn ema_loss_finite() {
         let t_logits = vec![1.0_f32, 2.0, 3.0];
         let s_logits = vec![0.9_f32, 2.1, 3.0];
-        let loss = EmaTeacher::ema_loss(&t_logits, &s_logits, 2, 0.5, 4.0).unwrap();
+        let loss = EmaTeacher::ema_loss(&t_logits, &s_logits, 2, 0.5, 4.0)
+            .expect("ema_loss should succeed");
         assert!(loss.is_finite() && loss >= 0.0);
     }
 }

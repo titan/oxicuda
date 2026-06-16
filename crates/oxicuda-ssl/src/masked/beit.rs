@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn vq_codebook_init_correct_shape() {
         let mut rng = LcgRng::new(1);
-        let cb = vq_codebook_init(64, 32, &mut rng).unwrap();
+        let cb = vq_codebook_init(64, 32, &mut rng).expect("vq_codebook_init should succeed");
         assert_eq!(cb.embeddings.len(), 64 * 32);
         assert_eq!(cb.n_codes, 64);
         assert_eq!(cb.code_dim, 32);
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn vq_codebook_init_entries_finite() {
         let mut rng = LcgRng::new(2);
-        let cb = vq_codebook_init(16, 8, &mut rng).unwrap();
+        let cb = vq_codebook_init(16, 8, &mut rng).expect("vq_codebook_init should succeed");
         assert!(cb.embeddings.iter().all(|v| v.is_finite()));
         assert!(cb.ema_sum.iter().all(|v| v.is_finite()));
     }
@@ -722,11 +722,11 @@ mod tests {
         let mut rng = LcgRng::new(5);
         let k = 32;
         let c = 8;
-        let cb = vq_codebook_init(k, c, &mut rng).unwrap();
+        let cb = vq_codebook_init(k, c, &mut rng).expect("vq_codebook_init should succeed");
         let n = 20;
         let mut emb = vec![0.0_f32; n * c];
         rng.fill_normal(&mut emb);
-        let (indices, _, _) = vq_encode(&cb, &emb, n, c).unwrap();
+        let (indices, _, _) = vq_encode(&cb, &emb, n, c).expect("vq_encode should succeed");
         assert_eq!(indices.len(), n);
         for &idx in &indices {
             assert!(idx < k, "index {idx} out of range");
@@ -739,11 +739,11 @@ mod tests {
         let mut rng = LcgRng::new(6);
         let k = 16;
         let c = 4;
-        let cb = vq_codebook_init(k, c, &mut rng).unwrap();
+        let cb = vq_codebook_init(k, c, &mut rng).expect("vq_codebook_init should succeed");
         let n = 10;
         let mut emb = vec![0.0_f32; n * c];
         rng.fill_normal(&mut emb);
-        let (_, _, vq_loss) = vq_encode(&cb, &emb, n, c).unwrap();
+        let (_, _, vq_loss) = vq_encode(&cb, &emb, n, c).expect("vq_encode should succeed");
         assert!(vq_loss >= 0.0, "vq_loss = {vq_loss} should be >= 0");
     }
 
@@ -753,11 +753,11 @@ mod tests {
         let mut rng = LcgRng::new(7);
         let k = 8;
         let c = 6;
-        let cb = vq_codebook_init(k, c, &mut rng).unwrap();
+        let cb = vq_codebook_init(k, c, &mut rng).expect("vq_codebook_init should succeed");
         let n = 5;
         let mut emb = vec![0.0_f32; n * c];
         rng.fill_normal(&mut emb);
-        let (indices, quantized, _) = vq_encode(&cb, &emb, n, c).unwrap();
+        let (indices, quantized, _) = vq_encode(&cb, &emb, n, c).expect("vq_encode should succeed");
         assert_eq!(quantized.len(), n * c);
         assert_eq!(indices.len(), n);
     }
@@ -768,7 +768,7 @@ mod tests {
         let mut rng = LcgRng::new(8);
         let k = 8;
         let c = 4;
-        let mut cb = vq_codebook_init(k, c, &mut rng).unwrap();
+        let mut cb = vq_codebook_init(k, c, &mut rng).expect("vq_codebook_init should succeed");
         // Force codebook[3] to be the zero vector.
         for v in &mut cb.embeddings[3 * c..4 * c] {
             *v = 0.0;
@@ -776,7 +776,7 @@ mod tests {
         // Embed = zero vector → should match code 3 (or whichever other code
         // is closest to zero; we just assert the returned distance is minimal).
         let emb = vec![0.0_f32; c];
-        let (indices, _, vq_loss) = vq_encode(&cb, &emb, 1, c).unwrap();
+        let (indices, _, vq_loss) = vq_encode(&cb, &emb, 1, c).expect("vq_encode should succeed");
         // The selected code must be a valid index.
         assert!(indices[0] < k);
         // Loss must be non-negative.
@@ -792,7 +792,7 @@ mod tests {
         let mut rng = LcgRng::new(9);
         let k = 4;
         let c = 3;
-        let mut cb = vq_codebook_init(k, c, &mut rng).unwrap();
+        let mut cb = vq_codebook_init(k, c, &mut rng).expect("vq_codebook_init should succeed");
         // Use a small momentum so the update is visible.
         cb.ema_momentum = 0.5;
 
@@ -803,7 +803,7 @@ mod tests {
         let n = 5;
         let emb = vec![1.0_f32; n * c];
         let indices = vec![0usize; n];
-        vq_update_codebook(&mut cb, &emb, &indices, n).unwrap();
+        vq_update_codebook(&mut cb, &emb, &indices, n).expect("vq_update_codebook should succeed");
 
         let updated_code0: Vec<f32> = cb.embeddings[0..c].to_vec();
         // Each component of code 0 should be between its original value and 1.0.
@@ -834,7 +834,8 @@ mod tests {
         rng.fill_normal(&mut logits);
         let indices: Vec<usize> = (0..n).map(|i| i % k).collect();
         let mask: Vec<bool> = (0..n).map(|i| i % 2 == 0).collect();
-        let result = beit_loss(&logits, &indices, &mask, n, k, &cfg).unwrap();
+        let result =
+            beit_loss(&logits, &indices, &mask, n, k, &cfg).expect("beit_loss should succeed");
         assert!(result.total_loss.is_finite(), "total_loss should be finite");
         assert!(result.beit_loss >= 0.0, "beit_loss should be >= 0");
     }
@@ -851,7 +852,8 @@ mod tests {
         let logits = vec![1.0_f32; n * k];
         let indices = vec![0usize; n];
         let mask: Vec<bool> = (0..n).map(|i| i < 7).collect(); // 7 masked
-        let result = beit_loss(&logits, &indices, &mask, n, k, &cfg).unwrap();
+        let result =
+            beit_loss(&logits, &indices, &mask, n, k, &cfg).expect("beit_loss should succeed");
         assert_eq!(result.n_masked, 7);
     }
 
@@ -867,7 +869,8 @@ mod tests {
         let logits = vec![0.5_f32; n * k];
         let indices = vec![0usize; n];
         let mask = vec![false; n];
-        let result = beit_loss(&logits, &indices, &mask, n, k, &cfg).unwrap();
+        let result =
+            beit_loss(&logits, &indices, &mask, n, k, &cfg).expect("beit_loss should succeed");
         assert_eq!(result.n_masked, 0);
         assert!(
             result.beit_loss.abs() < 1e-7,
@@ -890,7 +893,8 @@ mod tests {
         rng.fill_normal(&mut logits);
         let indices: Vec<usize> = (0..n).map(|_| rng.next_usize(k)).collect();
         let mask = vec![true; n];
-        let result = beit_loss(&logits, &indices, &mask, n, k, &cfg).unwrap();
+        let result =
+            beit_loss(&logits, &indices, &mask, n, k, &cfg).expect("beit_loss should succeed");
         assert!(
             (0.0..=1.0).contains(&result.codebook_usage),
             "codebook_usage = {}",
@@ -913,7 +917,8 @@ mod tests {
         // Assign each patch to a distinct code (cycling) to maximise diversity.
         let indices: Vec<usize> = (0..n).map(|i| i % k).collect();
         let mask = vec![true; n];
-        let result = beit_loss(&logits, &indices, &mask, n, k, &cfg).unwrap();
+        let result =
+            beit_loss(&logits, &indices, &mask, n, k, &cfg).expect("beit_loss should succeed");
         assert!(
             result.perplexity >= 1.0 && result.perplexity <= k as f32 + 1e-4,
             "perplexity = {} out of [1, {}]",
@@ -941,7 +946,7 @@ mod tests {
         let h = 14;
         let w = 14;
         let n = h * w;
-        let mask = beit_block_mask(n, h, w, 0.4, &mut rng).unwrap();
+        let mask = beit_block_mask(n, h, w, 0.4, &mut rng).expect("beit_block_mask should succeed");
         assert_eq!(mask.len(), n);
     }
 
@@ -952,7 +957,7 @@ mod tests {
         let h = 8;
         let w = 8;
         let n = h * w;
-        let mask = beit_block_mask(n, h, w, 0.0, &mut rng).unwrap();
+        let mask = beit_block_mask(n, h, w, 0.0, &mut rng).expect("beit_block_mask should succeed");
         assert!(mask.iter().all(|&v| !v));
     }
 
@@ -974,7 +979,8 @@ mod tests {
         let w = 14;
         let n = h * w; // 196
         let ratio = 0.4_f32;
-        let mask = beit_block_mask(n, h, w, ratio, &mut rng).unwrap();
+        let mask =
+            beit_block_mask(n, h, w, ratio, &mut rng).expect("beit_block_mask should succeed");
         let n_masked = mask.iter().filter(|&&v| v).count();
         // The block mask stops exactly at target = floor(196 * 0.4) = 78.
         let target = (n as f32 * ratio).floor() as usize;
@@ -995,11 +1001,12 @@ mod tests {
         let mut rng = LcgRng::new(17);
         let k = 32;
         let c = 16;
-        let cb = vq_codebook_init(k, c, &mut rng).unwrap();
+        let cb = vq_codebook_init(k, c, &mut rng).expect("vq_codebook_init should succeed");
         let n = 50;
         let mut emb = vec![0.0_f32; n * c];
         rng.fill_normal(&mut emb);
-        let (indices, quantized, vq_loss) = vq_encode(&cb, &emb, n, c).unwrap();
+        let (indices, quantized, vq_loss) =
+            vq_encode(&cb, &emb, n, c).expect("vq_encode should succeed");
         assert_eq!(indices.len(), n);
         assert_eq!(quantized.len(), n * c);
         assert!(vq_loss.is_finite() && vq_loss >= 0.0);

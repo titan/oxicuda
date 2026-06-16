@@ -100,7 +100,8 @@ mod tests {
         let u = heat_analytic(x, t, ALPHA);
         let u_t = -ALPHA * pi * pi * u;
         let u_xx = -pi * pi * u;
-        let r = heat_residual(u_t, u_xx, ALPHA).unwrap();
+        let r = heat_residual(u_t, u_xx, ALPHA)
+            .expect("heat_residual should succeed for analytic u_t and u_xx with valid alpha");
         assert!(
             r.abs() < 1e-3,
             "Residual on analytic solution should be ~0, got {r}"
@@ -109,14 +110,17 @@ mod tests {
 
     #[test]
     fn heat_residual_check_passes() {
-        let ok = heat_residual_check(0.5, 0.5, ALPHA, 1e-3).unwrap();
+        let ok = heat_residual_check(0.5, 0.5, ALPHA, 1e-3).expect(
+            "heat_residual_check should succeed for valid alpha at interior point (0.5, 0.5)",
+        );
         assert!(ok, "heat_residual_check should pass for analytic solution");
     }
 
     #[test]
     fn heat_residual_nonzero_for_wrong_solution() {
         // u = 1 (constant) → u_t = 0, u_xx = 0, R = 0 only by coincidence
-        let r = heat_residual(1.0, 0.0, ALPHA).unwrap();
+        let r = heat_residual(1.0, 0.0, ALPHA)
+            .expect("heat_residual with u_t=1.0 and u_xx=0.0 should succeed for valid alpha");
         assert!((r - 1.0).abs() < 1e-5, "R = u_t - alpha*u_xx = 1 - 0 = 1");
     }
 
@@ -142,7 +146,9 @@ mod tests {
     fn heat_grid_residuals_small() {
         let x_pts: Vec<f32> = (1..5).map(|i| i as f32 * 0.2).collect();
         let t_pts: Vec<f32> = (1..5).map(|i| i as f32 * 0.1).collect();
-        let residuals = heat_residual_on_grid(&x_pts, &t_pts, ALPHA).unwrap();
+        let residuals = heat_residual_on_grid(&x_pts, &t_pts, ALPHA).expect(
+            "heat_residual_on_grid should succeed for interior x/t grid points with valid alpha",
+        );
         for r in &residuals {
             assert!(r.abs() < 1e-3, "Grid residual should be near zero: {r}");
         }

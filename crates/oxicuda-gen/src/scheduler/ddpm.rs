@@ -241,28 +241,32 @@ mod tests {
 
     #[test]
     fn new_scheduler_1000_steps() {
-        let sched = DdpmScheduler::new(1000).unwrap();
+        let sched = DdpmScheduler::new(1000).expect("new should succeed");
         assert_eq!(sched.num_steps(), 1000);
     }
 
     #[test]
     fn add_noise_output_shape() {
-        let sched = DdpmScheduler::new(100).unwrap();
+        let sched = DdpmScheduler::new(100).expect("new should succeed");
         let mut rng = make_rng();
         let x0 = randn(&mut rng, 64);
         let noise = randn(&mut rng, 64);
-        let x_t = sched.add_noise(&x0, &noise, 50).unwrap();
+        let x_t = sched
+            .add_noise(&x0, &noise, 50)
+            .expect("add_noise should succeed");
         assert_eq!(x_t.len(), 64);
     }
 
     #[test]
     fn add_noise_at_t0_close_to_x0() {
         // At t=0, beta is very small (~0.0001), so x_t ≈ x_0
-        let sched = DdpmScheduler::new(1000).unwrap();
+        let sched = DdpmScheduler::new(1000).expect("new should succeed");
         let mut rng = make_rng();
         let x0 = randn(&mut rng, 32);
         let noise = randn(&mut rng, 32);
-        let x_t = sched.add_noise(&x0, &noise, 0).unwrap();
+        let x_t = sched
+            .add_noise(&x0, &noise, 0)
+            .expect("add_noise should succeed");
         // sqrt(alphas_bar[0]) ≈ sqrt(1 - 0.0001) ≈ 0.99995
         let max_diff: f32 = x0
             .iter()
@@ -275,7 +279,7 @@ mod tests {
 
     #[test]
     fn add_noise_dimension_mismatch() {
-        let sched = DdpmScheduler::new(100).unwrap();
+        let sched = DdpmScheduler::new(100).expect("new should succeed");
         let x0 = vec![1.0_f32; 10];
         let noise = vec![0.0_f32; 5];
         assert!(matches!(
@@ -286,7 +290,7 @@ mod tests {
 
     #[test]
     fn add_noise_invalid_timestep() {
-        let sched = DdpmScheduler::new(100).unwrap();
+        let sched = DdpmScheduler::new(100).expect("new should succeed");
         let x0 = vec![1.0_f32; 8];
         let noise = vec![0.0_f32; 8];
         assert!(matches!(
@@ -297,26 +301,32 @@ mod tests {
 
     #[test]
     fn step_output_shape() {
-        let sched = DdpmScheduler::new(100).unwrap();
+        let sched = DdpmScheduler::new(100).expect("new should succeed");
         let mut rng = make_rng();
         let eps = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
         let noise = randn(&mut rng, 32);
-        let x_prev = sched.step(&eps, &x_t, 50, &noise).unwrap();
+        let x_prev = sched
+            .step(&eps, &x_t, 50, &noise)
+            .expect("step should succeed");
         assert_eq!(x_prev.len(), 32);
     }
 
     #[test]
     fn step_at_t0_no_stochastic_noise() {
         // At t=0, sigma should be 0, so the step is deterministic regardless of z
-        let sched = DdpmScheduler::new(100).unwrap();
+        let sched = DdpmScheduler::new(100).expect("new should succeed");
         let mut rng = make_rng();
         let eps = randn(&mut rng, 16);
         let x_t = randn(&mut rng, 16);
         let noise1 = randn(&mut rng, 16);
         let noise2 = randn(&mut rng, 16);
-        let x1 = sched.step(&eps, &x_t, 0, &noise1).unwrap();
-        let x2 = sched.step(&eps, &x_t, 0, &noise2).unwrap();
+        let x1 = sched
+            .step(&eps, &x_t, 0, &noise1)
+            .expect("step should succeed");
+        let x2 = sched
+            .step(&eps, &x_t, 0, &noise2)
+            .expect("step should succeed");
         let max_diff: f32 = x1
             .iter()
             .zip(&x2)
@@ -330,25 +340,31 @@ mod tests {
 
     #[test]
     fn predict_x0_output_shape() {
-        let sched = DdpmScheduler::new(100).unwrap();
+        let sched = DdpmScheduler::new(100).expect("new should succeed");
         let mut rng = make_rng();
         let x_t = randn(&mut rng, 64);
         let eps = randn(&mut rng, 64);
-        let x0 = sched.predict_x0(&x_t, &eps, 50).unwrap();
+        let x0 = sched
+            .predict_x0(&x_t, &eps, 50)
+            .expect("predict_x0 should succeed");
         assert_eq!(x0.len(), 64);
     }
 
     #[test]
     fn predict_x0_roundtrip() {
         // If we add noise with true eps, predict_x0 should recover x_0 approximately
-        let sched = DdpmScheduler::new(1000).unwrap();
+        let sched = DdpmScheduler::new(1000).expect("new should succeed");
         let mut rng = make_rng();
         let x0: Vec<f32> = (0..32).map(|i| (i as f32) / 32.0 - 0.5).collect();
         let noise = randn(&mut rng, 32);
         let t = 10;
-        let x_t = sched.add_noise(&x0, &noise, t).unwrap();
+        let x_t = sched
+            .add_noise(&x0, &noise, t)
+            .expect("add_noise should succeed");
         // Predict x0 using the true noise (oracle)
-        let x0_pred = sched.predict_x0(&x_t, &noise, t).unwrap();
+        let x0_pred = sched
+            .predict_x0(&x_t, &noise, t)
+            .expect("predict_x0 should succeed");
         let max_diff: f32 = x0
             .iter()
             .zip(&x0_pred)
@@ -359,7 +375,7 @@ mod tests {
 
     #[test]
     fn step_dimension_mismatch() {
-        let sched = DdpmScheduler::new(100).unwrap();
+        let sched = DdpmScheduler::new(100).expect("new should succeed");
         let eps = vec![0.0_f32; 10];
         let x_t = vec![0.0_f32; 5];
         let noise = vec![0.0_f32; 10];
@@ -371,20 +387,22 @@ mod tests {
 
     #[test]
     fn step_all_outputs_finite() {
-        let sched = DdpmScheduler::new(100).unwrap();
+        let sched = DdpmScheduler::new(100).expect("new should succeed");
         let mut rng = make_rng();
         let eps = randn(&mut rng, 32);
         let x_t = randn(&mut rng, 32);
         let noise = randn(&mut rng, 32);
         for t in 0..10 {
-            let x_prev = sched.step(&eps, &x_t, t, &noise).unwrap();
+            let x_prev = sched
+                .step(&eps, &x_t, t, &noise)
+                .expect("step should succeed");
             assert!(x_prev.iter().all(|v| v.is_finite()), "non-finite at t={t}");
         }
     }
 
     #[test]
     fn with_schedule_custom() {
-        let bs = BetaSchedule::linear(50, 0.001, 0.01).unwrap();
+        let bs = BetaSchedule::linear(50, 0.001, 0.01).expect("linear should succeed");
         let sched = DdpmScheduler::with_schedule(bs);
         assert_eq!(sched.num_steps(), 50);
     }

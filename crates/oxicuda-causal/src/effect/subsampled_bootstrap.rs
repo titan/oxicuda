@@ -333,7 +333,8 @@ mod tests {
         let data: Vec<f32> = (0..20).map(|i| i as f32).collect();
         let cfg = SubsampledBootstrapConfig::default();
         let mut rng = make_rng(42);
-        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng).unwrap();
+        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap should succeed");
         // Full-sample mean = 9.5
         assert!(
             (result.estimate - 9.5).abs() < 1e-4,
@@ -352,7 +353,8 @@ mod tests {
             alpha: 0.05,
         };
         let mut rng = make_rng(7);
-        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng).unwrap();
+        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap should succeed");
         let sample_mean = 49.5_f32;
         assert!(
             result.ci_lower <= sample_mean && sample_mean <= result.ci_upper,
@@ -368,7 +370,8 @@ mod tests {
         let data: Vec<f32> = (0..30).map(|i| i as f32 * 0.1).collect();
         let cfg = SubsampledBootstrapConfig::default();
         let mut rng = make_rng(13);
-        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng).unwrap();
+        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap should succeed");
         assert!(result.se >= 0.0, "se={}", result.se);
     }
 
@@ -377,7 +380,8 @@ mod tests {
         let data: Vec<f32> = (0..50).map(|i| (i as f32 - 25.0) * 0.5).collect();
         let cfg = SubsampledBootstrapConfig::default();
         let mut rng = make_rng(99);
-        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng).unwrap();
+        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap should succeed");
         assert!(
             result.ci_lower <= result.estimate,
             "ci_lower={} > estimate={}",
@@ -401,7 +405,8 @@ mod tests {
             alpha: 0.05,
         };
         let mut rng = make_rng(5);
-        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng).unwrap();
+        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap should succeed");
         assert!(result.n_valid <= cfg.n_bootstrap);
     }
 
@@ -416,7 +421,8 @@ mod tests {
                 alpha: 0.05,
             };
             let mut rng = make_rng(17);
-            let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng).unwrap();
+            let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng)
+                .expect("subsampled_bootstrap should succeed");
             assert!(
                 result.ci_lower <= result.ci_upper,
                 "fraction={}: ci_lower={} > ci_upper={}",
@@ -436,7 +442,8 @@ mod tests {
             alpha: 0.05,
         };
         let mut rng = make_rng(3);
-        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng).unwrap();
+        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap should succeed");
         // With 1 subsample, Var = 0, so se = 0, CI is degenerate
         assert_eq!(result.se, 0.0);
         assert_eq!(result.n_valid, 1);
@@ -584,7 +591,8 @@ mod tests {
             alpha: 0.05,
         };
         let mut rng = make_rng(77);
-        let results = subsampled_bootstrap_vec(&data, n, d, estimator, &cfg, &mut rng).unwrap();
+        let results = subsampled_bootstrap_vec(&data, n, d, estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap_vec should succeed");
         assert_eq!(
             results.len(),
             d,
@@ -616,7 +624,8 @@ mod tests {
         };
         let cfg = SubsampledBootstrapConfig::default();
         let mut rng = make_rng(88);
-        let results = subsampled_bootstrap_vec(&data, n, d, estimator, &cfg, &mut rng).unwrap();
+        let results = subsampled_bootstrap_vec(&data, n, d, estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap_vec should succeed");
         for (k, r) in results.iter().enumerate() {
             assert!(
                 r.ci_lower <= r.ci_upper,
@@ -637,7 +646,8 @@ mod tests {
         let data = vec![const_val; 50];
         let cfg = SubsampledBootstrapConfig::default();
         let mut rng = make_rng(11);
-        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng).unwrap();
+        let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng)
+            .expect("subsampled_bootstrap should succeed");
         assert!(
             result.se < 1e-4,
             "se={} expected very small for constant data",
@@ -658,7 +668,7 @@ mod tests {
         let mut rng = make_rng(33);
         let result = subsampled_bootstrap(&data, mean_estimator, &cfg, &mut rng);
         assert!(result.is_ok(), "n=5 should not fail: {:?}", result);
-        let r = result.unwrap();
+        let r = result.expect("result should be present");
         assert!(r.n_valid > 0);
         assert!(r.se.is_finite());
     }

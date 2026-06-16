@@ -575,7 +575,9 @@ mod tests {
         let fno = Fno1d::new(cfg, &mut rng);
         let n = 16;
         let input = vec![0.5_f32; n];
-        let output = fno.forward(&input, n).unwrap();
+        let output = fno
+            .forward(&input, n)
+            .expect("FNO1d forward pass should produce output of length n");
         assert_eq!(output.len(), n);
     }
 
@@ -592,7 +594,9 @@ mod tests {
         let fno = Fno1d::new(cfg, &mut rng);
         let n = 16;
         let input: Vec<f32> = (0..n).map(|i| (i as f32 * 0.1).sin()).collect();
-        let output = fno.forward(&input, n).unwrap();
+        let output = fno
+            .forward(&input, n)
+            .expect("FNO1d forward pass should succeed and produce finite values");
         assert!(
             output.iter().all(|v| v.is_finite()),
             "FNO1d output not finite"
@@ -655,7 +659,9 @@ mod tests {
         let fno = Fno2d::new(cfg, &mut rng);
         let (nx, ny) = (8, 8);
         let input = vec![0.1_f32; nx * ny];
-        let output = fno.forward(&input, nx, ny).unwrap();
+        let output = fno
+            .forward(&input, nx, ny)
+            .expect("FNO2d forward pass should produce output of correct shape");
         assert_eq!(output.len(), nx * ny);
     }
 
@@ -671,7 +677,9 @@ mod tests {
         };
         let fno = Fno2d::new(cfg, &mut rng);
         let input = vec![0.3_f32; 8 * 8];
-        let output = fno.forward(&input, 8, 8).unwrap();
+        let output = fno
+            .forward(&input, 8, 8)
+            .expect("FNO2d forward pass should produce finite values");
         assert!(output.iter().all(|v| v.is_finite()));
     }
 
@@ -702,7 +710,9 @@ mod tests {
         let fno = Fno1d::new(cfg, &mut rng);
         let n = 16;
         let input = vec![0.1_f32; n * 2];
-        let output = fno.forward(&input, n).unwrap();
+        let output = fno
+            .forward(&input, n)
+            .expect("FNO1d multi-channel forward pass should succeed");
         assert_eq!(output.len(), n * 3);
     }
 }

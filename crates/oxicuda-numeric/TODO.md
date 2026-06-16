@@ -8,9 +8,9 @@ for QUADPACK / GSL / SciPy-style scientific computing utilities. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,061 (71 files, tokei measurement)
+- **Actual SLoC:** 13,644 (99 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 6,787
-- **Tests:** 212 passing
+- **Tests:** 466 passing
 - **Vol.60 scope:** Root finding, numerical quadrature, special functions, ODE
   solvers, polynomial roots, numerical differentiation, interpolation, and
   multidimensional cubature. Complements oxicuda-blas / oxicuda-solver / oxicuda-fft
@@ -143,10 +143,17 @@ for QUADPACK / GSL / SciPy-style scientific computing utilities. Part of
   storage and FP32 accumulation
 
 #### P2 -- Algorithmic Extensions
-- [ ] Tanh-sinh (double-exponential) quadrature for endpoint singularities
+- [x] Tanh-sinh (double-exponential) quadrature for endpoint singularities
 - [ ] Implicit Runge-Kutta (Radau IIA, SDIRK) for stiff problems beyond BDF1/BDF2
 - [ ] GPU-resident sparse polynomial root finder for very high-degree polynomials
 - [ ] Multi-precision residual refinement for ill-conditioned root finding
+- [x] `quadrature/gauss_patterson.rs` — Gauss-Patterson sparse-grid quadrature: 1D nested Gauss-Kronrod rules (1,3,7,15,31,63 pts); multi-dimensional Smolyak sparse grid with Clenshaw-Curtis + Gauss-Legendre nodes; `SmolyakQuadrature { level: usize, dim: usize }`
+- [x] `ode/sdirk.rs` — SDIRK integrators (Alexander 1977): SDIRK3 (3-stage order-3) + SDIRK4 (5-stage order-4); stage-value Newton iterations with frozen Jacobian; error control via embedded pair; A-stable for stiff systems
+- [x] `diff/dual_number.rs` — Dual-number forward-mode AD: `Dual { val: f64, eps: f64 }` with overloaded arithmetic + transcendentals; Jacobian-vector products; exact to machine precision; composition through any `Fn(Dual)->Dual`
+- [ ] `roots/complex_newton.rs` — Complex Newton + Halley root-finding: complex arithmetic over `num-complex::Complex<f64>`; Halley's method cubic convergence; used in Aberth-Ehrlich simultaneous poly-root refinement
+- [x] `interp/rbf_interp.rs` — Radial Basis Function interpolation (Hardy 1971): scattered data in ℝⁿ; thin-plate spline / multiquadric / Gaussian kernels; solve linear system via Cholesky + condition estimate; `RbfInterpolator { kernel: RbfKernel }`
+- [ ] `integral/cubature_adaptive.rs` — Adaptive multi-dimensional cubature (Genz-Malik 1980, Berntsen-Espelid-Genz 1991): 7th-order rule with error estimate; recursive bisection of error-dominant hyperrectangles; `AdaptiveCubature { abs_tol, rel_tol, max_eval }`
+- [ ] `special/wright_omega.rs` — Wright ω function (Corless-Jeffrey 2002): solution to ω+log(ω)=z; extends Lambert W to complex arguments; Halley iterations from initial approximation; `wright_omega(z: Complex<f64>) -> Complex<f64>`
 
 ## Dependencies
 
@@ -164,7 +171,7 @@ routines are implemented privately under `linalg/`.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 212 passing (unit + 38 e2e cross-module)
+- Tests: 466 passing (unit + 38 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns
@@ -224,9 +231,9 @@ tuning is currently uniform; targeted tuning is tracked under Future Enhancement
 
 | Metric | Estimated (estimation.md Vol.60) | Actual |
 |--------|----------------------------------|--------|
-| SLoC | 80K-140K (median ~110K) | 6,061 |
-| Files | ~35-55 algorithm modules | 71 |
-| Tests | algorithm-grade coverage | 212 |
+| SLoC | 80K-140K (median ~110K) | 13,644 |
+| Files | ~35-55 algorithm modules | 99 |
+| Tests | algorithm-grade coverage | 466 |
 
 The gap to the median estimate reflects the estimation targeting full
 QUADPACK-/GSL-grade production parity including arbitrary-precision residual

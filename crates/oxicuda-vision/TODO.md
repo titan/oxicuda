@@ -9,8 +9,8 @@ multi-scale features, DETR decoder, and bipartite set matching. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 9,830 (26 files, Rust 7,119 code + 1,479 comments + 1,227 blanks)
-- **Tests:** 349 passing (#[test] count in src/)
+- **Actual SLoC:** 19,287 (61 files, Rust 7,119 code + 1,479 comments + 1,227 blanks)
+- **Tests:** 768 passing (#[test] count in src/)
 - **Crate:** `oxicuda-vision` -- Vol.20 Vision Transformer & CLIP Primitives
 
 ### Completed [x]
@@ -92,8 +92,8 @@ multi-scale features, DETR decoder, and bipartite set matching. Part of
 - [ ] FlashAttention-2 fused MHSA (link with `oxicuda-dnn` fused-MHA when available)
 - [x] Swin Transformer windowed + shifted-window attention (vit/swin.rs -- Liu 2021 ICCV; window partition/reverse, cyclic shift, SW-MSA attention mask, relative position bias table, W-MSA/SW-MSA pre-norm block)
 - [x] ConvNeXt modern-CNN block (convnext/block.rs -- Liu 2022 CVPR; depthwise 7×7 same-pad conv + channel LayerNorm + 1×1 4× expansion + GELU + 1×1 projection + layer scale + residual)
-- [ ] EfficientNet-V2 fused-MBConv block
-- [ ] BatchNorm folding into Conv2d for inference
+- [x] EfficientNet-V2 fused-MBConv block
+- [x] BatchNorm folding into Conv2d for inference
 
 #### P1 -- Important (Architecture and Feature Coverage)
 - [ ] DeiT / BEiT / DINO ViT training-time tricks (DropPath, stochastic depth)
@@ -104,11 +104,14 @@ multi-scale features, DETR decoder, and bipartite set matching. Part of
 - [ ] SAM (Segment Anything) image-encoder building blocks
 
 #### P2 -- Nice-to-Have (Research / Advanced)
+- [ ] RTMDet real-time detection transformer (`detection/rtmdet.rs`) — Lyu 2022: CSPNeXt backbone + PAFPNv2 neck + decoupled head with dynamic soft labels; `RtmDet`
+- [ ] SAM image-encoder + prompt encoder + mask decoder (`segmentation/sam.rs`) — Kirillov 2023 ICCV: MAE-pretrained ViT-H image encoder + positional + sparse/dense prompt encoders + two-way transformer mask decoder; `SamModel`
+- [ ] Point Transformer for 3D point-cloud classification (`pointcloud/point_transformer.rs`) — Zhao 2021 ICCV: vector self-attention with subtraction relation function + position encoding; `PointTransformer`
 - [ ] DINOv2 self-supervised pre-training loss
 - [x] MAE (Masked Autoencoder) random-mask + decoder (vit/mae.rs -- He 2022 CVPR; partial Fisher–Yates random mask, encoder over visible tokens only, decoder reconstructs full sequence with shared mask_token, MSE loss over masked positions only)
 - [ ] EVA / EVA-CLIP large-scale variant configurations
 - [ ] Tokens-to-Token ViT, CaiT, XCiT variants
-- [ ] Mixup / CutMix data-augmentation helpers
+- [x] Mixup / CutMix data-augmentation helpers
 - [ ] Quantised ViT (INT8 / FP8) inference path
 
 ## Dependencies
@@ -124,7 +127,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 349 passing
+- Tests: 768 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All (largest is `ptx_kernels.rs` at ~1280 lines)
 - Pure-Rust default features: Yes (Pure Rust Policy)
@@ -212,7 +215,7 @@ Target: bandwidth-bound kernels at >=90% peak DRAM throughput on sm_80+.
 ### Implementation Deepening
 - [ ] CLIP text encoder (Transformer encoder + BPE / SentencePiece adapter)
 - [x] Full Hungarian algorithm in `bipartite_match` (currently greedy + 2-opt) (detection/hungarian.rs -- Kuhn 1955 / Munkres 1957; O(n^3) Kuhn-Munkres with potentials u/v + alternating-tree augmenting paths + slack updates, f64 internal accumulation, rectangular padding to max(n_workers, n_jobs); `exact_bipartite_match` wraps it in the existing greedy signature)
-- [ ] Anchor generator + NMS post-processing for two-stage detectors
+- [x] Anchor generator + NMS post-processing for two-stage detectors
 - [ ] Mask head (mask R-CNN style) for instance segmentation
 - [ ] DropPath / stochastic-depth helpers in `ViTBlock` for training regularisation
 - [ ] Multi-GPU CLIP contrastive (all-gather batch across devices)

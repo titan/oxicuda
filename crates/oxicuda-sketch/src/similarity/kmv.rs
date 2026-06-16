@@ -213,14 +213,14 @@ mod tests {
 
     #[test]
     fn kmv_new_empty() {
-        let sketch = KmvSketch::new(5, 0).unwrap();
+        let sketch = KmvSketch::new(5, 0).expect("new should succeed");
         assert_eq!(sketch.len(), 0);
         assert!(sketch.is_empty());
     }
 
     #[test]
     fn kmv_add_k_elements() {
-        let mut sketch = KmvSketch::new(5, 1).unwrap();
+        let mut sketch = KmvSketch::new(5, 1).expect("new should succeed");
         for i in 0..5u64 {
             sketch.add(i);
         }
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn kmv_add_deduplication() {
-        let mut sketch = KmvSketch::new(5, 2).unwrap();
+        let mut sketch = KmvSketch::new(5, 2).expect("new should succeed");
         sketch.add(42);
         sketch.add(42);
         sketch.add(42);
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn kmv_add_beyond_k() {
-        let mut sketch = KmvSketch::new(5, 3).unwrap();
+        let mut sketch = KmvSketch::new(5, 3).expect("new should succeed");
         for i in 0..100u64 {
             sketch.add(i);
         }
@@ -247,16 +247,16 @@ mod tests {
 
     #[test]
     fn kmv_kbar_inf_when_less_than_k() {
-        let sketch = KmvSketch::new(5, 4).unwrap();
+        let sketch = KmvSketch::new(5, 4).expect("new should succeed");
         assert_eq!(sketch.kbar(), u64::MAX);
-        let mut sketch = KmvSketch::new(5, 4).unwrap();
+        let mut sketch = KmvSketch::new(5, 4).expect("new should succeed");
         sketch.add(1);
         assert_eq!(sketch.kbar(), u64::MAX);
     }
 
     #[test]
     fn kmv_kbar_decreases_with_inserts() {
-        let mut sketch = KmvSketch::new(4, 5).unwrap();
+        let mut sketch = KmvSketch::new(4, 5).expect("new should succeed");
         for i in 0..4u64 {
             sketch.add(i * 1000);
         }
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn kmv_estimate_distinct_few() {
-        let mut sketch = KmvSketch::new(256, 6).unwrap();
+        let mut sketch = KmvSketch::new(256, 6).expect("new should succeed");
         for i in 0..10u64 {
             sketch.add(i);
         }
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn kmv_estimate_distinct_large() {
         let k = 256;
-        let mut sketch = KmvSketch::new(k, 7).unwrap();
+        let mut sketch = KmvSketch::new(k, 7).expect("new should succeed");
         let n = 10_000u64;
         for i in 0..n {
             sketch.add(i);
@@ -298,15 +298,15 @@ mod tests {
 
     #[test]
     fn kmv_merge_combined_values() {
-        let mut a = KmvSketch::new(8, 8).unwrap();
-        let mut b = KmvSketch::new(8, 8).unwrap();
+        let mut a = KmvSketch::new(8, 8).expect("new should succeed");
+        let mut b = KmvSketch::new(8, 8).expect("new should succeed");
         for i in 0..20u64 {
             a.add(i);
         }
         for i in 10..30u64 {
             b.add(i);
         }
-        let merged = a.merge(&b).unwrap();
+        let merged = a.merge(&b).expect("merge should succeed");
         for &v in &merged.values {
             let in_a = a.values.binary_search(&v).is_ok();
             let in_b = b.values.binary_search(&v).is_ok();
@@ -316,60 +316,66 @@ mod tests {
 
     #[test]
     fn kmv_merge_len_at_most_k() {
-        let mut a = KmvSketch::new(16, 9).unwrap();
-        let mut b = KmvSketch::new(16, 9).unwrap();
+        let mut a = KmvSketch::new(16, 9).expect("new should succeed");
+        let mut b = KmvSketch::new(16, 9).expect("new should succeed");
         for i in 0..100u64 {
             a.add(i);
             b.add(i + 50);
         }
-        let merged = a.merge(&b).unwrap();
+        let merged = a.merge(&b).expect("merge should succeed");
         assert!(merged.len() <= 16);
     }
 
     #[test]
     fn kmv_jaccard_identical() {
-        let mut sketch = KmvSketch::new(64, 10).unwrap();
+        let mut sketch = KmvSketch::new(64, 10).expect("new should succeed");
         for i in 0..200u64 {
             sketch.add(i);
         }
-        let j = sketch.jaccard_similarity(&sketch.clone()).unwrap();
+        let j = sketch
+            .jaccard_similarity(&sketch.clone())
+            .expect("value should be present");
         assert!((j - 1.0).abs() < 1e-9, "identical sketch Jaccard = {j}");
     }
 
     #[test]
     fn kmv_jaccard_disjoint() {
-        let mut a = KmvSketch::new(128, 11).unwrap();
-        let mut b = KmvSketch::new(128, 11).unwrap();
+        let mut a = KmvSketch::new(128, 11).expect("new should succeed");
+        let mut b = KmvSketch::new(128, 11).expect("new should succeed");
         for i in 0..500u64 {
             a.add(i);
         }
         for i in 1_000_000..1_000_500u64 {
             b.add(i);
         }
-        let j = a.jaccard_similarity(&b).unwrap();
+        let j = a
+            .jaccard_similarity(&b)
+            .expect("jaccard_similarity should succeed");
         assert!(j < 0.05, "disjoint Jaccard = {j}");
     }
 
     #[test]
     fn kmv_jaccard_partial_overlap() {
         let k = 512;
-        let mut a = KmvSketch::new(k, 12).unwrap();
-        let mut b = KmvSketch::new(k, 12).unwrap();
+        let mut a = KmvSketch::new(k, 12).expect("new should succeed");
+        let mut b = KmvSketch::new(k, 12).expect("new should succeed");
         for i in 0..500u64 {
             a.add(i);
         }
         for i in 250..750u64 {
             b.add(i);
         }
-        let j = a.jaccard_similarity(&b).unwrap();
+        let j = a
+            .jaccard_similarity(&b)
+            .expect("jaccard_similarity should succeed");
         let true_j = 250.0 / 750.0;
         assert!((j - true_j).abs() < 0.20, "estimated {j} true {true_j}");
     }
 
     #[test]
     fn kmv_estimate_union_at_least_max() {
-        let mut a = KmvSketch::new(128, 13).unwrap();
-        let mut b = KmvSketch::new(128, 13).unwrap();
+        let mut a = KmvSketch::new(128, 13).expect("new should succeed");
+        let mut b = KmvSketch::new(128, 13).expect("new should succeed");
         for i in 0..300u64 {
             a.add(i);
         }
@@ -378,7 +384,7 @@ mod tests {
         }
         let est_a = a.estimate_distinct();
         let est_b = b.estimate_distinct();
-        let est_u = a.estimate_union(&b).unwrap();
+        let est_u = a.estimate_union(&b).expect("estimate_union should succeed");
         assert!(
             est_u >= est_a.max(est_b) * 0.80,
             "union {est_u} should be at least ~max({est_a},{est_b})"
@@ -388,8 +394,8 @@ mod tests {
     #[test]
     fn kmv_containment_subset() {
         let k = 256;
-        let mut a = KmvSketch::new(k, 14).unwrap();
-        let mut b = KmvSketch::new(k, 14).unwrap();
+        let mut a = KmvSketch::new(k, 14).expect("new should succeed");
+        let mut b = KmvSketch::new(k, 14).expect("new should succeed");
         for i in 0..100u64 {
             a.add(i);
             b.add(i);
@@ -397,7 +403,7 @@ mod tests {
         for i in 100..400u64 {
             b.add(i);
         }
-        let cont = a.containment(&b).unwrap();
+        let cont = a.containment(&b).expect("containment should succeed");
         assert!(cont > 0.70, "containment of subset A in B = {cont}");
     }
 
@@ -408,7 +414,7 @@ mod tests {
 
     #[test]
     fn kmv_add_str_works() {
-        let mut sketch = KmvSketch::new(8, 16).unwrap();
+        let mut sketch = KmvSketch::new(8, 16).expect("new should succeed");
         sketch.add_str("hello");
         assert_eq!(sketch.len(), 1);
         sketch.add_str("world");
@@ -419,21 +425,23 @@ mod tests {
 
     #[test]
     fn kmv_estimate_intersection_nonneg() {
-        let mut a = KmvSketch::new(64, 17).unwrap();
-        let mut b = KmvSketch::new(64, 17).unwrap();
+        let mut a = KmvSketch::new(64, 17).expect("new should succeed");
+        let mut b = KmvSketch::new(64, 17).expect("new should succeed");
         for i in 0..100u64 {
             a.add(i);
         }
         for i in 50..150u64 {
             b.add(i);
         }
-        let inter = a.estimate_intersection(&b).unwrap();
+        let inter = a
+            .estimate_intersection(&b)
+            .expect("estimate_intersection should succeed");
         assert!(inter >= 0.0, "intersection estimate {inter} < 0");
     }
 
     #[test]
     fn kmv_values_sorted_invariant() {
-        let mut sketch = KmvSketch::new(16, 99).unwrap();
+        let mut sketch = KmvSketch::new(16, 99).expect("new should succeed");
         for i in (0u64..200).rev() {
             sketch.add(i);
         }
@@ -449,8 +457,8 @@ mod tests {
 
     #[test]
     fn kmv_merge_seed_mismatch_err() {
-        let mut a = KmvSketch::new(8, 1).unwrap();
-        let mut b = KmvSketch::new(8, 2).unwrap();
+        let mut a = KmvSketch::new(8, 1).expect("new should succeed");
+        let mut b = KmvSketch::new(8, 2).expect("new should succeed");
         a.add(0);
         b.add(0);
         assert!(a.merge(&b).is_err());

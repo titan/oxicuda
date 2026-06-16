@@ -7,8 +7,11 @@
 //! resize) can propagate updated dimensions to later stages.
 
 pub mod geometric;
+pub mod mixup;
 pub mod normalize;
 pub mod photometric;
+
+pub use mixup::{MixOutput, cutmix, mixup};
 
 use crate::{error::VisionResult, handle::LcgRng};
 

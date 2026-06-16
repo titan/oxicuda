@@ -27,9 +27,12 @@ fn default_cfg(
 #[test]
 fn initial_forward_is_zero_with_zero_b() {
     let cfg = default_cfg(6, 8, (2, 4), (3, 2), 2, 4.0);
-    let adapter = LoKrAdapter::new(cfg, 7).unwrap();
+    let adapter =
+        LoKrAdapter::new(cfg, 7).expect("LoKrAdapter creation should succeed with valid config");
     let x: Vec<f64> = (0..6).map(|i| i as f64 - 2.5).collect();
-    let y = adapter.forward(&x).unwrap();
+    let y = adapter
+        .forward(&x)
+        .expect("forward pass should succeed with valid input");
     assert_eq!(y.len(), 8);
     for &v in &y {
         assert!(v.abs() < 1e-15, "expected zero output, got {v}");
@@ -39,8 +42,10 @@ fn initial_forward_is_zero_with_zero_b() {
 #[test]
 fn reproducible_by_seed() {
     let cfg = default_cfg(6, 8, (2, 4), (3, 2), 2, 4.0);
-    let a = LoKrAdapter::new(cfg.clone(), 42).unwrap();
-    let b = LoKrAdapter::new(cfg, 42).unwrap();
+    let a = LoKrAdapter::new(cfg.clone(), 42)
+        .expect("LoKrAdapter a creation should succeed with valid config");
+    let b =
+        LoKrAdapter::new(cfg, 42).expect("LoKrAdapter b creation should succeed with valid config");
     assert_eq!(a.w1, b.w1);
     assert_eq!(a.a, b.a);
     assert_eq!(a.b, b.b);
@@ -67,22 +72,28 @@ fn in_features_kronecker_mismatch_rejected() {
 #[test]
 fn forward_dimensions_correct() {
     let cfg = default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0);
-    let mut adapter = LoKrAdapter::new(cfg, 11).unwrap();
+    let mut adapter =
+        LoKrAdapter::new(cfg, 11).expect("LoKrAdapter creation should succeed with valid config");
     for (i, b) in adapter.b.iter_mut().enumerate() {
         *b = 0.1 * (i as f64 + 1.0);
     }
     let x = vec![1.0_f64; 6];
-    let y = adapter.forward(&x).unwrap();
+    let y = adapter
+        .forward(&x)
+        .expect("forward pass should succeed with valid input");
     assert_eq!(y.len(), 6);
 }
 
 #[test]
 fn backward_shapes_correct() {
     let cfg = default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0);
-    let adapter = LoKrAdapter::new(cfg, 3).unwrap();
+    let adapter =
+        LoKrAdapter::new(cfg, 3).expect("LoKrAdapter creation should succeed with valid config");
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3, 0.7];
     let grad_y = vec![0.1_f64, -0.2, 0.3, 0.4, 0.1, -0.05];
-    let (dw1, da, db) = adapter.backward(&x, &grad_y).unwrap();
+    let (dw1, da, db) = adapter
+        .backward(&x, &grad_y)
+        .expect("backward pass should succeed with valid inputs");
     assert_eq!(dw1.len(), 3 * 2);
     assert_eq!(da.len(), 2 * 3);
     assert_eq!(db.len(), 2 * 2);
@@ -109,7 +120,8 @@ fn naive_kron(w1: &[f64], w2: &[f64], m1: usize, n1: usize, m2: usize, n2: usize
 #[test]
 fn block_form_matches_naive_kronecker() {
     let cfg = default_cfg(4, 4, (2, 2), (2, 2), 2, 4.0);
-    let mut adapter = LoKrAdapter::new(cfg, 55).unwrap();
+    let mut adapter =
+        LoKrAdapter::new(cfg, 55).expect("LoKrAdapter creation should succeed with valid config");
     for (i, b) in adapter.b.iter_mut().enumerate() {
         *b = 0.2 * (i as f64 + 1.0);
     }
@@ -126,7 +138,9 @@ fn block_form_matches_naive_kronecker() {
         }
         *y_o = s * acc;
     }
-    let y_block = adapter.forward(&x).unwrap();
+    let y_block = adapter
+        .forward(&x)
+        .expect("forward pass should succeed with valid input");
     for (a, b) in y_naive.iter().zip(y_block.iter()) {
         assert!((a - b).abs() < 1e-8, "block={b} naive={a}");
     }
@@ -134,7 +148,11 @@ fn block_form_matches_naive_kronecker() {
 
 fn loss_at(a: &LoKrAdapter, x: &[f64], gy: &[f64]) -> f64 {
     gy.iter()
-        .zip(a.forward(x).unwrap().iter())
+        .zip(
+            a.forward(x)
+                .expect("forward pass should succeed in loss_at helper")
+                .iter(),
+        )
         .map(|(g, y)| g * y)
         .sum()
 }
@@ -166,7 +184,8 @@ fn check_fd(
 #[test]
 fn backward_matches_finite_differences() {
     let cfg = default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0);
-    let mut adapter = LoKrAdapter::new(cfg, 99).unwrap();
+    let mut adapter =
+        LoKrAdapter::new(cfg, 99).expect("LoKrAdapter creation should succeed with valid config");
     for (i, b) in adapter.b.iter_mut().enumerate() {
         *b = 0.1 * (i as f64 + 1.0);
     }
@@ -174,7 +193,9 @@ fn backward_matches_finite_differences() {
     adapter.a[3] -= 0.07;
     let x = vec![0.5_f64, -1.0, 0.25, 0.75, 0.4, -0.6];
     let gy = vec![1.0_f64, -0.5, 0.25, 0.4, -0.3, 0.2];
-    let (dw1, da, db) = adapter.backward(&x, &gy).unwrap();
+    let (dw1, da, db) = adapter
+        .backward(&x, &gy)
+        .expect("backward pass should succeed with valid inputs");
     check_fd(&mut adapter, &x, &gy, |a| &mut a.w1, &dw1, "w1");
     check_fd(&mut adapter, &x, &gy, |a| &mut a.a, &da, "a");
     check_fd(&mut adapter, &x, &gy, |a| &mut a.b, &db, "b");
@@ -182,18 +203,21 @@ fn backward_matches_finite_differences() {
 
 #[test]
 fn sgd_reduces_loss_on_small_fit() {
-    let mut adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0), 21).unwrap();
+    let mut adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0), 21)
+        .expect("LoKrAdapter creation should succeed with valid config");
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3, 0.75];
     let target = {
         let mut probe = adapter.clone();
         for (i, b) in probe.b.iter_mut().enumerate() {
             *b = 0.4 * (i as f64 + 1.0);
         }
-        probe.forward(&x).unwrap()
+        probe
+            .forward(&x)
+            .expect("probe forward pass should succeed")
     };
     let mse = |a: &LoKrAdapter| -> f64 {
         a.forward(&x)
-            .unwrap()
+            .expect("forward pass should succeed in mse closure")
             .iter()
             .zip(target.iter())
             .map(|(p, q)| (p - q).powi(2))
@@ -205,10 +229,16 @@ fn sgd_reduces_loss_on_small_fit() {
     }
     let initial = mse(&adapter);
     for _ in 0..200 {
-        let y = adapter.forward(&x).unwrap();
+        let y = adapter
+            .forward(&x)
+            .expect("forward pass should succeed in training loop");
         let gy: Vec<f64> = y.iter().zip(target.iter()).map(|(p, q)| p - q).collect();
-        let (dw1, da, db) = adapter.backward(&x, &gy).unwrap();
-        adapter.apply_grads(&dw1, &da, &db, 0.05).unwrap();
+        let (dw1, da, db) = adapter
+            .backward(&x, &gy)
+            .expect("backward pass should succeed in training loop");
+        adapter
+            .apply_grads(&dw1, &da, &db, 0.05)
+            .expect("gradient application should succeed");
     }
     let final_loss = mse(&adapter);
     assert!(
@@ -219,12 +249,15 @@ fn sgd_reduces_loss_on_small_fit() {
 
 #[test]
 fn alpha_zero_produces_zero_forward() {
-    let mut adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 0.0), 77).unwrap();
+    let mut adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 0.0), 77)
+        .expect("LoKrAdapter creation should succeed with alpha=0");
     for (i, b) in adapter.b.iter_mut().enumerate() {
         *b = 0.1 * (i as f64 + 1.0);
     }
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3, 0.7];
-    let y = adapter.forward(&x).unwrap();
+    let y = adapter
+        .forward(&x)
+        .expect("forward pass should succeed with alpha=0");
     for &v in &y {
         assert!(v.abs() < 1e-15, "α=0 must zero out adapter, got {v}");
     }
@@ -232,7 +265,8 @@ fn alpha_zero_produces_zero_forward() {
 
 #[test]
 fn dim_mismatch_in_forward_and_backward_rejected() {
-    let adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 2.0), 0).unwrap();
+    let adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 2.0), 0)
+        .expect("LoKrAdapter creation should succeed with valid config");
     assert!(matches!(
         adapter.forward(&[1.0_f64; 5]),
         Err(PeftError::DimensionMismatch { .. })
@@ -249,7 +283,8 @@ fn dim_mismatch_in_forward_and_backward_rejected() {
 
 #[test]
 fn apply_grads_dim_mismatch_rejected() {
-    let mut adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 2.0), 0).unwrap();
+    let mut adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 2.0), 0)
+        .expect("LoKrAdapter creation should succeed with valid config");
     let good_w1 = vec![0.0_f64; 3 * 2];
     let good_a = vec![0.0_f64; 2 * 3];
     let good_b = vec![0.0_f64; 2 * 2];
@@ -293,14 +328,20 @@ fn invalid_configs_rejected() {
 
 #[test]
 fn scale_alpha_over_rank_applied() {
-    let mut a1 = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0), 33).unwrap();
-    let mut a2 = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 8.0), 33).unwrap();
+    let mut a1 = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0), 33)
+        .expect("a1 LoKrAdapter creation should succeed with valid config");
+    let mut a2 = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 8.0), 33)
+        .expect("a2 LoKrAdapter creation should succeed with valid config");
     let b_seed: Vec<f64> = (0..a1.b.len()).map(|i| 0.1 * (i as f64 + 1.0)).collect();
     a1.b.copy_from_slice(&b_seed);
     a2.b.copy_from_slice(&b_seed);
     let x = vec![0.5_f64, -0.25, 1.0, -1.5, 0.3, 0.7];
-    let y1 = a1.forward(&x).unwrap();
-    let y2 = a2.forward(&x).unwrap();
+    let y1 = a1
+        .forward(&x)
+        .expect("a1 forward pass should succeed with valid input");
+    let y2 = a2
+        .forward(&x)
+        .expect("a2 forward pass should succeed with valid input");
     for (v1, v2) in y1.iter().zip(y2.iter()) {
         assert!((2.0 * v1 - v2).abs() < 1e-12, "α doubled → y doubled");
     }
@@ -310,6 +351,7 @@ fn scale_alpha_over_rank_applied() {
 
 #[test]
 fn n_trainable_counts_w1_a_b() {
-    let adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0), 0).unwrap();
+    let adapter = LoKrAdapter::new(default_cfg(6, 6, (3, 2), (2, 3), 2, 4.0), 0)
+        .expect("LoKrAdapter creation should succeed with valid config");
     assert_eq!(adapter.n_trainable(), 3 * 2 + 2 * (2 + 3));
 }

@@ -534,12 +534,14 @@ mod tests {
     fn build_all_indices_present_once() {
         let n = 200;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(8, 4)).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(8, 4)).expect("value should be present");
         let radius = brute_radius(&pts, n, &[0.5, 0.5, 0.5], 100.0);
         // Sanity: brute force inside huge radius is all indices.
         assert_eq!(radius.len(), n);
         // Collect leaf indices via a giant radius query (covers whole cube).
-        let mut all = tree.query_radius(&[0.5, 0.5, 0.5], 100.0).unwrap();
+        let mut all = tree
+            .query_radius(&[0.5, 0.5, 0.5], 100.0)
+            .expect("query_radius should succeed");
         all.sort_unstable();
         let expected: Vec<usize> = (0..n).collect();
         assert_eq!(all, expected, "every index must appear exactly once");
@@ -550,7 +552,7 @@ mod tests {
         // Directly walk the tree gathering leaf indices to confirm partition.
         let n = 64;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(6, 2)).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(6, 2)).expect("value should be present");
         let mut collected = Vec::new();
         fn walk(node: &OctreeNode, out: &mut Vec<usize>) {
             match node {
@@ -572,10 +574,12 @@ mod tests {
     fn query_radius_matches_brute_force() {
         let n = 150;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(8, 3)).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(8, 3)).expect("value should be present");
         let center = [0.4_f32, 0.6, 0.5];
         for &radius in &[0.1_f32, 0.25, 0.5] {
-            let mut got = tree.query_radius(&center, radius).unwrap();
+            let mut got = tree
+                .query_radius(&center, radius)
+                .expect("query_radius should succeed");
             got.sort_unstable();
             let mut exp = brute_radius(&pts, n, &center, radius);
             exp.sort_unstable();
@@ -587,10 +591,10 @@ mod tests {
     fn query_knn_matches_brute_force() {
         let n = 120;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(8, 2)).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(8, 2)).expect("value should be present");
         let q = [0.55_f32, 0.45, 0.5];
         for &k in &[1usize, 3, 5, 10] {
-            let got = tree.query_knn(&q, k).unwrap();
+            let got = tree.query_knn(&q, k).expect("query_knn should succeed");
             let exp = brute_knn(&pts, n, &q, k);
             assert_eq!(got.len(), exp.len());
             for ((gi, gd), (ei, ed)) in got.iter().zip(exp.iter()) {
@@ -604,8 +608,10 @@ mod tests {
     fn query_knn_sorted_ascending() {
         let n = 80;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(6, 3)).unwrap();
-        let res = tree.query_knn(&[0.3, 0.3, 0.3], 7).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(6, 3)).expect("value should be present");
+        let res = tree
+            .query_knn(&[0.3, 0.3, 0.3], 7)
+            .expect("query_knn should succeed");
         for w in res.windows(2) {
             assert!(w[0].1 <= w[1].1, "knn must be ascending");
         }
@@ -615,7 +621,7 @@ mod tests {
     fn depth_at_most_max_depth() {
         let n = 256;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(4, 1)).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(4, 1)).expect("value should be present");
         assert!(tree.depth() <= 4, "depth {} exceeds max", tree.depth());
     }
 
@@ -623,7 +629,7 @@ mod tests {
     fn counts_are_positive() {
         let n = 50;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(5, 4)).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(5, 4)).expect("value should be present");
         assert!(tree.leaf_count() >= 1);
         assert!(tree.n_nodes() >= 1);
         assert_eq!(tree.len(), n);
@@ -633,8 +639,10 @@ mod tests {
     #[test]
     fn single_point_knn_zero_distance() {
         let pts = vec![0.5_f32, 0.5, 0.5];
-        let tree = Octree::build(&pts, 1, unit_cfg(4, 1)).unwrap();
-        let res = tree.query_knn(&[0.5, 0.5, 0.5], 1).unwrap();
+        let tree = Octree::build(&pts, 1, unit_cfg(4, 1)).expect("value should be present");
+        let res = tree
+            .query_knn(&[0.5, 0.5, 0.5], 1)
+            .expect("query_knn should succeed");
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].0, 0);
         assert!(res[0].1 < 1e-9);
@@ -648,16 +656,20 @@ mod tests {
     fn knn_k_larger_than_n_returns_n() {
         let n = 7;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(4, 2)).unwrap();
-        let res = tree.query_knn(&[0.5, 0.5, 0.5], 100).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(4, 2)).expect("value should be present");
+        let res = tree
+            .query_knn(&[0.5, 0.5, 0.5], 100)
+            .expect("query_knn should succeed");
         assert_eq!(res.len(), n);
     }
 
     #[test]
     fn radius_zero_at_exact_point() {
         let pts = vec![0.2_f32, 0.3, 0.4, 0.7, 0.8, 0.9];
-        let tree = Octree::build(&pts, 2, unit_cfg(4, 1)).unwrap();
-        let res = tree.query_radius(&[0.2, 0.3, 0.4], 0.0).unwrap();
+        let tree = Octree::build(&pts, 2, unit_cfg(4, 1)).expect("value should be present");
+        let res = tree
+            .query_radius(&[0.2, 0.3, 0.4], 0.0)
+            .expect("query_radius should succeed");
         assert_eq!(res, vec![0]);
     }
 
@@ -665,13 +677,16 @@ mod tests {
     fn deterministic_build() {
         let n = 100;
         let pts = make_cloud(n);
-        let a = Octree::build(&pts, n, unit_cfg(6, 3)).unwrap();
-        let b = Octree::build(&pts, n, unit_cfg(6, 3)).unwrap();
+        let a = Octree::build(&pts, n, unit_cfg(6, 3)).expect("value should be present");
+        let b = Octree::build(&pts, n, unit_cfg(6, 3)).expect("value should be present");
         assert_eq!(a.n_nodes(), b.n_nodes());
         assert_eq!(a.depth(), b.depth());
         assert_eq!(a.leaf_count(), b.leaf_count());
         let q = [0.33_f32, 0.66, 0.5];
-        assert_eq!(a.query_knn(&q, 5).unwrap(), b.query_knn(&q, 5).unwrap());
+        assert_eq!(
+            a.query_knn(&q, 5).expect("query_knn should succeed"),
+            b.query_knn(&q, 5).expect("query_knn should succeed")
+        );
     }
 
     #[test]
@@ -683,8 +698,10 @@ mod tests {
             0.25, 0.5, 0.25, // on y-plane
             0.75, 0.75, 0.5, // on z-plane
         ];
-        let tree = Octree::build(&pts, 4, unit_cfg(6, 1)).unwrap();
-        let mut all = tree.query_radius(&[0.5, 0.5, 0.5], 100.0).unwrap();
+        let tree = Octree::build(&pts, 4, unit_cfg(6, 1)).expect("value should be present");
+        let mut all = tree
+            .query_radius(&[0.5, 0.5, 0.5], 100.0)
+            .expect("query_radius should succeed");
         all.sort_unstable();
         assert_eq!(all, vec![0, 1, 2, 3]);
     }
@@ -711,7 +728,7 @@ mod tests {
     #[test]
     fn err_k_zero() {
         let pts = make_cloud(10);
-        let tree = Octree::build(&pts, 10, unit_cfg(4, 2)).unwrap();
+        let tree = Octree::build(&pts, 10, unit_cfg(4, 2)).expect("value should be present");
         assert_eq!(
             tree.query_knn(&[0.0, 0.0, 0.0], 0),
             Err(Geom3dError::InvalidK { k: 0, n: 10 })
@@ -721,7 +738,7 @@ mod tests {
     #[test]
     fn err_radius_negative() {
         let pts = make_cloud(10);
-        let tree = Octree::build(&pts, 10, unit_cfg(4, 2)).unwrap();
+        let tree = Octree::build(&pts, 10, unit_cfg(4, 2)).expect("value should be present");
         assert_eq!(
             tree.query_radius(&[0.0, 0.0, 0.0], -1.0),
             Err(Geom3dError::InvalidRadius { radius: -1.0 })
@@ -744,9 +761,11 @@ mod tests {
     fn empty_far_radius_query() {
         let n = 30;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(6, 2)).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(6, 2)).expect("value should be present");
         // Query far away from the unit cube.
-        let res = tree.query_radius(&[100.0, 100.0, 100.0], 1.0).unwrap();
+        let res = tree
+            .query_radius(&[100.0, 100.0, 100.0], 1.0)
+            .expect("query_radius should succeed");
         assert!(res.is_empty());
     }
 
@@ -761,7 +780,7 @@ mod tests {
             0.90, 0.90, 0.90, // octant 7
             0.90, 0.10, 0.10, // octant 1
         ];
-        let tree = Octree::build(&pts, 4, unit_cfg(10, 1)).unwrap();
+        let tree = Octree::build(&pts, 4, unit_cfg(10, 1)).expect("value should be present");
         assert!(tree.depth() > 1, "clustered points must subdivide deeply");
         assert!(tree.leaf_count() >= 2);
     }
@@ -770,12 +789,14 @@ mod tests {
     fn max_depth_zero_single_leaf() {
         let n = 40;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(0, 1)).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(0, 1)).expect("value should be present");
         assert_eq!(tree.depth(), 0);
         assert_eq!(tree.leaf_count(), 1);
         assert_eq!(tree.n_nodes(), 1);
         // Queries must still work on a single leaf.
-        let res = tree.query_knn(&[0.5, 0.5, 0.5], 3).unwrap();
+        let res = tree
+            .query_knn(&[0.5, 0.5, 0.5], 3)
+            .expect("query_knn should succeed");
         assert_eq!(res.len(), 3);
     }
 
@@ -784,8 +805,10 @@ mod tests {
         // All identical points would collapse into one octant forever without
         // the single-octant leaf guard.
         let pts = vec![0.5_f32; 30]; // 10 identical points
-        let tree = Octree::build(&pts, 10, unit_cfg(20, 1)).unwrap();
-        let res = tree.query_knn(&[0.5, 0.5, 0.5], 10).unwrap();
+        let tree = Octree::build(&pts, 10, unit_cfg(20, 1)).expect("value should be present");
+        let res = tree
+            .query_knn(&[0.5, 0.5, 0.5], 10)
+            .expect("query_knn should succeed");
         assert_eq!(res.len(), 10);
         assert!(res.iter().all(|&(_, d)| d < 1e-9));
     }
@@ -795,7 +818,7 @@ mod tests {
         let n = 12;
         let pts = make_cloud(n);
         let cfg = unit_cfg(5, 3);
-        let tree = Octree::build(&pts, n, cfg.clone()).unwrap();
+        let tree = Octree::build(&pts, n, cfg.clone()).expect("value should be present");
         assert_eq!(tree.config(), &cfg);
     }
 
@@ -805,11 +828,11 @@ mod tests {
         use crate::neighborhood::kd_tree::KdTree;
         let n = 90;
         let pts = make_cloud(n);
-        let tree = Octree::build(&pts, n, unit_cfg(8, 2)).unwrap();
-        let kd = KdTree::build(&pts, n).unwrap();
+        let tree = Octree::build(&pts, n, unit_cfg(8, 2)).expect("value should be present");
+        let kd = KdTree::build(&pts, n).expect("build should succeed");
         let q = [0.41_f32, 0.59, 0.5];
-        let oct = tree.query_knn(&q, 4).unwrap();
-        let kdr = kd.knn(q, 4).unwrap();
+        let oct = tree.query_knn(&q, 4).expect("query_knn should succeed");
+        let kdr = kd.knn(q, 4).expect("knn should succeed");
         for ((oi, od), (ki, kd_d)) in oct.iter().zip(kdr.iter()) {
             assert_eq!(oi, ki);
             assert!((od - kd_d).abs() < 1e-6);

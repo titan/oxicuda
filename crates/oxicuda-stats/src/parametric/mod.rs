@@ -5,6 +5,7 @@ pub mod manova;
 pub mod regression_inference;
 pub mod t_test;
 pub mod test_builder;
+pub mod variance_tests;
 
 pub use anova::{AnovaResult, one_way_anova, two_way_anova};
 pub use manova::{ManovaResult, manova_wilks};
@@ -14,3 +15,4 @@ pub use test_builder::{
     AnovaBuilder, AnovaBuilderResult, BootstrapBuilder, BootstrapCiMethod, TTestBuilder,
     TTestResult as TTestBuilderResult, TailDirection,
 };
+pub use variance_tests::{BartlettResult, LeveneCenter, LeveneResult, bartlett_test, levene_test};

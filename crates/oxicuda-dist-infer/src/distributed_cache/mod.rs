@@ -13,6 +13,8 @@
 
 pub mod migration;
 pub mod partition;
+pub mod radix_cache;
 
 pub use migration::BlockMigrator;
 pub use partition::{CachePartition, SeqOwnership};
+pub use radix_cache::{RadixCache, RadixNode};

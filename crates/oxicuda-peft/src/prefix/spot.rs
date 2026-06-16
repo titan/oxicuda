@@ -311,9 +311,12 @@ mod tests {
         let prompt: Vec<f32> = (0..8).map(|i| i as f32 * 0.1).collect();
         let cfg = make_cfg(2, 4, 3, 1.0);
         let src = make_source(task_emb.clone(), prompt.clone(), "task_a");
-        let lib = SoftPromptLibrary::new(cfg, vec![src]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
 
-        let result = lib.initialize_target(&task_emb).unwrap();
+        let result = lib
+            .initialize_target(&task_emb)
+            .expect("initialize_target should succeed with valid embedding");
         assert_eq!(result.embeddings.len(), 8);
         for (r, p) in result.embeddings.iter().zip(prompt.iter()) {
             assert!(
@@ -333,9 +336,12 @@ mod tests {
         let cfg = make_cfg(2, 3, 3, 1.0);
         let src_a = make_source(task_emb.clone(), prompt_a, "a");
         let src_b = make_source(task_emb.clone(), prompt_b, "b");
-        let lib = SoftPromptLibrary::new(cfg, vec![src_a, src_b]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src_a, src_b])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
 
-        let weights = lib.similarity_weights(&task_emb).unwrap();
+        let weights = lib
+            .similarity_weights(&task_emb)
+            .expect("similarity_weights should succeed with valid embedding");
         assert_eq!(weights.len(), 2);
         assert!(
             (weights[0] - 0.5).abs() < 1e-5,
@@ -355,7 +361,8 @@ mod tests {
     fn target_dim_mismatch_errors() {
         let cfg = make_cfg(2, 4, 3, 1.0);
         let src = make_source(vec![1.0, 0.0, 0.0], vec![0.0_f32; 8], "x");
-        let lib = SoftPromptLibrary::new(cfg, vec![src]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
 
         let bad_target = vec![1.0_f32; 5]; // task_embed_dim = 3
         let res = lib.similarity_weights(&bad_target);
@@ -374,7 +381,8 @@ mod tests {
         let srcs: Vec<SourceTask> = (0..5)
             .map(|i| make_source(vec![i as f32, 0.0, 0.0], vec![0.0_f32; 8], &format!("t{i}")))
             .collect();
-        let lib = SoftPromptLibrary::new(cfg, srcs).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, srcs)
+            .expect("SoftPromptLibrary::new should succeed with valid config");
         assert_eq!(lib.num_sources(), 5);
     }
 
@@ -391,8 +399,11 @@ mod tests {
             vec![0.5_f32; num_tokens * embed_dim],
             "src",
         );
-        let lib = SoftPromptLibrary::new(cfg, vec![src]).unwrap();
-        let result = lib.initialize_target(&[1.0, 0.0, 0.0]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
+        let result = lib
+            .initialize_target(&[1.0, 0.0, 0.0])
+            .expect("initialize_target should succeed with valid embedding");
         assert_eq!(result.embeddings.len(), num_tokens * embed_dim);
         assert_eq!(result.num_tokens, num_tokens);
         assert_eq!(result.embed_dim, embed_dim);
@@ -404,7 +415,8 @@ mod tests {
     fn zero_temperature_errors() {
         let cfg = make_cfg(2, 4, 3, 0.0);
         let src = make_source(vec![1.0, 0.0, 0.0], vec![0.0_f32; 8], "x");
-        let lib = SoftPromptLibrary::new(cfg, vec![src]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
         let res = lib.similarity_weights(&[1.0, 0.0, 0.0]);
         assert!(
             matches!(res, Err(PeftError::Internal { .. })),
@@ -423,9 +435,12 @@ mod tests {
         let target = vec![1.0_f32, 0.0, 0.0];
         let src_a = make_source(vec![1.0_f32, 0.0, 0.0], vec![2.0_f32; 6], "a");
         let src_b = make_source(vec![0.0_f32, 1.0, 0.0], vec![0.0_f32; 6], "b");
-        let lib = SoftPromptLibrary::new(cfg, vec![src_a, src_b]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src_a, src_b])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
 
-        let result = lib.top_k_initialize(&target, 1).unwrap();
+        let result = lib
+            .top_k_initialize(&target, 1)
+            .expect("top_k_initialize should succeed with k=1");
         // Source A has cosine=1 with target, source B has cosine=0.
         // top-1 must be A, so prompt ≈ [2, 2, 2, 2, 2, 2].
         for &v in &result.embeddings {
@@ -451,10 +466,15 @@ mod tests {
                 make_source(emb, vec![i as f32 * 0.1; 15], &format!("s{i}"))
             })
             .collect();
-        let lib = SoftPromptLibrary::new(cfg, srcs).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, srcs)
+            .expect("SoftPromptLibrary::new should succeed with valid config");
 
-        let full = lib.initialize_target(&target).unwrap();
-        let top_k = lib.top_k_initialize(&target, 4).unwrap();
+        let full = lib
+            .initialize_target(&target)
+            .expect("initialize_target should succeed with valid embedding");
+        let top_k = lib
+            .top_k_initialize(&target, 4)
+            .expect("top_k_initialize should succeed with k=num_sources");
 
         for (a, b) in full.embeddings.iter().zip(top_k.embeddings.iter()) {
             assert!(
@@ -470,7 +490,8 @@ mod tests {
     fn top_k_exceeds_num_sources_errors() {
         let cfg = make_cfg(2, 4, 3, 1.0);
         let src = make_source(vec![1.0, 0.0, 0.0], vec![0.0_f32; 8], "x");
-        let lib = SoftPromptLibrary::new(cfg, vec![src]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
         let res = lib.top_k_initialize(&[1.0, 0.0, 0.0], 5);
         assert!(
             matches!(res, Err(PeftError::WeightCountMismatch { .. })),
@@ -485,7 +506,8 @@ mod tests {
     fn top_k_zero_errors() {
         let cfg = make_cfg(2, 4, 3, 1.0);
         let src = make_source(vec![1.0, 0.0, 0.0], vec![0.0_f32; 8], "x");
-        let lib = SoftPromptLibrary::new(cfg, vec![src]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
         let res = lib.top_k_initialize(&[1.0, 0.0, 0.0], 0);
         assert!(
             matches!(res, Err(PeftError::Internal { .. })),
@@ -536,10 +558,13 @@ mod tests {
                 make_source(emb, vec![0.0_f32; 6], &format!("t{i}"))
             })
             .collect();
-        let lib = SoftPromptLibrary::new(cfg, srcs).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, srcs)
+            .expect("SoftPromptLibrary::new should succeed with valid config");
 
         let target = vec![0.3_f32, 0.7, 0.1, 0.9];
-        let weights = lib.similarity_weights(&target).unwrap();
+        let weights = lib
+            .similarity_weights(&target)
+            .expect("similarity_weights should succeed with valid embedding");
         let sum: f32 = weights.iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-5,
@@ -555,13 +580,18 @@ mod tests {
         let cfg = make_cfg(2, 4, task_dim, 1.0);
         let src_a = make_source(vec![1.0_f32, 0.0, 0.0], vec![0.0_f32; 8], "a");
         let src_b = make_source(vec![0.0_f32, 1.0, 0.0], vec![1.0_f32; 8], "b");
-        let lib = SoftPromptLibrary::new(cfg, vec![src_a, src_b]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src_a, src_b])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
 
         let target1 = vec![1.0_f32, 0.0, 0.0];
         let target2 = vec![0.0_f32, 1.0, 0.0];
 
-        let w1 = lib.similarity_weights(&target1).unwrap();
-        let w2 = lib.similarity_weights(&target2).unwrap();
+        let w1 = lib
+            .similarity_weights(&target1)
+            .expect("similarity_weights should succeed with first target");
+        let w2 = lib
+            .similarity_weights(&target2)
+            .expect("similarity_weights should succeed with second target");
 
         // The two weight vectors should differ substantially.
         let diff: f32 = w1.iter().zip(w2.iter()).map(|(a, b)| (a - b).abs()).sum();
@@ -578,11 +608,14 @@ mod tests {
         let task_dim = 3;
         let cfg = make_cfg(2, 3, task_dim, 1.0);
         let src = make_source(vec![1.0_f32, 0.0, 0.0], vec![0.5_f32; 6], "x");
-        let lib = SoftPromptLibrary::new(cfg, vec![src]).unwrap();
+        let lib = SoftPromptLibrary::new(cfg, vec![src])
+            .expect("SoftPromptLibrary::new should succeed with valid config");
 
         // Near-zero target → cosine = 0 → all weights equal.
         let tiny = vec![1e-12_f32; task_dim];
-        let weights = lib.similarity_weights(&tiny).unwrap();
+        let weights = lib
+            .similarity_weights(&tiny)
+            .expect("similarity_weights should succeed with near-zero target");
         let sum: f32 = weights.iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-5,

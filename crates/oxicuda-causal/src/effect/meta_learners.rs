@@ -222,7 +222,8 @@ mod tests {
             .map(|i: usize| if i.is_multiple_of(2) { 1.0 } else { 0.0 })
             .collect();
         let y: Vec<f32> = (0..n).map(|i| x[i * d] + t[i] * 0.5).collect();
-        let model = SLearner::fit(&x, &t, &y, n, d).unwrap();
+        let model =
+            SLearner::fit(&x, &t, &y, n, d).expect("SLearner::fit should succeed for valid inputs");
         let cate = cate_slearner(&model, &x, n);
         assert_eq!(cate.len(), n);
     }

@@ -372,7 +372,8 @@ mod tests {
     #[test]
     fn gap_spatial_one_returns_unchanged() {
         let feat = vec![1.0_f32, 2.0, 3.0];
-        let result = ProjFreeDistiller::global_avg_pool(&feat, 3, 1).unwrap();
+        let result = ProjFreeDistiller::global_avg_pool(&feat, 3, 1)
+            .expect("global_avg_pool should succeed");
         assert_eq!(result, feat);
     }
 
@@ -380,7 +381,8 @@ mod tests {
     fn gap_spatial_four_computes_mean() {
         // 1 channel, 4 spatial positions [1,2,3,4] → mean = 2.5
         let feat = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let result = ProjFreeDistiller::global_avg_pool(&feat, 1, 4).unwrap();
+        let result = ProjFreeDistiller::global_avg_pool(&feat, 1, 4)
+            .expect("global_avg_pool should succeed");
         assert_eq!(result.len(), 1);
         assert!((result[0] - 2.5_f32).abs() < 1e-6);
     }
@@ -389,7 +391,8 @@ mod tests {
     fn gap_two_channels_two_spatial() {
         // channel 0: [1, 3] → 2.0; channel 1: [2, 4] → 3.0
         let feat = vec![1.0_f32, 3.0, 2.0, 4.0]; // row-major: ch0 row then ch1 row
-        let result = ProjFreeDistiller::global_avg_pool(&feat, 2, 2).unwrap();
+        let result = ProjFreeDistiller::global_avg_pool(&feat, 2, 2)
+            .expect("global_avg_pool should succeed");
         assert!((result[0] - 2.0_f32).abs() < 1e-6);
         assert!((result[1] - 3.0_f32).abs() < 1e-6);
     }
@@ -444,7 +447,7 @@ mod tests {
     #[test]
     fn mse_identical_is_zero() {
         let v = vec![1.0_f32, 2.0, 3.0];
-        let loss = ProjFreeDistiller::mse_loss(&v, &v).unwrap();
+        let loss = ProjFreeDistiller::mse_loss(&v, &v).expect("mse_loss should succeed");
         assert!(loss.abs() < 1e-7);
     }
 
@@ -464,7 +467,7 @@ mod tests {
     #[test]
     fn cosine_dist_identical_is_zero() {
         let v = vec![1.0_f32, 2.0, 3.0];
-        let dist = ProjFreeDistiller::cosine_dist(&v, &v).unwrap();
+        let dist = ProjFreeDistiller::cosine_dist(&v, &v).expect("cosine_dist should succeed");
         assert!(dist.abs() < 1e-5);
     }
 
@@ -472,7 +475,7 @@ mod tests {
     fn cosine_dist_orthogonal_is_one() {
         let t = vec![1.0_f32, 0.0];
         let s = vec![0.0_f32, 1.0];
-        let dist = ProjFreeDistiller::cosine_dist(&t, &s).unwrap();
+        let dist = ProjFreeDistiller::cosine_dist(&t, &s).expect("cosine_dist should succeed");
         assert!((dist - 1.0_f32).abs() < 1e-5);
     }
 
@@ -481,7 +484,8 @@ mod tests {
     #[test]
     fn smooth_l1_identical_is_zero() {
         let v = vec![5.0_f32, -3.0, 0.0];
-        let loss = ProjFreeDistiller::smooth_l1_loss(&v, &v).unwrap();
+        let loss =
+            ProjFreeDistiller::smooth_l1_loss(&v, &v).expect("smooth_l1_loss should succeed");
         assert!(loss.abs() < 1e-7);
     }
 
@@ -490,7 +494,8 @@ mod tests {
         // |2 - 0| = 2 >= delta=1 → 2 - 0.5 = 1.5
         let t = vec![2.0_f32];
         let s = vec![0.0_f32];
-        let loss = ProjFreeDistiller::smooth_l1_loss(&t, &s).unwrap();
+        let loss =
+            ProjFreeDistiller::smooth_l1_loss(&t, &s).expect("smooth_l1_loss should succeed");
         assert!((loss - 1.5_f32).abs() < 1e-5);
     }
 
@@ -499,7 +504,8 @@ mod tests {
         // |0.5| < 1 → 0.5 * 0.25 = 0.125
         let t = vec![0.5_f32];
         let s = vec![0.0_f32];
-        let loss = ProjFreeDistiller::smooth_l1_loss(&t, &s).unwrap();
+        let loss =
+            ProjFreeDistiller::smooth_l1_loss(&t, &s).expect("smooth_l1_loss should succeed");
         assert!((loss - 0.125_f32).abs() < 1e-5);
     }
 
@@ -549,7 +555,8 @@ mod tests {
     fn loss_identical_teacher_student_near_zero() {
         let feat: Vec<f32> = (0..8).map(|i| (i + 1) as f32).collect(); // 2ch × 4 spatial
         let cfg = ProjFreeConfig::default();
-        let l = ProjFreeDistiller::loss(&feat, 2, 4, &feat, 2, 4, &cfg).unwrap();
+        let l =
+            ProjFreeDistiller::loss(&feat, 2, 4, &feat, 2, 4, &cfg).expect("loss should succeed");
         assert!(
             l.abs() < 1e-5,
             "loss should be ~0 for identical inputs, got {l}"
@@ -580,7 +587,8 @@ mod tests {
             loss_type: ProjFreeLossType::CosineDist,
             ..Default::default()
         };
-        let l = ProjFreeDistiller::loss(&feat, 2, 2, &feat, 2, 2, &cfg).unwrap();
+        let l =
+            ProjFreeDistiller::loss(&feat, 2, 2, &feat, 2, 2, &cfg).expect("loss should succeed");
         assert!(l.abs() < 1e-5);
     }
 
@@ -591,7 +599,8 @@ mod tests {
             loss_type: ProjFreeLossType::SmoothL1,
             ..Default::default()
         };
-        let l = ProjFreeDistiller::loss(&feat, 2, 2, &feat, 2, 2, &cfg).unwrap();
+        let l =
+            ProjFreeDistiller::loss(&feat, 2, 2, &feat, 2, 2, &cfg).expect("loss should succeed");
         assert!(l.abs() < 1e-5);
     }
 

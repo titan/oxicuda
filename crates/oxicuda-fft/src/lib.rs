@@ -70,6 +70,14 @@ pub use multi_gpu::{MultiGpuFftConfig, MultiGpuFftPlan, SlabDecomposition};
 pub use out_of_core::{LargeFftConfig, OutOfCoreConfig, OutOfCorePlan, OutOfCoreStrategy};
 pub use plan::FftPlan;
 pub use pruned::{PruneMode, PrunedFftConfig, PrunedFftPlan, PrunedStage, plan_pruned_fft};
+pub use transforms::bluestein::bluestein_fft;
+pub use transforms::goertzel::{goertzel, goertzel_freq, goertzel_power};
+pub use transforms::ntt::{
+    NTT_MOD, NTT_PRIMITIVE_ROOT, mod_inv, mod_pow, ntt, ntt_convolve, ntt_multiply,
+};
+pub use transforms::nufft_t1::{NufftT1, NufftT1Config};
+pub use transforms::rfft::{irfft, rfft};
+pub use transforms::stft::{Stft, StftConfig, WindowType};
 pub use types::{Complex, FftDirection, FftPrecision, FftType};
 
 /// Prelude for convenient imports.
@@ -90,5 +98,13 @@ pub mod prelude {
     pub use crate::out_of_core::{OutOfCoreConfig, OutOfCorePlan, OutOfCoreStrategy};
     pub use crate::plan::FftPlan;
     pub use crate::pruned::{PruneMode, PrunedFftConfig, PrunedFftPlan, PrunedStage};
+    pub use crate::transforms::bluestein::bluestein_fft;
+    pub use crate::transforms::goertzel::{goertzel, goertzel_freq, goertzel_power};
+    pub use crate::transforms::ntt::{
+        NTT_MOD, NTT_PRIMITIVE_ROOT, mod_inv, mod_pow, ntt, ntt_convolve, ntt_multiply,
+    };
+    pub use crate::transforms::nufft_t1::{NufftT1, NufftT1Config};
+    pub use crate::transforms::rfft::{irfft, rfft};
+    pub use crate::transforms::stft::{Stft, StftConfig, WindowType};
     pub use crate::types::{Complex, FftDirection, FftPrecision, FftType};
 }

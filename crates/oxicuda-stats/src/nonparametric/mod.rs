@@ -1,19 +1,32 @@
-//! Non-parametric (rank-based) tests.
+//! Non-parametric methods: rank-based tests, isotonic regression, and
+//! Dirichlet-process (CRP / stick-breaking / DP-mixture) tools.
 
+pub mod dirichlet_process;
 pub mod friedman;
+pub mod isotonic;
 pub mod kruskal_wallis;
 pub mod mann_whitney;
 pub mod outlier;
 pub mod permanova;
+pub mod sign_cochran;
 pub mod wilcoxon;
 
+pub use dirichlet_process::{
+    ChineseRestaurant, DpMixtureConfig, DpMixtureResult, NormalBaseMeasure, StickBreakingWeights,
+    crp_simulate, dp_mixture_fit, stick_breaking_weights,
+};
 pub use friedman::{FriedmanResult, friedman};
+pub use isotonic::{
+    IsotonicBlock, IsotonicFit, antitonic_regression, antitonic_regression_weighted,
+    isotonic_regression, isotonic_regression_weighted, weighted_sse,
+};
 pub use kruskal_wallis::{KruskalWallisResult, kruskal_wallis};
 pub use mann_whitney::{MannWhitneyResult, mann_whitney_u};
 pub use permanova::{
     DistMetric, PermanovaConfig, PermanovaResult, distance_matrix_from_data, permanova,
     permanova_f_statistic,
 };
+pub use sign_cochran::{CochranQResult, SignTestResult, cochran_q, sign_test};
 pub use wilcoxon::{WilcoxonResult, wilcoxon_signed_rank};
 
 /// Internal helper: compute mid-ranks (average rank for ties) given a slice of values.

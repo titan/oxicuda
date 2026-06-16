@@ -673,8 +673,9 @@ mod tests {
         let cfg = default_cfg();
         let n = 20_usize;
         let series = constant_series(n, 0.5);
-        let fit = lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 1).unwrap();
-        let scores = lstm_ae_score(&fit, &series, n).unwrap();
+        let fit =
+            lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 1).expect("lstm_ae_fit should succeed");
+        let scores = lstm_ae_score(&fit, &series, n).expect("lstm_ae_score should succeed");
         assert_eq!(scores.len(), n, "expected {n} scores, got {}", scores.len());
     }
 
@@ -685,8 +686,9 @@ mod tests {
         let cfg = default_cfg();
         let n = 20_usize;
         let series: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin()).collect();
-        let fit = lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 2).unwrap();
-        let scores = lstm_ae_score(&fit, &series, n).unwrap();
+        let fit =
+            lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 2).expect("lstm_ae_fit should succeed");
+        let scores = lstm_ae_score(&fit, &series, n).expect("lstm_ae_score should succeed");
         for (i, &s) in scores.iter().enumerate() {
             assert!(s.is_finite(), "score[{i}] = {s} not finite");
             assert!(s >= 0.0, "score[{i}] = {s} is negative");
@@ -707,8 +709,9 @@ mod tests {
         let mut series = constant_series(n, 0.1);
         series[spike_t] = 5.0; // large spike
 
-        let fit = lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 3).unwrap();
-        let scores = lstm_ae_score(&fit, &series, n).unwrap();
+        let fit =
+            lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 3).expect("lstm_ae_fit should succeed");
+        let scores = lstm_ae_score(&fit, &series, n).expect("lstm_ae_score should succeed");
 
         let spike_score = scores[spike_t];
         let normal_mean: f64 = scores
@@ -736,8 +739,9 @@ mod tests {
         let cfg = default_cfg();
         let n = 15_usize;
         let series = constant_series(n, 0.3);
-        let fit = lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 4).unwrap();
-        let preds = lstm_ae_predict(&fit, &series, n, 0.1).unwrap();
+        let fit =
+            lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 4).expect("lstm_ae_fit should succeed");
+        let preds = lstm_ae_predict(&fit, &series, n, 0.1).expect("lstm_ae_predict should succeed");
         assert_eq!(preds.len(), n);
     }
 
@@ -789,8 +793,8 @@ mod tests {
         };
         let n = 10_usize;
         let series: Vec<f64> = (0..n * 2).map(|i| i as f64 * 0.1).collect();
-        let fit = lstm_ae_fit(&series, n, 2, &cfg, 7).unwrap();
-        let scores = lstm_ae_score(&fit, &series, n).unwrap();
+        let fit = lstm_ae_fit(&series, n, 2, &cfg, 7).expect("lstm_ae_fit should succeed");
+        let scores = lstm_ae_score(&fit, &series, n).expect("lstm_ae_score should succeed");
         assert_eq!(scores.len(), n);
         for &s in &scores {
             assert!(s.is_finite() && s >= 0.0, "score = {s}");
@@ -811,8 +815,8 @@ mod tests {
             n_epochs: 5,
         };
         let series: Vec<f64> = (0..n * d).map(|i| (i as f64 * 0.05).cos()).collect();
-        let fit = lstm_ae_fit(&series, n, d, &cfg, 8).unwrap();
-        let scores = lstm_ae_score(&fit, &series, n).unwrap();
+        let fit = lstm_ae_fit(&series, n, d, &cfg, 8).expect("lstm_ae_fit should succeed");
+        let scores = lstm_ae_score(&fit, &series, n).expect("lstm_ae_score should succeed");
         assert_eq!(scores.len(), n);
         for (i, &s) in scores.iter().enumerate() {
             assert!(s.is_finite(), "score[{i}] = {s} not finite");
@@ -826,9 +830,10 @@ mod tests {
         let cfg = default_cfg();
         let n = 15_usize;
         let series = constant_series(n, 0.5);
-        let fit = lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 9).unwrap();
-        let scores = lstm_ae_score(&fit, &series, n).unwrap();
-        let preds = lstm_ae_predict(&fit, &series, n, 0.0).unwrap();
+        let fit =
+            lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 9).expect("lstm_ae_fit should succeed");
+        let scores = lstm_ae_score(&fit, &series, n).expect("lstm_ae_score should succeed");
+        let preds = lstm_ae_predict(&fit, &series, n, 0.0).expect("lstm_ae_predict should succeed");
         for (i, (&s, &p)) in scores.iter().zip(preds.iter()).enumerate() {
             if s > 0.0 {
                 assert!(p, "timestep {i} score={s} should be flagged at threshold 0");
@@ -843,7 +848,8 @@ mod tests {
         let cfg = default_cfg();
         let n = 20_usize;
         let series = constant_series(n, 0.5);
-        let fit = lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 10).unwrap();
+        let fit =
+            lstm_ae_fit(&series, n, cfg.input_dim, &cfg, 10).expect("lstm_ae_fit should succeed");
         // Try to score a shorter series
         let short = constant_series(3, 0.5);
         let result = lstm_ae_score(&fit, &short, 3);
@@ -873,11 +879,19 @@ mod tests {
             ..cfg_few.clone()
         };
 
-        let fit_few = lstm_ae_fit(&series, n, d, &cfg_few, 200).unwrap();
-        let fit_many = lstm_ae_fit(&series, n, d, &cfg_many, 200).unwrap();
+        let fit_few =
+            lstm_ae_fit(&series, n, d, &cfg_few, 200).expect("lstm_ae_fit should succeed");
+        let fit_many =
+            lstm_ae_fit(&series, n, d, &cfg_many, 200).expect("lstm_ae_fit should succeed");
 
-        let score_few: f64 = lstm_ae_score(&fit_few, &series, n).unwrap().iter().sum();
-        let score_many: f64 = lstm_ae_score(&fit_many, &series, n).unwrap().iter().sum();
+        let score_few: f64 = lstm_ae_score(&fit_few, &series, n)
+            .expect("lstm_ae_score should succeed")
+            .iter()
+            .sum();
+        let score_many: f64 = lstm_ae_score(&fit_many, &series, n)
+            .expect("lstm_ae_score should succeed")
+            .iter()
+            .sum();
 
         assert!(
             score_few.is_finite() && score_many.is_finite(),
@@ -904,8 +918,8 @@ mod tests {
             n_epochs: 3,
         };
         let series: Vec<f64> = (0..n).map(|i| i as f64 * 0.1).collect();
-        let fit = lstm_ae_fit(&series, n, d, &cfg, 12).unwrap();
-        let scores = lstm_ae_score(&fit, &series, n).unwrap();
+        let fit = lstm_ae_fit(&series, n, d, &cfg, 12).expect("lstm_ae_fit should succeed");
+        let scores = lstm_ae_score(&fit, &series, n).expect("lstm_ae_score should succeed");
         assert_eq!(scores.len(), n);
         for &s in &scores {
             assert!(s.is_finite() && s >= 0.0, "score = {s}");

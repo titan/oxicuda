@@ -227,8 +227,12 @@ mod tests {
         let data: Vec<f32> = (0..100_usize)
             .flat_map(|i| vec![i as f32 * 0.1, i as f32 * 0.05])
             .collect();
-        scorer.fit(&data, 100, 2, &mut rng).unwrap();
-        let s = scorer.score(&[5.0_f32, 2.5]).unwrap();
+        scorer
+            .fit(&data, 100, 2, &mut rng)
+            .expect("isolation scorer fit should succeed");
+        let s = scorer
+            .score(&[5.0_f32, 2.5])
+            .expect("isolation scorer score should succeed");
         assert!((0.0..=1.0).contains(&s), "s={s}");
     }
 }

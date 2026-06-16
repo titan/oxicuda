@@ -183,8 +183,11 @@ mod tests {
         let mut grid = VoxelGrid::new([0.0, 0.0, 0.0], 1.0, [4, 4, 4], 1);
         let pts = vec![0.5_f32, 0.5, 0.5, 0.3_f32, 0.3, 0.3];
         let feats = vec![2.0_f32, 4.0_f32];
-        grid.scatter(&pts, 2, &feats, VoxelPoolMode::Mean).unwrap();
-        let (_, out_feats) = grid.occupied_centroids().unwrap();
+        grid.scatter(&pts, 2, &feats, VoxelPoolMode::Mean)
+            .expect("scatter should succeed");
+        let (_, out_feats) = grid
+            .occupied_centroids()
+            .expect("occupied_centroids should succeed");
         // Both points fall in same voxel → mean = 3.0
         assert_eq!(out_feats.len(), 1);
         assert!((out_feats[0] - 3.0).abs() < 1e-5);
@@ -198,8 +201,11 @@ mod tests {
             1.5_f32, 0.5, 0.5, // voxel (1,0,0)
         ];
         let feats = vec![1.0_f32, 2.0_f32];
-        grid.scatter(&pts, 2, &feats, VoxelPoolMode::Sum).unwrap();
-        let (_, out_feats) = grid.occupied_centroids().unwrap();
+        grid.scatter(&pts, 2, &feats, VoxelPoolMode::Sum)
+            .expect("scatter should succeed");
+        let (_, out_feats) = grid
+            .occupied_centroids()
+            .expect("occupied_centroids should succeed");
         assert_eq!(out_feats.len(), 2);
     }
 
@@ -208,8 +214,11 @@ mod tests {
         let mut grid = VoxelGrid::new([0.0, 0.0, 0.0], 1.0, [2, 2, 2], 1);
         let pts = vec![100.0_f32, 100.0, 100.0]; // out of bounds
         let feats = vec![1.0_f32];
-        grid.scatter(&pts, 1, &feats, VoxelPoolMode::Sum).unwrap();
-        let (coords, _) = grid.occupied_centroids().unwrap();
+        grid.scatter(&pts, 1, &feats, VoxelPoolMode::Sum)
+            .expect("scatter should succeed");
+        let (coords, _) = grid
+            .occupied_centroids()
+            .expect("occupied_centroids should succeed");
         assert!(coords.is_empty(), "Out-of-bounds point should be skipped");
     }
 
@@ -218,8 +227,11 @@ mod tests {
         let mut grid = VoxelGrid::new([0.0, 0.0, 0.0], 1.0, [2, 2, 2], 1);
         let pts = vec![0.1_f32, 0.1, 0.1, 0.2_f32, 0.2, 0.2];
         let feats = vec![3.0_f32, 7.0_f32];
-        grid.scatter(&pts, 2, &feats, VoxelPoolMode::Max).unwrap();
-        let (_, out_feats) = grid.occupied_centroids().unwrap();
+        grid.scatter(&pts, 2, &feats, VoxelPoolMode::Max)
+            .expect("scatter should succeed");
+        let (_, out_feats) = grid
+            .occupied_centroids()
+            .expect("occupied_centroids should succeed");
         assert_eq!(out_feats.len(), 1);
         assert!((out_feats[0] - 7.0).abs() < 1e-5);
     }

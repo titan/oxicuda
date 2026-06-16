@@ -23,32 +23,52 @@
 
 pub mod dpo;
 pub mod error;
+pub mod grpo;
 pub mod handle;
 pub mod metrics;
 pub mod orpo;
 pub mod ppo_rlhf;
 pub mod preference;
 pub mod ptx_kernels;
+pub mod rebel;
 pub mod reward;
 pub mod sft;
+pub mod utils;
 
 pub mod prelude {
+    pub use crate::dpo::bco::{
+        BcoConfig, RewardShift, bco_loss, bco_loss_from_rewards,
+        implicit_reward as bco_implicit_reward,
+    };
     pub use crate::dpo::cringe::{CringeBatch, CringeConfig, CringeLoss, CringeSample};
     pub use crate::dpo::dpo::{DpoConfig, dpo_log_ratio, dpo_loss, dpo_loss_per_pair};
+    pub use crate::dpo::dpop::{
+        DpopConfig, dpop_log_ratio, dpop_loss, dpop_loss_per_pair, dpop_penalty,
+    };
     pub use crate::dpo::ipo::{IpoConfig, ipo_loss};
     pub use crate::dpo::kto::{KtoConfig, kto_loss};
     pub use crate::dpo::length_dpo::{LengthDpo, LengthDpoBatch, LengthDpoConfig, LengthPair};
     pub use crate::dpo::online_dpo::{
         OnlineDpoConfig, PairingMode, build_preference_pair, online_dpo_pairs, online_dpo_step,
     };
+    pub use crate::dpo::rrhf::{
+        RrhfConfig, RrhfSample, ft_loss as rrhf_ft_loss, length_normalized_scores, ranking_loss,
+        rrhf_loss, rrhf_loss_batch,
+    };
     pub use crate::dpo::sdpo::{
         SdpoConfig, StagedDpo, sdpo_stage_loss, sdpo_stage_margin, sdpo_total_loss,
         sdpo_update_reference,
+    };
+    pub use crate::dpo::slic::{
+        SlicConfig, SlicPair, calibration_loss, regularization_loss, slic_loss, slic_loss_batch,
     };
     pub use crate::dpo::step_dpo::{
         StepDpoConfig, StepDpoOutput, StepPair, step_dpo_loss, step_dpo_loss_batch,
     };
     pub use crate::error::{RlhfError, RlhfResult};
+    pub use crate::grpo::{
+        GrpoConfig, GrpoOutput, group_advantages, grpo_loss, kl_k3, output_surrogate,
+    };
     pub use crate::handle::{LcgRng, RlhfHandle, SmVersion};
     pub use crate::metrics::alignment::{
         AlignmentMetrics, compute_alignment_metrics, kl_from_ref, perplexity, reward_gap, win_rate,
@@ -57,6 +77,7 @@ pub mod prelude {
     pub use crate::orpo::simpo::{SimpoConfig, simpo_loss};
     pub use crate::ppo_rlhf::kl_control::{KlController, kl_divergence_from_logps};
     pub use crate::ppo_rlhf::ppo_step::{RlhfPpoConfig, rlhf_ppo_loss};
+    pub use crate::ppo_rlhf::rloo::{RlooConfig, rloo_advantages, rloo_loss, rloo_loss_with_kl};
     pub use crate::ppo_rlhf::rollout::RlhfRollout;
     pub use crate::preference::bradley_terry::{RewardHead, bt_reward_loss};
     pub use crate::preference::pair::{PairBatch, PreferencePair};
@@ -64,12 +85,21 @@ pub mod prelude {
         bt_reward_loss_ptx, dpo_loss_ptx, f32_hex, ipo_loss_ptx, kto_loss_ptx, orpo_odds_ptx,
         rlhf_kl_ptx, sft_mask_ptx,
     };
+    pub use crate::rebel::{
+        RebelConfig, RebelPair, predicted_relative_reward, rebel_loss, rebel_loss_slices,
+        rebel_pair_loss,
+    };
     pub use crate::reward::best_of_n::{BestOfN, BestOfNConfig, ScoreAggregation};
     pub use crate::reward::ensemble::{EnsembleAgg, RewardEnsemble, RewardEnsembleConfig};
+    pub use crate::reward::length_penalty::{LengthDebiasedReward, pearson_correlation};
     pub use crate::reward::model::RewardModel;
     pub use crate::reward::normalize::RewardNormalizer;
     pub use crate::reward::process_reward::{
         PrmConfig, PrmLabel, PrmOutput, prm_aggregate_score, prm_loss, prm_rank_solutions,
+    };
+    pub use crate::reward::rm_calibration::{
+        RewardModelCalibrator, expected_calibration_error, fit_temperature_pairs,
+        isotonic_regression,
     };
     pub use crate::sft::loss::{masked_token_ce, sft_loss};
 }
@@ -82,7 +112,7 @@ mod e2e_tests {
     fn e2e_bt_loss_zero_equal_rewards() {
         let chosen = [1.0_f32, 2.0, 0.5];
         let rejected = [1.0_f32, 2.0, 0.5];
-        let loss = bt_reward_loss(&chosen, &rejected).unwrap();
+        let loss = bt_reward_loss(&chosen, &rejected).expect("bt_reward_loss should succeed");
         let expected = -(0.5_f32.ln());
         assert!(
             (loss - expected).abs() < 1e-4,
@@ -96,8 +126,10 @@ mod e2e_tests {
         let rejected_small = [1.0_f32];
         let chosen_large = [3.0_f32];
         let rejected_large = [0.0_f32];
-        let loss_small = bt_reward_loss(&chosen_small, &rejected_small).unwrap();
-        let loss_large = bt_reward_loss(&chosen_large, &rejected_large).unwrap();
+        let loss_small =
+            bt_reward_loss(&chosen_small, &rejected_small).expect("bt_reward_loss should succeed");
+        let loss_large =
+            bt_reward_loss(&chosen_large, &rejected_large).expect("bt_reward_loss should succeed");
         assert!(
             loss_large < loss_small,
             "BT loss should decrease with larger reward gap: small={loss_small}, large={loss_large}"
@@ -112,9 +144,9 @@ mod e2e_tests {
             vec![-1.1_f32, -2.1, -1.6],
             vec![-2.1_f32, -3.1, -2.6],
         )
-        .unwrap();
+        .expect("value should be present");
         let cfg = DpoConfig { beta: 0.1 };
-        let loss = dpo_loss(&batch, &cfg).unwrap();
+        let loss = dpo_loss(&batch, &cfg).expect("dpo_loss should succeed");
         assert!(loss.is_finite(), "DPO loss must be finite, got {loss}");
     }
 
@@ -126,17 +158,17 @@ mod e2e_tests {
             vec![-1.0_f32],
             vec![-1.0_f32],
         )
-        .unwrap();
+        .expect("value should be present");
         let unaligned_batch = PairBatch::new(
             vec![-3.0_f32],
             vec![-0.5_f32],
             vec![-1.0_f32],
             vec![-1.0_f32],
         )
-        .unwrap();
+        .expect("value should be present");
         let cfg = DpoConfig { beta: 0.5 };
-        let loss_aligned = dpo_loss(&aligned_batch, &cfg).unwrap();
-        let loss_unaligned = dpo_loss(&unaligned_batch, &cfg).unwrap();
+        let loss_aligned = dpo_loss(&aligned_batch, &cfg).expect("dpo_loss should succeed");
+        let loss_unaligned = dpo_loss(&unaligned_batch, &cfg).expect("dpo_loss should succeed");
         assert!(
             loss_aligned < loss_unaligned,
             "Aligned DPO loss {loss_aligned} should be lower than unaligned {loss_unaligned}"
@@ -151,9 +183,9 @@ mod e2e_tests {
             vec![-1.2_f32, -2.2],
             vec![-2.7_f32, -3.2],
         )
-        .unwrap();
+        .expect("value should be present");
         let cfg = IpoConfig { beta: 0.1 };
-        let loss = ipo_loss(&batch, &cfg).unwrap();
+        let loss = ipo_loss(&batch, &cfg).expect("ipo_loss should succeed");
         assert!(loss.is_finite(), "IPO loss must be finite, got {loss}");
         assert!(loss >= 0.0, "IPO loss must be non-negative, got {loss}");
     }
@@ -167,7 +199,7 @@ mod e2e_tests {
             lambda_d: 1.0,
             lambda_u: 1.0,
         };
-        let loss = kto_loss(&desirable, &undesirable, &cfg).unwrap();
+        let loss = kto_loss(&desirable, &undesirable, &cfg).expect("kto_loss should succeed");
         assert!(loss.is_finite(), "KTO loss must be finite");
         assert!(loss >= 0.0, "KTO loss must be non-negative, got {loss}");
     }
@@ -178,7 +210,8 @@ mod e2e_tests {
         let rejected_logps = [-2.0_f32, -3.0];
         let sft_loss_val = 2.0_f32;
         let cfg = OrpoConfig { lambda: 0.5 };
-        let loss = orpo_loss(&chosen_logps, &rejected_logps, sft_loss_val, &cfg).unwrap();
+        let loss = orpo_loss(&chosen_logps, &rejected_logps, sft_loss_val, &cfg)
+            .expect("orpo_loss should succeed");
         assert!(loss.is_finite(), "ORPO loss must be finite, got {loss}");
         assert!(
             loss >= sft_loss_val,
@@ -196,8 +229,8 @@ mod e2e_tests {
             beta: 2.0,
             gamma: 0.5,
         };
-        let loss =
-            simpo_loss(&chosen_sum, &rejected_sum, &chosen_len, &rejected_len, &cfg).unwrap();
+        let loss = simpo_loss(&chosen_sum, &rejected_sum, &chosen_len, &rejected_len, &cfg)
+            .expect("simpo_loss should succeed");
         assert!(loss.is_finite(), "SimPO loss must be finite, got {loss}");
     }
 
@@ -210,7 +243,7 @@ mod e2e_tests {
         logits[label as usize] = 100.0;
         let labels = [label];
         let mask = [1_u8];
-        let loss = sft_loss(&logits, &labels, &mask, n_vocab).unwrap();
+        let loss = sft_loss(&logits, &labels, &mask, n_vocab).expect("sft_loss should succeed");
         assert!(
             loss < 0.01,
             "SFT loss should be near 0 for strongly correct prediction, got {loss}"
@@ -220,7 +253,7 @@ mod e2e_tests {
     #[test]
     fn e2e_kl_zero_at_ref() {
         let log_probs = [-1.0_f32, -2.0, -0.5, -1.5];
-        let kl = kl_from_ref(&log_probs, &log_probs).unwrap();
+        let kl = kl_from_ref(&log_probs, &log_probs).expect("kl_from_ref should succeed");
         assert!(
             kl.abs() < 1e-5,
             "KL from ref should be 0 when lp == ref_lp, got {kl}"
@@ -234,7 +267,10 @@ mod e2e_tests {
         for &v in &values {
             norm.update(v);
         }
-        let normalized: Vec<f32> = values.iter().map(|&v| norm.normalize(v).unwrap()).collect();
+        let normalized: Vec<f32> = values
+            .iter()
+            .map(|&v| norm.normalize(v).expect("normalize should succeed"))
+            .collect();
         let mean: f32 = normalized.iter().sum::<f32>() / normalized.len() as f32;
         let variance: f32 = normalized
             .iter()

@@ -282,10 +282,13 @@ mod tests {
     fn single_adapter_weight_is_one() {
         let cfg = default_cfg(6, 1, 1.0);
         let mut h = handle(7);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden = vec![0.3_f32, -0.2, 0.4, 0.1, -0.5, 0.6];
         let outs = vec![vec![0.1_f32, 0.2, -0.3, 0.4, 0.5, -0.6]];
-        let (_y, probs) = fusion.forward(&hidden, &outs).unwrap();
+        let (_y, probs) = fusion
+            .forward(&hidden, &outs)
+            .expect("forward should succeed with valid inputs and matching dimensions");
         assert_eq!(probs.len(), 1);
         assert!((probs[0] - 1.0).abs() < 1e-6, "weight = {}", probs[0]);
     }
@@ -294,11 +297,14 @@ mod tests {
     fn two_identical_adapters_split_attention_evenly() {
         let cfg = default_cfg(5, 2, 1.0);
         let mut h = handle(11);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden = vec![0.1_f32, 0.2, 0.3, -0.1, 0.0];
         let same = vec![0.7_f32, -0.4, 0.2, 0.5, -0.3];
         let outs = vec![same.clone(), same];
-        let probs = fusion.attention_weights(&hidden, &outs).unwrap();
+        let probs = fusion
+            .attention_weights(&hidden, &outs)
+            .expect("attention_weights should succeed with valid inputs and matching dimensions");
         assert_eq!(probs.len(), 2);
         assert!((probs[0] - 0.5).abs() < 1e-5);
         assert!((probs[1] - 0.5).abs() < 1e-5);
@@ -308,7 +314,8 @@ mod tests {
     fn hidden_dim_mismatch_errors() {
         let cfg = default_cfg(4, 2, 1.0);
         let mut h = handle(1);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let bad_hidden = vec![0.1_f32; 5]; // wrong length
         let outs = vec![vec![0.0_f32; 4]; 2];
         let res = fusion.forward(&bad_hidden, &outs);
@@ -319,7 +326,8 @@ mod tests {
     fn n_adapter_count_mismatch_errors() {
         let cfg = default_cfg(4, 3, 1.0);
         let mut h = handle(2);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden = vec![0.1_f32; 4];
         let outs = vec![vec![0.0_f32; 4]; 2]; // only two adapters
         let res = fusion.forward(&hidden, &outs);
@@ -330,7 +338,8 @@ mod tests {
     fn adapter_inner_dim_mismatch_errors() {
         let cfg = default_cfg(4, 2, 1.0);
         let mut h = handle(3);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden = vec![0.1_f32; 4];
         let outs = vec![vec![0.0_f32; 4], vec![0.0_f32; 3]]; // second wrong
         let res = fusion.forward(&hidden, &outs);
@@ -375,12 +384,15 @@ mod tests {
     fn attention_weights_sum_to_one() {
         let cfg = default_cfg(6, 5, 1.0);
         let mut h = handle(7);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden: Vec<f32> = (0..6).map(|i| 0.1 * i as f32 - 0.3).collect();
         let outs: Vec<Vec<f32>> = (0..5)
             .map(|k| (0..6).map(|i| 0.05 * i as f32 + 0.1 * k as f32).collect())
             .collect();
-        let probs = fusion.attention_weights(&hidden, &outs).unwrap();
+        let probs = fusion
+            .attention_weights(&hidden, &outs)
+            .expect("attention_weights should succeed with valid inputs and matching dimensions");
         let sum: f32 = probs.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5, "softmax sum = {sum}");
     }
@@ -390,10 +402,13 @@ mod tests {
         let d = 8;
         let cfg = default_cfg(d, 3, 1.0);
         let mut h = handle(9);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden = vec![0.5_f32; d];
         let outs = vec![vec![0.25_f32; d]; 3];
-        let (out, _probs) = fusion.forward(&hidden, &outs).unwrap();
+        let (out, _probs) = fusion
+            .forward(&hidden, &outs)
+            .expect("forward should succeed with valid inputs and matching dimensions");
         assert_eq!(out.len(), d);
     }
 
@@ -402,8 +417,10 @@ mod tests {
         let cfg = default_cfg(5, 4, 1.0);
         let mut h1 = handle(33);
         let mut h2 = handle(33);
-        let a = AdapterFusion::new(cfg.clone(), &mut h1).unwrap();
-        let b = AdapterFusion::new(cfg, &mut h2).unwrap();
+        let a = AdapterFusion::new(cfg.clone(), &mut h1)
+            .expect("AdapterFusion construction should succeed with valid config");
+        let b = AdapterFusion::new(cfg, &mut h2)
+            .expect("AdapterFusion construction should succeed with valid config");
         assert_eq!(a.w_q, b.w_q);
         assert_eq!(a.w_k, b.w_k);
         assert_eq!(a.w_v, b.w_v);
@@ -413,12 +430,15 @@ mod tests {
     fn large_temperature_flattens_distribution() {
         let cfg = default_cfg(6, 5, 100.0);
         let mut h = handle(13);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden: Vec<f32> = (0..6).map(|i| 0.3 * i as f32 - 0.7).collect();
         let outs: Vec<Vec<f32>> = (0..5)
             .map(|k| (0..6).map(|i| 0.2 * (i as f32 + k as f32 * 1.1)).collect())
             .collect();
-        let probs = fusion.attention_weights(&hidden, &outs).unwrap();
+        let probs = fusion
+            .attention_weights(&hidden, &outs)
+            .expect("attention_weights should succeed with valid inputs and matching dimensions");
         let uniform = 1.0_f32 / 5.0;
         for &p in &probs {
             assert!(
@@ -432,18 +452,24 @@ mod tests {
     fn small_temperature_sharpens_distribution() {
         let cfg = default_cfg(6, 5, 1.0);
         let mut h = handle(15);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden: Vec<f32> = (0..6).map(|i| 0.3 * i as f32 - 0.7).collect();
         let outs: Vec<Vec<f32>> = (0..5)
             .map(|k| (0..6).map(|i| 0.2 * (i as f32 + k as f32 * 1.1)).collect())
             .collect();
-        let probs_baseline = fusion.attention_weights(&hidden, &outs).unwrap();
+        let probs_baseline = fusion
+            .attention_weights(&hidden, &outs)
+            .expect("attention_weights should succeed with valid inputs and matching dimensions");
 
         // Same data, sharper temperature.
         let cfg_sharp = default_cfg(6, 5, 0.01);
         let mut h_sharp = handle(15);
-        let fusion_sharp = AdapterFusion::new(cfg_sharp, &mut h_sharp).unwrap();
-        let probs_sharp = fusion_sharp.attention_weights(&hidden, &outs).unwrap();
+        let fusion_sharp = AdapterFusion::new(cfg_sharp, &mut h_sharp)
+            .expect("AdapterFusion construction should succeed with sharp-temperature config");
+        let probs_sharp = fusion_sharp
+            .attention_weights(&hidden, &outs)
+            .expect("attention_weights should succeed with valid inputs");
 
         let max_baseline = probs_baseline.iter().copied().fold(0.0_f32, f32::max);
         let max_sharp = probs_sharp.iter().copied().fold(0.0_f32, f32::max);
@@ -462,8 +488,10 @@ mod tests {
         let cfg = default_cfg(5, 3, 1.0);
         let mut h1 = handle(1);
         let mut h2 = handle(2);
-        let a = AdapterFusion::new(cfg.clone(), &mut h1).unwrap();
-        let b = AdapterFusion::new(cfg, &mut h2).unwrap();
+        let a = AdapterFusion::new(cfg.clone(), &mut h1)
+            .expect("AdapterFusion construction should succeed with valid config");
+        let b = AdapterFusion::new(cfg, &mut h2)
+            .expect("AdapterFusion construction should succeed with valid config");
         let diff_q: f32 = a
             .w_q
             .iter()
@@ -491,13 +519,18 @@ mod tests {
     fn weights_match_forward_attention() {
         let cfg = default_cfg(5, 4, 1.0);
         let mut h = handle(21);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden: Vec<f32> = (0..5).map(|i| 0.1 * (i as f32 + 1.0)).collect();
         let outs: Vec<Vec<f32>> = (0..4)
             .map(|k| (0..5).map(|i| 0.05 * (i as f32 - k as f32)).collect())
             .collect();
-        let (_y, probs_fwd) = fusion.forward(&hidden, &outs).unwrap();
-        let probs_only = fusion.attention_weights(&hidden, &outs).unwrap();
+        let (_y, probs_fwd) = fusion
+            .forward(&hidden, &outs)
+            .expect("forward should succeed with valid inputs and matching dimensions");
+        let probs_only = fusion
+            .attention_weights(&hidden, &outs)
+            .expect("attention_weights should succeed with valid inputs and matching dimensions");
         for (a, b) in probs_fwd.iter().zip(probs_only.iter()) {
             assert!(
                 (a - b).abs() < 1e-6,
@@ -511,7 +544,8 @@ mod tests {
         let d = 8;
         let cfg = default_cfg(d, 2, 1.0);
         let mut h = handle(101);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let limit = (6.0_f32 / (2.0 * d as f32)).sqrt();
         for v in fusion
             .w_q
@@ -529,10 +563,13 @@ mod tests {
         // finite output and a valid probability distribution.
         let cfg = default_cfg(4, 2, 1.0);
         let mut h = handle(42);
-        let fusion = AdapterFusion::new(cfg, &mut h).unwrap();
+        let fusion = AdapterFusion::new(cfg, &mut h)
+            .expect("AdapterFusion construction should succeed with valid config");
         let hidden = vec![1.0_f32; 4];
         let outs = vec![vec![1e6_f32; 4], vec![-1e6_f32; 4]];
-        let (out, probs) = fusion.forward(&hidden, &outs).unwrap();
+        let (out, probs) = fusion
+            .forward(&hidden, &outs)
+            .expect("forward should succeed with valid inputs and matching dimensions");
         for &v in &out {
             assert!(
                 v.is_finite(),

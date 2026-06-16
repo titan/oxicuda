@@ -7,7 +7,7 @@ providing GPU-accelerated operations on AMD GPUs. Part of [OxiCUDA](https://gith
 
 ## Implementation Status
 
-- **Actual SLoC:** ~4,854 across 9 files
+- **Actual SLoC:** ~3,739 across 9 files
 - **Tests:** 104 passing
 - **Status:** HIP kernel generators, hipBLAS/hipRTC runtime loaders, multi-GPU dispatcher
 - **Targets:** AMD CDNA1/CDNA2/CDNA3 (MI100/MI200/MI300) and RDNA2/RDNA3 (Radeon RX 7000 series)
@@ -62,6 +62,9 @@ providing GPU-accelerated operations on AMD GPUs. Part of [OxiCUDA](https://gith
 - [ ] LDS (Local Data Share) bank conflict avoidance -- skew GEMM A/B tiles by 4 bytes to eliminate 32-bank conflicts
 
 #### P2 -- Nice-to-Have
+- [ ] `hip_kernels/rocm_sdma.rs` — ROCm 6.0 SDMA engine dispatch (AMD 2024): direct submission to System DMA engines via `hipMemcpyWithStream` SDMA path for CPU-GPU zero-copy on unified-memory APU (MI300A); `RocmSdmaTransfer`
+- [ ] `hipblas/hipblaslt.rs` — hipBLASLt runtime loader (`libhipblaslt.so`) for matrix-layout-flexible GEMM with epilogue fusions (bias/activation) on CDNA3/RDNA3; `HipBlasLt`
+- [ ] `device/flat_workgroup.rs` — AMDGPU flat work-group size attribute tuning (AMD 2022): emit `__attribute__((amdgpu_flat_work_group_size(min, max)))` hints to hipRTC for optimal occupancy on divergent kernels; `FlatWorkgroupHint`
 - [ ] AMD MIGraphX backend interop for ONNX model execution
 - [ ] AOMP/AOCC LLVM IR emission as alternative to hipRTC source compilation
 - [ ] HSA (Heterogeneous System Architecture) queue management for fine-grained dispatch

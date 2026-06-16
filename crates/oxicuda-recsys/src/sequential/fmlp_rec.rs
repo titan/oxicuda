@@ -653,8 +653,8 @@ mod tests {
         let mut im = vec![0.0_f32; n];
         re[0] = 1.0;
         let orig_re = re.clone();
-        fft_inplace(&mut re, &mut im, false).unwrap();
-        fft_inplace(&mut re, &mut im, true).unwrap();
+        fft_inplace(&mut re, &mut im, false).expect("fft_inplace should succeed");
+        fft_inplace(&mut re, &mut im, true).expect("fft_inplace should succeed");
         for (a, b) in orig_re.iter().zip(re.iter()) {
             assert_close(*a, *b, 1e-4);
         }
@@ -671,8 +671,8 @@ mod tests {
             .collect();
         let mut im = vec![0.0_f32; n];
         let orig_re = re.clone();
-        fft_inplace(&mut re, &mut im, false).unwrap();
-        fft_inplace(&mut re, &mut im, true).unwrap();
+        fft_inplace(&mut re, &mut im, false).expect("fft_inplace should succeed");
+        fft_inplace(&mut re, &mut im, true).expect("fft_inplace should succeed");
         for (a, b) in orig_re.iter().zip(re.iter()) {
             assert_close(*a, *b, 1e-4);
         }
@@ -689,8 +689,8 @@ mod tests {
             .collect();
         let mut im = vec![0.0_f32; n];
         let orig_re = re.clone();
-        fft_inplace(&mut re, &mut im, false).unwrap();
-        fft_inplace(&mut re, &mut im, true).unwrap();
+        fft_inplace(&mut re, &mut im, false).expect("fft_inplace should succeed");
+        fft_inplace(&mut re, &mut im, true).expect("fft_inplace should succeed");
         for (a, b) in orig_re.iter().zip(re.iter()) {
             assert_close(*a, *b, 1e-4);
         }
@@ -725,7 +725,7 @@ mod tests {
             n_items: 5,
         };
         let mut rng = LcgRng::new(101);
-        let mut model = FmlpRec::new(cfg.clone(), &mut rng).unwrap();
+        let mut model = FmlpRec::new(cfg.clone(), &mut rng).expect("value should be present");
         // Zero the FFN weights and biases.
         let layer = &mut model.layers[0];
         for v in layer.w_ffn1.iter_mut() {
@@ -747,7 +747,9 @@ mod tests {
         let mut rng_x = LcgRng::new(999);
         let mut x = vec![0.0_f32; seq_len * d];
         rng_x.fill_normal(&mut x);
-        let out = model.apply_layer(&x, &model.layers[0]).unwrap();
+        let out = model
+            .apply_layer(&x, &model.layers[0])
+            .expect("apply_layer should succeed");
         // Reference: per-position LayerNorm(X+X) (and then LayerNorm again
         // because the FFN adds zero residual).
         for pos in 0..seq_len {
@@ -771,8 +773,10 @@ mod tests {
     #[test]
     fn session_shorter_than_max_works() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
-        let logits = model.forward_session(&[0_usize, 1, 2]).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
+        let logits = model
+            .forward_session(&[0_usize, 1, 2])
+            .expect("forward_session should succeed");
         assert_eq!(logits.len(), 12);
         assert!(logits.iter().all(|v| v.is_finite()));
     }
@@ -780,9 +784,13 @@ mod tests {
     #[test]
     fn same_session_two_calls_returns_identical() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
-        let logits_a = model.forward_session(&[1_usize, 3, 5, 7]).unwrap();
-        let logits_b = model.forward_session(&[1_usize, 3, 5, 7]).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
+        let logits_a = model
+            .forward_session(&[1_usize, 3, 5, 7])
+            .expect("forward_session should succeed");
+        let logits_b = model
+            .forward_session(&[1_usize, 3, 5, 7])
+            .expect("forward_session should succeed");
         for (a, b) in logits_a.iter().zip(logits_b.iter()) {
             assert_close(*a, *b, 1e-5);
         }
@@ -837,8 +845,10 @@ mod tests {
     #[test]
     fn output_length_equals_n_items() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
-        let logits = model.forward_session(&[0_usize, 1]).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
+        let logits = model
+            .forward_session(&[0_usize, 1])
+            .expect("forward_session should succeed");
         assert_eq!(logits.len(), 12);
     }
 
@@ -893,7 +903,7 @@ mod tests {
     #[test]
     fn err_session_item_oor() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
         // n_items = 12; id 12 is out of range.
         assert!(matches!(
             model.forward_session(&[1_usize, 12]),
@@ -904,7 +914,7 @@ mod tests {
     #[test]
     fn err_empty_session() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
         assert!(matches!(
             model.forward_session(&[]),
             Err(RecsysError::EmptyInput)
@@ -914,7 +924,7 @@ mod tests {
     #[test]
     fn err_session_longer_than_max_seq_len() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
         // max_seq_len = 8; a 9-long session must error.
         let long_session: Vec<usize> = (0..9).map(|i| i % 12).collect();
         assert!(matches!(
@@ -927,8 +937,8 @@ mod tests {
     fn deterministic_init_given_seed() {
         let mut rng_a = LcgRng::new(2026);
         let mut rng_b = LcgRng::new(2026);
-        let model_a = FmlpRec::new(default_cfg(), &mut rng_a).unwrap();
-        let model_b = FmlpRec::new(default_cfg(), &mut rng_b).unwrap();
+        let model_a = FmlpRec::new(default_cfg(), &mut rng_a).expect("value should be present");
+        let model_b = FmlpRec::new(default_cfg(), &mut rng_b).expect("value should be present");
         assert_eq!(model_a.item_embeds, model_b.item_embeds);
         assert_eq!(model_a.pos_embeds, model_b.pos_embeds);
         for (la, lb) in model_a.layers.iter().zip(model_b.layers.iter()) {
@@ -942,7 +952,7 @@ mod tests {
     #[test]
     fn weights_finite_after_init() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
         for v in &model.item_embeds {
             assert!(v.is_finite());
         }
@@ -969,14 +979,14 @@ mod tests {
     #[test]
     fn n_params_positive() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
         assert!(model.n_params() > 0);
     }
 
     #[test]
     fn filter_init_is_one_zero() {
         let mut rng = make_rng();
-        let model = FmlpRec::new(default_cfg(), &mut rng).unwrap();
+        let model = FmlpRec::new(default_cfg(), &mut rng).expect("value should be present");
         for layer in &model.layers {
             for v in &layer.filter_real {
                 assert!((v - 1.0).abs() < 1e-7);

@@ -57,10 +57,12 @@ mod tests {
 
     #[test]
     fn z_expval_of_zero_state_is_plus_one() {
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let sv = StateVector::new_zero_state(1)
+            .expect("n_qubits=1 is a valid qubit count so zero-state construction cannot fail");
         let mut ham = Hamiltonian::new();
         ham.add_term(1.0, vec![PauliOp::Z]);
-        let ev = expectation_value(&sv, &ham).unwrap();
+        let ev = expectation_value(&sv, &ham)
+            .expect("single-qubit Z expectation value on a normalized state is always computable");
         assert!((ev - 1.0).abs() < 1e-5, "ev={ev}");
     }
 }

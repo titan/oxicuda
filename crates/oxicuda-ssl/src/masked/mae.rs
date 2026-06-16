@@ -149,7 +149,8 @@ mod tests {
     #[test]
     fn random_patch_mask_respects_ratio() {
         let mut rng = LcgRng::new(0);
-        let mask = random_patch_mask(100, 0.75, &mut rng).unwrap();
+        let mask =
+            random_patch_mask(100, 0.75, &mut rng).expect("random_patch_mask should succeed");
         let n_masked = mask.iter().filter(|&&v| v == 0.0).count();
         assert_eq!(n_masked, 75);
     }
@@ -157,7 +158,7 @@ mod tests {
     #[test]
     fn random_patch_mask_handles_zero_ratio() {
         let mut rng = LcgRng::new(0);
-        let mask = random_patch_mask(8, 0.0, &mut rng).unwrap();
+        let mask = random_patch_mask(8, 0.0, &mut rng).expect("random_patch_mask should succeed");
         for &v in &mask {
             assert!((v - 1.0).abs() < 1e-6);
         }
@@ -184,7 +185,8 @@ mod tests {
         let target = vec![1.0_f32; n * d];
         let pred = target.clone();
         let mask = vec![0.0_f32, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0];
-        let l = mae_reconstruction_loss(&target, &pred, &mask, n, d).unwrap();
+        let l = mae_reconstruction_loss(&target, &pred, &mask, n, d)
+            .expect("mae_reconstruction_loss should succeed");
         assert!(l.abs() < 1e-7);
     }
 
@@ -195,7 +197,8 @@ mod tests {
         let target = vec![1.0_f32, 2.0, 3.0, 4.0];
         let pred = vec![10.0_f32, 2.0, 30.0, 4.0]; // off only at masked positions
         let mask = vec![0.0_f32, 1.0, 0.0, 1.0]; // patches 0 and 2 are masked
-        let l = mae_reconstruction_loss(&target, &pred, &mask, n, d).unwrap();
+        let l = mae_reconstruction_loss(&target, &pred, &mask, n, d)
+            .expect("mae_reconstruction_loss should succeed");
         // Errors at masked: (1-10)² = 81, (3-30)² = 729; mean = 405.
         assert!((l - 405.0).abs() < 1e-3, "l = {l}");
     }

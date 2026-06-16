@@ -652,8 +652,8 @@ mod tests {
         let n = 50;
         let x = make_data(n, d, 2, 1.0, 0.0);
         let cfg = default_cfg(d);
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
-        let scores = suod_score(&fit, &x, n).unwrap();
+        let fit = suod_fit(&x, n, d, &cfg).expect("SUOD fit should succeed");
+        let scores = suod_score(&fit, &x, n).expect("SUOD score should succeed");
         assert_eq!(scores.len(), n);
         for (i, s) in scores.iter().enumerate() {
             assert!(s.is_finite(), "score[{i}] = {s}");
@@ -668,8 +668,8 @@ mod tests {
         let n = 40;
         let x = make_data(n, d, 3, 1.0, 0.0);
         let cfg = default_cfg(d);
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
-        let scores = suod_score(&fit, &x, n).unwrap();
+        let fit = suod_fit(&x, n, d, &cfg).expect("suod_fit should succeed");
+        let scores = suod_score(&fit, &x, n).expect("suod_score should succeed");
         for (i, &s) in scores.iter().enumerate() {
             assert!((0.0..=1.0).contains(&s), "score[{i}] = {s} not in [0, 1]");
         }
@@ -690,15 +690,15 @@ mod tests {
             base_contamination: 0.1,
             seed: 7,
         };
-        let fit = suod_fit(&x_train, n, d, &cfg).unwrap();
+        let fit = suod_fit(&x_train, n, d, &cfg).expect("suod_fit should succeed for outlier test");
 
         // Inlier: same distribution
         let inlier = make_data(1, d, 999, 0.2, 0.4);
         // Outlier: far from training distribution
         let outlier: Vec<f64> = vec![100.0; d];
 
-        let s_in = suod_score(&fit, &inlier, 1).unwrap()[0];
-        let s_out = suod_score(&fit, &outlier, 1).unwrap()[0];
+        let s_in = suod_score(&fit, &inlier, 1).expect("inlier score should succeed")[0];
+        let s_out = suod_score(&fit, &outlier, 1).expect("outlier score should succeed")[0];
 
         assert!(
             s_out >= s_in,
@@ -714,8 +714,8 @@ mod tests {
         let n = 30;
         let x = make_data(n, d, 5, 1.0, 0.0);
         let cfg = default_cfg(d);
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
-        let preds = suod_predict(&fit, &x, n, 0.5).unwrap();
+        let fit = suod_fit(&x, n, d, &cfg).expect("suod_fit should succeed for predict test");
+        let preds = suod_predict(&fit, &x, n, 0.5).expect("suod_predict should succeed");
         assert_eq!(preds.len(), n);
     }
 
@@ -727,9 +727,10 @@ mod tests {
         let n = 30;
         let x = make_data(n, d, 6, 1.0, 0.0);
         let cfg = default_cfg(d);
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
+        let fit = suod_fit(&x, n, d, &cfg).expect("suod_fit should succeed for max-threshold test");
         // All scores in [0,1], threshold > 1 means nothing flagged
-        let preds = suod_predict(&fit, &x, n, 1.01).unwrap();
+        let preds =
+            suod_predict(&fit, &x, n, 1.01).expect("suod_predict at max threshold should succeed");
         assert!(preds.iter().all(|&p| !p), "expected all normal");
     }
 
@@ -741,8 +742,10 @@ mod tests {
         let n = 20;
         let x = make_data(n, d, 7, 1.0, 0.0);
         let cfg = default_cfg(d);
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
-        let preds = suod_predict(&fit, &x, n, 0.0).unwrap();
+        let fit =
+            suod_fit(&x, n, d, &cfg).expect("suod_fit should succeed for zero-threshold test");
+        let preds =
+            suod_predict(&fit, &x, n, 0.0).expect("suod_predict at zero threshold should succeed");
         assert!(preds.iter().all(|&p| p), "expected all anomalous");
     }
 
@@ -763,7 +766,8 @@ mod tests {
         let n = 20;
         let x = make_data(n, d, 9, 1.0, 0.0);
         let cfg = default_cfg(d);
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
+        let fit = suod_fit(&x, n, d, &cfg)
+            .expect("suod_fit should succeed before testing score mismatch");
 
         // Wrong dimension
         let bad = make_data(5, 3, 0, 1.0, 0.0); // d=3 instead of d=8
@@ -788,8 +792,9 @@ mod tests {
             base_contamination: 0.1,
             seed: 42,
         };
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
-        let scores = suod_score(&fit, &x, n).unwrap();
+        let fit = suod_fit(&x, n, d, &cfg).expect("suod_fit without approx_clfs should succeed");
+        let scores =
+            suod_score(&fit, &x, n).expect("suod_score without approx_clfs should succeed");
         assert_eq!(scores.len(), n);
         assert!(
             scores
@@ -812,8 +817,9 @@ mod tests {
             base_contamination: 0.1,
             seed: 42,
         };
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
-        let scores = suod_score(&fit, &x, n).unwrap();
+        let fit = suod_fit(&x, n, d, &cfg).expect("suod_fit with many detectors should succeed");
+        let scores =
+            suod_score(&fit, &x, n).expect("suod_score with many detectors should succeed");
         assert_eq!(scores.len(), n);
         assert!(scores.iter().all(|s| s.is_finite()));
     }
@@ -826,10 +832,10 @@ mod tests {
         let n = 30;
         let x = make_data(n, d, 12, 1.0, 0.0);
         let cfg = default_cfg(d);
-        let fit1 = suod_fit(&x, n, d, &cfg).unwrap();
-        let fit2 = suod_fit(&x, n, d, &cfg).unwrap();
-        let s1 = suod_score(&fit1, &x, n).unwrap();
-        let s2 = suod_score(&fit2, &x, n).unwrap();
+        let fit1 = suod_fit(&x, n, d, &cfg).expect("first suod_fit should succeed");
+        let fit2 = suod_fit(&x, n, d, &cfg).expect("second suod_fit should succeed");
+        let s1 = suod_score(&fit1, &x, n).expect("first suod_score should succeed");
+        let s2 = suod_score(&fit2, &x, n).expect("second suod_score should succeed");
         for (a, b) in s1.iter().zip(s2.iter()) {
             assert!((a - b).abs() < 1e-12, "scores differ: {a} vs {b}");
         }
@@ -849,8 +855,10 @@ mod tests {
             base_contamination: 0.1,
             seed: 42,
         };
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
-        let scores = suod_score(&fit, &x, n).unwrap();
+        let fit = suod_fit(&x, n, d, &cfg)
+            .expect("suod_fit with oversized proj_dim should succeed after clamping");
+        let scores =
+            suod_score(&fit, &x, n).expect("suod_score with clamped proj_dim should succeed");
         assert_eq!(scores.len(), n);
         assert!(scores.iter().all(|s| s.is_finite()));
     }
@@ -863,7 +871,8 @@ mod tests {
         let n = 20;
         let x = make_data(n, d, 14, 1.0, 0.0);
         let cfg = default_cfg(d);
-        let fit = suod_fit(&x, n, d, &cfg).unwrap();
+        let fit =
+            suod_fit(&x, n, d, &cfg).expect("suod_fit should succeed before testing empty score");
         let result = suod_score(&fit, &[], 0);
         assert!(matches!(result, Err(AnomalyError::EmptyInput)));
     }

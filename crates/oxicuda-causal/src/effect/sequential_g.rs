@@ -604,7 +604,8 @@ mod tests {
             propensity_max_iter: 300,
             ..Default::default()
         };
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h)
+            .expect("fit should succeed");
         let gamma = result.gamma[0];
         // Allow generous tolerance due to finite-sample noise.
         assert!((gamma - 0.5).abs() < 0.4, "gamma={gamma} not close to 0.5");
@@ -629,7 +630,8 @@ mod tests {
             propensity_max_iter: 300,
             ..Default::default()
         };
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h)
+            .expect("fit should succeed");
         let gamma = result.gamma[0];
         assert!(
             gamma.abs() < 0.5,
@@ -649,7 +651,8 @@ mod tests {
             .collect();
         let x = vec![1.0_f64; n * p];
         let cfg = SequentialGConfig::default();
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, k, p, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, k, p, &cfg, &mut h)
+            .expect("fit should succeed");
         assert_eq!(result.propensity_matrix.len(), n * k);
     }
 
@@ -665,7 +668,8 @@ mod tests {
             .collect();
         let x = vec![0.5_f64; n];
         let cfg = SequentialGConfig::default();
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, k, p, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, k, p, &cfg, &mut h)
+            .expect("fit should succeed");
         assert_eq!(result.blipped_down_y.len(), n);
     }
 
@@ -684,7 +688,8 @@ mod tests {
             propensity_max_iter: 400,
             ..Default::default()
         };
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h)
+            .expect("fit should succeed");
         assert_eq!(result.gamma.len(), 1);
         assert!(
             (result.gamma[0] - true_gamma).abs() < 0.5,
@@ -713,7 +718,8 @@ mod tests {
             propensity_max_iter: 300,
             ..Default::default()
         };
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, k, p, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, k, p, &cfg, &mut h)
+            .expect("fit should succeed");
         assert_eq!(result.gamma.len(), 2);
     }
 
@@ -731,7 +737,8 @@ mod tests {
             propensity_max_iter: 100,
             ..Default::default()
         };
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h)
+            .expect("fit should succeed");
         for &se in &result.se_gamma {
             assert!(se >= 0.0, "se must be non-negative, got {se}");
         }
@@ -745,7 +752,8 @@ mod tests {
         let x = vec![1.0_f64; n];
         let y: Vec<f64> = (0..n).map(|i| 0.5 * a[i]).collect();
         let cfg = SequentialGConfig::default(); // bootstrap_reps = 0
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h)
+            .expect("fit should succeed");
         for &se in &result.se_gamma {
             assert_eq!(se, 0.0);
         }
@@ -765,8 +773,10 @@ mod tests {
         let mut h1 = CausalHandle::new(80, 42);
         let mut h2 = CausalHandle::new(80, 42);
 
-        let r1 = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h1).unwrap();
-        let r2 = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h2).unwrap();
+        let r1 = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h1)
+            .expect("fit should succeed");
+        let r2 = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h2)
+            .expect("fit should succeed");
 
         assert_eq!(r1.gamma, r2.gamma);
     }
@@ -786,7 +796,8 @@ mod tests {
             propensity_max_iter: 100,
             ..Default::default()
         };
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, k, p, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, k, p, &cfg, &mut h)
+            .expect("fit should succeed");
         assert_eq!(result.propensity_matrix.len(), n * k);
         assert_eq!(result.blipped_down_y.len(), n);
         assert_eq!(result.gamma.len(), 1);
@@ -806,7 +817,8 @@ mod tests {
             propensity_max_iter: 100,
             ..Default::default()
         };
-        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h).unwrap();
+        let result = SequentialGEstimator::fit(&y, &a, &x, n, 1, 1, &cfg, &mut h)
+            .expect("fit should succeed");
         // With y=0, num=0, so gamma=0, blipped_down = y = 0.
         for &bd in &result.blipped_down_y {
             assert!(

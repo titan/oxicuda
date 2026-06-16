@@ -424,7 +424,8 @@ mod tests {
         ];
         let dist = euclidean_dist_2d(&pts);
         let groups = [0, 0, 0, 1, 1, 1];
-        let f = permanova_f_statistic(&dist, 6, &groups).unwrap();
+        let f =
+            permanova_f_statistic(&dist, 6, &groups).expect("permanova_f_statistic should succeed");
         // Large F expected for well-separated groups
         assert!(f > 10.0, "F={f} should be large for well-separated groups");
     }
@@ -435,7 +436,8 @@ mod tests {
         let pts = [(0.0, 0.0); 4];
         let dist = euclidean_dist_2d(&pts);
         let groups = [0, 0, 1, 1];
-        let f = permanova_f_statistic(&dist, 4, &groups).unwrap();
+        let f =
+            permanova_f_statistic(&dist, 4, &groups).expect("permanova_f_statistic should succeed");
         // SS_W = 0 → ms_w = 0 → F = infinity
         assert!(f.is_infinite() || f >= 0.0);
     }
@@ -446,7 +448,8 @@ mod tests {
         let pts = [(0.0, 0.0), (1.0, 0.0), (0.5, 0.0), (0.5, 0.0)];
         let dist = euclidean_dist_2d(&pts);
         let groups = [0, 0, 1, 1];
-        let f = permanova_f_statistic(&dist, 4, &groups).unwrap();
+        let f =
+            permanova_f_statistic(&dist, 4, &groups).expect("permanova_f_statistic should succeed");
         assert!(f >= 0.0);
     }
 
@@ -489,7 +492,7 @@ mod tests {
             n_permutations: 499,
             seed: 1234,
         };
-        let r = permanova(&dist, 6, &groups, &cfg).unwrap();
+        let r = permanova(&dist, 6, &groups, &cfg).expect("permanova should succeed");
         assert!(
             r.p_value <= 0.1,
             "p={} expected small for well-separated groups",
@@ -510,7 +513,7 @@ mod tests {
             n_permutations: 199,
             seed: 99,
         };
-        let r = permanova(&dist, 4, &groups, &cfg).unwrap();
+        let r = permanova(&dist, 4, &groups, &cfg).expect("permanova should succeed");
         // p should be well above 0.01
         assert!(
             r.p_value > 0.01,
@@ -535,7 +538,7 @@ mod tests {
             n_permutations: 99,
             seed: 7,
         };
-        let r = permanova(&dist, 6, &groups, &cfg).unwrap();
+        let r = permanova(&dist, 6, &groups, &cfg).expect("permanova should succeed");
         assert!(r.r_squared >= 0.0 && r.r_squared <= 1.0);
     }
 
@@ -545,7 +548,8 @@ mod tests {
     fn distance_euclidean_construction() {
         // Two 2D points: (0,0) and (3,4) → distance = 5
         let data = [0.0, 0.0, 3.0, 4.0];
-        let mat = distance_matrix_from_data(&data, 2, 2, DistMetric::Euclidean).unwrap();
+        let mat = distance_matrix_from_data(&data, 2, 2, DistMetric::Euclidean)
+            .expect("distance_matrix_from_data should succeed");
         // Row-major flatten of (row=0, col=1) in a 2x2 distance matrix → index 1.
         assert!((mat[1] - 5.0).abs() < 1e-12);
         assert_eq!(mat[0], 0.0);
@@ -555,7 +559,8 @@ mod tests {
     #[test]
     fn distance_manhattan_construction() {
         let data = [0.0, 0.0, 3.0, 4.0];
-        let mat = distance_matrix_from_data(&data, 2, 2, DistMetric::Manhattan).unwrap();
+        let mat = distance_matrix_from_data(&data, 2, 2, DistMetric::Manhattan)
+            .expect("distance_matrix_from_data should succeed");
         // Row-major flatten of (row=0, col=1) in a 2x2 distance matrix → index 1.
         assert!((mat[1] - 7.0).abs() < 1e-12);
     }
@@ -564,7 +569,8 @@ mod tests {
     fn distance_bray_curtis_construction() {
         // (1,1) and (3,3): |1-3|+|1-3| = 4; (1+3)+(1+3) = 8 → BC = 0.5
         let data = [1.0, 1.0, 3.0, 3.0];
-        let mat = distance_matrix_from_data(&data, 2, 2, DistMetric::BrayCurtis).unwrap();
+        let mat = distance_matrix_from_data(&data, 2, 2, DistMetric::BrayCurtis)
+            .expect("distance_matrix_from_data should succeed");
         // Row-major flatten of (row=0, col=1) in a 2x2 distance matrix → index 1.
         assert!((mat[1] - 0.5).abs() < 1e-12);
     }

@@ -131,9 +131,10 @@ mod tests {
     fn bell_circuit_produces_two_tebd_gates() {
         // H on qubit 0, CNOT on (0,1): should compile to 2 TEBD gate entries.
         let mut circ = Circuit::new(2);
-        circ.h(0).unwrap();
-        circ.cnot(0, 1).unwrap();
-        let compiled = compile_circuit_to_tebd_gates(&circ).unwrap();
+        circ.h(0).expect("h should succeed");
+        circ.cnot(0, 1).expect("cnot should succeed");
+        let compiled = compile_circuit_to_tebd_gates(&circ)
+            .expect("compile_circuit_to_tebd_gates should succeed");
         assert_eq!(
             compiled.len(),
             2,
@@ -148,8 +149,9 @@ mod tests {
     #[test]
     fn single_qubit_on_last_site_uses_right_embed() {
         let mut circ = Circuit::new(3);
-        circ.x(2).unwrap(); // qubit 2, last site → bond 1, embed right
-        let compiled = compile_circuit_to_tebd_gates(&circ).unwrap();
+        circ.x(2).expect("x should succeed"); // qubit 2, last site → bond 1, embed right
+        let compiled = compile_circuit_to_tebd_gates(&circ)
+            .expect("compile_circuit_to_tebd_gates should succeed");
         assert_eq!(compiled.len(), 1);
         assert_eq!(compiled[0].0, 1, "Last qubit gate should use bond n-2");
     }
@@ -170,16 +172,18 @@ mod tests {
     #[test]
     fn empty_circuit_compiles_to_empty() {
         let circ = Circuit::new(4);
-        let compiled = compile_circuit_to_tebd_gates(&circ).unwrap();
+        let compiled = compile_circuit_to_tebd_gates(&circ)
+            .expect("compile_circuit_to_tebd_gates should succeed");
         assert!(compiled.is_empty());
     }
 
     #[test]
     fn single_qubit_only_circuit_embeds_correctly() {
         let mut circ = Circuit::new(3);
-        circ.h(0).unwrap();
-        circ.z(1).unwrap();
-        let compiled = compile_circuit_to_tebd_gates(&circ).unwrap();
+        circ.h(0).expect("h should succeed");
+        circ.z(1).expect("z should succeed");
+        let compiled = compile_circuit_to_tebd_gates(&circ)
+            .expect("compile_circuit_to_tebd_gates should succeed");
         assert_eq!(compiled.len(), 2);
         // H on qubit 0 → bond 0 (embed left)
         assert_eq!(compiled[0].0, 0);

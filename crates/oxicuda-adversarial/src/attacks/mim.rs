@@ -153,13 +153,14 @@ mod tests {
     fn smoke_quadratic_increases_loss() {
         let target = vec![0.5_f32; 6];
         let x = vec![0.6_f32, 0.4, 0.7, 0.3, 0.55, 0.45];
-        let cfg = MimConfig::new(0.1, 0.02, 8, 1.0).unwrap();
+        let cfg = MimConfig::new(0.1, 0.02, 8, 1.0).expect("new should succeed");
         let baseline: f32 = x
             .iter()
             .zip(target.iter())
             .map(|(a, b)| 0.5 * (a - b).powi(2))
             .sum();
-        let y = mim_attack(&x, -10.0, 10.0, &cfg, quad_grad(target.clone())).unwrap();
+        let y = mim_attack(&x, -10.0, 10.0, &cfg, quad_grad(target.clone()))
+            .expect("value should be present");
         let new_loss: f32 = y
             .iter()
             .zip(target.iter())
@@ -177,8 +178,8 @@ mod tests {
         // sign attack with α step.
         let x = vec![0.5_f32; 4];
         let g = vec![1.0_f32, -1.0, 1.0, -1.0];
-        let cfg = MimConfig::new(0.4, 0.05, 3, 0.0).unwrap();
-        let y = mim_attack(&x, -10.0, 10.0, &cfg, const_grad(g)).unwrap();
+        let cfg = MimConfig::new(0.4, 0.05, 3, 0.0).expect("new should succeed");
+        let y = mim_attack(&x, -10.0, 10.0, &cfg, const_grad(g)).expect("value should be present");
         // 3 steps × ±0.05 = ±0.15.
         let expected = [0.65_f32, 0.35, 0.65, 0.35];
         for (a, b) in y.iter().zip(expected.iter()) {
@@ -190,8 +191,8 @@ mod tests {
     fn projection_enforced() {
         let target = vec![10.0_f32; 6];
         let x = vec![0.5_f32; 6];
-        let cfg = MimConfig::new(0.05, 0.05, 20, 0.9).unwrap();
-        let y = mim_attack(&x, 0.0, 1.0, &cfg, quad_grad(target)).unwrap();
+        let cfg = MimConfig::new(0.05, 0.05, 20, 0.9).expect("new should succeed");
+        let y = mim_attack(&x, 0.0, 1.0, &cfg, quad_grad(target)).expect("value should be present");
         let delta: Vec<f32> = y.iter().zip(x.iter()).map(|(a, b)| a - b).collect();
         assert!(l_inf_norm(&delta) <= 0.05 + 1e-5);
         for v in &y {
@@ -202,7 +203,7 @@ mod tests {
     #[test]
     fn dim_mismatch_caught() {
         let x = vec![0.0_f32; 3];
-        let cfg = MimConfig::new(0.1, 0.05, 1, 1.0).unwrap();
+        let cfg = MimConfig::new(0.1, 0.05, 1, 1.0).expect("new should succeed");
         let bad = const_grad(vec![1.0_f32; 5]);
         assert!(matches!(
             mim_attack(&x, -1.0, 1.0, &cfg, bad).unwrap_err(),
@@ -213,7 +214,7 @@ mod tests {
     #[test]
     fn nan_grad_caught() {
         let x = vec![0.0_f32; 3];
-        let cfg = MimConfig::new(0.1, 0.05, 1, 1.0).unwrap();
+        let cfg = MimConfig::new(0.1, 0.05, 1, 1.0).expect("new should succeed");
         let bad = const_grad(vec![1.0, f32::NAN, 1.0]);
         assert!(matches!(
             mim_attack(&x, -1.0, 1.0, &cfg, bad).unwrap_err(),
@@ -224,7 +225,7 @@ mod tests {
     #[test]
     fn empty_input_rejected() {
         let x: Vec<f32> = vec![];
-        let cfg = MimConfig::new(0.1, 0.05, 1, 1.0).unwrap();
+        let cfg = MimConfig::new(0.1, 0.05, 1, 1.0).expect("new should succeed");
         assert_eq!(
             mim_attack(&x, -1.0, 1.0, &cfg, const_grad(vec![])).unwrap_err(),
             AdvError::EmptyInput
@@ -239,8 +240,9 @@ mod tests {
         // because we take sign(momentum), so primarily the *direction* is
         // verified to remain stable.
         let x = vec![0.5_f32];
-        let cfg = MimConfig::new(0.5, 0.01, 5, 1.0).unwrap();
-        let y = mim_attack(&x, -10.0, 10.0, &cfg, const_grad(vec![1.0])).unwrap();
+        let cfg = MimConfig::new(0.5, 0.01, 5, 1.0).expect("new should succeed");
+        let y = mim_attack(&x, -10.0, 10.0, &cfg, const_grad(vec![1.0]))
+            .expect("value should be present");
         // Each step adds +0.01 ⇒ final 0.5 + 5·0.01 = 0.55.
         assert!((y[0] - 0.55).abs() < 1e-5);
     }
@@ -248,7 +250,7 @@ mod tests {
     #[test]
     fn degenerate_box_rejected() {
         let x = vec![0.0_f32; 3];
-        let cfg = MimConfig::new(0.1, 0.05, 1, 1.0).unwrap();
+        let cfg = MimConfig::new(0.1, 0.05, 1, 1.0).expect("new should succeed");
         assert!(mim_attack(&x, 1.0, 1.0, &cfg, const_grad(vec![1.0; 3])).is_err());
     }
 }

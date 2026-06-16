@@ -867,7 +867,8 @@ mod tests {
     fn n_trees_count() {
         let (x, y, a) = make_data(50, 2, 1.0, 0.1, 1);
         let cfg = default_cfg();
-        let forest = GrfForest::fit(&x, &y, &a, 50, 2, &cfg, GrfMoment::CausalEffect).unwrap();
+        let forest = GrfForest::fit(&x, &y, &a, 50, 2, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
         assert_eq!(forest.n_trees(), cfg.n_trees);
     }
 
@@ -875,7 +876,8 @@ mod tests {
     fn n_features_correct() {
         let (x, y, a) = make_data(50, 4, 1.0, 0.1, 2);
         let cfg = default_cfg();
-        let forest = GrfForest::fit(&x, &y, &a, 50, 4, &cfg, GrfMoment::CausalEffect).unwrap();
+        let forest = GrfForest::fit(&x, &y, &a, 50, 4, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
         assert_eq!(forest.n_features(), 4);
     }
 
@@ -883,9 +885,10 @@ mod tests {
     fn predict_shape() {
         let (x, y, a) = make_data(50, 2, 1.0, 0.1, 3);
         let cfg = default_cfg();
-        let forest = GrfForest::fit(&x, &y, &a, 50, 2, &cfg, GrfMoment::CausalEffect).unwrap();
+        let forest = GrfForest::fit(&x, &y, &a, 50, 2, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
         let x_new: Vec<f64> = (0..10 * 2).map(|i| i as f64 * 0.01).collect();
-        let pred = forest.predict(&x_new, 10).unwrap();
+        let pred = forest.predict(&x_new, 10).expect("predict should succeed");
         assert_eq!(pred.n, 10);
         assert_eq!(pred.moment_dim, 1);
         assert_eq!(pred.theta.len(), 10);
@@ -905,8 +908,9 @@ mod tests {
             mtry: 0,
             seed: 99,
         };
-        let forest = GrfForest::fit(&x, &y, &a, n, p, &cfg, GrfMoment::CausalEffect).unwrap();
-        let (ate, _se) = forest.ate(&x, n).unwrap();
+        let forest = GrfForest::fit(&x, &y, &a, n, p, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
+        let (ate, _se) = forest.ate(&x, n).expect("ate should succeed");
         assert!((ate - 2.0).abs() < 0.5, "ATE={ate} not within 0.5 of 2.0");
     }
 
@@ -917,8 +921,9 @@ mod tests {
             n_trees: 10,
             ..default_cfg()
         };
-        let forest = GrfForest::fit(&x, &y, &a, 60, 2, &cfg, GrfMoment::CausalEffect).unwrap();
-        let pred = forest.predict(&x, 60).unwrap();
+        let forest = GrfForest::fit(&x, &y, &a, 60, 2, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
+        let pred = forest.predict(&x, 60).expect("predict should succeed");
         for &v in &pred.variance {
             assert!(v >= 0.0, "variance is negative: {v}");
         }
@@ -954,8 +959,8 @@ mod tests {
                 regularization: 1e-3,
             },
         )
-        .unwrap();
-        let pred = forest.predict(&x, n).unwrap();
+        .expect("value should be present");
+        let pred = forest.predict(&x, n).expect("predict should succeed");
         // Average of first coefficient (slope for X[:,0]) should be ≈ 3.
         let mean_coeff0 = pred.theta.iter().step_by(p).sum::<f64>() / n as f64;
         assert!(
@@ -1025,10 +1030,12 @@ mod tests {
             seed: 42,
             ..default_cfg()
         };
-        let f1 = GrfForest::fit(&x, &y, &a, 50, 2, &cfg, GrfMoment::CausalEffect).unwrap();
-        let f2 = GrfForest::fit(&x, &y, &a, 50, 2, &cfg, GrfMoment::CausalEffect).unwrap();
-        let p1 = f1.predict(&x, 50).unwrap();
-        let p2 = f2.predict(&x, 50).unwrap();
+        let f1 = GrfForest::fit(&x, &y, &a, 50, 2, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
+        let f2 = GrfForest::fit(&x, &y, &a, 50, 2, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
+        let p1 = f1.predict(&x, 50).expect("predict should succeed");
+        let p2 = f2.predict(&x, 50).expect("predict should succeed");
         assert_eq!(p1.theta, p2.theta, "single tree is not deterministic");
     }
 
@@ -1039,11 +1046,12 @@ mod tests {
             n_trees: 5,
             ..default_cfg()
         };
-        let forest = GrfForest::fit(&x, &y, &a, 30, 2, &cfg, GrfMoment::CausalEffect).unwrap();
+        let forest = GrfForest::fit(&x, &y, &a, 30, 2, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
         let x_new: Vec<f64> = (0..60 * 2).map(|i| i as f64 * 0.01).collect();
         let pred = forest.predict(&x_new, 60);
         assert!(pred.is_ok());
-        assert_eq!(pred.unwrap().n, 60);
+        assert_eq!(pred.expect("pred should be present").n, 60);
     }
 
     #[test]
@@ -1097,10 +1105,11 @@ mod tests {
             n_trees: 5,
             ..default_cfg()
         };
-        let forest = GrfForest::fit(&x, &y, &a, 40, 2, &cfg, GrfMoment::CausalEffect).unwrap();
+        let forest = GrfForest::fit(&x, &y, &a, 40, 2, &cfg, GrfMoment::CausalEffect)
+            .expect("fit should succeed");
         let result = forest.ate(&x, 40);
         assert!(result.is_ok());
-        let (ate, se) = result.unwrap();
+        let (ate, se) = result.expect("result should be present");
         assert!(ate.is_finite());
         assert!(se.is_finite());
         assert!(se >= 0.0);

@@ -632,7 +632,10 @@ fn superpose_long_range_mpos(mpos: Vec<LongRangeMpo>) -> TnResult<LongRangeMpo> 
         return Err(TnError::EmptyInput);
     }
     if mpos.len() == 1 {
-        return Ok(mpos.into_iter().next().unwrap());
+        return Ok(mpos
+            .into_iter()
+            .next()
+            .expect("mpos has exactly one element (len == 1 checked above)"));
     }
 
     let n_sites = mpos[0].n_sites;

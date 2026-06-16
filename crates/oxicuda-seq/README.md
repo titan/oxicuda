@@ -106,7 +106,7 @@ fn main() -> SeqResult<()> {
 
 ## Status
 
-**Alpha** -- 13,336 SLoC, 384 passing tests. API may evolve before v1.0.
+**Alpha** -- 20,887 SLoC, 617 passing tests. API may evolve before v1.0.
 
 ## License
 

@@ -372,7 +372,7 @@ mod tests {
             0.0, 1.0, // e2
             0.0, -1.0, // -e2
         ];
-        let l = uniformity_loss(&z, 4, 2).unwrap();
+        let l = uniformity_loss(&z, 4, 2).expect("uniformity_loss should succeed");
         // Cosines: e1·(-e1) = -1 (dist² = 4, kernel = exp(-8))
         //          e1·e2 = 0  (dist² = 2, kernel = exp(-4))
         // There are 6 pairs; result must be a finite negative number.
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn uniformity_all_same_point_high() {
         let z = all_same(&[1.0_f32, 0.0, 0.0], 6);
-        let l = uniformity_loss(&z, 6, 3).unwrap();
+        let l = uniformity_loss(&z, 6, 3).expect("uniformity_loss should succeed");
         assert!((l - 0.0).abs() < 1e-5, "expected ≈ 0, got {l}");
     }
 
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn uniformity_two_orthogonal_points() {
         let z = vec![1.0_f32, 0.0, 0.0, 1.0];
-        let l = uniformity_loss(&z, 2, 2).unwrap();
+        let l = uniformity_loss(&z, 2, 2).expect("uniformity_loss should succeed");
         // cos = 0 → dist² = 2 → kernel = exp(-4) → log(exp(-4)) = -4
         assert!((l - (-4.0)).abs() < 1e-4, "expected -4, got {l}");
     }
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn alignment_identical_pairs_zero_loss() {
         let z: Vec<f32> = (0..16).map(|i| (i as f32) * 0.3 + 0.1).collect();
-        let l = alignment_loss(&z, &z, 4, 4, 2.0).unwrap();
+        let l = alignment_loss(&z, &z, 4, 4, 2.0).expect("alignment_loss should succeed");
         assert!(l.abs() < 1e-5, "expected 0, got {l}");
     }
 
@@ -413,7 +413,7 @@ mod tests {
     fn alignment_orthogonal_pairs_max_loss() {
         let z1 = vec![1.0_f32, 0.0];
         let z2 = vec![0.0_f32, 1.0];
-        let l = alignment_loss(&z1, &z2, 1, 2, 2.0).unwrap();
+        let l = alignment_loss(&z1, &z2, 1, 2, 2.0).expect("alignment_loss should succeed");
         assert!((l - 2.0).abs() < 1e-5, "expected 2, got {l}");
     }
 
@@ -422,7 +422,7 @@ mod tests {
     fn alignment_n1_works() {
         let z1 = vec![1.0_f32, 0.0, 0.0];
         let z2 = vec![0.0_f32, 1.0, 0.0];
-        let l = alignment_loss(&z1, &z2, 1, 3, 2.0).unwrap();
+        let l = alignment_loss(&z1, &z2, 1, 3, 2.0).expect("alignment_loss should succeed");
         assert!(l.is_finite() && l >= 0.0, "l = {l}");
     }
 
@@ -431,7 +431,7 @@ mod tests {
     fn alignment_alpha_one_finite() {
         let z1 = vec![1.0_f32, 0.0];
         let z2 = vec![0.0_f32, 1.0];
-        let l = alignment_loss(&z1, &z2, 1, 2, 1.0).unwrap();
+        let l = alignment_loss(&z1, &z2, 1, 2, 1.0).expect("alignment_loss should succeed");
         // dist_sq = 2, dist = sqrt(2) → l = sqrt(2)
         assert!((l - 2.0_f32.sqrt()).abs() < 1e-4, "l = {l}");
     }
@@ -457,7 +457,7 @@ mod tests {
         let d = 8_usize;
         // Use d rows of the identity: e1, …, ed — each direction equally active.
         let z = basis(d);
-        let er = effective_rank(&z, d, d).unwrap();
+        let er = effective_rank(&z, d, d).expect("effective_rank should succeed");
         // Exact eff_rank = d when all variances are equal.
         assert!((er - d as f32).abs() < 0.5, "expected ≈ {d}, got {er}");
     }
@@ -498,7 +498,7 @@ mod tests {
             z_near_rank1[i * d] = 1.0;
             z_near_rank1[i * d + 1] = (i as f32) * 0.001; // tiny varying offset
         }
-        let er = effective_rank(&z_near_rank1, n, d).unwrap();
+        let er = effective_rank(&z_near_rank1, n, d).expect("effective_rank should succeed");
         assert!(er < 2.0, "expected eff_rank ≈ 1, got {er}");
         assert!(er >= 1.0, "eff_rank must be >= 1, got {er}");
     }
@@ -519,7 +519,7 @@ mod tests {
                 ((state >> 33) as f32) / (u32::MAX as f32) * 2.0 - 1.0
             })
             .collect();
-        let er = effective_rank(&z, n, d).unwrap();
+        let er = effective_rank(&z, n, d).expect("effective_rank should succeed");
         assert!(er >= 1.0 - 1e-4, "eff_rank below 1: {er}");
         assert!(er <= d as f32 + 1e-4, "eff_rank above d: {er}");
     }
@@ -531,7 +531,8 @@ mod tests {
     fn pairwise_cosine_orthogonal_basis() {
         let d = 4_usize;
         let z = basis(d);
-        let (mean, std, max) = pairwise_cosine_stats(&z, d, d).unwrap();
+        let (mean, std, max) =
+            pairwise_cosine_stats(&z, d, d).expect("pairwise_cosine_stats should succeed");
         assert!(mean.abs() < 1e-5, "mean = {mean}");
         assert!(std.abs() < 1e-5, "std = {std}");
         assert!(max.abs() < 1e-5, "max = {max}");
@@ -543,7 +544,8 @@ mod tests {
         let n = 5_usize;
         let unit = [1.0_f32, 0.0, 0.0];
         let z = all_same(&unit, n);
-        let (mean, std, max) = pairwise_cosine_stats(&z, n, 3).unwrap();
+        let (mean, std, max) =
+            pairwise_cosine_stats(&z, n, 3).expect("pairwise_cosine_stats should succeed");
         assert!((mean - 1.0).abs() < 1e-5, "mean = {mean}");
         assert!(std.abs() < 1e-5, "std = {std}");
         assert!((max - 1.0).abs() < 1e-5, "max = {max}");
@@ -642,7 +644,7 @@ mod tests {
         let d = 4_usize;
         let n = 4_usize;
         let z = basis(d);
-        let score = collapse_score(&z, &z, n, d).unwrap();
+        let score = collapse_score(&z, &z, n, d).expect("collapse_score should succeed");
         // Identical pairs → alignment = 0; uniformity = some negative value.
         // score = 0 - u = -u > 0.
         assert!(score.is_finite(), "score = {score}");

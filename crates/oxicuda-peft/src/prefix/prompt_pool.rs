@@ -284,9 +284,12 @@ mod tests {
     #[test]
     fn key_scores_length_and_range() {
         let mut rng = LcgRng::new(1);
-        let pool = PromptPool::new(cfg(6, 2, 3, 4, 5), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(6, 2, 3, 4, 5), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let query = vec![0.3_f32, -0.1, 0.7, 0.2, -0.4];
-        let scores = pool.key_scores(&query).unwrap();
+        let scores = pool
+            .key_scores(&query)
+            .expect("key_scores should succeed with valid query");
         assert_eq!(scores.len(), 6);
         for &s in &scores {
             assert!(
@@ -300,9 +303,12 @@ mod tests {
     #[test]
     fn select_returns_distinct_indices() {
         let mut rng = LcgRng::new(2);
-        let pool = PromptPool::new(cfg(8, 4, 2, 3, 4), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(8, 4, 2, 3, 4), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let query = vec![0.5_f32, 0.5, 0.5, 0.5];
-        let sel = pool.select(&query).unwrap();
+        let sel = pool
+            .select(&query)
+            .expect("select should succeed with valid query");
         assert_eq!(sel.len(), 4);
         let mut sorted = sel.clone();
         sorted.sort_unstable();
@@ -321,7 +327,8 @@ mod tests {
     #[test]
     fn query_equal_to_key_selected_first() {
         let mut rng = LcgRng::new(3);
-        let mut pool = PromptPool::new(cfg(5, 2, 2, 3, 4), &mut rng).unwrap();
+        let mut pool = PromptPool::new(cfg(5, 2, 2, 3, 4), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         // Make key 3 a clear, large-magnitude direction.
         let target = [1.0_f32, 2.0, -1.0, 0.5];
         set_key(&mut pool, 3, &target);
@@ -330,7 +337,9 @@ mod tests {
         set_key(&mut pool, 1, &[0.0, -1.0, 0.0, 0.0]);
         set_key(&mut pool, 2, &[0.0, 0.0, 0.0, -1.0]);
         set_key(&mut pool, 4, &[-1.0, -2.0, 1.0, -0.5]);
-        let sel = pool.select(&target).unwrap();
+        let sel = pool
+            .select(&target)
+            .expect("select should succeed with valid query");
         assert_eq!(sel[0], 3, "key equal to query must rank first, got {sel:?}");
     }
 
@@ -341,9 +350,12 @@ mod tests {
         let top_n = 3;
         let prompt_len = 4;
         let embed_dim = 6;
-        let pool = PromptPool::new(cfg(7, top_n, prompt_len, embed_dim, 5), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(7, top_n, prompt_len, embed_dim, 5), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let query = vec![0.1_f32; 5];
-        let out = pool.selected_prompts(&query).unwrap();
+        let out = pool
+            .selected_prompts(&query)
+            .expect("selected_prompts should succeed with valid query");
         assert_eq!(out.len(), top_n * prompt_len * embed_dim);
     }
 
@@ -351,9 +363,12 @@ mod tests {
     #[test]
     fn matching_loss_in_range() {
         let mut rng = LcgRng::new(5);
-        let pool = PromptPool::new(cfg(10, 3, 2, 4, 6), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(10, 3, 2, 4, 6), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let query = vec![0.2_f32, -0.5, 0.1, 0.9, -0.3, 0.4];
-        let loss = pool.matching_loss(&query).unwrap();
+        let loss = pool
+            .matching_loss(&query)
+            .expect("matching_loss should succeed with valid query");
         assert!(
             (0.0 - 1e-5..=2.0 + 1e-5).contains(&loss),
             "matching loss {loss} outside [0, 2]"
@@ -364,13 +379,16 @@ mod tests {
     #[test]
     fn matching_loss_zero_when_keys_equal_query() {
         let mut rng = LcgRng::new(6);
-        let mut pool = PromptPool::new(cfg(3, 3, 2, 3, 4), &mut rng).unwrap();
+        let mut pool = PromptPool::new(cfg(3, 3, 2, 3, 4), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         // top_n == pool_size → all keys selected; make every key == query.
         let query = [0.4_f32, -0.2, 0.7, 0.1];
         for m in 0..3 {
             set_key(&mut pool, m, &query);
         }
-        let loss = pool.matching_loss(&query).unwrap();
+        let loss = pool
+            .matching_loss(&query)
+            .expect("matching_loss should succeed when keys equal query");
         assert!(loss.abs() < 1e-5, "expected loss≈0, got {loss}");
     }
 
@@ -378,7 +396,8 @@ mod tests {
     #[test]
     fn prefix_len_formula() {
         let mut rng = LcgRng::new(7);
-        let pool = PromptPool::new(cfg(9, 4, 5, 2, 3), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(9, 4, 5, 2, 3), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         assert_eq!(pool.prefix_len(), 4 * 5);
     }
 
@@ -386,9 +405,12 @@ mod tests {
     #[test]
     fn top_n_equals_pool_size_selects_all() {
         let mut rng = LcgRng::new(8);
-        let pool = PromptPool::new(cfg(5, 5, 2, 3, 4), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(5, 5, 2, 3, 4), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let query = vec![0.3_f32, 0.1, -0.2, 0.6];
-        let sel = pool.select(&query).unwrap();
+        let sel = pool
+            .select(&query)
+            .expect("select should succeed when top_n equals pool_size");
         assert_eq!(sel.len(), 5);
         let mut sorted = sel.clone();
         sorted.sort_unstable();
@@ -400,14 +422,18 @@ mod tests {
     fn deterministic_same_seed() {
         let mut r1 = LcgRng::new(42);
         let mut r2 = LcgRng::new(42);
-        let p1 = PromptPool::new(cfg(6, 2, 3, 4, 5), &mut r1).unwrap();
-        let p2 = PromptPool::new(cfg(6, 2, 3, 4, 5), &mut r2).unwrap();
+        let p1 = PromptPool::new(cfg(6, 2, 3, 4, 5), &mut r1)
+            .expect("PromptPool::new should succeed with valid config");
+        let p2 = PromptPool::new(cfg(6, 2, 3, 4, 5), &mut r2)
+            .expect("PromptPool::new should succeed with valid config");
         assert_eq!(p1.keys, p2.keys);
         assert_eq!(p1.prompts, p2.prompts);
         let q = vec![0.5_f32; 5];
         assert_eq!(
-            p1.selected_prompts(&q).unwrap(),
-            p2.selected_prompts(&q).unwrap()
+            p1.selected_prompts(&q)
+                .expect("selected_prompts should succeed with valid query"),
+            p2.selected_prompts(&q)
+                .expect("selected_prompts should succeed with valid query")
         );
     }
 
@@ -463,7 +489,8 @@ mod tests {
     #[test]
     fn err_query_wrong_length() {
         let mut rng = LcgRng::new(16);
-        let pool = PromptPool::new(cfg(4, 2, 3, 4, 5), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(4, 2, 3, 4, 5), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let res = pool.key_scores(&[0.0_f32; 4]); // key_dim = 5
         assert!(matches!(res, Err(PeftError::DimensionMismatch { .. })));
         let res2 = pool.select(&[0.0_f32; 6]);
@@ -474,14 +501,19 @@ mod tests {
     #[test]
     fn zero_query_no_nan() {
         let mut rng = LcgRng::new(17);
-        let pool = PromptPool::new(cfg(5, 2, 2, 3, 4), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(5, 2, 2, 3, 4), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let query = vec![0.0_f32; 4];
-        let scores = pool.key_scores(&query).unwrap();
+        let scores = pool
+            .key_scores(&query)
+            .expect("key_scores should succeed with zero query");
         for &s in &scores {
             assert!(s.is_finite(), "score must be finite, got {s}");
             assert!(s.abs() < 1e-4, "zero query → cosine≈0, got {s}");
         }
-        let loss = pool.matching_loss(&query).unwrap();
+        let loss = pool
+            .matching_loss(&query)
+            .expect("matching_loss should succeed with zero query");
         assert!(loss.is_finite(), "loss must be finite, got {loss}");
     }
 
@@ -489,10 +521,15 @@ mod tests {
     #[test]
     fn selection_order_descending_score() {
         let mut rng = LcgRng::new(18);
-        let pool = PromptPool::new(cfg(7, 4, 2, 3, 5), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(7, 4, 2, 3, 5), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let query = vec![0.7_f32, -0.2, 0.4, 0.1, -0.6];
-        let scores = pool.key_scores(&query).unwrap();
-        let sel = pool.select(&query).unwrap();
+        let scores = pool
+            .key_scores(&query)
+            .expect("key_scores should succeed with valid query");
+        let sel = pool
+            .select(&query)
+            .expect("select should succeed with valid query");
         for w in sel.windows(2) {
             assert!(
                 scores[w[0]] >= scores[w[1]] - 1e-6,
@@ -507,7 +544,8 @@ mod tests {
     #[test]
     fn tie_break_lowest_index() {
         let mut rng = LcgRng::new(19);
-        let mut pool = PromptPool::new(cfg(4, 2, 2, 3, 3), &mut rng).unwrap();
+        let mut pool = PromptPool::new(cfg(4, 2, 2, 3, 3), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         // Make keys 0 and 2 identical (and aligned with the query) so they tie.
         let dir = [1.0_f32, 0.0, 0.0];
         set_key(&mut pool, 0, &dir);
@@ -515,7 +553,9 @@ mod tests {
         // Keys 1 and 3 point away so they score lower.
         set_key(&mut pool, 1, &[-1.0, 0.0, 0.0]);
         set_key(&mut pool, 3, &[0.0, -1.0, 0.0]);
-        let sel = pool.select(&dir).unwrap();
+        let sel = pool
+            .select(&dir)
+            .expect("select should succeed with tied keys");
         // Both tied winners selected, lower index (0) before higher (2).
         assert_eq!(
             sel,
@@ -530,10 +570,15 @@ mod tests {
         let mut rng = LcgRng::new(20);
         let prompt_len = 2;
         let embed_dim = 3;
-        let pool = PromptPool::new(cfg(5, 3, prompt_len, embed_dim, 4), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(5, 3, prompt_len, embed_dim, 4), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let query = vec![0.2_f32, 0.5, -0.1, 0.3];
-        let sel = pool.select(&query).unwrap();
-        let gathered = pool.selected_prompts(&query).unwrap();
+        let sel = pool
+            .select(&query)
+            .expect("select should succeed with valid query");
+        let gathered = pool
+            .selected_prompts(&query)
+            .expect("selected_prompts should succeed with valid query");
         let block = prompt_len * embed_dim;
         for (slot, &m) in sel.iter().enumerate() {
             let src = &pool.prompts[m * block..m * block + block];
@@ -546,7 +591,8 @@ mod tests {
     #[test]
     fn num_params_formula() {
         let mut rng = LcgRng::new(21);
-        let pool = PromptPool::new(cfg(6, 2, 3, 4, 5), &mut rng).unwrap();
+        let pool = PromptPool::new(cfg(6, 2, 3, 4, 5), &mut rng)
+            .expect("PromptPool::new should succeed with valid config");
         let expected = 6 * 5 + 6 * 3 * 4;
         assert_eq!(pool.num_params(), expected);
     }

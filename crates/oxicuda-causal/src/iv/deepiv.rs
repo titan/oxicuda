@@ -256,11 +256,17 @@ mod tests {
         let n = 10;
         let z: Vec<f32> = (0..n * 2).map(|i| i as f32 / 20.0).collect();
         let t: Vec<f32> = (0..n).map(|i| i as f32 / n as f32).collect();
-        model.fit_stage1(&z, &t, n, 0.001, 5).unwrap();
+        model
+            .fit_stage1(&z, &t, n, 0.001, 5)
+            .expect("fit_stage1 should succeed");
         let x: Vec<f32> = (0..n * 3).map(|i| i as f32 / 30.0).collect();
         let y: Vec<f32> = (0..n).map(|i| i as f32 / n as f32).collect();
-        model.fit_stage2(&x, &t, &y, n, 0.001, 5).unwrap();
-        let out = model.predict_outcome(&x, &t, n).unwrap();
+        model
+            .fit_stage2(&x, &t, &y, n, 0.001, 5)
+            .expect("fit_stage2 should succeed");
+        let out = model
+            .predict_outcome(&x, &t, n)
+            .expect("predict_outcome should succeed");
         assert_eq!(out.len(), n);
     }
 }

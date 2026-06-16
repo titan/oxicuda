@@ -152,14 +152,15 @@ mod tests {
     fn class_inc_classes_accumulate() {
         let t0 = make_task_cls(0, 10, 0, 2); // classes 0, 1
         let t1 = make_task_cls(1, 10, 2, 3); // classes 2, 3, 4
-        let mut stream = class_inc_new(vec![t0, t1]).unwrap();
+        let mut stream = class_inc_new(vec![t0, t1])
+            .expect("class-incremental stream should initialize with valid tasks");
         init_class_inc(&mut stream);
         assert_eq!(
             n_classes_seen(&stream),
             2,
             "Should see 2 classes after task 0"
         );
-        advance_class_inc(&mut stream).unwrap();
+        advance_class_inc(&mut stream).expect("advancing class-incremental stream should succeed");
         assert_eq!(
             n_classes_seen(&stream),
             5,
@@ -171,13 +172,16 @@ mod tests {
     fn class_inc_batch_size_correct() {
         let t0 = make_task_cls(0, 20, 0, 2);
         let t1 = make_task_cls(1, 20, 2, 3);
-        let mut stream = class_inc_new(vec![t0, t1]).unwrap();
+        let mut stream = class_inc_new(vec![t0, t1])
+            .expect("class-incremental stream should initialize with valid tasks");
         let mut rng = LcgRng::new(42);
-        let batch = class_inc_batch(&stream, 0, 8, &mut rng).unwrap();
+        let batch = class_inc_batch(&stream, 0, 8, &mut rng)
+            .expect("class-incremental batch sampling should succeed");
         assert_eq!(batch.len(), 8);
         // Advance and sample from task 1
-        advance_class_inc(&mut stream).unwrap();
-        let batch1 = class_inc_batch(&stream, 1, 6, &mut rng).unwrap();
+        advance_class_inc(&mut stream).expect("advancing class-incremental stream should succeed");
+        let batch1 = class_inc_batch(&stream, 1, 6, &mut rng)
+            .expect("class-incremental batch sampling should succeed");
         assert_eq!(batch1.len(), 6);
     }
 
@@ -185,10 +189,13 @@ mod tests {
     fn class_inc_labels_disjoint() {
         let t0 = make_task_cls(0, 10, 0, 3); // classes 0, 1, 2
         let t1 = make_task_cls(1, 10, 3, 2); // classes 3, 4
-        let stream = class_inc_new(vec![t0, t1]).unwrap();
+        let stream = class_inc_new(vec![t0, t1])
+            .expect("class-incremental stream should initialize with valid tasks");
         let mut rng = LcgRng::new(7);
-        let b0 = class_inc_batch(&stream, 0, 10, &mut rng).unwrap();
-        let b1 = class_inc_batch(&stream, 1, 10, &mut rng).unwrap();
+        let b0 = class_inc_batch(&stream, 0, 10, &mut rng)
+            .expect("class-incremental batch sampling should succeed");
+        let b1 = class_inc_batch(&stream, 1, 10, &mut rng)
+            .expect("class-incremental batch sampling should succeed");
         // Verify no label from t0 appears in t1
         let labels0: std::collections::HashSet<u32> = b0.iter().map(|(_, l)| *l).collect();
         let labels1: std::collections::HashSet<u32> = b1.iter().map(|(_, l)| *l).collect();
@@ -215,7 +222,8 @@ mod tests {
     #[test]
     fn class_inc_batch_out_of_range_returns_err() {
         let t0 = make_task_cls(0, 10, 0, 2);
-        let stream = class_inc_new(vec![t0]).unwrap();
+        let stream = class_inc_new(vec![t0])
+            .expect("class-incremental stream should initialize with valid tasks");
         let mut rng = LcgRng::new(1);
         assert!(class_inc_batch(&stream, 5, 4, &mut rng).is_err());
     }
@@ -223,11 +231,13 @@ mod tests {
     #[test]
     fn class_inc_multiple_advances() {
         let tasks: Vec<Task> = (0..4).map(|i| make_task_cls(i, 5, i * 2, 2)).collect();
-        let mut stream = class_inc_new(tasks).unwrap();
+        let mut stream = class_inc_new(tasks)
+            .expect("class-incremental stream should initialize with valid tasks");
         init_class_inc(&mut stream);
         assert_eq!(n_classes_seen(&stream), 2);
         for expected in [4, 6, 8] {
-            advance_class_inc(&mut stream).unwrap();
+            advance_class_inc(&mut stream)
+                .expect("advancing class-incremental stream should succeed");
             assert_eq!(
                 n_classes_seen(&stream),
                 expected,

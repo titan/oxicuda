@@ -265,10 +265,13 @@ mod tests {
         let in_dim = cfg.in_dim;
         let mut h = make_handle(1);
         let base_w: Vec<f32> = (0..(out_dim * in_dim)).map(|i| i as f32 * 0.01).collect();
-        let layer = QaLoraLayer::new(cfg, &base_w, &mut h).unwrap();
+        let layer = QaLoraLayer::new(cfg, &base_w, &mut h)
+            .expect("QaLoraLayer creation should succeed with valid config");
         // B is all zeros → LoRA delta is zero; output must equal W_base @ x.
         let x = vec![1.0_f32; in_dim];
-        let out = layer.forward(&x, 1).unwrap();
+        let out = layer
+            .forward(&x, 1)
+            .expect("forward pass should succeed with valid input");
         let base_out = mat_vec_mul(&layer.base_weight, &x, out_dim, in_dim);
         for (a, b) in out.iter().zip(base_out.iter()) {
             assert!((a - b).abs() < 1e-5, "mismatch: {a} vs {b}");
@@ -283,7 +286,7 @@ mod tests {
         let cfg = make_cfg(4, 3, 4, 2);
         let out_dim = cfg.out_dim;
         let in_dim = cfg.in_dim;
-        let layer = make_layer(cfg, 2).unwrap();
+        let layer = make_layer(cfg, 2).expect("layer creation should succeed for merge_shape test");
         assert_eq!(layer.merge().len(), out_dim * in_dim);
     }
 
@@ -297,7 +300,8 @@ mod tests {
         let in_dim = 4usize;
         let out_dim = 3usize;
         let cfg = make_cfg(in_dim, out_dim, rank, n_groups);
-        let layer = make_layer(cfg, 3).unwrap();
+        let layer =
+            make_layer(cfg, 3).expect("layer creation should succeed for lora_params_formula test");
         let rank_g = rank / n_groups;
         let group_in = in_dim / n_groups;
         assert_eq!(
@@ -312,7 +316,8 @@ mod tests {
     #[test]
     fn total_params_formula() {
         let cfg = make_cfg(4, 3, 4, 2);
-        let layer = make_layer(cfg, 4).unwrap();
+        let layer = make_layer(cfg, 4)
+            .expect("layer creation should succeed for total_params_formula test");
         assert_eq!(
             layer.total_params(),
             layer.cfg.out_dim * layer.cfg.in_dim + layer.lora_params()
@@ -328,7 +333,8 @@ mod tests {
         let rank = 4usize;
         let cfg = make_cfg(4, 3, rank, n_groups);
         let alpha = cfg.lora_alpha;
-        let layer = make_layer(cfg, 5).unwrap();
+        let layer =
+            make_layer(cfg, 5).expect("layer creation should succeed for scaling_value test");
         let rank_g = rank / n_groups;
         assert!((layer.scaling() - alpha / rank_g as f32).abs() < 1e-7);
     }
@@ -340,7 +346,8 @@ mod tests {
     fn group_scales_len() {
         let n_groups = 3usize;
         let cfg = make_cfg(6, 4, 6, n_groups);
-        let layer = make_layer(cfg, 6).unwrap();
+        let layer =
+            make_layer(cfg, 6).expect("layer creation should succeed for group_scales_len test");
         assert_eq!(layer.group_scales.len(), n_groups);
     }
 
@@ -350,7 +357,8 @@ mod tests {
     #[test]
     fn base_weight_len() {
         let cfg = make_cfg(4, 3, 4, 2);
-        let layer = make_layer(cfg, 7).unwrap();
+        let layer =
+            make_layer(cfg, 7).expect("layer creation should succeed for base_weight_len test");
         assert_eq!(
             layer.base_weight.len(),
             layer.cfg.out_dim * layer.cfg.in_dim
@@ -365,9 +373,12 @@ mod tests {
         let cfg = make_cfg(4, 3, 4, 2);
         let out_dim = cfg.out_dim;
         let in_dim = cfg.in_dim;
-        let layer = make_layer(cfg, 8).unwrap();
+        let layer =
+            make_layer(cfg, 8).expect("layer creation should succeed for seq_len_gt_1 test");
         let x = vec![0.5_f32; 3 * in_dim];
-        let out = layer.forward(&x, 3).unwrap();
+        let out = layer
+            .forward(&x, 3)
+            .expect("forward pass should succeed with seq_len=3");
         assert_eq!(out.len(), 3 * out_dim);
     }
 
@@ -380,7 +391,8 @@ mod tests {
         let n_groups = 2usize;
         let group_in = in_dim / n_groups;
         let cfg = make_cfg(in_dim, 3, 4, n_groups);
-        let layer = make_layer(cfg, 9).unwrap();
+        let layer =
+            make_layer(cfg, 9).expect("layer creation should succeed for kaiming_range test");
         let bound = (6.0_f32 / group_in as f32).sqrt() + 1e-5;
         for &v in &layer.lora_a[0] {
             assert!(v.abs() <= bound, "value {v} out of Kaiming range ±{bound}");
@@ -396,7 +408,8 @@ mod tests {
         let cfg = make_cfg(4, 3, 4, 2);
         let mut h = make_handle(10);
         let base_w: Vec<f32> = (0..12).map(|i| i as f32 * 0.15 - 0.5).collect();
-        let layer = QaLoraLayer::new(cfg, &base_w, &mut h).unwrap();
+        let layer = QaLoraLayer::new(cfg, &base_w, &mut h)
+            .expect("QaLoraLayer creation should succeed with valid base weights");
         // Every element in base_weight must be absmax * NF4_TABLE[some_idx] for its group.
         // Check that each value is one of the 16 NF4 table values times some absmax.
         for &bw in &layer.base_weight {
@@ -467,11 +480,17 @@ mod tests {
         let base_w: Vec<f32> = (0..12).map(|i| i as f32 * 0.05).collect();
         let mut h_a = make_handle(42);
         let mut h_b = make_handle(42);
-        let layer_a = QaLoraLayer::new(cfg_a, &base_w, &mut h_a).unwrap();
-        let layer_b = QaLoraLayer::new(cfg_b, &base_w, &mut h_b).unwrap();
+        let layer_a = QaLoraLayer::new(cfg_a, &base_w, &mut h_a)
+            .expect("layer_a creation should succeed with valid config");
+        let layer_b = QaLoraLayer::new(cfg_b, &base_w, &mut h_b)
+            .expect("layer_b creation should succeed with valid config");
         let x = vec![0.3_f32; in_dim];
-        let out_a = layer_a.forward(&x, 1).unwrap();
-        let out_b = layer_b.forward(&x, 1).unwrap();
+        let out_a = layer_a
+            .forward(&x, 1)
+            .expect("layer_a forward should succeed");
+        let out_b = layer_b
+            .forward(&x, 1)
+            .expect("layer_b forward should succeed");
         assert_eq!(out_a, out_b);
     }
 
@@ -484,13 +503,16 @@ mod tests {
         let in_dim = cfg.in_dim;
         let mut h = make_handle(15);
         let base_w = vec![0.0_f32; cfg.out_dim * cfg.in_dim];
-        let mut layer = QaLoraLayer::new(cfg, &base_w, &mut h).unwrap();
+        let mut layer = QaLoraLayer::new(cfg, &base_w, &mut h)
+            .expect("layer creation should succeed for lora_contribution test");
         // Set A[0][0,0]=1, B[0][0,0]=1 → group-0 contributes scaling() to output[0].
         layer.lora_a[0][0] = 1.0;
         layer.lora_b[0][0] = 1.0;
         let mut x = vec![0.0_f32; in_dim];
         x[0] = 1.0; // group-0 input col 0
-        let out = layer.forward(&x, 1).unwrap();
+        let out = layer
+            .forward(&x, 1)
+            .expect("forward pass should succeed after setting lora weights");
         let expected = layer.scaling();
         assert!(
             (out[0] - expected).abs() < 1e-5,
@@ -506,10 +528,12 @@ mod tests {
     fn n_groups_1() {
         let cfg = make_cfg(4, 3, 4, 1);
         let in_dim = cfg.in_dim;
-        let layer = make_layer(cfg, 16).unwrap();
+        let layer = make_layer(cfg, 16).expect("layer creation should succeed for n_groups_1 test");
         assert_eq!(layer.group_scales.len(), 1);
         let x = vec![1.0_f32; in_dim];
-        let out = layer.forward(&x, 1).unwrap();
+        let out = layer
+            .forward(&x, 1)
+            .expect("forward pass should succeed with single group");
         assert_eq!(out.len(), 3);
     }
 
@@ -519,7 +543,8 @@ mod tests {
     #[test]
     fn forward_dim_err() {
         let cfg = make_cfg(4, 3, 4, 2);
-        let layer = make_layer(cfg, 17).unwrap();
+        let layer =
+            make_layer(cfg, 17).expect("layer creation should succeed for forward_dim_err test");
         let x = vec![0.0_f32; 5]; // not seq_len * in_dim
         assert!(layer.forward(&x, 1).is_err());
     }

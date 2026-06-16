@@ -433,19 +433,32 @@ mod tests {
 
     #[test]
     fn no_self_loop_isolated_node_is_zero() {
-        // self_loop = false and node has no edges → all-zero row.
+        // self_loop = false and a node with no incoming message → all-zero row.
+        //
+        // CSR convention (see module docs and `from_edges`): an entry
+        // `from_edges(_, &[(s, d)])` is stored on row `s`, so `neighbors(s)`
+        // yields `d`; aggregation for node `i` sums over `neighbors(i)`. To make
+        // node 0 genuinely isolated we route the relation-1 edge as `(1, 0)`,
+        // which lands on row 1 (so `neighbors(0)` is empty while node 1 still
+        // receives a message). Relation 0 is edge-free.
         let layer = make_layer(2, 3, 2, 2, false, 19);
         let g0 = empty_relation(2);
-        let g1 = CsrGraph::from_edges(2, &[(0, 1)]).expect("test invariant: graph must construct");
+        let g1 = CsrGraph::from_edges(2, &[(1, 0)]).expect("test invariant: graph must construct");
         let h = vec![1.0_f32, -2.0, 3.0, -4.0];
         let out = layer
             .forward(&[g0, g1], &h)
             .expect("test invariant: forward must succeed");
-        // Node 0 has no incoming edges in either relation (g1 edge is 0→1,
-        // which under the convention is an incoming edge to node 1).
+        // Node 0 receives no message in either relation, so with no self-loop
+        // its pre-activation is all-zero and ReLU keeps it zero.
         for (k, &v) in out[0..3].iter().enumerate() {
             assert!(v.abs() < 1e-7, "node 0 not zero at {k}: {v}");
         }
+        // Sanity: node 1 *does* receive from node 0, so its row is not forced
+        // to zero (guards against the edge silently producing no message).
+        assert!(
+            out[3..6].iter().any(|&v| v.abs() > 1e-7),
+            "node 1 should receive a message from node 0"
+        );
     }
 
     #[test]

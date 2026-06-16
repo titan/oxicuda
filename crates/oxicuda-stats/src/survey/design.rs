@@ -504,7 +504,7 @@ mod tests {
     fn weighted_mean_uniform_weights() {
         let vals = [1.0, 2.0, 3.0, 4.0, 5.0];
         let wts = [1.0; 5];
-        let mu = weighted_mean(&vals, &wts).unwrap();
+        let mu = weighted_mean(&vals, &wts).expect("weighted_mean should succeed");
         assert!((mu - 3.0).abs() < 1e-12);
     }
 
@@ -513,7 +513,7 @@ mod tests {
         // Heavy weight on value 10.0 — mean should be near 10
         let vals = [1.0, 10.0];
         let wts = [1.0, 9.0];
-        let mu = weighted_mean(&vals, &wts).unwrap();
+        let mu = weighted_mean(&vals, &wts).expect("weighted_mean should succeed");
         let expected = (1.0 * 1.0 + 10.0 * 9.0) / 10.0;
         assert!((mu - expected).abs() < 1e-12);
     }
@@ -541,8 +541,8 @@ mod tests {
         // With unit weights, the Bessel-corrected formula should give (n-1) denominator
         let vals = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
         let wts = [1.0; 8];
-        let mu = weighted_mean(&vals, &wts).unwrap();
-        let wv = weighted_variance(&vals, &wts, mu).unwrap();
+        let mu = weighted_mean(&vals, &wts).expect("weighted_mean should succeed");
+        let wv = weighted_variance(&vals, &wts, mu).expect("weighted_variance should succeed");
         // Population sample variance of the dataset
         let n = vals.len() as f64;
         let mean = vals.iter().sum::<f64>() / n;
@@ -555,7 +555,7 @@ mod tests {
         // Single element: denom will be zero → error
         let vals = [5.0];
         let wts = [1.0];
-        let mu = weighted_mean(&vals, &wts).unwrap();
+        let mu = weighted_mean(&vals, &wts).expect("weighted_mean should succeed");
         // denom = 1 - 1/1 = 0 → NumericalInstability
         let result = weighted_variance(&vals, &wts, mu);
         assert!(result.is_err());
@@ -569,7 +569,8 @@ mod tests {
         let values = [1.0, 2.0, 3.0, 10.0, 11.0, 12.0];
         let weights = [1.0; 6];
         let strata = [0, 0, 0, 1, 1, 1];
-        let r = stratified_variance(&values, &weights, &strata, 2).unwrap();
+        let r = stratified_variance(&values, &weights, &strata, 2)
+            .expect("stratified_variance should succeed");
         // Overall mean should be around 6.5 (equal strata, equal weights)
         assert!((r.estimate - 6.5).abs() < 1e-6);
         assert!(r.variance >= 0.0);
@@ -585,7 +586,8 @@ mod tests {
         let values = [1.0, 2.0, 3.0, 4.0, 5.0];
         let weights = [1.0; 5];
         let strata = [0, 0, 0, 0, 0];
-        let r = stratified_variance(&values, &weights, &strata, 1).unwrap();
+        let r = stratified_variance(&values, &weights, &strata, 1)
+            .expect("stratified_variance should succeed");
         assert!((r.estimate - 3.0).abs() < 1e-10);
     }
 
@@ -594,7 +596,8 @@ mod tests {
         let values = [1.0, 2.0, 3.0, 4.0, 100.0];
         let weights = [1.0; 5];
         let strata = [0, 0, 0, 0, 1]; // 4 vs 1
-        let r = stratified_variance(&values, &weights, &strata, 2).unwrap();
+        let r = stratified_variance(&values, &weights, &strata, 2)
+            .expect("stratified_variance should succeed");
         // Stratum 0 contributes more
         assert!(r.estimate < 100.0 && r.estimate > 2.0);
     }
@@ -614,7 +617,8 @@ mod tests {
         let values = [1.0, 2.0, 10.0, 11.0];
         let weights = [1.0; 4];
         let clusters = [0, 0, 1, 1];
-        let r = cluster_variance(&values, &weights, &clusters, 2).unwrap();
+        let r = cluster_variance(&values, &weights, &clusters, 2)
+            .expect("cluster_variance should succeed");
         // Overall mean ~ (1+2+10+11)/4 = 6
         assert!((r.estimate - 6.0).abs() < 1e-10);
         assert!(r.variance >= 0.0);
@@ -627,7 +631,8 @@ mod tests {
         let values = [5.0, 5.0, 5.0, 5.0];
         let weights = [1.0; 4];
         let clusters = [0, 0, 1, 1];
-        let r = cluster_variance(&values, &weights, &clusters, 2).unwrap();
+        let r = cluster_variance(&values, &weights, &clusters, 2)
+            .expect("cluster_variance should succeed");
         assert!((r.estimate - 5.0).abs() < 1e-10);
         assert!(r.variance < 1e-12);
     }
@@ -673,7 +678,8 @@ mod tests {
             }
             v.iter().zip(w).map(|(x, wi)| x * wi).sum::<f64>() / sw
         };
-        let jk_var = jackknife_survey_variance(&values, &weights, &clusters, 2, stat).unwrap();
+        let jk_var = jackknife_survey_variance(&values, &weights, &clusters, 2, stat)
+            .expect("jackknife_survey_variance should succeed");
         assert!(jk_var >= 0.0);
     }
 
@@ -690,8 +696,8 @@ mod tests {
 
     #[test]
     fn survey_design_construction() {
-        let design =
-            SurveyDesign::new(vec![1.0, 2.0, 1.0], vec![0, 0, 1], Some(vec![0, 0, 1]), 2).unwrap();
+        let design = SurveyDesign::new(vec![1.0, 2.0, 1.0], vec![0, 0, 1], Some(vec![0, 0, 1]), 2)
+            .expect("value should be present");
         assert_eq!(design.n_strata, 2);
         assert_eq!(design.weights.len(), 3);
     }

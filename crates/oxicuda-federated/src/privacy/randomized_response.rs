@@ -43,13 +43,12 @@ use crate::handle::LcgRng;
 
 /// Draw a uniform `[0, 1)` deviate from an [`LcgRng`].
 ///
-/// `LcgRng::next_u32` actually returns the high *31* bits of the
-/// 64-bit LCG state (`max = 2^31 − 1`), so dividing by `u32::MAX + 1`
-/// only yields `[0, 0.5)`. Dividing by `2^31` fixes the range.
+/// `LcgRng::next_u32` spans the full 32-bit range `[0, 2^32)` and
+/// `LcgRng::next_f32` divides it by `2^32`, so the result is a proper
+/// `[0, 1)` sample.
 #[inline]
 fn uniform_unit(rng: &mut LcgRng) -> f32 {
-    const SCALE: f32 = (1_u64 << 31) as f32;
-    rng.next_u32() as f32 / SCALE
+    rng.next_f32()
 }
 
 /// Configuration for the k-ary randomized-response mechanism.
@@ -139,9 +138,7 @@ impl RandomizedResponse {
             });
         }
         // Draw a uniform [0, 1) deviate from the LCG and decide
-        // "tell the truth" vs "lie". The crate's `next_u32()` returns
-        // the high 31 bits of the 64-bit LCG state (max value 2^31 − 1),
-        // so we divide by 2^31 to get a proper [0, 1) sample.
+        // "tell the truth" vs "lie".
         let u = uniform_unit(rng);
         if u < self.p_truth {
             return Ok(true_value);

@@ -10,6 +10,7 @@
 //! ├── persistence/    — PersistenceDiagram, Barcode, bottleneck/Wasserstein distances
 //! ├── mapper/         — Mapper algorithm: cover, single-linkage clustering, MapperGraph
 //! ├── witness/        — Maxmin landmark selection, lazy witness complex
+//! ├── vector/         — Vectorised summaries: Betti curves
 //! └── metrics/        — Betti numbers, persistent entropy, landscape, total persistence
 //! ```
 
@@ -20,8 +21,10 @@ pub mod handle;
 pub mod homology;
 pub mod mapper;
 pub mod metrics;
+pub mod morse;
 pub mod persistence;
 pub mod ptx_kernels;
+pub mod vector;
 pub mod witness;
 
 pub use error::{TdaError, TdaResult};

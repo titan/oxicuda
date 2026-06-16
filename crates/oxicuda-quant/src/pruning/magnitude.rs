@@ -164,7 +164,9 @@ mod tests {
     fn l1_prune_50_percent() {
         let p = MagnitudePruner::new(0.5, MagnitudeNorm::L1);
         let weights = vec![0.1_f32, 0.5, 0.3, 0.9, 0.2, 0.8, 0.4, 0.6];
-        let mask = p.compute_mask(&weights).unwrap();
+        let mask = p
+            .compute_mask(&weights)
+            .expect("compute_mask should succeed");
         assert_abs_diff_eq!(mask.sparsity(), 0.5, epsilon = 0.01);
         // Smallest 4 by |w|: 0.1, 0.2, 0.3, 0.4 → pruned
         assert!(!mask.mask[0], "0.1 should be pruned");
@@ -175,7 +177,9 @@ mod tests {
     fn l2_prune_25_percent() {
         let p = MagnitudePruner::new(0.25, MagnitudeNorm::L2);
         let weights = vec![0.1_f32, 0.5, 0.3, 0.9];
-        let mask = p.compute_mask(&weights).unwrap();
+        let mask = p
+            .compute_mask(&weights)
+            .expect("compute_mask should succeed");
         // n_prune = ceil(4 * 0.25) = 1 → prune smallest w² = 0.01 → index 0
         assert_eq!(mask.count_pruned(), 1);
         assert!(!mask.mask[0]);
@@ -185,7 +189,7 @@ mod tests {
     fn prune_in_place_zeroes_weights() {
         let p = MagnitudePruner::new(0.5, MagnitudeNorm::L1);
         let mut w = vec![1.0_f32, 0.01, 2.0, 0.02];
-        let mask = p.prune(&mut w).unwrap();
+        let mask = p.prune(&mut w).expect("prune should succeed");
         assert!(mask.count_pruned() >= 1);
         // The two smallest (0.01 and 0.02) should be zeroed.
         assert_abs_diff_eq!(w[1], 0.0, epsilon = 1e-7);
@@ -220,7 +224,7 @@ mod tests {
     fn zero_sparsity_all_active() {
         let p = MagnitudePruner::new(0.0, MagnitudeNorm::L1);
         let w = vec![0.5_f32, 1.0, 2.0];
-        let mask = p.compute_mask(&w).unwrap();
+        let mask = p.compute_mask(&w).expect("compute_mask should succeed");
         assert_eq!(mask.count_pruned(), 0);
     }
 
@@ -232,7 +236,9 @@ mod tests {
             0.1_f32, 0.5, 0.2, 0.8, // group 0: prune 0.1, 0.2
             0.9_f32, 0.3, 0.7, 0.1,
         ]; // group 1: prune 0.1, 0.3
-        let mask = p.compute_grouped_mask(&w, 4).unwrap();
+        let mask = p
+            .compute_grouped_mask(&w, 4)
+            .expect("compute_grouped_mask should succeed");
         assert_eq!(mask.len(), 8);
         assert_abs_diff_eq!(mask.sparsity(), 0.5, epsilon = 0.01);
     }

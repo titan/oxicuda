@@ -9,6 +9,8 @@ pub mod hash_field;
 pub mod kplanes;
 pub mod plenoxel;
 pub mod tensorf;
+pub mod vm_field;
 
 pub use kplanes::{KPlanes, KPlanesConfig};
 pub use plenoxel::{PlenoxelConfig, PlenoxelGrid};
+pub use vm_field::{VmField, VmFieldConfig};

@@ -42,14 +42,14 @@ mod tests {
     fn ip_orthogonal() {
         let a = vec![1.0_f32, 0.0];
         let b = vec![0.0_f32, 1.0];
-        assert_eq!(ip(&a, &b).unwrap(), 0.0);
+        assert_eq!(ip(&a, &b).expect("test invariant: should succeed"), 0.0);
     }
 
     #[test]
     fn cosine_parallel() {
         let a = vec![1.0_f32, 1.0];
         let b = vec![2.0_f32, 2.0];
-        let c = cosine_sim(&a, &b).unwrap();
+        let c = cosine_sim(&a, &b).expect("test invariant: should succeed");
         assert!((c - 1.0).abs() < 1e-6, "cosine={c}");
     }
 }

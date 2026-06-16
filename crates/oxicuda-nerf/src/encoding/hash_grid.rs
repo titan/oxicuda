@@ -109,6 +109,15 @@ impl HashGrid {
         self.config.n_levels * self.config.n_features_per_level
     }
 
+    /// Per-level grid resolutions `N_l` (length `n_levels`).
+    ///
+    /// Exposed so anti-aliased samplers (e.g. Zip-NeRF) can compare a sample's
+    /// spatial footprint against each level's cell size `1 / N_l`.
+    #[must_use]
+    pub fn level_resolutions(&self) -> &[usize] {
+        &self.level_resolutions
+    }
+
     /// Query a single 3D point in `[0, 1]^3`.
     ///
     /// Returns a feature vector of length `output_dim`.
@@ -222,13 +231,13 @@ mod tests {
             max_resolution: 32,
         };
         let mut rng = LcgRng::new(seed);
-        HashGrid::new(cfg, &mut rng).unwrap()
+        HashGrid::new(cfg, &mut rng).expect("new should succeed")
     }
 
     #[test]
     fn query_output_shape() {
         let grid = make_grid(1);
-        let feat = grid.query([0.5, 0.5, 0.5]).unwrap();
+        let feat = grid.query([0.5, 0.5, 0.5]).expect("query should succeed");
         assert_eq!(feat.len(), grid.output_dim());
     }
 
@@ -236,7 +245,9 @@ mod tests {
     fn batch_output_shape() {
         let grid = make_grid(2);
         let pts: Vec<f32> = (0..5).flat_map(|i| [i as f32 * 0.2; 3]).collect();
-        let out = grid.query_batch(&pts, 5).unwrap();
+        let out = grid
+            .query_batch(&pts, 5)
+            .expect("query_batch should succeed");
         assert_eq!(out.len(), 5 * grid.output_dim());
     }
 

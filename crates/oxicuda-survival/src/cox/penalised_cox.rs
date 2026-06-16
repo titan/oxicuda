@@ -663,7 +663,7 @@ mod tests {
         let x_new: Vec<f64> = data
             .covariates
             .as_ref()
-            .unwrap()
+            .expect("value should be present")
             .iter()
             .take(5)
             .flat_map(|row| row.iter().copied())

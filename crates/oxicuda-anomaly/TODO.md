@@ -6,7 +6,7 @@ Anomaly detection primitives for OxiCUDA (DeepSVDD, autoencoder / VAE reconstruc
 
 ## Implementation Status
 
-**Actual: 4,048 SLoC (23 source files + 1 benches file) -- Coverage: deep / distance / density / statistical / ensemble anomaly families**
+**Actual: ~23,650 SLoC (69 source files + 1 benches file) -- Coverage: deep / distance / density / statistical / ensemble anomaly families**
 
 Current implementation covers all canonical anomaly-detection families: DeepSVDD (Ruff et al. 2018, 3-layer MLP with hypersphere-collapse prevention via no-bias last layer); autoencoder + VAE reconstruction-based scoring; LOF (Breunig et al. 2000) brute-force k-NN local outlier factor; pure k-NN distance baseline; COPOD (Li et al. 2020) empirical-CDF copula-based scoring with optional skewness adjustment; Mahalanobis distance with Gauss-Jordan covariance inversion and ridge stabilisation; Isolation Scorer (random-projection path-length estimation with `c(n) = 2H(n - 1) - 2(n - 1) / n` adjustment); MAD (`MAD = 1.4826 * median|x_i - mu|`) and Z-score (Welford online) statistical detectors; ensemble combiner (Average / Maximum / Weighted with per-detector min-max normalisation); AUC-ROC / AUC-PR / F1@threshold metrics.
 
@@ -24,10 +24,14 @@ Current implementation covers all canonical anomaly-detection families: DeepSVDD
 #### Distance-Based Detection
 - [x] `distance/lof.rs` -- LOF (Breunig et al. 2000): brute-force k-NN; `fit` computes `knn_indices` / `knn_dists` / `lrd`; `reach_dist_k(i, j) = max(knn_dists[j * (k - 1)], dist(i, j))`; `lrd_k(i) = k / sum(reach_dist)`; `score = mean(lrd_neighbors) / lrd_x`; numerical guard `lrd -> 1e30` if zero denominator
 - [x] `distance/knn_score.rs` -- `KnnAnomalyScorer`: average k-NN distance baseline; brute-force; batch scoring
+- [x] `distance/abod.rs` -- ABOD (Kriegel-Schubert-Zimek KDD 2008): ABOF=Var[⟨pa,pb⟩/(‖pa‖·‖pb‖)²]; score=-ABOF (high=anomalous); brute-force O(n²d); 14 unit tests
+- [x] `distance/cblof.rs` -- CBLOF (He 2003): cluster-based LOF using k-means; score proportional to distance from nearest large cluster / intra-cluster distance; 12 unit tests
+- [x] `distance/cof.rs` -- COF (Tang-Chen-Fu 2002): SBN greedy NN chain cost=(2/(k(k+1)))·Σᵢ i·dist(oᵢ₋₁,oᵢ); COF=cost/mean(neighbor costs); 17 unit tests
 
 #### Density-Based Detection
 - [x] `density/copod.rs` -- COPOD (Li et al. 2020): empirical CDF via sorted-column binary search; `score = -sum(log(F_j(x_j)) + log(1 - F_j(x_j))) / 2`; `score_skew_adjusted` (Fisher-Pearson skewness-weighted tail)
 - [x] `density/mahalanobis.rs` -- `MahalanobisDetector`: sample mean + covariance estimation; Gauss-Jordan inversion with full pivoting on augmented `[M | I]`; ridge `0.01 * I` for numerical stability; `D^2 = diff^T * Sigma^(-1) * diff`
+- [x] `density/fast_mcd.rs` -- FastMCD (Rousseeuw-Van Driessen JASA 1999): C-step MCD algorithm, n_starts random h-subsets, Cholesky log-det convergence, Gauss-Jordan inversion with ridge 1e-5; Mahalanobis² score w.r.t. robust covariance; 16 unit tests
 
 #### Isolation
 - [x] `isolation/iforest_score.rs` -- `IsolationScorer`: random-projection path-length estimation; `c_factor(n) = 2 * H(n - 1) - 2 * (n - 1) / n` (EULER_MASCHERONI = 0.5772156649); `isolation_score_from_path(avg_path, n) = 2^(-avg_path / c_n)`
@@ -86,6 +90,17 @@ Current implementation covers all canonical anomaly-detection families: DeepSVDD
 - [x] Federated anomaly detection (`ensemble/federated.rs`)
 - [x] Time-series anomaly detection (LSTM-AE, USAD, TranAD) — RNN-AE (`time_series/lstm_ae.rs`)
 - [x] Graph anomaly detection (DOMINANT, AnomalyDAE) (`graph/dominant.rs`)
+- [x] `isolation/inne.rs` — INNE (Isolation Nearest-Neighbour Ensemble, Bandaragoda 2018): isolation probability iz(x)=d(x,nn₁)/max{d(x,nnₖ)} via t-ball ratio per sample; ensemble average over ψ random sub-samples; O(ψ log n) per query
+- [x] `svdd/deep_sad.rs` — DeepSAD (Ruff 2020, semi-supervised): hypersphere loss with labeled normal pulls (η=+1) + anomaly pushes (η=-1); η-weighted cross-entropy on labeled subset + DeepSVDD on unlabeled
+- [x] `distance/lof_online.rs` — Online LOF (Pokrajac 2007): incremental O(k²) updates to kNN graph, LRD, and LOF scores on point insertion; avoids O(n²) full refit; supports streaming windows
+- [x] `reconstruction/norm_flow.rs` — Normalising Flow anomaly scoring (Rezende-Mohamed 2015 extended): log-likelihood under RealNVP/MADE flow as anomaly score; OOD = low log p(x); uses existing `variational/real_nvp.rs` as reference
+- [x] `statistical/extreme_value.rs` — Extreme Value Theory detector (Gnedenko 1943, Clifton 2011): GPD tail fitting on high-score exceedances via maximum-likelihood; automatic threshold selection by mean-excess plot; `GpdDetector`
+- [x] `distance/abod_approx.rs` — FastABOD / approximate ABOD (Kriegel 2008 §4): restrict angle variance computation to k-NN set instead of all pairs; reduces O(n²d) to O(knd); `AbodApprox { k: usize }`
+- [x] `distance/sod.rs` — SOD (Subspace Outlier Degree, Kriegel 2009): per-point shared-nearest-neighbour subspace projection; SOD=d(x,μ_snn)/Var_snn_subspace; handles high-dimensional feature irrelevance
+- [ ] `ensemble/lscp.rs` — LSCP (Zhao 2019, Locally Selective Combination in Parallel): local pseudo-ground-truth via max-score in neighbourhood + greedy detector selection; `LscpEnsemble`
+- [ ] Fused kNN+LOF PTX kernel: warp-level distance min reduction + concurrent reach-dist update in shared memory on sm_80+
+- [ ] ABOD batch PTX kernel: stream-k angle-variance accumulation over query batches; 3-vector inner-product with reciprocal-distance weighting
+- [ ] FastMCD GPU C-step: device-side Mahalanobis distance for all n points in one kernel call (replaces host-side loop in `density/fast_mcd.rs`)
 
 ## Dependencies
 
@@ -97,11 +112,11 @@ Current implementation covers all canonical anomaly-detection families: DeepSVDD
 
 ## Quality Status
 
-- Tests: 62 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 582 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
-- Files: 23 source `.rs` files, all under 2000 lines
+- Files: 69 source `.rs` files, all under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS compiles but returns `UnsupportedPlatform` at runtime
 
@@ -125,9 +140,9 @@ Target: scoring throughput comparable to PyOD CPU reference and (for deep detect
 
 | Metric | Description | Actual |
 |--------|-------------|--------|
-| Files | source `.rs` files under `src/` | 23 |
-| SLoC | code lines (tokei) | ~4,048 |
-| Tests | e2e + unit | 62 |
+| Files | source `.rs` files under `src/` | 69 |
+| SLoC | code lines (tokei) | ~23,650 |
+| Tests | e2e + unit | 582 |
 | Coverage | detector families | 5 (deep, distance, density, isolation, statistical) |
 | Coverage | ensemble methods | 3 (Average, Maximum, Weighted) |
 

@@ -41,10 +41,10 @@
 //!     let scaled_grad: Vec<f32> = params[0].data.iter()
 //!         .map(|&p| scaler.scale() as f32 * 2.0 * p)
 //!         .collect();
-//!     params[0].set_grad(scaled_grad).unwrap();
+//!     params[0].set_grad(scaled_grad).expect("set_grad should succeed");
 //!
-//!     scaler.unscale(&mut params).unwrap();
-//!     let did_step = scaler.step(&mut opt, &mut params).unwrap();
+//!     scaler.unscale(&mut params).expect("unscale should succeed");
+//!     let did_step = scaler.step(&mut opt, &mut params).expect("step should succeed");
 //!     scaler.update();
 //!     let _ = (step, did_step);
 //! }

@@ -8,12 +8,16 @@ pub mod domain_incremental;
 pub mod generative_replay;
 pub mod hat;
 pub mod icarl;
+pub mod memo;
 pub mod multihead;
 pub mod packnet;
 pub mod piggyback;
 pub mod progressive;
 pub mod sparse_mask_apply;
 pub mod stochastic_binary;
+
+// ─── MEMO re-exports ─────────────────────────────────────────────────────────
+pub use memo::{Memo, MemoConfig, SpecializedBlock};
 
 // ─── iCaRL re-exports ────────────────────────────────────────────────────────
 pub use icarl::{

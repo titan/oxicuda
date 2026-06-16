@@ -79,7 +79,7 @@ fn main() -> oxicuda_cvx::CvxResult<()> {
 
 ## Status
 
-**Alpha** -- 12,790 SLoC, 387 passing tests. API may evolve before v1.0.
+**Alpha** -- 20,511 SLoC, 616 passing tests. API may evolve before v1.0.
 
 ## License
 

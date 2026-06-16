@@ -489,7 +489,7 @@ mod tests {
             solution_label: None,
         };
         let cfg = PrmConfig::default();
-        let result = prm_loss(&output, &label, &cfg).unwrap();
+        let result = prm_loss(&output, &label, &cfg).expect("prm_loss should succeed");
         let expected_step_loss = 2.0_f32.ln();
         assert!(
             (result.step_loss - expected_step_loss).abs() < 1e-5,
@@ -514,7 +514,7 @@ mod tests {
             solution_label: None,
         };
         let cfg = PrmConfig::default();
-        let result = prm_loss(&output, &label, &cfg).unwrap();
+        let result = prm_loss(&output, &label, &cfg).expect("prm_loss should succeed");
         assert!(
             result.total_loss < 1e-3,
             "high-confidence correct step should have ~0 loss, got {}",
@@ -567,10 +567,12 @@ mod tests {
         };
         // 2 steps with logit=0 (prob=0.5 each): product = 0.25
         let out2 = PrmOutput::new(vec![0.0, 0.0]);
-        let score2 = prm_aggregate_score(&out2, &cfg_4).unwrap();
+        let score2 =
+            prm_aggregate_score(&out2, &cfg_4).expect("prm_aggregate_score should succeed");
         // 4 steps: product = 0.0625
         let out4 = PrmOutput::new(vec![0.0, 0.0, 0.0, 0.0]);
-        let score4 = prm_aggregate_score(&out4, &cfg_4).unwrap();
+        let score4 =
+            prm_aggregate_score(&out4, &cfg_4).expect("prm_aggregate_score should succeed");
         assert!(
             score4 < score2,
             "product score should decrease with more uncertain steps: {score4} < {score2}"
@@ -589,8 +591,10 @@ mod tests {
         };
         // logits vary: one bad step
         let output = PrmOutput::new(vec![5.0, 5.0, -5.0]);
-        let min_score = prm_aggregate_score(&output, &cfg_min).unwrap();
-        let mean_score = prm_aggregate_score(&output, &cfg_mean).unwrap();
+        let min_score =
+            prm_aggregate_score(&output, &cfg_min).expect("prm_aggregate_score should succeed");
+        let mean_score =
+            prm_aggregate_score(&output, &cfg_mean).expect("prm_aggregate_score should succeed");
         assert!(
             min_score < mean_score,
             "min score {min_score} should be less than mean score {mean_score}"
@@ -604,7 +608,7 @@ mod tests {
             ..Default::default()
         };
         let output = PrmOutput::new(vec![1.0, 2.0, 3.0]);
-        let score = prm_aggregate_score(&output, &cfg).unwrap();
+        let score = prm_aggregate_score(&output, &cfg).expect("prm_aggregate_score should succeed");
         let expected = sigmoid(3.0);
         assert!(
             (score - expected).abs() < 1e-6,
@@ -620,7 +624,7 @@ mod tests {
             ..Default::default()
         };
         let output = PrmOutput::new(vec![0.0, 100.0]); // step2 nearly certain
-        let score = prm_aggregate_score(&output, &cfg).unwrap();
+        let score = prm_aggregate_score(&output, &cfg).expect("prm_aggregate_score should succeed");
         // Expected: (1*0.5 + 2*1.0) / 3 = 2.5 / 3 ≈ 0.833
         let expected = (1.0 * sigmoid(0.0) + 2.0 * sigmoid(100.0)) / 3.0;
         assert!(
@@ -637,7 +641,8 @@ mod tests {
         // Output 0: all correct (logit=5), Output 1: all wrong (logit=-5)
         let out0 = PrmOutput::new(vec![5.0, 5.0]);
         let out1 = PrmOutput::new(vec![-5.0, -5.0]);
-        let ranked = prm_rank_solutions(&[out0, out1], &cfg).unwrap();
+        let ranked =
+            prm_rank_solutions(&[out0, out1], &cfg).expect("prm_rank_solutions should succeed");
         assert_eq!(ranked[0], 0, "best solution (index 0) should rank first");
         assert_eq!(ranked[1], 1);
     }
@@ -646,7 +651,7 @@ mod tests {
     fn rank_solutions_single_index_zero() {
         let cfg = PrmConfig::default();
         let out = PrmOutput::new(vec![1.0]);
-        let ranked = prm_rank_solutions(&[out], &cfg).unwrap();
+        let ranked = prm_rank_solutions(&[out], &cfg).expect("prm_rank_solutions should succeed");
         assert_eq!(ranked, vec![0], "single solution should rank as [0]");
     }
 
@@ -660,7 +665,8 @@ mod tests {
         let out0 = PrmOutput::new(vec![1.0, 1.0]); // mean sigmoid(1.0) ≈ 0.731
         let out1 = PrmOutput::new(vec![0.0, 0.0]); // mean 0.5
         let out2 = PrmOutput::new(vec![-1.0, -1.0]); // mean sigmoid(-1.0) ≈ 0.269
-        let ranked = prm_rank_solutions(&[out0, out1, out2], &cfg).unwrap();
+        let ranked = prm_rank_solutions(&[out0, out1, out2], &cfg)
+            .expect("prm_rank_solutions should succeed");
         assert_eq!(ranked[0], 0, "highest-logit solution should rank first");
         assert_eq!(ranked[1], 1);
         assert_eq!(ranked[2], 2);
@@ -681,10 +687,15 @@ mod tests {
             step_labels: vec![1.0, 0.0],
             solution_label: None,
         };
-        let l0 = prm_loss(&out0, &lbl0, &cfg).unwrap().total_loss;
-        let l1 = prm_loss(&out1, &lbl1, &cfg).unwrap().total_loss;
+        let l0 = prm_loss(&out0, &lbl0, &cfg)
+            .expect("prm_loss should succeed")
+            .total_loss;
+        let l1 = prm_loss(&out1, &lbl1, &cfg)
+            .expect("prm_loss should succeed")
+            .total_loss;
         let expected = (l0 + l1) / 2.0;
-        let batch = prm_loss_batch(&[out0, out1], &[lbl0, lbl1], &cfg).unwrap();
+        let batch = prm_loss_batch(&[out0, out1], &[lbl0, lbl1], &cfg)
+            .expect("prm_loss_batch should succeed");
         assert!(
             (batch - expected).abs() < 1e-5,
             "batch mean = {batch}, expected {expected}"

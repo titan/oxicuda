@@ -410,7 +410,7 @@ mod tests {
     fn log_loss_perfect_predictions() {
         let probs = vec![1.0_f32, 1.0, 0.0, 0.0];
         let labels = vec![1u32, 1, 0, 0];
-        let loss = log_loss(&probs, &labels, 1e-7).unwrap();
+        let loss = log_loss(&probs, &labels, 1e-7).expect("log_loss should succeed");
         // With clipping p→1-eps, loss ≈ -log(1-eps) ≈ eps (very small)
         assert!(loss < 1e-5, "loss={loss}");
     }
@@ -419,7 +419,7 @@ mod tests {
     fn log_loss_random_noise() {
         let probs = vec![0.5_f32; 10];
         let labels = vec![1u32, 0, 1, 0, 1, 0, 1, 0, 1, 0];
-        let loss = log_loss(&probs, &labels, 1e-7).unwrap();
+        let loss = log_loss(&probs, &labels, 1e-7).expect("log_loss should succeed");
         assert!(loss > 0.0);
     }
 
@@ -427,7 +427,7 @@ mod tests {
     fn brier_score_perfect() {
         let probs = vec![1.0_f32, 0.0, 1.0, 0.0];
         let labels = vec![1u32, 0, 1, 0];
-        let bs = brier_score(&probs, &labels).unwrap();
+        let bs = brier_score(&probs, &labels).expect("brier_score should succeed");
         assert!(bs.abs() < 1e-6, "bs={bs}");
     }
 
@@ -435,7 +435,7 @@ mod tests {
     fn brier_score_worst_case() {
         let probs = vec![1.0_f32, 1.0];
         let labels = vec![0u32, 0];
-        let bs = brier_score(&probs, &labels).unwrap();
+        let bs = brier_score(&probs, &labels).expect("brier_score should succeed");
         assert!((bs - 1.0).abs() < 1e-6, "bs={bs}");
     }
 
@@ -443,7 +443,7 @@ mod tests {
     fn brier_score_random() {
         let probs = vec![0.3_f32, 0.7, 0.9, 0.1];
         let labels = vec![0u32, 1, 1, 0];
-        let bs = brier_score(&probs, &labels).unwrap();
+        let bs = brier_score(&probs, &labels).expect("brier_score should succeed");
         assert!((0.0..=1.0).contains(&bs), "bs={bs}");
     }
 
@@ -452,7 +452,8 @@ mod tests {
         let probs = vec![0.9_f32, 0.8, 0.7, 0.6];
         let labels = vec![1u32, 0, 1, 0];
         // threshold = 0 → all predicted positive
-        let prec = precision_at_threshold(&probs, &labels, 0.0).unwrap();
+        let prec = precision_at_threshold(&probs, &labels, 0.0)
+            .expect("precision_at_threshold should succeed");
         // TP=2, FP=2 → precision = 0.5 = mean(labels)
         assert!((prec - 0.5).abs() < 1e-6, "prec={prec}");
     }
@@ -462,7 +463,8 @@ mod tests {
         let probs = vec![0.9_f32, 0.8, 0.7, 0.6];
         let labels = vec![1u32, 0, 1, 0];
         // threshold = 0 → all predicted positive → all positives recalled
-        let rec = recall_at_threshold(&probs, &labels, 0.0).unwrap();
+        let rec =
+            recall_at_threshold(&probs, &labels, 0.0).expect("recall_at_threshold should succeed");
         assert!((rec - 1.0).abs() < 1e-6, "rec={rec}");
     }
 
@@ -471,14 +473,17 @@ mod tests {
         let probs = vec![0.9_f32, 0.8, 0.2, 0.1];
         let labels = vec![1u32, 1, 0, 0];
         let threshold = 0.5;
-        let p = precision_at_threshold(&probs, &labels, threshold).unwrap();
-        let r = recall_at_threshold(&probs, &labels, threshold).unwrap();
+        let p = precision_at_threshold(&probs, &labels, threshold)
+            .expect("precision_at_threshold should succeed");
+        let r = recall_at_threshold(&probs, &labels, threshold)
+            .expect("recall_at_threshold should succeed");
         let f1_expected = if p + r < 1e-12 {
             0.0
         } else {
             2.0 * p * r / (p + r)
         };
-        let f1 = f1_at_threshold(&probs, &labels, threshold).unwrap();
+        let f1 =
+            f1_at_threshold(&probs, &labels, threshold).expect("f1_at_threshold should succeed");
         assert!(
             (f1 - f1_expected).abs() < 1e-6,
             "f1={f1} expected={f1_expected}"
@@ -489,7 +494,8 @@ mod tests {
     fn pr_curve_monotone() {
         let probs = vec![0.9_f32, 0.8, 0.7, 0.4, 0.3, 0.2];
         let labels = vec![1u32, 0, 1, 0, 1, 0];
-        let (_, _, recalls) = precision_recall_curve(&probs, &labels).unwrap();
+        let (_, _, recalls) =
+            precision_recall_curve(&probs, &labels).expect("precision_recall_curve should succeed");
         // Recalls should be non-decreasing as we move along the curve (lower thresholds)
         // The curve is sorted by decreasing threshold, so recalls are non-decreasing
         for i in 1..recalls.len() {
@@ -506,7 +512,7 @@ mod tests {
     fn pr_auc_in_range() {
         let probs = vec![0.9_f32, 0.4, 0.35, 0.8, 0.65, 0.7];
         let labels = vec![1u32, 1, 0, 1, 0, 1];
-        let auc = pr_auc(&probs, &labels).unwrap();
+        let auc = pr_auc(&probs, &labels).expect("pr_auc should succeed");
         assert!((0.0..=1.0).contains(&auc), "auc={auc}");
     }
 
@@ -515,7 +521,7 @@ mod tests {
         // Perfect classifier: all positives have higher score than all negatives
         let probs = vec![0.9_f32, 0.8, 0.7, 0.2, 0.1, 0.05];
         let labels = vec![1u32, 1, 1, 0, 0, 0];
-        let auc = pr_auc(&probs, &labels).unwrap();
+        let auc = pr_auc(&probs, &labels).expect("pr_auc should succeed");
         assert!(auc > 0.95, "auc={auc}");
     }
 
@@ -523,7 +529,7 @@ mod tests {
     fn average_precision_in_range() {
         let probs = vec![0.9_f32, 0.4, 0.35, 0.8, 0.65, 0.7];
         let labels = vec![1u32, 1, 0, 1, 0, 1];
-        let ap = average_precision(&probs, &labels).unwrap();
+        let ap = average_precision(&probs, &labels).expect("average_precision should succeed");
         assert!((0.0..=1.0).contains(&ap), "ap={ap}");
     }
 
@@ -543,7 +549,8 @@ mod tests {
             0.1, 0.2, 0.7, // sample 2: class 2
         ];
         let labels = vec![0u32, 1, 2];
-        let (p, r, f) = multiclass_prf(&probs, &labels, 3, 0.5).unwrap();
+        let (p, r, f) =
+            multiclass_prf(&probs, &labels, 3, 0.5).expect("multiclass_prf should succeed");
         assert!(p.is_finite());
         assert!(r.is_finite());
         assert!(f.is_finite());
@@ -557,7 +564,7 @@ mod tests {
         // Instead use predictions that equal labels exactly
         let probs = vec![0.0_f32, 0.0, 1.0, 1.0];
         let labels = vec![0u32, 0, 1, 1];
-        let ece = binary_ece(&probs, &labels, 10).unwrap();
+        let ece = binary_ece(&probs, &labels, 10).expect("binary_ece should succeed");
         // conf=0 for negatives, acc=0 → |0-0|=0; conf=1 for positives, acc=1 → |1-1|=0
         assert!(ece.abs() < 1e-5, "ece={ece}");
     }
@@ -566,7 +573,7 @@ mod tests {
     fn binary_ece_in_range() {
         let probs = vec![0.9_f32, 0.4, 0.35, 0.8, 0.65, 0.7];
         let labels = vec![1u32, 1, 0, 1, 0, 1];
-        let ece = binary_ece(&probs, &labels, 5).unwrap();
+        let ece = binary_ece(&probs, &labels, 5).expect("binary_ece should succeed");
         assert!((0.0..=1.0).contains(&ece), "ece={ece}");
     }
 

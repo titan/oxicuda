@@ -320,10 +320,12 @@ mod tests {
     #[test]
     fn forward_in_open_unit_interval() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let dense_in: Vec<f32> = (0..6).map(|_| rng.next_normal()).collect();
         let cat = vec![1usize, 3, 2];
-        let p = model.forward(&dense_in, &cat).unwrap();
+        let p = model
+            .forward(&dense_in, &cat)
+            .expect("forward should succeed");
         assert!(p.is_finite(), "probability must be finite, got {p}");
         assert!(p > 0.0 && p < 1.0, "probability {p} not in (0,1)");
     }
@@ -338,10 +340,12 @@ mod tests {
             bottom_mlp: vec![],
             top_mlp: vec![],
         };
-        let model = Dlrm::new(cfg, &mut rng).unwrap();
+        let model = Dlrm::new(cfg, &mut rng).expect("new should succeed");
         let dense_emb = vec![0.5_f32; 8];
         let cat_embs = vec![vec![0.1_f32; 8], vec![0.2_f32; 8]];
-        let out = model.interact(&dense_emb, &cat_embs).unwrap();
+        let out = model
+            .interact(&dense_emb, &cat_embs)
+            .expect("interact should succeed");
         // k = 2 → embed_dim + (k+1)*k/2 = 8 + 3 = 11.
         assert_eq!(out.len(), 8 + 3);
     }
@@ -356,10 +360,12 @@ mod tests {
             bottom_mlp: vec![],
             top_mlp: vec![],
         };
-        let model = Dlrm::new(cfg, &mut rng).unwrap();
+        let model = Dlrm::new(cfg, &mut rng).expect("new should succeed");
         let dense_emb = vec![0.5_f32; 8];
         let cat_embs = vec![vec![0.1_f32; 8]; 4];
-        let out = model.interact(&dense_emb, &cat_embs).unwrap();
+        let out = model
+            .interact(&dense_emb, &cat_embs)
+            .expect("interact should succeed");
         // k = 4 → 5 vectors → C(5,2) = 10 pairs → 8 + 10 = 18.
         assert_eq!(out.len(), 8 + 10);
     }
@@ -374,10 +380,12 @@ mod tests {
             bottom_mlp: vec![],
             top_mlp: vec![],
         };
-        let model = Dlrm::new(cfg, &mut rng).unwrap();
+        let model = Dlrm::new(cfg, &mut rng).expect("new should succeed");
         let dense_emb = vec![0.5_f32; 8];
         let cat_embs = vec![vec![0.1_f32; 8]];
-        let out = model.interact(&dense_emb, &cat_embs).unwrap();
+        let out = model
+            .interact(&dense_emb, &cat_embs)
+            .expect("interact should succeed");
         // k = 1 → 2 vectors → 1 pair → embed_dim + 1 = 9.
         assert_eq!(out.len(), 8 + 1);
     }
@@ -385,10 +393,12 @@ mod tests {
     #[test]
     fn interact_pair_count_matches_upper_triangle() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let dense_emb = vec![0.3_f32; 8];
         let cat_embs = vec![vec![0.1_f32; 8]; 3];
-        let out = model.interact(&dense_emb, &cat_embs).unwrap();
+        let out = model
+            .interact(&dense_emb, &cat_embs)
+            .expect("interact should succeed");
         // 4 vectors → C(4,2) = 6 unique pairs (i<j only), not 4*4 = 16.
         let n_pairs = out.len() - 8;
         assert_eq!(n_pairs, 6);
@@ -406,11 +416,13 @@ mod tests {
             bottom_mlp: vec![],
             top_mlp: vec![],
         };
-        let model = Dlrm::new(cfg, &mut rng).unwrap();
+        let model = Dlrm::new(cfg, &mut rng).expect("new should succeed");
         let a = vec![1.0_f32, 2.0, 3.0];
         let b = vec![0.5_f32, -1.0, 2.0];
         let c = vec![-2.0_f32, 0.0, 1.0];
-        let out = model.interact(&a, &[b.clone(), c.clone()]).unwrap();
+        let out = model
+            .interact(&a, &[b.clone(), c.clone()])
+            .expect("value should be present");
         // Pairs in order: (a,b), (a,c), (b,c).
         let ab: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
         let ac: f32 = a.iter().zip(c.iter()).map(|(x, y)| x * y).sum();
@@ -423,7 +435,7 @@ mod tests {
     #[test]
     fn embedding_table_sizes_correct() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         assert_eq!(model.embeddings.len(), 3);
         assert_eq!(model.embeddings[0].len(), 10 * 8);
         assert_eq!(model.embeddings[1].len(), 20 * 8);
@@ -433,9 +445,11 @@ mod tests {
     #[test]
     fn bottom_mlp_output_dim_is_embed_dim() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let dense_in = vec![0.1_f32; 6];
-        let emb = model.bottom_forward(&dense_in).unwrap();
+        let emb = model
+            .bottom_forward(&dense_in)
+            .expect("bottom_forward should succeed");
         assert_eq!(emb.len(), 8);
     }
 
@@ -449,9 +463,11 @@ mod tests {
             bottom_mlp: vec![],
             top_mlp: vec![],
         };
-        let model = Dlrm::new(cfg, &mut rng).unwrap();
+        let model = Dlrm::new(cfg, &mut rng).expect("new should succeed");
         let dense_in = vec![0.2_f32; 5];
-        let emb = model.bottom_forward(&dense_in).unwrap();
+        let emb = model
+            .bottom_forward(&dense_in)
+            .expect("bottom_forward should succeed");
         // Single linear layer dense_dim(5) → embed_dim(8).
         assert_eq!(emb.len(), 8);
         assert_eq!(model.bottom_layers.len(), 1);
@@ -460,7 +476,7 @@ mod tests {
     #[test]
     fn n_params_positive_and_sane() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let np = model.n_params();
         assert!(np > 0, "n_params must be > 0");
         // Embedding params alone are (10+20+5)*8 = 280.
@@ -472,19 +488,23 @@ mod tests {
     fn deterministic_given_seed() {
         let mut rng_a = LcgRng::new(7);
         let mut rng_b = LcgRng::new(7);
-        let model_a = Dlrm::new(default_cfg(), &mut rng_a).unwrap();
-        let model_b = Dlrm::new(default_cfg(), &mut rng_b).unwrap();
+        let model_a = Dlrm::new(default_cfg(), &mut rng_a).expect("value should be present");
+        let model_b = Dlrm::new(default_cfg(), &mut rng_b).expect("value should be present");
         let dense_in = vec![0.3_f32; 6];
         let cat = vec![2usize, 5, 1];
-        let pa = model_a.forward(&dense_in, &cat).unwrap();
-        let pb = model_b.forward(&dense_in, &cat).unwrap();
+        let pa = model_a
+            .forward(&dense_in, &cat)
+            .expect("forward should succeed");
+        let pb = model_b
+            .forward(&dense_in, &cat)
+            .expect("forward should succeed");
         assert!((pa - pb).abs() < 1e-6, "same seed must give same output");
     }
 
     #[test]
     fn cat_index_out_of_range_errors() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let dense_in = vec![0.1_f32; 6];
         // Field 0 cardinality is 10; index 10 is out of range.
         let cat = vec![10usize, 3, 2];
@@ -495,7 +515,7 @@ mod tests {
     #[test]
     fn cat_indices_wrong_length_errors() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let dense_in = vec![0.1_f32; 6];
         let cat = vec![1usize, 3]; // only 2 of 3 fields
         let res = model.forward(&dense_in, &cat);
@@ -505,7 +525,7 @@ mod tests {
     #[test]
     fn dense_wrong_length_errors() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let dense_in = vec![0.1_f32; 5]; // expected 6
         let cat = vec![1usize, 3, 2];
         let res = model.forward(&dense_in, &cat);
@@ -515,10 +535,14 @@ mod tests {
     #[test]
     fn changing_cat_index_changes_output() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let dense_in = vec![0.3_f32; 6];
-        let p1 = model.forward(&dense_in, &[1usize, 3, 2]).unwrap();
-        let p2 = model.forward(&dense_in, &[4usize, 3, 2]).unwrap();
+        let p1 = model
+            .forward(&dense_in, &[1usize, 3, 2])
+            .expect("forward should succeed");
+        let p2 = model
+            .forward(&dense_in, &[4usize, 3, 2])
+            .expect("forward should succeed");
         assert!(
             (p1 - p2).abs() > 1e-9,
             "changing a cat index must move output"
@@ -528,21 +552,25 @@ mod tests {
     #[test]
     fn changing_dense_changes_output() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let cat = vec![1usize, 3, 2];
         let d1 = vec![0.1_f32; 6];
         let d2: Vec<f32> = (0..6).map(|i| i as f32 * 0.5 + 0.7).collect();
-        let p1 = model.forward(&d1, &cat).unwrap();
-        let p2 = model.forward(&d2, &cat).unwrap();
+        let p1 = model.forward(&d1, &cat).expect("forward should succeed");
+        let p2 = model.forward(&d2, &cat).expect("forward should succeed");
         assert!((p1 - p2).abs() > 1e-9, "changing dense must move output");
     }
 
     #[test]
     fn two_distinct_inputs_give_distinct_outputs() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
-        let p1 = model.forward(&[0.1_f32; 6], &[0usize, 0, 0]).unwrap();
-        let p2 = model.forward(&[0.9_f32; 6], &[9usize, 19, 4]).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
+        let p1 = model
+            .forward(&[0.1_f32; 6], &[0usize, 0, 0])
+            .expect("forward should succeed");
+        let p2 = model
+            .forward(&[0.9_f32; 6], &[9usize, 19, 4])
+            .expect("forward should succeed");
         assert!((p1 - p2).abs() > 1e-9, "distinct inputs must differ");
     }
 
@@ -613,7 +641,7 @@ mod tests {
     #[test]
     fn interact_wrong_dense_emb_length_errors() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let dense_emb = vec![0.5_f32; 7]; // expected 8
         let cat_embs = vec![vec![0.1_f32; 8]; 3];
         assert!(matches!(
@@ -625,9 +653,9 @@ mod tests {
     #[test]
     fn gather_cat_returns_correct_rows() {
         let mut rng = make_rng();
-        let model = Dlrm::new(default_cfg(), &mut rng).unwrap();
+        let model = Dlrm::new(default_cfg(), &mut rng).expect("value should be present");
         let cat = vec![2usize, 7, 1];
-        let rows = model.gather_cat(&cat).unwrap();
+        let rows = model.gather_cat(&cat).expect("gather_cat should succeed");
         assert_eq!(rows.len(), 3);
         for row in &rows {
             assert_eq!(row.len(), 8);

@@ -74,21 +74,22 @@ mod tests {
         // can be large near the shock; verify it's finite and check a region far from shock
         // At x=3.0 (far from shock at x≈0.5*t), the solution is near -1 and smooth
         let nu_small = 0.5_f32; // larger ν → smoother profile
-        let ok = burgers_residual_check(3.0, 0.5, nu_small, 0.5).unwrap();
+        let ok = burgers_residual_check(3.0, 0.5, nu_small, 0.5).expect("burgers_residual_check should succeed far from shock at x=3.0, t=0.5 with smooth profile");
         assert!(ok, "Burgers residual check should pass far from shock");
     }
 
     #[test]
     fn burgers_residual_zero_zero() {
         // u=0, u_t=0, u_x=0, u_xx=0 → R = 0
-        let r = burgers_residual(0.0, 0.0, 0.0, 0.0, NU).unwrap();
+        let r = burgers_residual(0.0, 0.0, 0.0, 0.0, NU)
+            .expect("burgers_residual should succeed for all-zero derivatives with valid nu");
         assert_eq!(r, 0.0);
     }
 
     #[test]
     fn burgers_residual_nonzero() {
         // Verify formula: R = u_t + u*u_x - nu*u_xx
-        let r = burgers_residual(1.0, 2.0, 3.0, 1.0, NU).unwrap();
+        let r = burgers_residual(1.0, 2.0, 3.0, 1.0, NU).expect("burgers_residual should succeed for finite inputs u_t=1.0, u=2.0, u_x=3.0, u_xx=1.0 with valid nu");
         let expected = 1.0 + 2.0 * 3.0 - NU * 1.0;
         assert!((r - expected).abs() < 1e-5);
     }

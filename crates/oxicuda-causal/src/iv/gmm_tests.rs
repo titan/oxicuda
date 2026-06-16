@@ -77,7 +77,7 @@ fn test_just_identified_matches_2sls() {
     let mut rng = LcgRng::new(7);
     let (y, x, z) = simulate_linear_iv(&mut rng, 400, 2.0, 1);
     let cfg = GmmConfig::default();
-    let r = Gmm::estimate(&y, &x, &z, &cfg).unwrap();
+    let r = Gmm::estimate(&y, &x, &z, &cfg).expect("estimate should succeed");
     assert_eq!(r.theta.len(), 1);
     assert!(approx(r.theta[0], 2.0, 0.2), "θ = {} ≠ 2", r.theta[0]);
     assert!(
@@ -106,7 +106,7 @@ fn test_z_equals_x_recovers_ols() {
         y[i] = 1.5 * xi + (rng.next_normal() as f64) * 0.1;
     }
     let z = x.clone();
-    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).unwrap();
+    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).expect("value should be present");
     assert!(approx(r.theta[0], 1.5, 0.15), "θ = {}", r.theta[0]);
 }
 
@@ -115,7 +115,7 @@ fn test_z_equals_x_recovers_ols() {
 fn test_overidentified_j_pvalue_in_unit_interval() {
     let mut rng = LcgRng::new(19);
     let (y, x, z) = simulate_linear_iv(&mut rng, 500, 1.5, 3);
-    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).unwrap();
+    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).expect("value should be present");
     assert!(r.j_stat.is_finite() && r.j_stat >= 0.0, "J = {}", r.j_stat);
     assert!(
         r.j_pvalue >= 0.0 && r.j_pvalue <= 1.0,
@@ -250,8 +250,8 @@ fn test_deterministic() {
     let mut rng = LcgRng::new(101);
     let (y, x, z) = simulate_linear_iv(&mut rng, 250, 1.7, 2);
     let cfg = GmmConfig::default();
-    let a = Gmm::estimate(&y, &x, &z, &cfg).unwrap();
-    let b = Gmm::estimate(&y, &x, &z, &cfg).unwrap();
+    let a = Gmm::estimate(&y, &x, &z, &cfg).expect("estimate should succeed");
+    let b = Gmm::estimate(&y, &x, &z, &cfg).expect("estimate should succeed");
     assert_eq!(a.theta, b.theta);
     assert_eq!(a.se, b.se);
     assert_eq!(a.j_stat, b.j_stat);
@@ -264,7 +264,7 @@ fn test_deterministic() {
 fn test_se_positive_finite() {
     let mut rng = LcgRng::new(31);
     let (y, x, z) = simulate_linear_iv(&mut rng, 400, 1.0, 3);
-    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).unwrap();
+    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).expect("value should be present");
     for &s in r.se.iter() {
         assert!(s.is_finite() && s >= 0.0, "se = {}", s);
     }
@@ -276,7 +276,7 @@ fn test_se_positive_finite() {
 fn test_just_identified_j_zero() {
     let mut rng = LcgRng::new(37);
     let (y, x, z) = simulate_linear_iv(&mut rng, 200, 1.0, 1);
-    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).unwrap();
+    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).expect("value should be present");
     assert!(r.j_stat.abs() < 1e-9, "J = {}", r.j_stat);
     assert!((r.j_pvalue - 1.0).abs() < 1e-12, "p = {}", r.j_pvalue);
 }
@@ -287,7 +287,7 @@ fn test_recover_beta_within_three_se() {
     let mut rng = LcgRng::new(41);
     let true_beta = 1.5_f64;
     let (y, x, z) = simulate_linear_iv(&mut rng, 1000, true_beta, 3);
-    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).unwrap();
+    let r = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).expect("value should be present");
     let z_score = (r.theta[0] - true_beta) / r.se[0].max(1e-6);
     assert!(z_score.abs() < 5.0, "z-score = {}", z_score);
 }
@@ -301,13 +301,13 @@ fn test_n_iters_zero_when_one_step() {
         two_step: false,
         ..GmmConfig::default()
     };
-    let r1 = Gmm::estimate(&y, &x, &z, &cfg_one).unwrap();
+    let r1 = Gmm::estimate(&y, &x, &z, &cfg_one).expect("estimate should succeed");
     assert_eq!(r1.n_iters, 0);
     let cfg_two = GmmConfig {
         two_step: true,
         ..GmmConfig::default()
     };
-    let r2 = Gmm::estimate(&y, &x, &z, &cfg_two).unwrap();
+    let r2 = Gmm::estimate(&y, &x, &z, &cfg_two).expect("estimate should succeed");
     assert!(r2.n_iters >= 1);
 }
 
@@ -316,7 +316,8 @@ fn test_n_iters_zero_when_one_step() {
 fn test_result_field_sizes() {
     let mut rng = LcgRng::new(47);
     let (y, x, z) = simulate_linear_iv(&mut rng, 200, 1.0, 2);
-    let r: GmmResult = Gmm::estimate(&y, &x, &z, &GmmConfig::default()).unwrap();
+    let r: GmmResult =
+        Gmm::estimate(&y, &x, &z, &GmmConfig::default()).expect("value should be present");
     let p = 1_usize;
     let q = 2_usize;
     assert_eq!(r.theta.len(), p);

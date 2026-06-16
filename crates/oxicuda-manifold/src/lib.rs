@@ -25,7 +25,9 @@
 pub mod autoencoder;
 pub mod clustering;
 pub mod diffusion;
+pub mod embed;
 pub mod error;
+pub mod geometry;
 pub mod handle;
 pub mod linalg;
 pub mod linear;
@@ -49,17 +51,32 @@ pub use clustering::kohonen_som::{
     som_weight_at,
 };
 pub use diffusion::phate::{PhateConfig, PhateResult, phate_fit};
+pub use embed::landmark_mds::{LandmarkMdsConfig, LandmarkMdsResult, landmark_mds};
+pub use embed::random_projection::{
+    RandomProjectionConfig, RandomProjectionKind, johnson_lindenstrauss_min_dim, random_projection,
+};
+pub use embed::sammon::{SammonConfig, SammonResult, sammon};
 pub use error::{ManifoldError, ManifoldResult};
 pub use handle::{LcgRng, ManifoldHandle, SmVersion};
 pub use linear::cca_pls::{
     CcaConfig, CcaFit, PlsConfig, PlsFit, PlsSvdFit, cca_fit, cca_transform, pls_fit, pls_predict,
     pls_svd_fit, pls_transform,
 };
+pub use local::hessian_lle::hessian_lle;
+pub use local::ltsa::ltsa;
+pub use mds::nonmetric_mds::{NonmetricMdsResult, nonmetric_mds, pava};
 pub use neighbor::hnsw::{
     HnswConfig, HnswDistance, HnswIndex, HnswSearchResult, hnsw_add, hnsw_build, hnsw_search,
 };
 pub use reduction::pacmap::{PaCMapConfig, PaCMapInit, PaCMapResult, pacmap};
+pub use reduction::poincare_embedding::{
+    PoincareConfig, PoincareModel, poincare_distances_all, poincare_fit, poincare_rank_relations,
+};
 pub use reduction::trimap::{TrimapConfig, TrimapInit, TrimapResult, trimap};
+pub use riemannian::riemannian_median::{
+    RiemannianMedianConfig, RiemannianMedianResult, riemannian_median, riemannian_median_objective,
+    riemannian_trimmed_mean,
+};
 pub use riemannian::so_n::{
     so_2_rotation, so_n_check, so_n_distance, so_n_geodesic, so_n_identity, so_n_inner, so_n_log,
     so_n_norm, so_n_project_tangent, so_n_random, so_n_retract_cayley, so_n_retract_expm,

@@ -322,8 +322,8 @@ mod tests {
     #[test]
     fn feature_mask_rows_sum_to_one_and_nonneg() {
         let mut rng = LcgRng::new(42);
-        let layer = AbstractLayer::new(8, 4, &mut rng).unwrap();
-        let mask = layer.feature_mask().unwrap();
+        let layer = AbstractLayer::new(8, 4, &mut rng).expect("new should succeed");
+        let mask = layer.feature_mask().expect("feature_mask should succeed");
         assert_eq!(mask.len(), 4 * 8);
         for a in 0..4 {
             let row = &mask[a * 8..(a + 1) * 8];
@@ -337,7 +337,7 @@ mod tests {
     fn sparsemax_one_hot_dominant_logit() {
         // A dominant first logit produces a near one-hot mask.
         let z = [50.0_f32, 0.0, 0.0, 0.0, 0.0];
-        let out = sparsemax(&z).unwrap();
+        let out = sparsemax(&z).expect("sparsemax should succeed");
         assert!((out[0] - 1.0).abs() < 1e-5, "expected one-hot, got {out:?}");
         assert!(out[1..].iter().all(|&v| v < 1e-5));
     }
@@ -347,7 +347,7 @@ mod tests {
         // All-equal logits → uniform 1/d.
         let d = 6usize;
         let z = vec![0.7_f32; d];
-        let out = sparsemax(&z).unwrap();
+        let out = sparsemax(&z).expect("sparsemax should succeed");
         let expected = 1.0_f32 / d as f32;
         for &v in &out {
             assert!((v - expected).abs() < 1e-5, "got {v}, expected {expected}");
@@ -358,7 +358,7 @@ mod tests {
     fn sparsemax_is_sparse_for_spread_logits() {
         // A spread vector should yield exact zeros in the projection.
         let z = [5.0_f32, 0.0, -3.0, -4.0, -5.0];
-        let out = sparsemax(&z).unwrap();
+        let out = sparsemax(&z).expect("sparsemax should succeed");
         let zeros = out.iter().filter(|&&v| v == 0.0).count();
         assert!(zeros > 0, "expected some exact zeros, got {out:?}");
         let s: f32 = out.iter().sum();
@@ -368,26 +368,26 @@ mod tests {
     #[test]
     fn feature_mask_shape() {
         let mut rng = LcgRng::new(7);
-        let layer = AbstractLayer::new(10, 5, &mut rng).unwrap();
-        let mask = layer.feature_mask().unwrap();
+        let layer = AbstractLayer::new(10, 5, &mut rng).expect("new should succeed");
+        let mask = layer.feature_mask().expect("feature_mask should succeed");
         assert_eq!(mask.len(), 5 * 10);
     }
 
     #[test]
     fn abstract_layer_forward_length() {
         let mut rng = LcgRng::new(11);
-        let layer = AbstractLayer::new(8, 4, &mut rng).unwrap();
+        let layer = AbstractLayer::new(8, 4, &mut rng).expect("new should succeed");
         let x = vec![0.3_f32; 8];
-        let out = layer.forward(&x).unwrap();
+        let out = layer.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), 4);
     }
 
     #[test]
     fn abstract_layer_forward_finite_and_bounded() {
         let mut rng = LcgRng::new(123);
-        let layer = AbstractLayer::new(6, 3, &mut rng).unwrap();
+        let layer = AbstractLayer::new(6, 3, &mut rng).expect("new should succeed");
         let x = vec![2.5_f32, -1.0, 0.0, 3.3, -2.2, 1.1];
-        let out = layer.forward(&x).unwrap();
+        let out = layer.forward(&x).expect("forward should succeed");
         // tanh activation → bounded in (-1, 1) and finite.
         assert!(out.iter().all(|v| v.is_finite()));
         assert!(out.iter().all(|&v| v.abs() <= 1.0 + 1e-6));
@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn abstract_layer_wrong_length_errs() {
         let mut rng = LcgRng::new(5);
-        let layer = AbstractLayer::new(8, 4, &mut rng).unwrap();
+        let layer = AbstractLayer::new(8, 4, &mut rng).expect("new should succeed");
         let x = vec![0.3_f32; 7];
         assert!(matches!(
             layer.forward(&x),
@@ -407,18 +407,18 @@ mod tests {
     #[test]
     fn danet_forward_length() {
         let mut rng = LcgRng::new(42);
-        let model = Danet::new(small_cfg(), &mut rng).unwrap();
+        let model = Danet::new(small_cfg(), &mut rng).expect("value should be present");
         let x = vec![0.5_f32; 8];
-        let out = model.forward(&x).unwrap();
+        let out = model.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), 3);
     }
 
     #[test]
     fn danet_forward_finite() {
         let mut rng = LcgRng::new(99);
-        let model = Danet::new(small_cfg(), &mut rng).unwrap();
+        let model = Danet::new(small_cfg(), &mut rng).expect("value should be present");
         let x = vec![0.2_f32, -0.5, 1.0, 0.0, 0.3, -1.1, 2.0, 0.7];
-        let out = model.forward(&x).unwrap();
+        let out = model.forward(&x).expect("forward should succeed");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -432,9 +432,9 @@ mod tests {
             n_groups: 1,
         };
         let mut rng = LcgRng::new(3);
-        let model = Danet::new(cfg, &mut rng).unwrap();
+        let model = Danet::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.1_f32; 5];
-        let out = model.forward(&x).unwrap();
+        let out = model.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), 2);
     }
 
@@ -448,9 +448,9 @@ mod tests {
             n_groups: 1,
         };
         let mut rng = LcgRng::new(8);
-        let model = Danet::new(cfg, &mut rng).unwrap();
+        let model = Danet::new(cfg, &mut rng).expect("new should succeed");
         let x = vec![0.4_f32; 4];
-        let out = model.forward(&x).unwrap();
+        let out = model.forward(&x).expect("forward should succeed");
         assert_eq!(out.len(), 1);
         assert!(out[0].is_finite());
     }
@@ -459,30 +459,30 @@ mod tests {
     fn danet_deterministic_given_seed() {
         let mut rng_a = LcgRng::new(2024);
         let mut rng_b = LcgRng::new(2024);
-        let model_a = Danet::new(small_cfg(), &mut rng_a).unwrap();
-        let model_b = Danet::new(small_cfg(), &mut rng_b).unwrap();
+        let model_a = Danet::new(small_cfg(), &mut rng_a).expect("value should be present");
+        let model_b = Danet::new(small_cfg(), &mut rng_b).expect("value should be present");
         let x = vec![0.33_f32; 8];
-        let out_a = model_a.forward(&x).unwrap();
-        let out_b = model_b.forward(&x).unwrap();
+        let out_a = model_a.forward(&x).expect("forward should succeed");
+        let out_b = model_b.forward(&x).expect("forward should succeed");
         assert_eq!(out_a, out_b);
     }
 
     #[test]
     fn danet_changing_x_changes_output() {
         let mut rng = LcgRng::new(17);
-        let model = Danet::new(small_cfg(), &mut rng).unwrap();
+        let model = Danet::new(small_cfg(), &mut rng).expect("value should be present");
         let x1 = vec![0.5_f32; 8];
         let mut x2 = x1.clone();
         x2[0] = -3.0;
-        let o1 = model.forward(&x1).unwrap();
-        let o2 = model.forward(&x2).unwrap();
+        let o1 = model.forward(&x1).expect("forward should succeed");
+        let o2 = model.forward(&x2).expect("forward should succeed");
         assert_ne!(o1, o2);
     }
 
     #[test]
     fn danet_wrong_input_length_errs() {
         let mut rng = LcgRng::new(1);
-        let model = Danet::new(small_cfg(), &mut rng).unwrap();
+        let model = Danet::new(small_cfg(), &mut rng).expect("value should be present");
         let x = vec![0.5_f32; 7];
         assert!(matches!(
             model.forward(&x),
@@ -494,7 +494,7 @@ mod tests {
     fn danet_n_params_positive_and_formula() {
         let mut rng = LcgRng::new(42);
         let cfg = small_cfg();
-        let model = Danet::new(cfg.clone(), &mut rng).unwrap();
+        let model = Danet::new(cfg.clone(), &mut rng).expect("value should be present");
         // Layer 0: mask (n_abstract*input_dim) + 2*n_abstract.
         let l0 = cfg.n_abstract * cfg.input_dim + 2 * cfg.n_abstract;
         // Layers 1..: each mask (n_abstract*n_abstract) + 2*n_abstract.
@@ -585,16 +585,18 @@ mod tests {
     #[test]
     fn danet_batch_forward_shape() {
         let mut rng = LcgRng::new(64);
-        let model = Danet::new(small_cfg(), &mut rng).unwrap();
+        let model = Danet::new(small_cfg(), &mut rng).expect("value should be present");
         let x = vec![0.25_f32; 3 * 8];
-        let out = model.forward_batch(&x, 3).unwrap();
+        let out = model
+            .forward_batch(&x, 3)
+            .expect("forward_batch should succeed");
         assert_eq!(out.len(), 3 * 3);
     }
 
     #[test]
     fn danet_batch_forward_wrong_len_errs() {
         let mut rng = LcgRng::new(64);
-        let model = Danet::new(small_cfg(), &mut rng).unwrap();
+        let model = Danet::new(small_cfg(), &mut rng).expect("value should be present");
         let x = vec![0.25_f32; 3 * 8 + 1];
         assert!(model.forward_batch(&x, 3).is_err());
     }

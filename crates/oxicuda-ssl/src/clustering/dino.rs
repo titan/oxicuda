@@ -213,7 +213,7 @@ mod tests {
         let t: Vec<f32> = (0..n * k).map(|i| (i as f32 * 0.029).cos()).collect();
         let centre = vec![0.0_f32; k];
         let cfg = DinoConfig::default();
-        let l = dino_loss(&s, &t, &centre, n, k, &cfg).unwrap();
+        let l = dino_loss(&s, &t, &centre, n, k, &cfg).expect("dino_loss should succeed");
         assert!(l.is_finite() && l > 0.0);
     }
 
@@ -230,7 +230,7 @@ mod tests {
         }
         let centre = vec![0.0_f32; k];
         let cfg = DinoConfig::default();
-        let l = dino_loss(&s, &t, &centre, n, k, &cfg).unwrap();
+        let l = dino_loss(&s, &t, &centre, n, k, &cfg).expect("dino_loss should succeed");
         assert!(l < 1.0, "l = {l}");
     }
 
@@ -242,7 +242,7 @@ mod tests {
         let t = vec![5.0_f32; n * k];
         let centre = vec![5.0_f32; k]; // Subtracting centre → uniform teacher.
         let cfg = DinoConfig::default();
-        let l = dino_loss(&s, &t, &centre, n, k, &cfg).unwrap();
+        let l = dino_loss(&s, &t, &centre, n, k, &cfg).expect("dino_loss should succeed");
         // Uniform teacher × uniform student → CE = ln(K)
         let expected = (k as f32).ln();
         assert!((l - expected).abs() < 1e-3, "l = {l}, expected {expected}");
@@ -261,7 +261,8 @@ mod tests {
     fn update_centre_zero_momentum_replaces_with_mean() {
         let mut centre = vec![1.0_f32; 4];
         let teacher = vec![5.0_f32; 8];
-        update_dino_centre(&mut centre, &teacher, 2, 4, 0.0).unwrap();
+        update_dino_centre(&mut centre, &teacher, 2, 4, 0.0)
+            .expect("update_dino_centre should succeed");
         for &v in &centre {
             assert!((v - 5.0).abs() < 1e-5);
         }
@@ -271,7 +272,8 @@ mod tests {
     fn update_centre_full_momentum_keeps_old_value() {
         let mut centre = vec![1.0_f32; 4];
         let teacher = vec![10.0_f32; 8];
-        update_dino_centre(&mut centre, &teacher, 2, 4, 1.0).unwrap();
+        update_dino_centre(&mut centre, &teacher, 2, 4, 1.0)
+            .expect("update_dino_centre should succeed");
         for &v in &centre {
             assert!((v - 1.0).abs() < 1e-5);
         }

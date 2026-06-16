@@ -134,21 +134,15 @@ impl TernaryCompressor {
 
         // Stochastic ternarization.
         //
-        // NOTE: LcgRng::next_f32() returns values in [0, 0.5) (the implementation
-        // uses the top 31 bits of the 64-bit state and divides by 2^32).  To
-        // perform an unbiased Bernoulli(p) draw for arbitrary p ∈ [0, 1] we
-        // must use next_u32() directly and compare against the corresponding
-        // threshold.  next_u32() returns values in [0, 2^31 − 1], so:
-        //
-        //   threshold = floor(p * 2^31)
-        //   flip      = (next_u32() < threshold)   → Bernoulli(p)
-        let max_u31 = (1u32 << 31) as f32; // 2^31
+        // `LcgRng::next_f32()` returns a uniform deviate in [0, 1), so an
+        // unbiased Bernoulli(p) draw is simply `next_f32() < p`.  This keeps
+        // the quantization unbiased: E[code_i] = sign(g_i) · p_i, hence
+        // E[decode_i] = scale · sign(g_i) · (|g_i|/scale) = g_i.
         let mut codes = Vec::with_capacity(n);
         for &g in gradient {
             let abs_g = g.abs();
             let prob = (abs_g / scale).min(1.0_f32);
-            let threshold = (prob * max_u31) as u32;
-            let flip = rng.next_u32() < threshold;
+            let flip = rng.next_f32() < prob;
             let code = if flip {
                 if g >= 0.0 { 1_i8 } else { -1_i8 }
             } else {

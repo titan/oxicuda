@@ -20,7 +20,7 @@
 //! `LcgRng::next_u32`. The crate's `LcgRng::next_f32` / `next_normal_pair`
 //! are unsuitable for an unbiased `[0, 1)` uniform (the generator only exposes
 //! the high 31 bits of state, so `next_f32` spans roughly `[0, 0.5)`), so we
-//! map `next_u32()` ourselves via `next_u32() as f32 / 2_147_483_648.0`, which
+//! map `next_u32()` ourselves via `next_u32() as f32 / 4_294_967_296.0`, which
 //! is a correct `[0, 1)` uniform given the 31-bit output range. Weights are
 //! then centred to `[-scale, scale)` so the initial gates are near-uniform.
 
@@ -59,7 +59,7 @@ pub struct MultiGateRouter {
 /// sidesteps the biased `LcgRng::next_f32` (which spans only `[0, 0.5)`).
 #[inline]
 fn uniform_unit(rng: &mut LcgRng) -> f32 {
-    rng.next_u32() as f32 / 2_147_483_648.0
+    rng.next_u32() as f32 / 4_294_967_296.0
 }
 
 /// Numerically stable softmax over a slice of logits.
@@ -466,7 +466,10 @@ mod tests {
         let b = router(16, 4, 3, 1234);
         assert_eq!(a.gate_weights, b.gate_weights);
         let x = vec![0.42_f32; 16];
-        assert_eq!(a.forward(&x).unwrap(), b.forward(&x).unwrap());
+        assert_eq!(
+            a.forward(&x).expect("forward should succeed"),
+            b.forward(&x).expect("forward should succeed")
+        );
     }
 
     #[test]

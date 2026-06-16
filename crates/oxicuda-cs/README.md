@@ -77,7 +77,7 @@ fn main() -> oxicuda_cs::CsResult<()> {
 
 ## Status
 
-**Alpha** -- 6,127 SLoC, 108 passing tests. API may evolve before v1.0.
+**Alpha** -- 10,537 SLoC, 253 passing tests. API may evolve before v1.0.
 
 ## License
 

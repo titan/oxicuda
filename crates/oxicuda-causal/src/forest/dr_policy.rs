@@ -337,8 +337,8 @@ mod tests {
             n_samples: n,
             ..
         } = hand_example_2actions();
-        let scores =
-            DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, n, 2, 0.01).unwrap();
+        let scores = DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, n, 2, 0.01)
+            .expect("build_dr_scores should succeed");
         assert_eq!(scores.len(), n * 2);
     }
 
@@ -356,8 +356,8 @@ mod tests {
             n_samples: n,
             ..
         } = hand_example_2actions();
-        let scores =
-            DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, n, 2, 0.01).unwrap();
+        let scores = DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, n, 2, 0.01)
+            .expect("build_dr_scores should succeed");
         // sample 0: T=0, Y=0, m̂_0=0, m̂_1=2, ê=0.5
         assert!((scores[0] - 0.0).abs() < 1e-6, "Γ_0(0) = {}", scores[0]);
         assert!((scores[1] - 2.0).abs() < 1e-6, "Γ_0(1) = {}", scores[1]);
@@ -384,7 +384,7 @@ mod tests {
             n_actions,
             0.01,
         )
-        .unwrap();
+        .expect("value should be present");
         // Γ_0(0) = m̂_0 = 5 (since T != 0).
         assert!((scores[0] - 5.0).abs() < 1e-6, "Γ_0(0) = {}", scores[0]);
         // Γ_0(1) = m̂_1 + (Y − m̂_1) · 1 / ê_1 = 2 + 1 / 0.6 = 2 + 1.666... = 3.666...
@@ -406,8 +406,8 @@ mod tests {
         let m_hat = vec![0.0_f32, 0.0];
         let e_hat = vec![0.0_f32, 1.0]; // ê for a=0 is zero!
         let clip = 0.05_f32;
-        let scores =
-            DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, 1, 2, clip).unwrap();
+        let scores = DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, 1, 2, clip)
+            .expect("build_dr_scores should succeed");
         // Γ_0(0) = m̂_0 + (Y − m̂_0)·1 / clipped(ê_0)
         //        = 0 + 1 / 0.05 = 20.
         assert!((scores[0] - 20.0).abs() < 1e-4, "Γ_0(0) = {}", scores[0]);
@@ -424,8 +424,8 @@ mod tests {
         let m_hat = vec![0.0_f32, 0.0];
         let e_hat = vec![1.0_f32, 0.0]; // ê_0 = 1.0
         let clip = 0.1_f32;
-        let scores =
-            DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, 1, 2, clip).unwrap();
+        let scores = DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, 1, 2, clip)
+            .expect("build_dr_scores should succeed");
         // Γ_0(0) = 0 + 1 / (1 - 0.1) = 1 / 0.9
         let expected = 1.0_f32 / 0.9;
         assert!(
@@ -452,8 +452,8 @@ mod tests {
             min_leaf_samples: 1,
             n_actions: 2,
         };
-        let res =
-            DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg).unwrap();
+        let res = DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg)
+            .expect("fit should succeed");
         // The tree should have splits (depth 1 over a clearly-separable
         // dataset).
         assert!(matches!(res.policy_tree.root, PolicyNode::Split { .. }));
@@ -477,12 +477,15 @@ mod tests {
             min_leaf_samples: 1,
             n_actions: 2,
         };
-        let res =
-            DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg).unwrap();
+        let res = DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg)
+            .expect("fit should succeed");
         for i in 0..n {
             let row = &features[i * d..(i + 1) * d];
-            let via_dr = DrPolicy::predict(&res, row).unwrap();
-            let via_pt = res.policy_tree.predict(row).unwrap();
+            let via_dr = DrPolicy::predict(&res, row).expect("predict should succeed");
+            let via_pt = res
+                .policy_tree
+                .predict(row)
+                .expect("predict should succeed");
             assert_eq!(via_dr, via_pt);
         }
     }
@@ -513,9 +516,9 @@ mod tests {
             d,
             cfg.clone(),
         )
-        .unwrap();
-        let b =
-            DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg).unwrap();
+        .expect("value should be present");
+        let b = DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg)
+            .expect("fit should succeed");
         assert_eq!(a.dr_scores, b.dr_scores);
         assert!((a.train_welfare - b.train_welfare).abs() < 1e-12);
         assert_eq!(a.policy_tree.root, b.policy_tree.root);
@@ -537,10 +540,14 @@ mod tests {
             min_leaf_samples: 1,
             n_actions: 2,
         };
-        let res =
-            DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg).unwrap();
-        let preds = res.policy_tree.predict_batch(&features, n, d).unwrap();
-        let w = PolicyTree::policy_welfare(&res.dr_scores, n, 2, &preds).unwrap();
+        let res = DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg)
+            .expect("fit should succeed");
+        let preds = res
+            .policy_tree
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed");
+        let w = PolicyTree::policy_welfare(&res.dr_scores, n, 2, &preds)
+            .expect("policy_welfare should succeed");
         assert!((w - res.train_welfare).abs() < 1e-6);
     }
 
@@ -569,8 +576,8 @@ mod tests {
             min_leaf_samples: min_leaf,
             n_actions: 2,
         };
-        let res =
-            DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg).unwrap();
+        let res = DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg)
+            .expect("fit should succeed");
         let rows: Vec<usize> = (0..n).collect();
         let smallest = min_leaf_size(&res.policy_tree.root, &rows, &features, d);
         assert!(
@@ -768,11 +775,14 @@ mod tests {
             min_leaf_samples: 1,
             n_actions: 2,
         };
-        let res =
-            DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg).unwrap();
+        let res = DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg)
+            .expect("fit should succeed");
         assert!(matches!(res.policy_tree.root, PolicyNode::Leaf { .. }));
         // All predictions identical (constant policy).
-        let preds = res.policy_tree.predict_batch(&features, n, d).unwrap();
+        let preds = res
+            .policy_tree
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed");
         let first = preds[0];
         for &a in &preds {
             assert_eq!(a, first);
@@ -793,11 +803,14 @@ mod tests {
             min_leaf_samples: 1,
             n_actions: 2,
         };
-        let res =
-            DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg).unwrap();
+        let res = DrPolicy::fit(&features, &treatments, &outcomes, &m_hat, &e_hat, n, d, cfg)
+            .expect("fit should succeed");
         // With constant scores Γ(a) = 3 for all (i, a), policy is arbitrary
         // but every predicted action must be in range.
-        let preds = res.policy_tree.predict_batch(&features, n, d).unwrap();
+        let preds = res
+            .policy_tree
+            .predict_batch(&features, n, d)
+            .expect("predict_batch should succeed");
         for &a in &preds {
             assert!(a < 2, "action {a} out of range");
         }
@@ -822,7 +835,7 @@ mod tests {
         let e_hat = vec![1.0_f32 / 3.0; 3];
         let scores =
             DrPolicy::build_dr_scores(&treatments, &outcomes, &m_hat, &e_hat, n, n_actions, 0.01)
-                .unwrap();
+                .expect("value should be present");
         // Γ_0(0) = m̂_0 = 1.
         assert!((scores[0] - 1.0).abs() < 1e-5, "Γ_0(0) = {}", scores[0]);
         // Γ_0(1) = m̂_1 + (Y − m̂_1)·1 / ê_1 = 4 + (7-4)/(1/3) = 4 + 9 = 13.

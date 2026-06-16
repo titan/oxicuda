@@ -5,6 +5,7 @@ pub mod dragonnet;
 pub mod g_computation;
 pub mod ipw;
 pub mod mediation;
+pub mod mediation_formula;
 #[cfg(test)]
 mod mediation_tests;
 pub mod meta_learners;
@@ -36,3 +37,17 @@ pub use subsampled_bootstrap::{
     SubsampledBootstrapConfig, SubsampledBootstrapResult, subsampled_bootstrap,
     subsampled_bootstrap_vec,
 };
+pub mod cevae;
+pub use cevae::{Cevae, CevaeConfig};
+pub use mediation_formula::{MediationFormulaConfig, MediationFormulaResult, mediation_formula};
+pub mod staggered_did;
+pub use staggered_did::{
+    Aggregation, EventStudyPoint, GroupTimeAtt, NEVER_TREATED, StaggeredDidConfig,
+    StaggeredDidResult, callaway_santanna,
+};
+pub mod psm;
+pub use psm::{MatchMetric, MatchedPair, PsmConfig, PsmResult, psm_att};
+pub mod entropy_balancing;
+pub use entropy_balancing::{EntropyBalancingConfig, EntropyBalancingResult, entropy_balancing};
+pub mod stabilized_ipw;
+pub use stabilized_ipw::{StabilizedIpwConfig, StabilizedIpwResult, stabilized_ipw};

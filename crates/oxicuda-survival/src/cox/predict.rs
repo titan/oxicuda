@@ -212,7 +212,9 @@ mod tests {
         let cox = make_cox(vec![0.5, -1.0, 2.0]);
         let x = vec![1.0, 2.0, 3.0];
         // 0.5*1 + (-1.0)*2 + 2.0*3 = 0.5 - 2 + 6 = 4.5
-        let lhr = cox.predict_log_hazard_ratio(&x).unwrap();
+        let lhr = cox
+            .predict_log_hazard_ratio(&x)
+            .expect("predict_log_hazard_ratio should succeed");
         assert!((lhr - 4.5).abs() < 1e-12, "expected 4.5, got {lhr}");
     }
 
@@ -221,8 +223,12 @@ mod tests {
     fn hazard_ratio_is_exp_lhr() {
         let cox = make_cox(vec![1.0, 0.5]);
         let x = vec![1.0, 2.0];
-        let lhr = cox.predict_log_hazard_ratio(&x).unwrap();
-        let hr = cox.predict_hazard_ratio(&x).unwrap();
+        let lhr = cox
+            .predict_log_hazard_ratio(&x)
+            .expect("predict_log_hazard_ratio should succeed");
+        let hr = cox
+            .predict_hazard_ratio(&x)
+            .expect("predict_hazard_ratio should succeed");
         assert!((hr - lhr.exp()).abs() < 1e-12, "HR must be exp(LHR)");
     }
 
@@ -233,7 +239,9 @@ mod tests {
         let x = vec![1.0];
         let (bt, bh) = linear_baseline(5);
         // At t=0: H₀(0)=0 → S = exp(0) = 1.0
-        let s = cox.predict_survival(&x, 0.0, &bt, &bh).unwrap();
+        let s = cox
+            .predict_survival(&x, 0.0, &bt, &bh)
+            .expect("predict_survival should succeed");
         assert!((s - 1.0).abs() < 1e-12, "S(0|x) must be 1.0");
     }
 
@@ -244,7 +252,9 @@ mod tests {
         let x = vec![1.5, -0.5];
         let (bt, bh) = linear_baseline(10);
         for &t in &[1.0, 3.0, 5.0, 10.0] {
-            let s = cox.predict_survival(&x, t, &bt, &bh).unwrap();
+            let s = cox
+                .predict_survival(&x, t, &bt, &bh)
+                .expect("predict_survival should succeed");
             assert!(s > 0.0 && s <= 1.0, "S({t}|x)={s} not in (0,1]");
         }
     }
@@ -256,8 +266,12 @@ mod tests {
         let x = vec![1.0];
         let (bt, bh) = linear_baseline(5);
         for &t in &[1.0, 2.0, 3.0, 5.0] {
-            let s = cox.predict_survival(&x, t, &bt, &bh).unwrap();
-            let h = cox.predict_cumulative_hazard(&x, t, &bt, &bh).unwrap();
+            let s = cox
+                .predict_survival(&x, t, &bt, &bh)
+                .expect("predict_survival should succeed");
+            let h = cox
+                .predict_cumulative_hazard(&x, t, &bt, &bh)
+                .expect("predict_cumulative_hazard should succeed");
             let neg_log_s = -s.ln();
             assert!(
                 (h - neg_log_s).abs() < 1e-10,
@@ -291,7 +305,8 @@ mod tests {
         let x = vec![1.0];
         let (bt, bh) = linear_baseline(10);
         let time_grid: Vec<f64> = (1..=10).map(|i| i as f64).collect();
-        let sf = predict_survival_curve(&cox, &x, &time_grid, &bt, &bh).unwrap();
+        let sf = predict_survival_curve(&cox, &x, &time_grid, &bt, &bh)
+            .expect("predict_survival_curve should succeed");
         assert_eq!(sf.times.len(), 10);
         assert_eq!(sf.values.len(), 10);
     }
@@ -315,7 +330,7 @@ mod tests {
         let baseline_cumhaz = vec![0.05, 0.12, 0.22, 0.35, 0.50];
         let time_grid = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let sf = predict_survival_curve(&cox, &x, &time_grid, &baseline_times, &baseline_cumhaz)
-            .unwrap();
+            .expect("value should be present");
         for i in 1..sf.values.len() {
             assert!(
                 sf.values[i] <= sf.values[i - 1] + 1e-10,
@@ -333,7 +348,9 @@ mod tests {
     fn zero_beta_hazard_ratio_one() {
         let cox = make_cox(vec![0.0, 0.0]);
         let x = vec![3.0, -2.0];
-        let hr = cox.predict_hazard_ratio(&x).unwrap();
+        let hr = cox
+            .predict_hazard_ratio(&x)
+            .expect("predict_hazard_ratio should succeed");
         assert!((hr - 1.0).abs() < 1e-12, "zero beta → HR=1, got {hr}");
     }
 
@@ -345,7 +362,9 @@ mod tests {
         let (bt, bh) = linear_baseline(20);
         let mut prev = 1.0_f64;
         for i in 1..=20 {
-            let s = cox.predict_survival(&x, i as f64, &bt, &bh).unwrap();
+            let s = cox
+                .predict_survival(&x, i as f64, &bt, &bh)
+                .expect("predict_survival should succeed");
             assert!(s <= prev + 1e-12, "S({i}) > S({}) — not monotone", i - 1);
             prev = s;
         }
@@ -356,9 +375,13 @@ mod tests {
     fn negative_beta_reduces_hazard() {
         let cox = make_cox(vec![-1.0]);
         let x = vec![2.0];
-        let lhr = cox.predict_log_hazard_ratio(&x).unwrap();
+        let lhr = cox
+            .predict_log_hazard_ratio(&x)
+            .expect("predict_log_hazard_ratio should succeed");
         assert!(lhr < 0.0, "negative beta × positive x → negative lhr");
-        let hr = cox.predict_hazard_ratio(&x).unwrap();
+        let hr = cox
+            .predict_hazard_ratio(&x)
+            .expect("predict_hazard_ratio should succeed");
         assert!(hr < 1.0, "negative lhr → HR < 1");
     }
 
@@ -367,8 +390,12 @@ mod tests {
     fn hazard_ratio_default_impl_is_exp_lhr() {
         let cox = make_cox(vec![0.0]);
         let x = vec![0.0];
-        let lhr = cox.predict_log_hazard_ratio(&x).unwrap();
-        let hr = cox.predict_hazard_ratio(&x).unwrap();
+        let lhr = cox
+            .predict_log_hazard_ratio(&x)
+            .expect("predict_log_hazard_ratio should succeed");
+        let hr = cox
+            .predict_hazard_ratio(&x)
+            .expect("predict_hazard_ratio should succeed");
         assert!((hr - lhr.exp()).abs() < 1e-12);
         assert!((hr - 1.0).abs() < 1e-12);
     }

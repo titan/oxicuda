@@ -94,9 +94,11 @@ mod tests {
     #[test]
     fn partial_trace_2q_product_state() {
         // |0⟩ ⊗ |0⟩ → trace out qubit 1 → still |0⟩⟨0|
-        let sv = StateVector::new_zero_state(2).unwrap();
+        let sv = StateVector::new_zero_state(2)
+            .expect("n_qubits=2 is a valid qubit count so zero-state construction cannot fail");
         let dm = DensityMatrix::from_pure_state(&sv);
-        let red = partial_trace(&dm, &[0], 2).unwrap();
+        let red = partial_trace(&dm, &[0], 2)
+            .expect("keeping qubit 0 from a 2-qubit 4×4 density matrix is a valid operation");
         assert_eq!(red.dim, 2);
         assert!((red.rho[0].re - 1.0).abs() < 1e-5);
     }

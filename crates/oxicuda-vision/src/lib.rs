@@ -8,23 +8,50 @@
 //! - **`convnext`**: ConvNeXt modern-CNN block (depthwise conv + channel
 //!   LayerNorm + inverted-bottleneck + layer scale).
 //! - **`clip`**: CLIP vision encoder, projection head, InfoNCE contrastive loss.
-//! - **`augment`**: geometric, photometric, and normalisation image augmentations.
+//! - **`augment`**: geometric, photometric, and normalisation image augmentations,
+//!   plus MixUp / CutMix batch mixing regularisers.
+//! - **`imgproc`**: classical image processing — Sobel gradients and the Canny
+//!   edge detector, binary/grayscale morphology, union-find connected-component
+//!   labelling, and the Hough line transform.
 //! - **`fpn`**: Feature Pyramid Network (lateral 1×1 convolutions + top-down pathway).
-//! - **`detection`**: RoI Align, DETR decoder, and bipartite set matching.
+//! - **`detection`**: RoI Align, DETR decoder, bipartite set matching,
+//!   IoU / GIoU / DIoU / CIoU box-regression losses, the RTMDet detector
+//!   (CSPNeXt backbone + PAFPN neck + decoupled head + SimOTA-lite cost), and
+//!   the OWL-ViT open-vocabulary detector (per-patch image-text matching).
+//! - **`segmentation`**: the Segment Anything Model (SAM) — ViT image encoder,
+//!   prompt encoder, and a two-way transformer mask decoder.
+//! - **`ssl`**: the DINOv2 self-supervised distillation recipe — ViT backbone
+//!   (`[CLS]` + patch tokens), weight-normalised prototype head, centred /
+//!   sharpened teacher-student DINO loss, EMA teacher, centering buffer, and the
+//!   iBOT masked-patch term.
+//! - **`text`**: the CLIP Transformer text encoder — token + positional
+//!   embeddings, causal self-attention blocks, EOS pooling, and joint-space
+//!   projection.
+//! - **`pointcloud`**: the Point Transformer vector self-attention layer over
+//!   kNN neighbourhoods.
+//! - **`losses`**: focal loss (sigmoid & softmax) and soft Dice segmentation loss.
 //! - **`ptx_kernels`**: 7 GPU PTX kernel string generators (SM 7.5–12.0).
 //!
 //! No CUDA SDK dependency; all forward passes run on CPU `f32` tensors
 //! using flat row-major `Vec<f32>` layouts.
 
 pub mod augment;
+pub mod blocks;
 pub mod clip;
 pub mod convnext;
 pub mod detection;
 pub mod error;
 pub mod fpn;
 pub mod handle;
+pub mod imgproc;
+pub mod losses;
+pub mod optimize;
 pub mod patch_embed;
+pub mod pointcloud;
 pub mod ptx_kernels;
+pub mod segmentation;
+pub mod ssl;
+pub mod text;
 pub mod vit;
 
 pub use error::{VisionError, VisionResult};
@@ -33,26 +60,51 @@ pub use handle::{LcgRng, SmVersion, VisionHandle};
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 pub mod prelude {
-    pub use crate::augment::{AugOp, Pipeline};
+    pub use crate::augment::{AugOp, MixOutput, Pipeline, cutmix, mixup};
     pub use crate::clip::{
         ClipVisionConfig, ClipVisionEncoder, ProjectionHead, contrastive::info_nce_loss,
     };
     pub use crate::convnext::block::{ConvNextBlock, ConvNextConfig};
     pub use crate::detection::{
-        AnchorConfig, AnchorGenerator, DetrConfig, DetrDecoder, MaskHead, MaskHeadConfig,
-        bipartite_match, iou, nms, roi_align, soft_nms,
+        AnchorConfig, AnchorGenerator, BBox, DetrConfig, DetrDecoder, IouBox, IouLossKind,
+        MaskHead, MaskHeadConfig, OwlVit, OwlVitConfig, OwlVitOutput, RtmDet, RtmDetConfig,
+        RtmDetOutput, bipartite_match, ciou_loss, decode_level, diou_loss, giou_loss, iou,
+        iou_loss, iou_loss_pairs, nms, roi_align, simota_cost, soft_nms,
     };
     pub use crate::error::{VisionError, VisionResult};
     pub use crate::fpn::{FeatureMap, Fpn, FpnConfig};
     pub use crate::handle::{LcgRng, SmVersion, VisionHandle};
+    pub use crate::imgproc::connected_components::{
+        ComponentLabels, Connectivity, connected_components,
+    };
+    pub use crate::imgproc::edges::{SobelOutput, canny, sobel_gradients};
+    pub use crate::imgproc::hough::{
+        HoughAccumulator, HoughConfig, HoughLine, hough_accumulate, hough_lines,
+    };
+    pub use crate::imgproc::morphology::{
+        StructuringElement, close, dilate, erode, morphological_gradient, open,
+    };
+    pub use crate::losses::dice::{dice_loss, dice_loss_default, dice_loss_squared};
+    pub use crate::losses::focal::{Reduction, binary_focal_loss, multiclass_focal_loss};
+    pub use crate::losses::quality::{ms_ssim, mse, psnr, ssim, ssim_default};
     pub use crate::patch_embed::{
         LearnablePosEmbed, PatchEmbed, PatchEmbedConfig, add_pos_embed, pos_2d_sincos, prepend_cls,
     };
+    pub use crate::pointcloud::{PointAttention, PointTransformerConfig, PointTransformerLayer};
     pub use crate::ptx_kernels::{
         adaptive_avg_pool_ptx, bilinear_interp_ptx, contrastive_loss_ptx, focal_loss_ptx,
         image_normalize_ptx, patch_embed_ptx, roi_align_ptx,
     };
+    pub use crate::segmentation::{
+        MaskPrediction, Sam, SamConfig, TwoWayAttentionBlock, TwoWayTransformer,
+    };
+    pub use crate::ssl::{
+        BackboneOutput, CenteringBuffer, DinoBackbone, DinoHead, cross_entropy, dino_loss,
+        ibot_loss, student_softmax, teacher_softmax,
+    };
+    pub use crate::text::{ClipTextConfig, ClipTextEncoder};
     pub use crate::vit::swin::{SwinBlock, SwinConfig, SwinWeights};
+    pub use crate::vit::vit_patch::{VitPatchConfig, VitPatchEmbed};
     pub use crate::vit::{ViTConfig, ViTEncoder, ViTModel};
 }
 

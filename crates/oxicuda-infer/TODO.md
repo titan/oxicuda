@@ -6,7 +6,7 @@ vLLM-style continuous batching inference engine with PagedAttention KV cache, sp
 
 ## Implementation Status
 
-**Actual: 5,736 SLoC across 21 files (includes Markdown doc-comments) / 4,060 pure Rust SLoC**
+**Actual: 7,754 SLoC across 33 files (includes Markdown doc-comments) / 4,060 pure Rust SLoC**
 
 Production-grade GPU inference engine implementing the algorithms required for efficient large
 language-model serving: PagedAttention KV cache (Kwon et al., 2023), continuous batching
@@ -80,8 +80,14 @@ structured sampling.
 - [x] Pluggable `ModelRunner` trait + `MockModelRunner` for unit testing (`executor/model_runner.rs`)
 - [x] Repetition penalty in `SamplingParams` (`batch/sequence.rs`)
 - [x] (P2) Structured output / JSON-constrained sampling (sampling/json_constrained.rs -- char-level pushdown JSON validator state machine + logit masking of structurally-invalid tokens)
+- [x] `sampling/logits_processor.rs` / `LogitsProcessor` — composable logits-processing pipeline: `LogitsProcessor` trait with `process()` over raw logit `Vec<f32>`; built-in processors: `TemperatureScaling`, `RepetitionPenalty`, `TopKFilter`, `TopPFilter`, `MinPFilter`; `LogitsProcessorChain` for sequential composition before sampling
+- [x] `sampling/beam_search.rs` / `BeamSearch` — extended `BeamSearch` struct wrapping `BeamSearchState` with configurable `BeamSearchConfig { beam_width, length_penalty_alpha, min_length, no_repeat_ngram_size }`; `BeamSearch::run()` drives the multi-step decode loop
 - [ ] (P2) Chunked prefill for long-prompt latency reduction (sequence chunking exists but not pipelined)
 - [x] (P2) Speculative decoding with verified-tree / Medusa heads (sampling/medusa.rs -- Cai 2024; multi-head top-k candidate tree capped at max_candidates + verify longest-accepted-prefix; extends single-draft SpeculativeDecoder)
+- [x] `kv_cache/paged_kv.rs` — Paged KV cache (Kwon 2023 vLLM): physical KV block table + logical page mapping; dynamic allocation for variable-length sequences; O(1) amortised block allocation
+- [x] `speculative/drafter.rs` — Speculative decoding (Leviathan 2023): small draft model generates k tokens; target model verifies in one forward pass; acceptance ratio approach with temperature-corrected rejection sampling
+- [ ] `quantization/awq.rs` — AWQ activation-aware weight quantization (Lin 2023): per-channel weight scaling based on activation magnitude; protect salient weights from INT4 rounding; no gradient needed
+- [x] `serving/continuous_batching.rs` — Continuous batching scheduler (Orca 2022): iteration-level scheduling; add new sequences at any step; preemption via swap/recompute; `ContinuousBatchScheduler`
 
 ## Dependencies
 
@@ -94,7 +100,7 @@ structured sampling.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 138 passing (root TODO.md count)
+- Tests: 297 passing (root TODO.md count)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference paths work; runtime GPU executor returns `UnsupportedPlatform`

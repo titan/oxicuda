@@ -452,7 +452,8 @@ mod tests {
     fn fit_all_positive_labels_yields_bin_probs_one() {
         let scores = vec![0.1_f32, 0.3, 0.5, 0.7, 0.9];
         let labels = vec![1.0_f32; 5];
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         // Every occupied bin should have prob = 1.0.
         for (&cnt, &prob) in cal.bin_counts.iter().zip(cal.bin_probs.iter()) {
             if cnt > 0 {
@@ -468,7 +469,8 @@ mod tests {
     fn fit_all_negative_labels_yields_bin_probs_zero() {
         let scores = vec![0.1_f32, 0.3, 0.5, 0.7, 0.9];
         let labels = vec![0.0_f32; 5];
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         for (&cnt, &prob) in cal.bin_counts.iter().zip(cal.bin_probs.iter()) {
             if cnt > 0 {
                 assert!(
@@ -533,7 +535,7 @@ mod tests {
             strategy: BinStrategy::EqualCount,
             ..default_cfg()
         };
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).expect("fit should succeed");
         assert_eq!(cal.bin_probs.len(), 10);
         assert_eq!(cal.boundaries.len(), 11);
     }
@@ -543,14 +545,16 @@ mod tests {
     #[test]
     fn find_bin_returns_zero_for_score_at_lower_boundary() {
         let (scores, labels) = linear_dataset(50);
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         assert_eq!(cal.find_bin(0.0), 0);
     }
 
     #[test]
     fn find_bin_returns_last_bin_for_score_at_one() {
         let (scores, labels) = linear_dataset(50);
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         let n_bins = cal.config.n_bins;
         assert_eq!(cal.find_bin(1.0), n_bins - 1);
     }
@@ -558,7 +562,8 @@ mod tests {
     #[test]
     fn find_bin_result_always_in_range() {
         let (scores, labels) = linear_dataset(100);
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         let n_bins = cal.config.n_bins;
         for i in 0..=20 {
             let s = i as f32 / 20.0;
@@ -579,21 +584,24 @@ mod tests {
             n_bins: 2,
             ..default_cfg()
         };
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).expect("fit should succeed");
         // Bin 0 (scores in [0, 0.5)): 5 samples, 0 positive → prob = 0.0
-        let p_low = cal.calibrate(0.2).unwrap();
+        let p_low = cal.calibrate(0.2).expect("calibrate should succeed");
         assert!((p_low - 0.0).abs() < 1e-6, "expected 0.0, got {p_low}");
         // Bin 1 (scores in [0.5, 1.0]): 5 samples, 5 positive → prob = 1.0
-        let p_high = cal.calibrate(0.8).unwrap();
+        let p_high = cal.calibrate(0.8).expect("calibrate should succeed");
         assert!((p_high - 1.0).abs() < 1e-6, "expected 1.0, got {p_high}");
     }
 
     #[test]
     fn calibrate_batch_length_matches_input() {
         let (scores, labels) = linear_dataset(30);
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         let test_scores = vec![0.1_f32, 0.4, 0.6, 0.9];
-        let out = cal.calibrate_batch(&test_scores).unwrap();
+        let out = cal
+            .calibrate_batch(&test_scores)
+            .expect("calibrate_batch should succeed");
         assert_eq!(out.len(), 4);
     }
 
@@ -613,8 +621,8 @@ mod tests {
             n_bins: 2,
             ..default_cfg()
         };
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).unwrap();
-        let ece_val = cal.ece(&scores, &labels).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).expect("fit should succeed");
+        let ece_val = cal.ece(&scores, &labels).expect("ece should succeed");
         assert!(
             ece_val.abs() < 1e-5,
             "ECE should be 0 for perfect predictor, got {ece_val}"
@@ -630,8 +638,8 @@ mod tests {
             n_bins: 2,
             ..default_cfg()
         };
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).unwrap();
-        let ece_val = cal.ece(&scores, &labels).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).expect("fit should succeed");
+        let ece_val = cal.ece(&scores, &labels).expect("ece should succeed");
         assert!(
             ece_val > 0.0,
             "ECE should be > 0 for miscalibrated predictor"
@@ -641,7 +649,8 @@ mod tests {
     #[test]
     fn ece_rejects_empty_input() {
         let (scores, labels) = linear_dataset(10);
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         let r = cal.ece(&[], &[]);
         assert!(matches!(r, Err(BayesError::CalibrationSetEmpty)));
     }
@@ -649,7 +658,8 @@ mod tests {
     #[test]
     fn ece_rejects_mismatched_lengths() {
         let (scores, labels) = linear_dataset(10);
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         let r = cal.ece(&[0.5_f32], &[0.0_f32, 1.0_f32]);
         assert!(matches!(r, Err(BayesError::DimensionMismatch { .. })));
     }
@@ -666,7 +676,7 @@ mod tests {
             min_bin_count: 1,
             ..default_cfg()
         };
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, cfg).expect("fit should succeed");
         // No bin_prob should be NaN.
         for (b, &p) in cal.bin_probs.iter().enumerate() {
             assert!(
@@ -681,10 +691,11 @@ mod tests {
     #[test]
     fn calibrate_output_always_in_unit_interval() {
         let (scores, labels) = linear_dataset(100);
-        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg()).unwrap();
+        let cal = HistogramBinCalibrator::fit(&scores, &labels, default_cfg())
+            .expect("value should be present");
         for i in 0..=20 {
             let s = i as f32 / 20.0;
-            let p = cal.calibrate(s).unwrap();
+            let p = cal.calibrate(s).expect("calibrate should succeed");
             assert!(
                 (0.0..=1.0).contains(&p),
                 "calibrate({s}) = {p} outside [0, 1]"

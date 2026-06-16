@@ -86,13 +86,17 @@ mod tests {
 
     #[test]
     fn halton_sequence_shape() {
-        let s = halton_sequence(20, 3).unwrap();
+        let s = halton_sequence(20, 3).expect(
+            "halton_sequence with 3 dimensions is within the 10-prime table and should succeed",
+        );
         assert_eq!(s.len(), 60);
     }
 
     #[test]
     fn halton_sequence_in_unit_cube() {
-        let s = halton_sequence(50, 5).unwrap();
+        let s = halton_sequence(50, 5).expect(
+            "halton_sequence with 5 dimensions is within the 10-prime table and should succeed",
+        );
         for &v in &s {
             assert!((0.0..=1.0).contains(&v), "Halton point {v} not in [0,1]");
         }
@@ -107,7 +111,9 @@ mod tests {
     #[test]
     fn halton_low_discrepancy_2d() {
         // 100 points in 2D: verify they cover the space reasonably
-        let s = halton_sequence(100, 2).unwrap();
+        let s = halton_sequence(100, 2).expect(
+            "halton_sequence with 2 dimensions should succeed for low-discrepancy coverage test",
+        );
         // Check that no 0.1×0.1 cell has more than 4 points (expected ~1)
         let n_cells = 10;
         let mut counts = vec![0_usize; n_cells * n_cells];
@@ -118,7 +124,10 @@ mod tests {
             let iy = (y * n_cells as f32).min(n_cells as f32 - 1.0) as usize;
             counts[ix * n_cells + iy] += 1;
         }
-        let max_count = *counts.iter().max().unwrap();
+        let max_count = *counts
+            .iter()
+            .max()
+            .expect("cell counts vec has 100 elements so max() always returns Some");
         assert!(
             max_count <= 4,
             "Max cell count too high: {max_count} (low-discrepancy should spread evenly)"

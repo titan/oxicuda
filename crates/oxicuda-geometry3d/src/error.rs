@@ -41,6 +41,9 @@ pub enum Geom3dError {
     #[error("invalid topology: {reason}")]
     InvalidTopology { reason: &'static str },
 
+    #[error("invalid covariance: {reason}")]
+    InvalidCovariance { reason: &'static str },
+
     #[error("NaN encountered at: {location}")]
     NanEncountered { location: &'static str },
 
@@ -143,6 +146,15 @@ mod tests {
             reason: "degenerate face",
         };
         assert!(e.to_string().contains("degenerate face"));
+    }
+
+    #[test]
+    fn error_display_invalid_covariance() {
+        let e = Geom3dError::InvalidCovariance {
+            reason: "not positive-definite",
+        };
+        assert!(e.to_string().contains("not positive-definite"));
+        assert!(e.to_string().contains("covariance"));
     }
 
     #[test]

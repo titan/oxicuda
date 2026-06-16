@@ -356,9 +356,11 @@ mod tests {
     #[test]
     fn build_sets_len_and_not_empty() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(1);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         assert_eq!(idx.len(), n);
         assert!(!idx.is_empty());
     }
@@ -366,11 +368,15 @@ mod tests {
     #[test]
     fn adc_table_dimensions_and_nonneg() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(2);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let query = vec![10.0_f32, 5.0, 0.0, 0.0];
-        let table = idx.adc_table(&query).unwrap();
+        let table = idx
+            .adc_table(&query)
+            .expect("adc_table should succeed with valid query");
         assert_eq!(table.len(), 2 * 4);
         for &v in &table {
             assert!(v >= 0.0, "ADC table entry negative: {v}");
@@ -389,19 +395,24 @@ mod tests {
             pq_m: 2,
             pq_ksub: 2,
         };
-        let mut idx = HnswPq::new(cfg).unwrap();
+        let mut idx = HnswPq::new(cfg).expect("HnswPq::new should succeed with valid config");
         let data = vec![0.0_f32, 0.0, 10.0, 10.0];
         let mut rng = LcgRng::new(3);
-        idx.build(&data, 2, &mut rng).unwrap();
+        idx.build(&data, 2, &mut rng)
+            .expect("build should succeed with valid data");
         // Query equal to point 0.
         let query = vec![0.0_f32, 0.0];
-        let table = idx.adc_table(&query).unwrap();
+        let table = idx
+            .adc_table(&query)
+            .expect("adc_table should succeed with valid query");
         // For each node, the ADC distance computed via the public method must
         // equal a manual sum of `table[s * ksub + code[s]]`.
         let pq_m = 2;
         let ksub = 2;
         for node in 0..2u32 {
-            let api_d = idx.adc_distance(&table, node).unwrap();
+            let api_d = idx
+                .adc_distance(&table, node)
+                .expect("adc_distance should succeed for valid node");
             let codes = idx.codes();
             let row = &codes[node as usize * pq_m..(node as usize + 1) * pq_m];
             let mut manual = 0.0_f32;
@@ -418,11 +429,13 @@ mod tests {
     #[test]
     fn search_returns_sorted_ascending() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(4);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let query = vec![0.0_f32, 0.0, 0.0, 0.0];
-        let res = idx.search(&query, 3).unwrap();
+        let res = idx.search(&query, 3).expect("search should return results");
         assert!(res.len() <= 3);
         for w in res.windows(2) {
             assert!(w[0].1 <= w[1].1, "not ascending: {res:?}");
@@ -441,12 +454,13 @@ mod tests {
             pq_m: 2,
             pq_ksub: 6,
         };
-        let mut idx = HnswPq::new(cfg).unwrap();
+        let mut idx = HnswPq::new(cfg).expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(5);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         for target in 0..n {
             let q = &data[target * dim..(target + 1) * dim];
-            let res = idx.search(q, 1).unwrap();
+            let res = idx.search(q, 1).expect("search should return results");
             assert_eq!(res.len(), 1);
             assert_eq!(res[0].0 as usize, target, "target={target} res={res:?}");
             assert!(res[0].1 < 1e-3, "target={target} dist={}", res[0].1);
@@ -456,26 +470,34 @@ mod tests {
     #[test]
     fn search_k_greater_than_n_returns_n() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(6);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let query = vec![0.0_f32, 0.0, 0.0, 0.0];
-        let res = idx.search(&query, 100).unwrap();
+        let res = idx
+            .search(&query, 100)
+            .expect("search should return results");
         assert_eq!(res.len(), n);
     }
 
     #[test]
     fn deterministic_build_and_search() {
         let (data, n, dim) = well_separated_4d();
-        let mut a = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
-        let mut b = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut a = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
+        let mut b = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut ra = LcgRng::new(7);
         let mut rb = LcgRng::new(7);
-        a.build(&data, n, &mut ra).unwrap();
-        b.build(&data, n, &mut rb).unwrap();
+        a.build(&data, n, &mut ra)
+            .expect("build should succeed with valid data");
+        b.build(&data, n, &mut rb)
+            .expect("build should succeed with valid data");
         let query = vec![10.0_f32, 0.0, 0.0, 0.0];
-        let resa = a.search(&query, 3).unwrap();
-        let resb = b.search(&query, 3).unwrap();
+        let resa = a.search(&query, 3).expect("search should return results");
+        let resb = b.search(&query, 3).expect("search should return results");
         assert_eq!(resa, resb);
     }
 
@@ -539,7 +561,8 @@ mod tests {
 
     #[test]
     fn err_build_n_zero() {
-        let mut idx = HnswPq::new(small_cfg(4, 2, 4)).unwrap();
+        let mut idx =
+            HnswPq::new(small_cfg(4, 2, 4)).expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(8);
         let r = idx.build(&[], 0, &mut rng);
         assert!(matches!(r, Err(AnnError::EmptyInput)));
@@ -547,7 +570,8 @@ mod tests {
 
     #[test]
     fn err_build_data_length_mismatch() {
-        let mut idx = HnswPq::new(small_cfg(4, 2, 4)).unwrap();
+        let mut idx =
+            HnswPq::new(small_cfg(4, 2, 4)).expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(9);
         let r = idx.build(&[0.0_f32, 1.0, 2.0], 2, &mut rng);
         assert!(matches!(r, Err(AnnError::DimensionMismatch { .. })));
@@ -556,9 +580,11 @@ mod tests {
     #[test]
     fn err_query_wrong_length() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(10);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let bad = vec![0.0_f32; 3];
         assert!(matches!(
             idx.search(&bad, 1),
@@ -573,9 +599,11 @@ mod tests {
     #[test]
     fn err_k_zero() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(11);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let q = vec![0.0_f32; dim];
         assert!(matches!(
             idx.search(&q, 0),
@@ -586,9 +614,11 @@ mod tests {
     #[test]
     fn codebook_dimensions_consistent() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(12);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let cb = idx.codebook();
         assert_eq!(cb.m, 2);
         assert_eq!(cb.ksub, 4);
@@ -607,9 +637,10 @@ mod tests {
             pq_m: 2,
             pq_ksub: 5,
         };
-        let mut idx = HnswPq::new(cfg).unwrap();
+        let mut idx = HnswPq::new(cfg).expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(13);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let codes = idx.codes();
         assert_eq!(codes.len(), n * 2);
         assert!(codes.iter().all(|&c| (c as usize) < 5));
@@ -618,13 +649,17 @@ mod tests {
     #[test]
     fn adc_table_positive_for_nontrivial_query() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(14);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         // A query far from every cluster centre should have a sum of minimum
         // table-row values that is strictly positive.
         let query = vec![1000.0_f32, 1000.0, 1000.0, 1000.0];
-        let table = idx.adc_table(&query).unwrap();
+        let table = idx
+            .adc_table(&query)
+            .expect("adc_table should succeed with valid query");
         let pq_m = 2usize;
         let ksub = 4usize;
         let mut min_sum = 0.0_f32;
@@ -641,7 +676,8 @@ mod tests {
 
     #[test]
     fn empty_index_search_errors() {
-        let idx = HnswPq::new(small_cfg(4, 2, 4)).unwrap();
+        let idx =
+            HnswPq::new(small_cfg(4, 2, 4)).expect("HnswPq::new should succeed with valid config");
         let q = vec![0.0_f32; 4];
         let r = idx.search(&q, 1);
         assert!(matches!(r, Err(AnnError::IndexEmpty)));
@@ -650,11 +686,15 @@ mod tests {
     #[test]
     fn adc_distance_id_out_of_range_errors() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(15);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let q = vec![0.0_f32; dim];
-        let table = idx.adc_table(&q).unwrap();
+        let table = idx
+            .adc_table(&q)
+            .expect("adc_table should succeed with valid query");
         let r = idx.adc_distance(&table, n as u32);
         assert!(matches!(r, Err(AnnError::IdOutOfRange { .. })));
     }
@@ -662,9 +702,11 @@ mod tests {
     #[test]
     fn adc_distance_bad_table_length_errors() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(16);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         let bogus = vec![0.0_f32; 3]; // not pq_m * ksub == 8
         let r = idx.adc_distance(&bogus, 0);
         assert!(matches!(r, Err(AnnError::DimensionMismatch { .. })));
@@ -683,22 +725,28 @@ mod tests {
             pq_m: 2,
             pq_ksub: 6,
         };
-        let mut idx = HnswPq::new(cfg).unwrap();
+        let mut idx = HnswPq::new(cfg).expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(17);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
 
         let query = vec![3.0_f32, -2.0, 0.5, 1.5];
-        let table = idx.adc_table(&query).unwrap();
+        let table = idx
+            .adc_table(&query)
+            .expect("adc_table should succeed with valid query");
 
         let mut recon = vec![0.0_f32; dim];
         for i in 0..n {
-            idx.reconstruct_into(i, &mut recon).unwrap();
+            idx.reconstruct_into(i, &mut recon)
+                .expect("reconstruct_into should succeed for valid index");
             let manual: f32 = query
                 .iter()
                 .zip(recon.iter())
                 .map(|(a, b)| (a - b) * (a - b))
                 .sum();
-            let api = idx.adc_distance(&table, i as u32).unwrap();
+            let api = idx
+                .adc_distance(&table, i as u32)
+                .expect("adc_distance should succeed for valid node");
             assert!(
                 (api - manual).abs() < 1e-4,
                 "i={i} api={api} manual={manual}"
@@ -718,14 +766,16 @@ mod tests {
             pq_m: 2,
             pq_ksub: 2,
         };
-        let mut idx = HnswPq::new(cfg).unwrap();
+        let mut idx = HnswPq::new(cfg).expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(18);
-        idx.build(&data, n, &mut rng).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
         assert_eq!(idx.len(), n);
         // Smaller subsequent build replaces state.
         let small = &data[..(3 * dim)];
         let mut rng2 = LcgRng::new(19);
-        idx.build(small, 3, &mut rng2).unwrap();
+        idx.build(small, 3, &mut rng2)
+            .expect("rebuild should succeed with valid data");
         assert_eq!(idx.len(), 3);
         assert_eq!(idx.codes().len(), 3 * 2);
     }
@@ -733,10 +783,14 @@ mod tests {
     #[test]
     fn encode_roundtrip_yields_valid_codes() {
         let (data, n, dim) = well_separated_4d();
-        let mut idx = HnswPq::new(small_cfg(dim, 2, 4)).unwrap();
+        let mut idx = HnswPq::new(small_cfg(dim, 2, 4))
+            .expect("HnswPq::new should succeed with valid config");
         let mut rng = LcgRng::new(20);
-        idx.build(&data, n, &mut rng).unwrap();
-        let code = idx.encode(&data[0..dim]).unwrap();
+        idx.build(&data, n, &mut rng)
+            .expect("build should succeed with valid data");
+        let code = idx
+            .encode(&data[0..dim])
+            .expect("encode should succeed for valid vector");
         assert_eq!(code.len(), 2);
         assert!(code.iter().all(|&c| (c as usize) < 4));
     }

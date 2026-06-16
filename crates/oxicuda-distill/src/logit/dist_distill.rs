@@ -136,7 +136,7 @@ mod tests {
     fn dist_loss_finite() {
         let s = vec![vec![1.0_f32, 2.0, 3.0], vec![1.5, 2.5, 3.5]];
         let t = vec![vec![1.1_f32, 1.9, 3.1], vec![1.4, 2.6, 3.4]];
-        let loss = dist_loss(&s, &t, 1.0, 0.5).unwrap();
+        let loss = dist_loss(&s, &t, 1.0, 0.5).expect("dist_loss should succeed");
         assert!(loss.is_finite());
     }
 }

@@ -14,4 +14,6 @@
 //! | Dirichlet-Multinomial  | Dirichlet(α)      | Multinomial   | Dirichlet(α+n)     |
 
 pub mod conjugate;
+pub mod dirichlet_mult;
 pub use conjugate::*;
+pub use dirichlet_mult::{DirMultFitConfig, DirichletMultinomial, dirichlet_multinomial_mle};

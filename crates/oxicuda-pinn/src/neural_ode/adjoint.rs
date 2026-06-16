@@ -149,33 +149,39 @@ mod tests {
 
     #[test]
     fn node_forward_shape() {
-        let (y_final, checkpoints) = node_forward(&exp_decay, 0.0, 1.0, &[1.0], 0.1).unwrap();
+        let (y_final, checkpoints) = node_forward(&exp_decay, 0.0, 1.0, &[1.0], 0.1)
+            .expect("NODE forward pass with valid exp-decay ODE should succeed");
         assert_eq!(y_final.len(), 1);
         assert!(!checkpoints.is_empty());
     }
 
     #[test]
     fn node_forward_exp_decay_accurate() {
-        let (y_final, _) = node_forward(&exp_decay, 0.0, 1.0, &[1.0], 0.01).unwrap();
+        let (y_final, _) = node_forward(&exp_decay, 0.0, 1.0, &[1.0], 0.01)
+            .expect("NODE forward pass with small step size should succeed");
         let expected = (-1.0_f32).exp();
         assert!((y_final[0] - expected).abs() < 1e-4);
     }
 
     #[test]
     fn adjoint_grad_returns_correct_shape() {
-        let (_, traj) = node_forward(&exp_decay, 0.0, 1.0, &[1.0], 0.1).unwrap();
+        let (_, traj) = node_forward(&exp_decay, 0.0, 1.0, &[1.0], 0.1)
+            .expect("NODE forward pass for adjoint shape test should succeed");
         let dfdy = |_t: f32, _y: &[f32]| vec![-1.0_f32]; // df/dy = -1 for dy/dt = -y
         let dfdth = |_t: f32, _y: &[f32]| vec![0.0_f32; 2]; // 2 dummy params
-        let dl_dth = node_adjoint_grad(&exp_decay, &dfdy, &dfdth, &traj, &[1.0], 0.1).unwrap();
+        let dl_dth = node_adjoint_grad(&exp_decay, &dfdy, &dfdth, &traj, &[1.0], 0.1)
+            .expect("adjoint gradient computation should return correct shape");
         assert_eq!(dl_dth.len(), 2);
     }
 
     #[test]
     fn adjoint_grad_finite_values() {
-        let (_, traj) = node_forward(&exp_decay, 0.0, 0.5, &[1.0], 0.05).unwrap();
+        let (_, traj) = node_forward(&exp_decay, 0.0, 0.5, &[1.0], 0.05)
+            .expect("NODE forward pass for adjoint finite-value test should succeed");
         let dfdy = |_t: f32, _y: &[f32]| vec![-1.0_f32];
         let dfdth = |_t: f32, _y: &[f32]| vec![1.0_f32];
-        let dl_dth = node_adjoint_grad(&exp_decay, &dfdy, &dfdth, &traj, &[1.0], 0.05).unwrap();
+        let dl_dth = node_adjoint_grad(&exp_decay, &dfdy, &dfdth, &traj, &[1.0], 0.05)
+            .expect("adjoint gradient values should be finite for exp-decay ODE");
         assert!(
             dl_dth.iter().all(|v| v.is_finite()),
             "dL/dθ not finite: {:?}",
@@ -203,7 +209,8 @@ mod tests {
             dy[0] = -y[0];
             dy[1] = -2.0 * y[1];
         }
-        let (y_final, _) = node_forward(&two_dim, 0.0, 1.0, &[1.0, 1.0], 0.01).unwrap();
+        let (y_final, _) = node_forward(&two_dim, 0.0, 1.0, &[1.0, 1.0], 0.01)
+            .expect("NODE forward pass for 2D ODE should succeed");
         assert_eq!(y_final.len(), 2);
         assert!((y_final[0] - (-1.0_f32).exp()).abs() < 1e-4);
         assert!((y_final[1] - (-2.0_f32).exp()).abs() < 1e-3);
@@ -215,11 +222,17 @@ mod tests {
             dy[0] = -y[0];
             dy[1] = -y[1];
         }
-        let (_, traj) = node_forward(&two_dim_ode, 0.0, 0.5, &[1.0, 1.0], 0.1).unwrap();
+        let (_, traj) = node_forward(&two_dim_ode, 0.0, 0.5, &[1.0, 1.0], 0.1)
+            .expect("NODE forward pass for 2D adjoint param-count test should succeed");
         let dfdy = |_t: f32, _y: &[f32]| vec![-1.0_f32, 0.0, 0.0, -1.0]; // 2x2 identity * -1
         let dfdth = |_t: f32, _y: &[f32]| vec![0.1_f32, 0.2_f32, 0.3_f32]; // 3 params
         let result = node_adjoint_grad(&two_dim_ode, &dfdy, &dfdth, &traj, &[1.0, 1.0], 0.1);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 3);
+        assert_eq!(
+            result
+                .expect("2D adjoint gradient result should be Ok")
+                .len(),
+            3
+        );
     }
 }

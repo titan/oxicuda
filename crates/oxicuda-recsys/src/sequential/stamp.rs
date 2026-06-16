@@ -465,9 +465,11 @@ mod tests {
         // For a single-click session, the long-term mean equals the only
         // embedding, which also is x_t. So the attention input collapses.
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
         // We exploit the manually-computed gate to assert.
-        let gates = model.stamp_attention_gates(&[2usize]).unwrap();
+        let gates = model
+            .stamp_attention_gates(&[2usize])
+            .expect("stamp_attention_gates should succeed");
         assert_eq!(gates.len(), 1);
         // The single gate must be finite.
         assert!(gates[0].is_finite());
@@ -482,7 +484,7 @@ mod tests {
             n_items: 3,
         };
         let mut rng = LcgRng::new(123);
-        let mut model = Stamp::new(cfg, &mut rng).unwrap();
+        let mut model = Stamp::new(cfg, &mut rng).expect("new should succeed");
         // Overwrite weights with deterministic small values so the math is
         // checkable by hand.
         model.item_embeds = vec![
@@ -497,7 +499,9 @@ mod tests {
         model.v_a = vec![1.0, 1.0];
 
         let session = [0_usize, 1];
-        let gates = model.stamp_attention_gates(&session).unwrap();
+        let gates = model
+            .stamp_attention_gates(&session)
+            .expect("stamp_attention_gates should succeed");
         // m_s = ((0.10+0.30)/2, (0.20+0.40)/2) = (0.20, 0.30)
         // x_t = (0.30, 0.40)
         // shared = W_a1·x_t + W_a2·m_s + b_a
@@ -532,10 +536,12 @@ mod tests {
             n_items: 4,
         };
         let mut rng = LcgRng::new(7);
-        let mut model = Stamp::new(cfg, &mut rng).unwrap();
+        let mut model = Stamp::new(cfg, &mut rng).expect("new should succeed");
         model.v_a = vec![1.0, 0.0, 0.0];
         let session = [0_usize, 1, 2];
-        let gates = model.stamp_attention_gates(&session).unwrap();
+        let gates = model
+            .stamp_attention_gates(&session)
+            .expect("stamp_attention_gates should succeed");
         for &g in &gates {
             assert!(
                 g > 0.0 && g < 1.0,
@@ -553,7 +559,7 @@ mod tests {
             n_items: 3,
         };
         let mut rng = LcgRng::new(123);
-        let mut model = Stamp::new(cfg, &mut rng).unwrap();
+        let mut model = Stamp::new(cfg, &mut rng).expect("new should succeed");
         // Big positive pre-activations so each sigmoid is ≈ 1 → sum ≈ 2 >> 1.
         model.item_embeds = vec![10.0, 10.0, 10.0, 10.0, 10.0, 10.0];
         model.w_a0 = vec![1.0, 0.0, 0.0, 1.0];
@@ -562,7 +568,9 @@ mod tests {
         model.b_a = vec![0.0, 0.0];
         model.v_a = vec![1.0, 1.0];
         let session = [0_usize, 1];
-        let gates = model.stamp_attention_gates(&session).unwrap();
+        let gates = model
+            .stamp_attention_gates(&session)
+            .expect("stamp_attention_gates should succeed");
         let s: f32 = gates.iter().sum();
         assert!((s - 1.0).abs() > 0.5, "sum {s} should not be close to 1.0");
     }
@@ -575,7 +583,7 @@ mod tests {
             n_items: 5,
         };
         let mut rng = LcgRng::new(0xCAFE);
-        let mut model = Stamp::new(cfg.clone(), &mut rng).unwrap();
+        let mut model = Stamp::new(cfg.clone(), &mut rng).expect("value should be present");
         for k in 0..cfg.embed_dim {
             let mut v_a = vec![0.0_f32; cfg.embed_dim];
             if let Some(slot) = v_a.get_mut(k) {
@@ -583,7 +591,9 @@ mod tests {
             }
             model.v_a = v_a;
             let session: Vec<usize> = (0..cfg.n_items).collect();
-            let gates = model.stamp_attention_gates(&session).unwrap();
+            let gates = model
+                .stamp_attention_gates(&session)
+                .expect("stamp_attention_gates should succeed");
             for &g in &gates {
                 assert!(g > 0.0 && g < 1.0, "gate {g} not in (0,1) at k={k}");
             }
@@ -593,17 +603,23 @@ mod tests {
     #[test]
     fn output_length_equals_n_items() {
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
-        let logits = model.forward_session(&[0_usize, 1, 2, 3]).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
+        let logits = model
+            .forward_session(&[0_usize, 1, 2, 3])
+            .expect("forward_session should succeed");
         assert_eq!(logits.len(), 6);
     }
 
     #[test]
     fn identical_sessions_identical_logits_determinism() {
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
-        let logits_a = model.forward_session(&[1_usize, 2, 3]).unwrap();
-        let logits_b = model.forward_session(&[1_usize, 2, 3]).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
+        let logits_a = model
+            .forward_session(&[1_usize, 2, 3])
+            .expect("forward_session should succeed");
+        let logits_b = model
+            .forward_session(&[1_usize, 2, 3])
+            .expect("forward_session should succeed");
         assert_eq!(logits_a.len(), logits_b.len());
         for (a, b) in logits_a.iter().zip(logits_b.iter()) {
             assert!((a - b).abs() < 1e-7);
@@ -617,9 +633,13 @@ mod tests {
         // permutation invariant because x_t = last item, but for a session
         // of identical items the last is unchanged either way.
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
-        let logits_a = model.forward_session(&[2_usize, 2, 2, 2]).unwrap();
-        let logits_b = model.forward_session(&[2_usize, 2, 2, 2]).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
+        let logits_a = model
+            .forward_session(&[2_usize, 2, 2, 2])
+            .expect("forward_session should succeed");
+        let logits_b = model
+            .forward_session(&[2_usize, 2, 2, 2])
+            .expect("forward_session should succeed");
         for (a, b) in logits_a.iter().zip(logits_b.iter()) {
             assert!((a - b).abs() < 1e-7);
         }
@@ -628,11 +648,15 @@ mod tests {
     #[test]
     fn last_item_replacement_changes_logits() {
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
         let session_a = [0_usize, 1, 2];
         let session_b = [0_usize, 1, 3];
-        let logits_a = model.forward_session(&session_a).unwrap();
-        let logits_b = model.forward_session(&session_b).unwrap();
+        let logits_a = model
+            .forward_session(&session_a)
+            .expect("forward_session should succeed");
+        let logits_b = model
+            .forward_session(&session_b)
+            .expect("forward_session should succeed");
         let diff: f32 = logits_a
             .iter()
             .zip(logits_b.iter())
@@ -647,7 +671,7 @@ mod tests {
     #[test]
     fn err_empty_session() {
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
         assert!(matches!(
             model.forward_session(&[]),
             Err(RecsysError::EmptyInput)
@@ -665,7 +689,7 @@ mod tests {
     #[test]
     fn err_item_id_out_of_bounds() {
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
         // n_items == 6, id 6 is OOR.
         assert!(matches!(
             model.forward_session(&[0_usize, 6]),
@@ -707,8 +731,8 @@ mod tests {
     fn deterministic_init_given_seed() {
         let mut rng_a = LcgRng::new(2026);
         let mut rng_b = LcgRng::new(2026);
-        let model_a = Stamp::new(default_cfg(), &mut rng_a).unwrap();
-        let model_b = Stamp::new(default_cfg(), &mut rng_b).unwrap();
+        let model_a = Stamp::new(default_cfg(), &mut rng_a).expect("value should be present");
+        let model_b = Stamp::new(default_cfg(), &mut rng_b).expect("value should be present");
         assert_eq!(model_a.item_embeds, model_b.item_embeds);
         assert_eq!(model_a.w_a0, model_b.w_a0);
         assert_eq!(model_a.w_a1, model_b.w_a1);
@@ -716,8 +740,12 @@ mod tests {
         assert_eq!(model_a.v_a, model_b.v_a);
         assert_eq!(model_a.w_mlp_s, model_b.w_mlp_s);
         assert_eq!(model_a.w_mlp_t, model_b.w_mlp_t);
-        let l_a = model_a.forward_session(&[0_usize, 1, 2]).unwrap();
-        let l_b = model_b.forward_session(&[0_usize, 1, 2]).unwrap();
+        let l_a = model_a
+            .forward_session(&[0_usize, 1, 2])
+            .expect("forward_session should succeed");
+        let l_b = model_b
+            .forward_session(&[0_usize, 1, 2])
+            .expect("forward_session should succeed");
         for (a, b) in l_a.iter().zip(l_b.iter()) {
             assert!((a - b).abs() < 1e-7);
         }
@@ -726,7 +754,7 @@ mod tests {
     #[test]
     fn all_weights_finite_no_nan() {
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
         for v in model
             .item_embeds
             .iter()
@@ -747,7 +775,7 @@ mod tests {
     #[test]
     fn n_params_closed_form() {
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
         let d = 4_usize;
         let n_items = 6_usize;
         let expected = n_items * d + 3 * d * d + d + d + 2 * (d * d) + 2 * d;
@@ -758,11 +786,15 @@ mod tests {
     fn session_rep_is_weighted_sum() {
         // m_a = Σ_i α_i x_i. With a session of one item, m_a = α_0 · x_0.
         let mut rng = LcgRng::new(101);
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
         let session = [3_usize];
-        let gates = model.stamp_attention_gates(&session).unwrap();
-        let m_a = model.stamp_session_rep(&session).unwrap();
-        let x_0 = model.lookup(3).unwrap().to_vec();
+        let gates = model
+            .stamp_attention_gates(&session)
+            .expect("stamp_attention_gates should succeed");
+        let m_a = model
+            .stamp_session_rep(&session)
+            .expect("stamp_session_rep should succeed");
+        let x_0 = model.lookup(3).expect("lookup should succeed").to_vec();
         for k in 0..model.cfg.embed_dim {
             assert!(
                 (m_a[k] - gates[0] * x_0[k]).abs() < 1e-5,
@@ -776,8 +808,10 @@ mod tests {
     #[test]
     fn logits_finite_after_forward() {
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
-        let logits = model.forward_session(&[0_usize, 2, 4]).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
+        let logits = model
+            .forward_session(&[0_usize, 2, 4])
+            .expect("forward_session should succeed");
         assert!(logits.iter().all(|v| v.is_finite()));
     }
 
@@ -786,9 +820,11 @@ mod tests {
         // Larger session should still produce n_items logits and remain
         // finite.
         let mut rng = make_rng();
-        let model = Stamp::new(default_cfg(), &mut rng).unwrap();
+        let model = Stamp::new(default_cfg(), &mut rng).expect("value should be present");
         let session: Vec<usize> = (0..5).map(|i| i % 6).collect();
-        let logits = model.forward_session(&session).unwrap();
+        let logits = model
+            .forward_session(&session)
+            .expect("forward_session should succeed");
         assert_eq!(logits.len(), 6);
         assert!(logits.iter().all(|v| v.is_finite()));
     }

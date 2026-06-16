@@ -87,7 +87,8 @@ mod tests {
 
     #[test]
     fn pure_state_trace_is_one() {
-        let sv = StateVector::new_zero_state(2).unwrap();
+        let sv = StateVector::new_zero_state(2)
+            .expect("n_qubits=2 is a valid qubit count so zero-state construction cannot fail");
         let dm = DensityMatrix::from_pure_state(&sv);
         let tr = dm.trace();
         assert!((tr.re - 1.0).abs() < 1e-6, "trace={}", tr.re);
@@ -95,7 +96,8 @@ mod tests {
 
     #[test]
     fn pure_state_trace_sq_is_one() {
-        let sv = StateVector::new_zero_state(1).unwrap();
+        let sv = StateVector::new_zero_state(1)
+            .expect("n_qubits=1 is a valid qubit count so zero-state construction cannot fail");
         let dm = DensityMatrix::from_pure_state(&sv);
         let tr2 = dm.trace_sq();
         assert!((tr2.re - 1.0).abs() < 1e-5, "trace_sq={}", tr2.re);

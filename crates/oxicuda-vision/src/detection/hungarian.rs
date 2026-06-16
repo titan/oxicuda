@@ -537,7 +537,7 @@ mod tests {
         let mut cost = vec![0.0f32; n * n];
         for c in cost.iter_mut() {
             // hazard-safe uniform [0, 10)
-            *c = (rng.next_u32() as f32) / 2_147_483_648.0 * 10.0;
+            *c = (rng.next_u32() as f32) / 4_294_967_296.0 * 10.0;
         }
 
         let hung = hungarian(&cost, n, n).expect("ok");
@@ -631,7 +631,7 @@ mod tests {
         let n = 6;
         let mut cost = vec![0.0f32; n * n];
         for c in cost.iter_mut() {
-            *c = (rng.next_u32() as f32) / 2_147_483_648.0 * 5.0;
+            *c = (rng.next_u32() as f32) / 4_294_967_296.0 * 5.0;
         }
         let a1 = hungarian(&cost, n, n).expect("ok");
         let a2 = hungarian(&cost, n, n).expect("ok");
@@ -646,7 +646,7 @@ mod tests {
         let n = 5;
         let mut cost = vec![0.0f32; n * n];
         for c in cost.iter_mut() {
-            *c = (rng.next_u32() as f32) / 2_147_483_648.0 * 7.0;
+            *c = (rng.next_u32() as f32) / 4_294_967_296.0 * 7.0;
         }
         let base = hungarian(&cost, n, n).expect("ok");
         let base_cost = total_cost(&cost, n, &base);
@@ -676,7 +676,7 @@ mod tests {
             let n = 3 + (trial % 4);
             let mut cost = vec![0.0f32; n * n];
             for c in cost.iter_mut() {
-                *c = (rng.next_u32() as f32) / 2_147_483_648.0 * 10.0;
+                *c = (rng.next_u32() as f32) / 4_294_967_296.0 * 10.0;
             }
             let h = hungarian(&cost, n, n).expect("ok");
             let hc = total_cost(&cost, n, &h);
@@ -799,7 +799,7 @@ mod tests {
         let n = 8;
         let mut cost = vec![0.0f32; n * n];
         for c in cost.iter_mut() {
-            *c = (rng.next_u32() as f32) / 2_147_483_648.0 * 100.0;
+            *c = (rng.next_u32() as f32) / 4_294_967_296.0 * 100.0;
         }
         let h = hungarian(&cost, n, n).expect("ok");
         let hc = total_cost(&cost, n, &h);

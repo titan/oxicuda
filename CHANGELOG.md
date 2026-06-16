@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-16
+
+### Added
+
+- Wave AAA+64 feature expansion: Extended Persistence and Discrete Morse theory (`oxicuda-tda`), Parametric UMAP (`oxicuda-manifold`), Fisher Information estimation (`oxicuda-bayes`), and adaptive RK45 integration with Richardson extrapolation for ODE/PDE solvers.
+- Expanded CUDA kernel coverage across the driver, memory, launch, and backend layers.
+- Test suite grew to 32,320 passing tests (up from 23,535 at 0.1.8).
+
+### Changed
+
+- Workspace-wide reliability pass: eliminated every `.unwrap()` from all `crates/*/src/` (production code and test modules now use descriptive `.expect(...)`), maintaining zero clippy warnings under `-D warnings`.
+
+### Fixed
+
+- `oxicuda-geometry3d`: corrected a sign error in the symmetric-3×3 Jacobi eigensolver (`crates/oxicuda-geometry3d/src/mesh/obb.rs`) whose rotation angle used `app - aqq` instead of `aqq - app`. The defect doubled the off-diagonal each sweep instead of annihilating it, so `Obb::fit_pca` returned eigenvectors tilted from the true principal axes and produced a non-tight oriented bounding box.
+
 ## [0.1.8] - 2026-05-21
 
 ### Changed

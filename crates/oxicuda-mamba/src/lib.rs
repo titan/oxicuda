@@ -10,7 +10,8 @@
 //! oxicuda-mamba
 //! ├── error       — MambaError / MambaResult
 //! ├── handle      — MambaHandle (SmVersion + LcgRng)
-//! ├── ssm         — Discretization, prefix scan, and SSM forward kernel
+//! ├── ssm         — Discretization, prefix scan, SSM forward kernel,
+//! │                 Liquid-S4 (input-modulated Δ) and selective-scan backward
 //! ├── s4          — S4: HiPPO-LegS init, DPLR parameterization, S4 layer
 //! │   ├── hippo   — HiPPO-LegS A/B matrices and NPLR decomposition
 //! │   ├── dplr    — Diagonal Plus Low Rank SSM representation and kernel
@@ -27,17 +28,22 @@
 //! │   ├── time_mixing    — WKV recurrence and receptance gating
 //! │   ├── channel_mixing — Gated FFN with Square-ReLU
 //! │   └── rwkv_block     — Complete RWKV residual block with pre-norm
-//! └── ptx_kernels — GPU PTX kernel strings for SSM operations
+//! ├── ptx_kernels — GPU PTX kernel strings for SSM operations
+//! └── quant       — Q-Mamba symmetric INT8 post-training quantization
 //! ```
 
 pub mod bidirectional_ssm;
 pub mod error;
 pub mod handle;
+pub mod hybrid;
 pub mod hyena;
+pub mod linear_attn;
 pub mod mamba;
 pub mod mamba2;
 pub mod mamba_moe;
+pub mod mega;
 pub mod ptx_kernels;
+pub mod quant;
 pub mod rwkv;
 pub mod s4;
 pub mod s5;
@@ -49,7 +55,16 @@ pub mod prelude {
     pub use crate::bidirectional_ssm::{BiDirMode, BiDirSsm, BiDirSsmConfig};
     pub use crate::error::{MambaError, MambaResult};
     pub use crate::handle::{LcgRng, MambaHandle, SmVersion};
+    pub use crate::hybrid::mamba_attn::{HybridBlock, HybridConfig};
     pub use crate::hyena::{HyenaConfig, HyenaOperator};
+    pub use crate::linear_attn::linear_attention::{
+        FeatureMap, LinearAttentionConfig, gated_linear_attention, linear_attention_parallel,
+        linear_attention_recurrent,
+    };
+    pub use crate::linear_attn::retnet::{
+        RetentionConfig, RetentionState, msr_decays, retention_chunkwise, retention_parallel,
+        retention_recurrent,
+    };
     pub use crate::mamba::mamba_block::{
         MambaBlock, MambaBlockConfig, MambaBlockWeights, causal_depthwise_conv1d, linear, rms_norm,
         silu,
@@ -60,10 +75,13 @@ pub mod prelude {
     pub use crate::mamba2::chunk_scan::{ChunkConfig, chunk_scan, verify_chunk_equivalence};
     pub use crate::mamba2::mamba2_block::{Mamba2Block, Mamba2BlockConfig, Mamba2BlockWeights};
     pub use crate::mamba2::ssd::{ssd_naive, ssd_recurrent, verify_ssd_equivalence};
+    pub use crate::mamba2::ssd_chunk_layer::{SsdChunk, SsdChunkConfig};
+    pub use crate::mega::{MegaBlock, MegaConfig};
     pub use crate::ptx_kernels::{
         depthwise_conv1d_ptx, f32_hex, hippo_legendre_ptx, parallel_scan_ptx, rms_norm_silu_ptx,
         selective_scan_ptx, ssd_chunk_ptx, wkv_forward_ptx,
     };
+    pub use crate::quant::qmamba::{QMambaQuantizer, QuantScheme, QuantizedTensor};
     pub use crate::rwkv::channel_mixing::{
         ChannelMixingConfig, ChannelMixingLayer, ChannelMixingWeights, square_relu,
     };
@@ -76,13 +94,18 @@ pub mod prelude {
     pub use crate::s4::hippo::{hippo_legs, hippo_legs_diag, hippo_nplr};
     pub use crate::s4::s4_fft::{fft, fft_conv1d, s4_fft_conv};
     pub use crate::s4::s4_layer::{S4Config, S4Layer, S4Weights, naive_conv1d};
+    pub use crate::s4::s4d::{S4D, S4DConfig, S4DInit};
     pub use crate::s5::{S5Config, S5Layer, S5Weights};
     pub use crate::ssm::discretize::{Discretization, discretize};
     pub use crate::ssm::hippo_variants::{
         HippoFou, HippoFouConfig, HippoLegT, HippoLegTConfig, HippoMatrix, compare_hippo_variants,
         hippo_legs_matrix,
     };
+    pub use crate::ssm::liquid::{LiquidS4Config, LiquidS4Layer};
     pub use crate::ssm::parallel_scan::{ScanPair, exclusive_scan, inclusive_scan, ssm_state_scan};
+    pub use crate::ssm::selective_scan_backward::{
+        BatchedScanGrads, ScanGrads, scan_backward, scan_backward_batched, scan_forward,
+    };
     pub use crate::ssm::ssm_kernel::{SsmConfig, SsmKernel};
     pub use crate::xlstm::{MLstm, MLstmConfig, MLstmState, SLstm, SLstmConfig, SLstmState};
 }

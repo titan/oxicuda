@@ -176,7 +176,7 @@ mod tests {
         let t: Vec<Vec<f32>> = (0..4)
             .map(|i| vec![i as f32 * 0.9, (i + 1) as f32])
             .collect();
-        let loss = distance_loss(&s, &t).unwrap();
+        let loss = distance_loss(&s, &t).expect("distance_loss should succeed");
         assert!(loss >= 0.0 && loss.is_finite());
     }
 

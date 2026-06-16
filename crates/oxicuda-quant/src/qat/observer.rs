@@ -411,7 +411,7 @@ mod tests {
     fn minmax_symmetric_scale() {
         let mut obs = MinMaxObserver::new(8, true);
         obs.observe(&[-2.0_f32, -1.0, 0.5, 2.0]);
-        let (scale, zp) = obs.compute_params().unwrap();
+        let (scale, zp) = obs.compute_params().expect("compute_params should succeed");
         // abs_max = 2.0, q_max = 127 → scale = 2/127
         assert_abs_diff_eq!(scale, 2.0 / 127.0, epsilon = 1e-6);
         assert_eq!(zp, 0);
@@ -421,7 +421,7 @@ mod tests {
     fn minmax_asymmetric_scale_zp() {
         let mut obs = MinMaxObserver::new(8, false);
         obs.observe(&[0.0_f32, 1.0, 2.0, 3.0]);
-        let (scale, zp) = obs.compute_params().unwrap();
+        let (scale, zp) = obs.compute_params().expect("compute_params should succeed");
         assert_abs_diff_eq!(scale, 3.0 / 255.0, epsilon = 1e-5);
         assert_eq!(zp, 0);
     }
@@ -448,7 +448,7 @@ mod tests {
         let mut obs = MovingAvgObserver::new(8, true, 0.9);
         obs.observe(&[-1.0_f32, 1.0]);
         // First batch: min=-1, max=1, no averaging yet.
-        let (scale, zp) = obs.compute_params().unwrap();
+        let (scale, zp) = obs.compute_params().expect("compute_params should succeed");
         assert_abs_diff_eq!(scale, 1.0 / 127.0, epsilon = 1e-5);
         assert_eq!(zp, 0);
     }
@@ -477,7 +477,7 @@ mod tests {
         let data: Vec<f32> = (0..1024).map(|i| (i as f32 / 512.0) - 1.0).collect();
         obs.observe(&data);
         assert!(obs.is_calibrated());
-        let (scale, zp) = obs.compute_params().unwrap();
+        let (scale, zp) = obs.compute_params().expect("compute_params should succeed");
         assert!(scale > 0.0, "scale must be positive: {scale}");
         assert_eq!(zp, 0, "symmetric: zp must be 0");
     }

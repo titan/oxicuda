@@ -374,15 +374,19 @@ mod tests {
     fn rock_normal_scores_small_after_warmup() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let mut det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let mut det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         // Warm up with points near origin
         for i in 0..20 {
             let p = vec![(i as f64) * 0.01, (i as f64) * 0.01];
-            det.update(&p, &cfg).unwrap();
+            det.update(&p, &cfg)
+                .expect("ROCK update should succeed with valid input");
         }
         // A point near the cluster centre should have a low score
-        let score = det.update(&[0.05, 0.05], &cfg).unwrap();
+        let score = det
+            .update(&[0.05, 0.05], &cfg)
+            .expect("ROCK update should succeed with valid input");
         assert!(
             score < cfg.anomaly_threshold,
             "expected small score for inlier, got {score}"
@@ -393,14 +397,18 @@ mod tests {
     fn rock_outlier_scores_high() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let mut det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let mut det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         // Train on cluster around (1, 1)
         for _ in 0..30 {
-            det.update(&[1.0, 1.0], &cfg).unwrap();
+            det.update(&[1.0, 1.0], &cfg)
+                .expect("ROCK update should succeed with valid input");
         }
         // Far-away outlier
-        let score = det.update(&[1000.0, 1000.0], &cfg).unwrap();
+        let score = det
+            .update(&[1000.0, 1000.0], &cfg)
+            .expect("ROCK update should succeed with valid input");
         assert!(
             score > cfg.anomaly_threshold,
             "expected high score for outlier, got {score}"
@@ -411,10 +419,12 @@ mod tests {
     fn rock_update_changes_centroids() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let mut det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let mut det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         let before: Vec<Vec<f64>> = det.centroids().to_vec();
-        det.update(&[10.0, 10.0], &cfg).unwrap();
+        det.update(&[10.0, 10.0], &cfg)
+            .expect("ROCK update should succeed with valid input");
         let after: Vec<Vec<f64>> = det.centroids().to_vec();
 
         // At least one centroid must have changed
@@ -430,14 +440,20 @@ mod tests {
     fn rock_score_is_deterministic() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let mut det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let mut det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         for _ in 0..10 {
-            det.update(&[1.0, 1.0], &cfg).unwrap();
+            det.update(&[1.0, 1.0], &cfg)
+                .expect("ROCK update should succeed with valid input");
         }
         let p = &[2.0, 2.0];
-        let s1 = det.score(p).unwrap();
-        let s2 = det.score(p).unwrap();
+        let s1 = det
+            .score(p)
+            .expect("ROCK score should succeed with valid input");
+        let s2 = det
+            .score(p)
+            .expect("ROCK score should succeed with valid input");
         assert_eq!(s1, s2, "score must be deterministic in inference mode");
     }
 
@@ -445,7 +461,8 @@ mod tests {
     fn rock_is_anomaly_flags_correctly() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         assert!(
             !det.is_anomaly(cfg.anomaly_threshold - 0.001, &cfg),
@@ -461,7 +478,8 @@ mod tests {
     fn rock_centroids_have_correct_shape() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         assert_eq!(det.centroids().len(), cfg.n_centroids);
         for c in det.centroids() {
@@ -473,7 +491,8 @@ mod tests {
     fn rock_n_dims_mismatch_returns_error() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let mut det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let mut det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         let wrong_dim = vec![1.0_f64; cfg.n_dims + 1];
         let result = det.update(&wrong_dim, &cfg);
@@ -484,10 +503,12 @@ mod tests {
     fn rock_n_seen_increments() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let mut det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let mut det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         for i in 0..5 {
-            det.update(&[i as f64, i as f64], &cfg).unwrap();
+            det.update(&[i as f64, i as f64], &cfg)
+                .expect("ROCK update should succeed with valid input");
             assert_eq!(det.n_seen(), i + 1);
         }
     }
@@ -496,14 +517,18 @@ mod tests {
     fn rock_score_only_no_state_change() {
         let cfg = default_rock_config();
         let mut rng = make_rng();
-        let mut det = RockDetector::new(&cfg, &mut rng).unwrap();
+        let mut det = RockDetector::new(&cfg, &mut rng)
+            .expect("RockDetector construction should succeed with valid config");
 
         for _ in 0..5 {
-            det.update(&[1.0, 1.0], &cfg).unwrap();
+            det.update(&[1.0, 1.0], &cfg)
+                .expect("ROCK update should succeed with valid input");
         }
         let n_before = det.n_seen();
         let centroids_before = det.centroids().to_vec();
-        let _ = det.score(&[1.0, 1.0]).unwrap();
+        let _ = det
+            .score(&[1.0, 1.0])
+            .expect("ROCK score should succeed with valid input");
         assert_eq!(det.n_seen(), n_before, "score() must not change n_seen");
         assert_eq!(
             det.centroids(),
@@ -521,7 +546,8 @@ mod tests {
 
         // Add a few exemplars near origin
         for _ in 0..5 {
-            det.update(&[0.0, 0.0], &cfg).unwrap();
+            det.update(&[0.0, 0.0], &cfg)
+                .expect("IDEC update should succeed");
         }
         let dens_near = det.density(&[0.0, 0.0], cfg.bandwidth);
         let dens_far = det.density(&[100.0, 100.0], cfg.bandwidth);
@@ -558,9 +584,11 @@ mod tests {
         let mut det = IdecDetector::new();
 
         assert_eq!(det.n_exemplars(), 0);
-        det.update(&[1.0, 2.0], &cfg).unwrap();
+        det.update(&[1.0, 2.0], &cfg)
+            .expect("IDEC update should succeed");
         assert_eq!(det.n_exemplars(), 1);
-        det.update(&[3.0, 4.0], &cfg).unwrap();
+        det.update(&[3.0, 4.0], &cfg)
+            .expect("IDEC update should succeed");
         assert_eq!(det.n_exemplars(), 2);
     }
 
@@ -573,7 +601,8 @@ mod tests {
         let mut det = IdecDetector::new();
 
         for i in 0..20 {
-            det.update(&[i as f64, 0.0], &cfg).unwrap();
+            det.update(&[i as f64, 0.0], &cfg)
+                .expect("IDEC update should succeed");
         }
         assert!(
             det.n_exemplars() <= cfg.max_components,
@@ -592,9 +621,11 @@ mod tests {
         };
         let mut det = IdecDetector::new();
 
-        det.update(&[0.0, 0.0], &cfg).unwrap();
+        det.update(&[0.0, 0.0], &cfg)
+            .expect("IDEC update should succeed");
         let w0 = det.exemplars[0].1;
-        det.update(&[0.0, 0.0], &cfg).unwrap();
+        det.update(&[0.0, 0.0], &cfg)
+            .expect("IDEC update should succeed");
         let w0_after = det.exemplars[0].1;
         // After one more update the first exemplar should have decayed
         assert!(
@@ -615,10 +646,13 @@ mod tests {
 
         // Build up density near origin
         for _ in 0..20 {
-            det.update(&[0.0, 0.0], &cfg).unwrap();
+            det.update(&[0.0, 0.0], &cfg)
+                .expect("IDEC update should succeed");
         }
         // Point very far from all exemplars should be flagged
-        let (dens, is_anom) = det.update(&[1000.0, 1000.0], &cfg).unwrap();
+        let (dens, is_anom) = det
+            .update(&[1000.0, 1000.0], &cfg)
+            .expect("IDEC update for outlier should succeed");
         assert!(is_anom, "distant point density={dens} should be anomaly");
     }
 
@@ -627,7 +661,9 @@ mod tests {
         let cfg = default_idec_config();
         let mut det = IdecDetector::new();
 
-        let (_, is_anom) = det.update(&[999.0, 999.0], &cfg).unwrap();
+        let (_, is_anom) = det
+            .update(&[999.0, 999.0], &cfg)
+            .expect("IDEC update for first point should succeed");
         assert!(
             !is_anom,
             "first point should never be flagged as anomaly (no reference)"

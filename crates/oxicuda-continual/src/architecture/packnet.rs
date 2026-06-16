@@ -140,7 +140,8 @@ mod tests {
     #[test]
     fn prune_sparsity_fraction_respected() {
         let weights: Vec<f32> = (1..=10).map(|i| i as f32).collect();
-        let mask = prune_weights_l1(&weights, 0.5, 0).unwrap();
+        let mask = prune_weights_l1(&weights, 0.5, 0)
+            .expect("L1 pruning should succeed with valid weight and sparsity");
         let n_keep = mask.n_active();
         // 0.5 sparsity → keep 5 weights
         assert_eq!(n_keep, 5, "Should keep 50% of weights");
@@ -149,7 +150,8 @@ mod tests {
     #[test]
     fn prune_keeps_largest_weights() {
         let weights = vec![0.1_f32, 5.0, 0.01, 3.0, 0.001];
-        let mask = prune_weights_l1(&weights, 0.6, 0).unwrap();
+        let mask = prune_weights_l1(&weights, 0.6, 0)
+            .expect("L1 pruning should succeed with valid sparsity");
         // Keep top 40% = 2 weights → indices 1 (5.0) and 3 (3.0)
         assert_eq!(mask.mask[1], 1, "Largest weight should be kept");
         assert_eq!(mask.mask[3], 1, "Second largest weight should be kept");
@@ -166,7 +168,8 @@ mod tests {
             task_id: 0,
             sparsity: 0.5,
         };
-        apply_mask(&mut weights, &mask).unwrap();
+        apply_mask(&mut weights, &mask)
+            .expect("mask application should succeed with matching dimensions");
         for (w, m) in weights.iter().zip(mask.mask.iter()) {
             if *m == 0 {
                 assert_eq!(*w, 0.0, "Masked weight should be zero");

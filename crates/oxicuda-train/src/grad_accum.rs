@@ -15,15 +15,15 @@
 //!
 //! // Simulate 4 micro-batch gradient passes
 //! for _ in 0..4 {
-//!     params[0].set_grad(vec![0.25f32; 8]).unwrap();
-//!     accum.accumulate(&mut params).unwrap();
+//!     params[0].set_grad(vec![0.25f32; 8]).expect("set_grad should succeed");
+//!     accum.accumulate(&mut params).expect("accumulate should succeed");
 //! }
 //!
 //! // After `k` accumulations, ready_to_step() returns true
 //! assert!(accum.ready_to_step());
 //!
 //! // Gradients are averaged, then call optimizer.step() once
-//! accum.finalise(&mut params).unwrap();
+//! accum.finalise(&mut params).expect("finalise should succeed");
 //! // params[0].grad now holds the averaged gradient
 //! ```
 

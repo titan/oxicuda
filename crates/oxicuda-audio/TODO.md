@@ -9,8 +9,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.21).
 
 ## Implementation Status
 
-- **Actual SLoC:** 8,679 (28 files, Rust 6,388 code + 1,217 comments + 1,074 blanks)
-- **Tests:** 286 passing (#[test] count in src/)
+- **Actual SLoC:** 16,665 (54 files, Rust 16,665 code + 1,217 comments + 1,074 blanks)
+- **Tests:** 669 passing (#[test] count in src/)
 - **Crate:** `oxicuda-audio` -- Vol.21 Audio/Speech ML Architectures
 
 ### Completed [x]
@@ -116,6 +116,9 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.21).
 - [ ] Quantised Conformer (INT8 / FP8) inference path
 - [ ] Streaming RNN-T greedy decoder
 - [ ] Multi-GPU SSL pre-training helper (DDP-style gradient sync)
+- [ ] Whisper-CTC joint model (`decoder/whisper_ctc.rs`) — Watanabe 2017 Interspeech: shared encoder output fed to both attention-decoder and CTC branch; joint decoding with λ·CTC + (1-λ)·attention log-probs; `WhisperCtcDecoder`
+- [ ] VITS2 TTS end-to-end acoustic model (`synthesis/vits2.rs`) — Kong 2023: improved normalizing-flow acoustic model with transformer-based duration predictor and adversarial training; `Vits2Synthesizer`
+- [ ] Beat Tracker (`rhythm/beat_tracker.rs`) — Böck 2011 ISMIR: dynamic Bayesian network over onset strength function with tempo prior and inter-beat-interval Markov chain; `BeatTracker`
 
 ## Dependencies
 
@@ -133,7 +136,7 @@ consumed via the `LogMelInput` adapter.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 286 passing
+- Tests: 669 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)

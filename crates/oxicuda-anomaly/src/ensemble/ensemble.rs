@@ -155,8 +155,11 @@ mod tests {
     fn ensemble_average_basic() {
         let mut ens = AnomalyEnsemble::new(EnsembleMethod::Average, 2);
         let train = vec![0.0_f32, 0.0, 1.0, 1.0, 0.5, 0.5];
-        ens.fit(&train, 3).unwrap();
-        let s = ens.combine(&[0.5_f32, 0.5]).unwrap();
+        ens.fit(&train, 3)
+            .expect("fit should succeed with valid 3-sample input");
+        let s = ens
+            .combine(&[0.5_f32, 0.5])
+            .expect("combine should succeed for in-range scores");
         assert!((0.0..=1.0).contains(&s), "s={s}");
     }
 
@@ -164,8 +167,11 @@ mod tests {
     fn ensemble_maximum_basic() {
         let mut ens = AnomalyEnsemble::new(EnsembleMethod::Maximum, 2);
         let train = vec![0.0_f32, 0.0, 1.0, 1.0];
-        ens.fit(&train, 2).unwrap();
-        let s = ens.combine(&[0.3_f32, 0.9]).unwrap();
+        ens.fit(&train, 2)
+            .expect("fit should succeed with valid 2-sample input");
+        let s = ens
+            .combine(&[0.3_f32, 0.9])
+            .expect("combine should succeed for valid detector scores");
         assert!((s - 0.9).abs() < 0.01, "s={s}");
     }
 }

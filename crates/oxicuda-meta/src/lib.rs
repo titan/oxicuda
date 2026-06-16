@@ -14,7 +14,9 @@
 //! ├── metric_learning/ — ProtoNet, MatchingNet, RelationNet
 //! ├── metrics/         — Few-shot accuracy, confidence intervals
 //! ├── network/         — MLP backbone and linear classification head
+//! ├── online/          — OML online-aware (forgetting-aware) meta-learning
 //! ├── reptile/         — Reptile first-order meta-learner
+//! ├── ssl/             — Self-supervised pretext tasks (rotation prediction)
 //! ├── handle           — LcgRng, MetaHandle, SmVersion
 //! ├── error            — MetaError / MetaResult
 //! ├── ptx_kernels      — GPU PTX kernel strings (8 kernels × 6 SM versions)
@@ -26,11 +28,14 @@ pub mod error;
 pub mod gradient;
 pub mod handle;
 pub mod maml;
+pub mod meta;
 pub mod metric_learning;
 pub mod metrics;
 pub mod network;
+pub mod online;
 pub mod ptx_kernels;
 pub mod reptile;
+pub mod ssl;
 
 pub mod prelude {
     pub use crate::episode::sampler::EpisodeSampler;
@@ -38,18 +43,32 @@ pub mod prelude {
     pub use crate::error::{MetaError, MetaResult};
     pub use crate::gradient::inner_loop::{cross_entropy_loss, inner_sgd_step, multi_step_inner};
     pub use crate::handle::{LcgRng, MetaHandle, SmVersion};
+    pub use crate::maml::alfa::{Alfa, AlfaConfig};
     pub use crate::maml::anil::{AnilConfig, anil_adapt_head, anil_meta_update};
+    pub use crate::maml::bayesian_maml::{
+        BayesianMaml, BayesianMamlConfig, BayesianMamlTask, median_bandwidth, svgd_step,
+    };
     pub use crate::maml::fomaml::{FoMamlConfig, fomaml_update};
+    pub use crate::maml::imaml::{
+        Imaml, ImamlConfig, ImamlTask, conjugate_gradient_implicit, hessian_vector_product,
+        imaml_task_gradient, proximal_inner_solve,
+    };
     pub use crate::maml::maml::{MamlConfig, maml_adapt, maml_meta_update};
+    pub use crate::meta::meta_sgd_learner::{MetaSgdLearner, MetaSgdLearnerConfig};
+    pub use crate::metric_learning::cafs::{CafsConfig, CafsFewShot};
     pub use crate::metric_learning::can::{Can, CanAttentionOutput, CanConfig, CanWeights};
     pub use crate::metric_learning::deepemd::{DeepEmd, DeepEmdConfig};
     pub use crate::metric_learning::feat::{Feat, FeatConfig};
     pub use crate::metric_learning::leo::{Leo, LeoConfig, LeoResult, LeoState, LeoWeights};
+    pub use crate::metric_learning::mahalanobis_proto::{
+        CovMode, MahalanobisConfig, MahalanobisProto,
+    };
     pub use crate::metric_learning::matching_net::{matching_net_attention, matching_net_predict};
     pub use crate::metric_learning::metaoptnet::{
         MetaOptNet, MetaOptNetConfig, MetaOptNetResult, MetaOptNetSolver, MetaOptNetWeights,
     };
     pub use crate::metric_learning::proto_net::{compute_prototypes, proto_loss, proto_predict};
+    pub use crate::metric_learning::protonet_model::{ProtoNet, ProtoNetConfig};
     pub use crate::metric_learning::r2d2::{R2D2, R2D2Config, R2D2Weights};
     pub use crate::metric_learning::relation_net::RelationNet;
     pub use crate::metrics::few_shot::{accuracy_at_k, episode_accuracy, mean_and_ci95};
@@ -57,11 +76,15 @@ pub mod prelude {
     pub use crate::network::conv4_backbone::{Conv4Backbone, Conv4Block, Conv4Config};
     pub use crate::network::linear_head::LinearHead;
     pub use crate::network::tbn::{TbnConfig, TransductiveBn};
+    pub use crate::online::oml::{Oml, OmlConfig, OmlLinear};
     pub use crate::ptx_kernels::{
         cosine_sim_ptx, episode_sample_ptx, f32_hex, inner_sgd_ptx, meta_grad_accum_ptx,
         proto_distance_ptx, relation_score_ptx, reptile_update_ptx,
     };
     pub use crate::reptile::reptile::{ReptileConfig, reptile_update};
+    pub use crate::ssl::rotation::{
+        NUM_ROTATIONS, RotationConfig, RotationHead, rotate_chw, rotation_pretext_loss,
+    };
 }
 
 #[cfg(test)]
@@ -84,9 +107,11 @@ mod e2e_tests {
         let support_y: Vec<u32> = (0..n_way)
             .flat_map(|c| std::iter::repeat_n(c as u32, k_shot))
             .collect();
-        let protos = compute_prototypes(&support_x, &support_y, n_way, k_shot, feat_dim).unwrap();
+        let protos = compute_prototypes(&support_x, &support_y, n_way, k_shot, feat_dim)
+            .expect("compute_prototypes should succeed");
         let query_x = protos.clone();
-        let preds = proto_predict(&query_x, &protos, n_way, feat_dim).unwrap();
+        let preds = proto_predict(&query_x, &protos, n_way, feat_dim)
+            .expect("proto_predict should succeed");
         for (i, &p) in preds.iter().enumerate() {
             assert_eq!(p as usize, i, "ProtoNet should predict class {i}");
         }
@@ -101,8 +126,10 @@ mod e2e_tests {
             .flat_map(|c| (0..feat_dim).map(move |j| if j == c { 1.0_f32 } else { 0.0_f32 }))
             .collect();
         let support_y: Vec<u32> = (0..n_way as u32).collect();
-        let protos = compute_prototypes(&support_x, &support_y, n_way, k_shot, feat_dim).unwrap();
-        let preds = proto_predict(&support_x, &protos, n_way, feat_dim).unwrap();
+        let protos = compute_prototypes(&support_x, &support_y, n_way, k_shot, feat_dim)
+            .expect("compute_prototypes should succeed");
+        let preds = proto_predict(&support_x, &protos, n_way, feat_dim)
+            .expect("proto_predict should succeed");
         for (i, &p) in preds.iter().enumerate() {
             assert_eq!(p, support_y[i]);
         }
@@ -120,8 +147,8 @@ mod e2e_tests {
         let support_y: Vec<u32> = (0..n_way)
             .flat_map(|c| std::iter::repeat_n(c as u32, k_shot))
             .collect();
-        let attn =
-            matching_net_attention(&query_feat, &support_feats, &support_y, n_way, 1.0).unwrap();
+        let attn = matching_net_attention(&query_feat, &support_feats, &support_y, n_way, 1.0)
+            .expect("matching_net_attention should succeed");
         let sum: f32 = attn.iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-5,
@@ -140,14 +167,14 @@ mod e2e_tests {
         let query_feat: Vec<f32> = (0..feat_dim)
             .map(|j| if j == 1 { 1.0_f32 } else { 0.0_f32 })
             .collect();
-        let attn =
-            matching_net_attention(&query_feat, &support_feats, &support_y, n_way, 5.0).unwrap();
+        let attn = matching_net_attention(&query_feat, &support_feats, &support_y, n_way, 5.0)
+            .expect("matching_net_attention should succeed");
         let best_cls = attn
             .iter()
             .enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("value should be present");
         assert_eq!(best_cls, 1, "Same-class should get highest attention");
     }
 
@@ -159,8 +186,12 @@ mod e2e_tests {
         let net = RelationNet::new(feat_dim, hidden_dim, &mut rng);
         let feat_a = vec![1.0_f32, 0.0, 0.0, 0.0];
         let feat_b = vec![0.0_f32, 1.0, 0.0, 0.0];
-        let score_same = net.relation_score(&feat_a, &feat_a).unwrap();
-        let score_diff = net.relation_score(&feat_a, &feat_b).unwrap();
+        let score_same = net
+            .relation_score(&feat_a, &feat_a)
+            .expect("relation_score should succeed");
+        let score_diff = net
+            .relation_score(&feat_a, &feat_b)
+            .expect("relation_score should succeed");
         assert!((0.0..=1.0).contains(&score_same));
         assert!((0.0..=1.0).contains(&score_diff));
         assert!(score_same.is_finite());
@@ -200,7 +231,9 @@ mod e2e_tests {
             query_x,
             query_y,
         };
-        let loss = net.relation_loss(&episode).unwrap();
+        let loss = net
+            .relation_loss(&episode)
+            .expect("relation_loss should succeed");
         assert!(
             loss.is_finite(),
             "RelationNet loss must be finite, got {loss}"
@@ -220,8 +253,8 @@ mod e2e_tests {
             inner_lr: 0.01,
             n_inner_steps: 3,
         };
-        let adapted =
-            maml_adapt(&params, &support_x, &support_y, n_classes, feat_dim, &cfg).unwrap();
+        let adapted = maml_adapt(&params, &support_x, &support_y, n_classes, feat_dim, &cfg)
+            .expect("maml_adapt should succeed");
         assert_ne!(params, adapted, "MAML adapt must change params");
     }
 
@@ -239,7 +272,8 @@ mod e2e_tests {
             n_inner_steps: 3,
             step_size: 0.5,
         };
-        let updated = reptile_update(&params, &task_data, n_classes, feat_dim, &cfg).unwrap();
+        let updated = reptile_update(&params, &task_data, n_classes, feat_dim, &cfg)
+            .expect("reptile_update should succeed");
         let moved = updated.iter().any(|&p| p.abs() > 1e-6);
         assert!(moved, "Reptile params must move toward task minimum");
     }
@@ -249,7 +283,8 @@ mod e2e_tests {
         let params = vec![2.0_f32];
         let grads = vec![2.0_f32 * params[0]];
         let lr = 0.1;
-        let new_params = inner_sgd_step(&params, &grads, lr).unwrap();
+        let new_params =
+            inner_sgd_step(&params, &grads, lr).expect("inner_sgd_step should succeed");
         assert!(
             new_params[0].abs() < params[0].abs(),
             "SGD step should move closer to 0: {new_params:?}"
@@ -264,7 +299,7 @@ mod e2e_tests {
             n_query: 4,
             feat_dim: 8,
         };
-        let sampler = EpisodeSampler::new(cfg.clone()).unwrap();
+        let sampler = EpisodeSampler::new(cfg.clone()).expect("value should be present");
         let n_classes = 5_usize;
         let examples_per_class = cfg.k_shot + cfg.n_query;
         let n_total = n_classes * examples_per_class;
@@ -273,7 +308,9 @@ mod e2e_tests {
             .map(|_| rng.next_f32())
             .collect();
         let labels: Vec<u32> = (0..n_total).map(|i| (i % n_classes) as u32).collect();
-        let episode = sampler.sample(&data, &labels, n_classes, &mut rng).unwrap();
+        let episode = sampler
+            .sample(&data, &labels, n_classes, &mut rng)
+            .expect("sample should succeed");
         assert_eq!(
             episode.support_x.len(),
             cfg.n_way * cfg.k_shot * cfg.feat_dim
@@ -290,7 +327,7 @@ mod e2e_tests {
     fn e2e_episode_accuracy_correct() {
         let preds = vec![0_u32, 1, 2, 1, 0];
         let labels = vec![0_u32, 1, 2, 1, 0];
-        let acc = episode_accuracy(&preds, &labels).unwrap();
+        let acc = episode_accuracy(&preds, &labels).expect("episode_accuracy should succeed");
         assert!((acc - 1.0).abs() < 1e-6, "100% accuracy should be 1.0");
     }
 

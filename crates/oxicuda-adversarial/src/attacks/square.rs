@@ -176,7 +176,8 @@ mod tests {
         let x = vec![0.5_f32; 16];
         let cfg = SquareAttackConfig::default();
         let mut rng = LcgRng::new(42);
-        let result = square_attack(&x, const_score(-1.0), &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, const_score(-1.0), &cfg, 0.0, 1.0, &mut rng)
+            .expect("value should be present");
         assert_eq!(result.len(), x.len());
     }
 
@@ -191,7 +192,8 @@ mod tests {
             ..Default::default()
         };
         let mut rng = LcgRng::new(7);
-        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         for (r, &xi) in result.iter().zip(x.iter()) {
             assert!(
                 (r - xi).abs() <= cfg.eps + 1e-6,
@@ -214,7 +216,8 @@ mod tests {
             ..Default::default()
         };
         let mut rng = LcgRng::new(3);
-        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         for &v in &result {
             assert!((0.0 - 1e-6..=1.0 + 1e-6).contains(&v), "box violated: {v}");
         }
@@ -231,7 +234,8 @@ mod tests {
             ..Default::default()
         };
         let mut rng = LcgRng::new(4);
-        let result = square_attack(&x, neg_first, &cfg, -0.5, 0.5, &mut rng).unwrap();
+        let result = square_attack(&x, neg_first, &cfg, -0.5, 0.5, &mut rng)
+            .expect("square_attack should succeed");
         for &v in &result {
             assert!((-0.5 - 1e-6..=0.5 + 1e-6).contains(&v), "box violated: {v}");
         }
@@ -252,7 +256,8 @@ mod tests {
         let mut rng = LcgRng::new(11);
         let score_fn = |v: &[f32]| Ok(v.iter().sum::<f32>());
         let init_score: f32 = x.iter().sum();
-        let result = square_attack(&x, score_fn, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, score_fn, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         let final_score: f32 = result.iter().sum();
         // Greedy descent: final score ≤ initial score (never worse).
         assert!(
@@ -276,7 +281,8 @@ mod tests {
             ..Default::default()
         };
         let mut rng = LcgRng::new(99);
-        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         // x[0] should have increased (gotten closer to 0.5 = 0.2+0.3 clipped to 1.0).
         assert!(
             result[0] > x[0] - 1e-5,
@@ -297,8 +303,10 @@ mod tests {
         };
         let mut r1 = LcgRng::new(42);
         let mut r2 = LcgRng::new(42);
-        let res1 = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut r1).unwrap();
-        let res2 = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut r2).unwrap();
+        let res1 = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut r1)
+            .expect("square_attack should succeed");
+        let res2 = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut r2)
+            .expect("square_attack should succeed");
         for (a, b) in res1.iter().zip(res2.iter()) {
             assert!((a - b).abs() < 1e-7);
         }
@@ -316,8 +324,10 @@ mod tests {
         };
         let mut r1 = LcgRng::new(1);
         let mut r2 = LcgRng::new(12345678);
-        let res1 = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut r1).unwrap();
-        let res2 = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut r2).unwrap();
+        let res1 = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut r1)
+            .expect("square_attack should succeed");
+        let res2 = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut r2)
+            .expect("square_attack should succeed");
         let any_diff = res1
             .iter()
             .zip(res2.iter())
@@ -369,7 +379,8 @@ mod tests {
             Ok(-(v[0]))
         };
 
-        let result = square_attack(&x, score_fn, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, score_fn, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         assert_eq!(result.len(), 100);
 
         // With 3 halvings from initial window ~50, we should see at least some
@@ -393,7 +404,8 @@ mod tests {
             ..Default::default()
         };
         let mut rng = LcgRng::new(0);
-        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         assert_eq!(result.len(), 1);
         assert!(result[0] >= 0.0 - 1e-6 && result[0] <= 1.0 + 1e-6);
     }
@@ -410,7 +422,8 @@ mod tests {
             ..Default::default()
         };
         let mut rng = LcgRng::new(1);
-        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         for &v in &result {
             assert!(
                 (v - 0.0).abs() < 1e-6 || (v - 1.0).abs() < 1e-6,
@@ -430,7 +443,8 @@ mod tests {
             ..Default::default()
         };
         let mut rng = LcgRng::new(0);
-        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, neg_first, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         assert_eq!(result.len(), 4);
     }
 
@@ -522,7 +536,8 @@ mod tests {
             }
             Ok(s)
         };
-        let result = square_attack(&x, score_fn, &cfg, 0.0, 1.0, &mut rng).unwrap();
+        let result = square_attack(&x, score_fn, &cfg, 0.0, 1.0, &mut rng)
+            .expect("square_attack should succeed");
         let final_score: f32 = result.iter().sum();
         // Final score must be ≤ initial score (greedy descent).
         // init_score is set from the first call (random init evaluation).

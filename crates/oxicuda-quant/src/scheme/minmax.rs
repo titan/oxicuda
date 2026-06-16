@@ -341,7 +341,7 @@ mod tests {
     fn symmetric_calibrate_scale() {
         let q = MinMaxQuantizer::int8_symmetric();
         let t = vec![-2.0_f32, -1.0, 0.5, 2.0];
-        let p = q.calibrate(&t).unwrap();
+        let p = q.calibrate(&t).expect("calibrate should succeed");
         let expected_scale = 2.0 / 127.0;
         assert_abs_diff_eq!(p.scales[0], expected_scale, epsilon = 1e-6);
         assert_eq!(p.zero_points[0], 0);
@@ -351,7 +351,7 @@ mod tests {
     fn asymmetric_calibrate_scale_zp() {
         let q = MinMaxQuantizer::new(8, QuantScheme::Asymmetric, QuantGranularity::PerTensor);
         let t = vec![0.0_f32, 1.0, 2.0, 3.0];
-        let p = q.calibrate(&t).unwrap();
+        let p = q.calibrate(&t).expect("calibrate should succeed");
         // scale = (3-0)/255, zp = 0
         let expected_scale = 3.0 / 255.0;
         assert_abs_diff_eq!(p.scales[0], expected_scale, epsilon = 1e-5);
@@ -362,7 +362,7 @@ mod tests {
     fn per_group_calibrate() {
         let q = MinMaxQuantizer::int4_per_group(4);
         let t = vec![-1.0_f32, 0.0, 0.5, 1.0, -2.0, 0.0, 1.0, 2.0];
-        let p = q.calibrate(&t).unwrap();
+        let p = q.calibrate(&t).expect("calibrate should succeed");
         assert_eq!(p.scales.len(), 2);
     }
 
@@ -370,8 +370,8 @@ mod tests {
     fn symmetric_round_trip_low_error() {
         let q = MinMaxQuantizer::int8_symmetric();
         let t = uniform_tensor(128);
-        let p = q.calibrate(&t).unwrap();
-        let codes = q.quantize(&t, &p).unwrap();
+        let p = q.calibrate(&t).expect("calibrate should succeed");
+        let codes = q.quantize(&t, &p).expect("quantize should succeed");
         let deq = q.dequantize(&codes, &p);
         let max_err = t
             .iter()
@@ -388,8 +388,10 @@ mod tests {
     fn grouped_round_trip() {
         let q = MinMaxQuantizer::int4_per_group(16);
         let t: Vec<f32> = (0..64).map(|i| i as f32 * 0.1).collect();
-        let p = q.calibrate(&t).unwrap();
-        let codes = q.quantize_grouped(&t, &p, 16).unwrap();
+        let p = q.calibrate(&t).expect("calibrate should succeed");
+        let codes = q
+            .quantize_grouped(&t, &p, 16)
+            .expect("quantize_grouped should succeed");
         let deq = q.dequantize_grouped(&codes, &p, 16);
         let max_err = t
             .iter()
@@ -420,7 +422,7 @@ mod tests {
     #[test]
     fn q_max_q_min_int8() {
         let q = MinMaxQuantizer::int8_symmetric();
-        let p = q.calibrate(&[1.0_f32]).unwrap();
+        let p = q.calibrate(&[1.0_f32]).expect("calibrate should succeed");
         assert_abs_diff_eq!(p.q_max(), 127.0, epsilon = 1e-6);
         assert_abs_diff_eq!(p.q_min(), -128.0, epsilon = 1e-6);
     }
@@ -433,7 +435,9 @@ mod tests {
             0.0_f32, 1.0, -1.0, 0.5, // row 0: max_abs=1
             0.0, 2.0, -2.0, 1.5,
         ]; // row 1: max_abs=2
-        let p = q.calibrate_2d(&t, 2, 4).unwrap();
+        let p = q
+            .calibrate_2d(&t, 2, 4)
+            .expect("calibrate_2d should succeed");
         assert_eq!(p.scales.len(), 2);
         assert!(p.scales[1] > p.scales[0], "row1 scale should be larger");
     }

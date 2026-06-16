@@ -6,7 +6,7 @@ Meta-learning algorithm primitives (MAML / FOMAML / ANIL / Reptile / Prototypica
 
 ## Implementation Status
 
-**Actual: 2,446 SLoC (25 source files + 1 benches file) -- Coverage: full N-way K-shot meta-learning toolkit**
+**Actual: 13,338 SLoC (51 source files + 1 benches file) -- Coverage: full N-way K-shot meta-learning toolkit**
 
 Current implementation covers MAML with second-order finite-difference outer gradients, FOMAML first-order approximation, ANIL head-only adaptation, Reptile first-order interpolation, three metric-learning few-shot heads (ProtoNet, MatchingNet, RelationNet), episode sampling, MLP backbone with Xavier init, and PTX kernels for inner SGD, Reptile interpolation, prototype distance, cosine similarity, relation score, meta-gradient accumulation, and episode sampling.
 
@@ -63,7 +63,7 @@ Current implementation covers MAML with second-order finite-difference outer gra
 ### Future Enhancements
 
 #### P0 -- Critical Algorithmic Coverage
-- [ ] Second-order MAML with full Hessian-vector product (currently FD-based) -- explicit Hvp via dual-pass autodiff for better scaling at >10K params
+- [x] Second-order MAML with full Hessian-vector product (currently FD-based) -- explicit Hvp via dual-pass autodiff for better scaling at >10K params
 - [x] Meta-SGD (Li et al. 2017) -- learnable per-parameter inner learning rates alongside meta-weights
 - [x] Conditional Neural Processes (CNP / NP) -- amortised inference for few-shot via context aggregation
 - [x] LEO (Latent Embedding Optimization, Rusu et al. 2019) -- meta-learn in low-dimensional latent space
@@ -82,6 +82,10 @@ Current implementation covers MAML with second-order finite-difference outer gra
 - [ ] Continual Meta-Learning (OML / ANML) -- representation learning under online updates
 - [ ] Hyperparameter meta-learning (e.g. MAML-LR, ALFA) -- learn per-task inner-loop hyperparameters
 - [ ] Self-supervised pre-training hooks (S2M2, ProtoTransfer) -- contrastive backbone before meta-training
+- [x] `meta/hyper_maml.rs` — HyperMAML (Przewięźlikowski 2022): hypernetwork generates fast-adapt weights rather than shared init; avoids inner-loop gradient computation; `HyperMaml { hyper_dims: Vec<usize> }`
+- [x] `meta/meta_sgd.rs` — Meta-SGD (Li 2017): learn per-parameter learning rates along with init; α learned as parameter; inner update x←x-α⊙∇L; strictly more expressive than MAML
+- [x] `metric/cross_attention_few.rs` — Cross-Attention Few-Shot (Ye 2021): cross-attend query to support set; task-specific attention produces class prototypes; `CafsFewShot { n_heads, n_layers }`
+- [x] `meta/leap.rs` — LEAP (Flennerhag 2019): Meta-Learning with Warped Gradient Descent; learn a warp transformation of parameter space that makes inner MAML loop faster convergent; `LeapConfig { warp_dim: usize }`
 
 ## Dependencies
 
@@ -93,11 +97,11 @@ Current implementation covers MAML with second-order finite-difference outer gra
 
 ## Quality Status
 
-- Tests: 18+ passing (12 e2e in lib.rs + module unit tests)
+- Tests: 363 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
-- Files: 25 source `.rs` files, all under 2000 lines
+- Files: 51 source `.rs` files, all under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS compiles but returns `UnsupportedPlatform` at runtime
 
@@ -120,9 +124,9 @@ Target: episode forward latency comparable to PyTorch `torchmeta` reference on `
 
 | Metric | Description | Actual |
 |--------|-------------|--------|
-| Files | source `.rs` files under `src/` | 25 |
-| SLoC | code lines (tokei) | ~2,446 |
-| Tests | e2e + unit | 18+ |
+| Files | source `.rs` files under `src/` | 51 |
+| SLoC | code lines (tokei) | 13,338 |
+| Tests | e2e + unit | 363 |
 | Coverage | algorithms with both CPU sim + PTX kernel | 7 (Proto/Matching/Relation + MAML/FOMAML/ANIL/Reptile) |
 
 The current implementation provides a compact reference covering all canonical few-shot meta-learning algorithms used in the literature (MAML, FOMAML, ANIL, Reptile, ProtoNet, MatchingNet, RelationNet). The P0/P1/P2 future items cover more recent / specialised approaches and richer backbones.

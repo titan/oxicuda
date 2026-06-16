@@ -337,11 +337,11 @@ mod tests {
             min_n,
             alpha,
         })
-        .unwrap()
+        .expect("value should be present")
     }
 
     fn make_cusum(mu0: f64, k: f64, h: f64) -> Cusum {
-        Cusum::new(CusumConfig { mu0, k, h }).unwrap()
+        Cusum::new(CusumConfig { mu0, k, h }).expect("new should succeed")
     }
 
     #[test]

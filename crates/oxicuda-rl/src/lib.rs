@@ -78,7 +78,7 @@
 //! }
 //!
 //! // Sample a mini-batch
-//! let batch = buf.sample(32, &mut handle).unwrap();
+//! let batch = buf.sample(32, &mut handle).expect("sample should succeed");
 //! assert_eq!(batch.len(), 32);
 //!
 //! // Compute GAE for a 5-step rollout
@@ -86,7 +86,7 @@
 //! let values     = vec![0.5_f32; 5];
 //! let next_vals  = vec![0.5_f32; 5];
 //! let dones      = vec![0.0_f32; 5];
-//! let gae = compute_gae(&rewards, &values, &next_vals, &dones, GaeConfig::default()).unwrap();
+//! let gae = compute_gae(&rewards, &values, &next_vals, &dones, GaeConfig::default()).expect("value should be present");
 //! assert_eq!(gae.advantages.len(), 5);
 //! ```
 //!
@@ -118,6 +118,9 @@ pub mod policy;
 /// Return and advantage estimators.
 pub mod estimator;
 
+/// Tabular temporal-difference control (Q-learning, SARSA).
+pub mod tabular;
+
 /// RL algorithm loss functions.
 pub mod loss;
 
@@ -126,6 +129,12 @@ pub mod normalize;
 
 /// Environment abstractions.
 pub mod env;
+
+/// World model components (DreamerV3 RSSM).
+pub mod world_model;
+
+/// Action-space abstractions (Discrete, MultiDiscrete, Tuple).
+pub mod spaces;
 
 // ─── Re-exports ───────────────────────────────────────────────────────────────
 
@@ -146,14 +155,22 @@ pub mod prelude {
     };
     pub use crate::handle::{LcgRng, RlHandle, SmVersion};
     pub use crate::loss::{
-        DqnConfig, DqnLoss, PpoConfig, PpoLoss, SacConfig, SacLoss, Td3Config, Td3Loss,
-        double_dqn_loss, dqn_loss, ppo_loss, sac_actor_loss, sac_critic_loss, sac_temperature_loss,
-        td3_actor_loss, td3_critic_loss,
+        DdpgConfig, DdpgCriticLoss, DiscreteSacConfig, DiscreteSacLoss, DqnConfig, DqnLoss,
+        IqnConfig, IqnLoss, MunchausenConfig, MunchausenLoss, PpoConfig, PpoLoss, SacConfig,
+        SacLoss, Td3Config, Td3Loss, ddpg_actor_loss, ddpg_critic_loss, double_dqn_loss, dqn_loss,
+        iqn_cosine_embedding, iqn_loss, iqn_targets, munchausen_dqn_loss, munchausen_target,
+        polyak_update, ppo_loss, sac_actor_loss, sac_critic_loss, sac_temperature_loss,
+        sample_taus, td3_actor_loss, td3_critic_loss,
     };
     pub use crate::normalize::{ObservationNormalizer, RewardNormalizer, RunningStats};
     pub use crate::policy::{
-        CategoricalPolicy, DeterministicPolicy, GaussianPolicy, deterministic::OrnsteinUhlenbeck,
+        Boltzmann, CategoricalPolicy, DecisionTransformer, DeterministicPolicy, DtConfig,
+        EpsilonGreedy, GaussianPolicy, IcmConfig, IcmReward, NoisyLinear, Plan2Explore,
+        Plan2ExploreConfig, RndReward, SimHashCount, deterministic::OrnsteinUhlenbeck,
+        dueling_q_values, dueling_q_values_batch, icm_intrinsic_reward, icm_inverse_loss,
     };
+    pub use crate::spaces::{Discrete, MultiDiscrete, Space, TupleSpace};
+    pub use crate::tabular::{QLearning, Sarsa};
 }
 
 // ─── Integration tests ────────────────────────────────────────────────────────

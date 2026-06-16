@@ -30,6 +30,7 @@ pub mod bayes;
 pub mod calibration;
 pub mod competing;
 pub mod concordance;
+pub mod copula;
 pub mod cox;
 pub mod data;
 pub mod deep;
@@ -42,13 +43,23 @@ pub mod nonparametric;
 pub mod plot;
 pub mod ptx_kernels;
 pub mod rmst;
+pub mod screening;
 pub mod special;
 pub mod test;
 pub mod time_varying;
 
+pub use aft::restricted_spline::{
+    RcsSplineConfig, RcsSplineFit, fit_rcs_spline, predict_rcs_survival,
+    rcs_basis as restricted_rcs_basis, rcs_deriv_basis,
+};
+pub use calibration::pseudo_r2::{PseudoR2Result, r2_d_from_d, royston_pseudo_r2};
 pub use calibration::time_roc::{
     CalibrationResult, DcaResult, TimeRocResult, calibration_analysis, decision_curve_analysis,
     time_roc, time_roc_auc_only,
+};
+pub use copula::bivariate::{
+    BivariateCopulaFit, CopulaConfig, CopulaFamily, WeibullMarginalFit, copula_survival_prob,
+    fit_bivariate_copula, kendall_tau_from_theta, theta_from_kendall_tau,
 };
 pub use cox::cox_builder::{CoxBuilder, CoxFitResult};
 pub use cox::cure_model::{
@@ -58,13 +69,23 @@ pub use cox::gradient_boost::{
     GbCoxConfig, GbCoxModel, GbCoxPred, GbCoxTree, GbNode, gb_cox_concordance, gb_cox_fit,
     gb_cox_predict,
 };
+pub use cox::influence_diagnostics::{
+    InfluenceDiagnostics, influence_diagnostics, score_residuals,
+};
 pub use cox::iptw::{
     AiptwConfig, AiptwResult, IptwConfig, IptwResult, PropensityResult, aiptw_fit,
     compute_iptw_weights, fit_propensity_score, iptw_cox, iptw_fit,
 };
+pub use cox::landmark::{
+    LandmarkConfig, LandmarkModel, LandmarkSlice, landmark_fit, landmark_predict,
+};
 pub use cox::line_search::{ArmijoConfig, WolfeConfig, armijo_backtrack, wolfe_line_search};
 pub use cox::newton_raphson::TieMethod;
 pub use cox::predict::{SurvivalPredict, predict_survival_curve};
+pub use cox::residuals_diagnostic::{
+    CumulativeResidualProcess, cumulative_martingale_process, deviance_residuals,
+    martingale_residuals,
+};
 pub use cox::trust_region::{TrustRegionConfig, TrustRegionResult, steihaug_cg, trust_region_cox};
 pub use data::truncation::{
     IntervalObs, RightTruncatedObs, TruncatedKmResult, TruncatedObs, TurnbullResult,
@@ -84,9 +105,16 @@ pub use nonparametric::multi_state::{
     MultiStateConfig, MultiStateFit, MultiStateObs, fit_multi_state, predict_occupation,
     predict_transition_probs,
 };
+pub use nonparametric::multi_state_inference::{
+    AjInference, CifInference, MultiStateData, aalen_johansen_variance, cif_with_variance,
+    transition_prob_at,
+};
 pub use nonparametric::net_survival::{
     NetSurvivalMethod, NetSurvivalResult, PopulationLifeTable, RelSurvObs, ederer_i, ederer_ii,
     net_survival_log_rank, pohar_perme,
+};
+pub use nonparametric::npsurv_bayes::{
+    DpSurvivalConfig, DpSurvivalPosterior, dp_predict_survival, dp_survival_posterior,
 };
 pub use nonparametric::recurrent::{
     AgConfig, AgFit, RecurrentGroupTest, RecurrentMcfResult, RecurrentObs, fit_andersen_gill,
@@ -105,13 +133,27 @@ pub use plot::step_functions::{
     StepFunction, cif_to_step_function, km_to_step_function, median_survival, na_to_step_function,
     rmst_from_step, step_plot_arrays,
 };
+pub use rmst::milestone_analysis::{
+    MilestoneContrast, MilestoneSummary, milestone_analysis, milestone_two_arm,
+};
 pub use rmst::pseudo_obs::{
     PseudoObsConfig, PseudoObsOutcome, PseudoObsRegression, PseudoObsResult, pseudo_obs_fit,
+};
+pub use screening::cif_sis::{
+    CifSisConfig, CifSisResult, cif_screened_dataset, cif_sure_independence_screening,
+};
+pub use screening::sis::{
+    SisConfig, SisResult, SisTieMethod, screened_dataset, sure_independence_screening,
 };
 pub use test::ph_lr_test::{PhLrTestResult, PhWaldResult, ph_lr_test, ph_score_test, ph_wald_test};
 pub use test::power_sample_size::{
     FreedmanConfig, FreedmanResult, PowerFromEventsConfig, SchoenefeldConfig, SchoenefeldResult,
     expected_events, freedman_sample_size, power_from_events, schoenfeld_sample_size,
+};
+pub mod cure;
+pub use cure::mixture_cure::{
+    CureModelConfig as CureMixtureConfig, CureModelFit as CureMixtureFit,
+    cure_predict_survival as cure_mixture_predict_survival, mixture_cure_fit,
 };
 
 #[cfg(test)]

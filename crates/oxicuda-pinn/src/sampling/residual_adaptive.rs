@@ -88,8 +88,8 @@ mod tests {
         let candidates: Vec<f32> = (0..10).map(|i| i as f32).collect();
         let residuals = vec![1.0_f32; 10];
         let mut rng = LcgRng::new(1);
-        let out =
-            residual_adaptive_sample(&candidates, &residuals, 10, 1, 5, 2.0, &mut rng).unwrap();
+        let out = residual_adaptive_sample(&candidates, &residuals, 10, 1, 5, 2.0, &mut rng)
+            .expect("residual adaptive sample with valid inputs should succeed");
         assert_eq!(out.len(), 5);
     }
 
@@ -98,8 +98,10 @@ mod tests {
         let candidates: Vec<f32> = (0..20).map(|i| i as f32).collect(); // 10 × 2
         let residuals = vec![0.5_f32; 10];
         let mut rng = LcgRng::new(2);
-        let out =
-            residual_adaptive_sample(&candidates, &residuals, 10, 2, 4, 1.0, &mut rng).unwrap();
+        let out = residual_adaptive_sample(&candidates, &residuals, 10, 2, 4, 1.0, &mut rng)
+            .expect(
+                "2D residual adaptive sample with uniform residuals and valid args should succeed",
+            );
         assert_eq!(out.len(), 8); // 4 × 2
     }
 
@@ -113,7 +115,7 @@ mod tests {
         residuals[5] = 10.0; // high residual
         let mut rng = LcgRng::new(42);
         let out =
-            residual_adaptive_sample(&candidates, &residuals, n, 1, 100, 2.0, &mut rng).unwrap();
+            residual_adaptive_sample(&candidates, &residuals, n, 1, 100, 2.0, &mut rng).expect("residual adaptive sample with skewed residuals (one high, rest low) should succeed");
         let count_special = out.iter().filter(|&&v| (v - 99.0).abs() < 1e-5).count();
         assert!(
             count_special > 50,
@@ -127,7 +129,7 @@ mod tests {
         let residuals = vec![0.0_f32; 5];
         let mut rng = LcgRng::new(3);
         let out =
-            residual_adaptive_sample(&candidates, &residuals, 5, 1, 10, 2.0, &mut rng).unwrap();
+            residual_adaptive_sample(&candidates, &residuals, 5, 1, 10, 2.0, &mut rng).expect("residual adaptive sample with all-zero residuals should fall back to uniform sampling");
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -143,8 +145,8 @@ mod tests {
         let candidates = vec![1.0_f32; 5];
         let residuals = vec![1.0_f32; 5];
         let mut rng = LcgRng::new(5);
-        let out =
-            residual_adaptive_sample(&candidates, &residuals, 5, 1, 0, 1.0, &mut rng).unwrap();
+        let out = residual_adaptive_sample(&candidates, &residuals, 5, 1, 0, 1.0, &mut rng)
+            .expect("residual adaptive sample with n_sample=0 should return an empty vec");
         assert!(out.is_empty());
     }
 
@@ -154,8 +156,8 @@ mod tests {
         let candidates: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let residuals = vec![1.0_f32; 5];
         let mut rng = LcgRng::new(6);
-        let out =
-            residual_adaptive_sample(&candidates, &residuals, 5, 1, 20, 1.0, &mut rng).unwrap();
+        let out = residual_adaptive_sample(&candidates, &residuals, 5, 1, 20, 1.0, &mut rng)
+            .expect("residual adaptive sample from small known candidate set should succeed");
         for &v in &out {
             assert!(
                 candidates.iter().any(|&c| (c - v).abs() < 1e-5),

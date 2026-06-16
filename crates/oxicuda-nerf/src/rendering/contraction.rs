@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn contract_point_inner_unchanged() {
         let x = [0.3_f32, 0.4, 0.0]; // |x| = 0.5 ≤ 1.0
-        let y = contract_point(&x, &CFG).unwrap();
+        let y = contract_point(&x, &CFG).expect("contract_point should succeed");
         assert_vec_close(&y, &x, 1e-7, "inner point identity");
     }
 
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn contract_point_exactly_on_boundary() {
         let x = [1.0_f32, 0.0, 0.0];
-        let y = contract_point(&x, &CFG).unwrap();
+        let y = contract_point(&x, &CFG).expect("contract_point should succeed");
         assert_vec_close(&y, &x, 1e-7, "boundary identity");
     }
 
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn contract_point_outer_norm_lt_2() {
         let x = [2.0_f32, 0.0, 0.0]; // |x| = 2 > 1
-        let y = contract_point(&x, &CFG).unwrap();
+        let y = contract_point(&x, &CFG).expect("contract_point should succeed");
         let norm_y = l2_norm_3(&y);
         assert!(norm_y < 2.0, "|contract(x)| must be < 2, got {norm_y}");
     }
@@ -302,7 +302,7 @@ mod tests {
             100.0 / 3.0_f32.sqrt(),
             100.0 / 3.0_f32.sqrt(),
         ]; // |x| ≈ 100
-        let y = contract_point(&x, &CFG).unwrap();
+        let y = contract_point(&x, &CFG).expect("contract_point should succeed");
         let norm_y = l2_norm_3(&y);
         assert!(
             norm_y < 2.0,
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn contract_point_direction_preserved() {
         let x = [3.0_f32, 4.0, 0.0]; // |x| = 5 > 1
-        let y = contract_point(&x, &CFG).unwrap();
+        let y = contract_point(&x, &CFG).expect("contract_point should succeed");
         // y = scale * x, so cross product x × y = 0
         // Check unit direction: y/|y| == x/|x|
         let norm_x = l2_norm_3(&x);
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn contract_point_zero() {
         let x = [0.0_f32, 0.0, 0.0];
-        let y = contract_point(&x, &CFG).unwrap();
+        let y = contract_point(&x, &CFG).expect("contract_point should succeed");
         assert_vec_close(&y, &x, 1e-9, "zero point identity");
     }
 
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn contract_point_axis_aligned() {
         let x = [2.0_f32, 0.0, 0.0];
-        let y = contract_point(&x, &CFG).unwrap();
+        let y = contract_point(&x, &CFG).expect("contract_point should succeed");
         assert_vec_close(&y, &[1.5, 0.0, 0.0], 1e-6, "axis-aligned contraction");
     }
 
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn uncontract_point_inner_unchanged() {
         let y = [0.5_f32, 0.0, 0.0];
-        let x = uncontract_point(&y, &CFG).unwrap();
+        let x = uncontract_point(&y, &CFG).expect("uncontract_point should succeed");
         assert_vec_close(&x, &y, 1e-7, "inner uncontract identity");
     }
 
@@ -354,8 +354,9 @@ mod tests {
     #[test]
     fn uncontract_point_roundtrip_inner() {
         let x = [0.7_f32, 0.0, 0.0];
-        let contracted = contract_point(&x, &CFG).unwrap();
-        let recovered = uncontract_point(&contracted, &CFG).unwrap();
+        let contracted = contract_point(&x, &CFG).expect("contract_point should succeed");
+        let recovered =
+            uncontract_point(&contracted, &CFG).expect("uncontract_point should succeed");
         assert_vec_close(&recovered, &x, 1e-5, "roundtrip inner");
     }
 
@@ -363,8 +364,9 @@ mod tests {
     #[test]
     fn uncontract_point_roundtrip_outer() {
         let x = [3.0_f32, 0.0, 0.0];
-        let contracted = contract_point(&x, &CFG).unwrap();
-        let recovered = uncontract_point(&contracted, &CFG).unwrap();
+        let contracted = contract_point(&x, &CFG).expect("contract_point should succeed");
+        let recovered =
+            uncontract_point(&contracted, &CFG).expect("uncontract_point should succeed");
         assert_vec_close(&recovered, &x, 1e-5, "roundtrip outer |x|=3");
     }
 
@@ -372,8 +374,9 @@ mod tests {
     #[test]
     fn uncontract_point_roundtrip_far() {
         let x = [50.0_f32, 0.0, 0.0];
-        let contracted = contract_point(&x, &CFG).unwrap();
-        let recovered = uncontract_point(&contracted, &CFG).unwrap();
+        let contracted = contract_point(&x, &CFG).expect("contract_point should succeed");
+        let recovered =
+            uncontract_point(&contracted, &CFG).expect("uncontract_point should succeed");
         assert_vec_close(&recovered, &x, 1e-4, "roundtrip far |x|=50");
     }
 
@@ -381,7 +384,7 @@ mod tests {
     #[test]
     fn contract_batch_shape() {
         let pts: Vec<f32> = (0..15).map(|i| i as f32 * 0.1).collect();
-        let out = contract_batch(&pts, &CFG).unwrap();
+        let out = contract_batch(&pts, &CFG).expect("contract_batch should succeed");
         assert_eq!(out.len(), 15, "batch output length");
     }
 
@@ -395,8 +398,9 @@ mod tests {
             2.0, 0.0, 0.0, // outer
             0.0, 0.0, 3.0, // outer
         ];
-        let contracted = contract_batch(&pts, &CFG).unwrap();
-        let recovered = uncontract_batch(&contracted, &CFG).unwrap();
+        let contracted = contract_batch(&pts, &CFG).expect("contract_batch should succeed");
+        let recovered =
+            uncontract_batch(&contracted, &CFG).expect("uncontract_batch should succeed");
         assert_vec_close(&recovered, &pts, 1e-5, "batch roundtrip");
     }
 
@@ -404,7 +408,7 @@ mod tests {
     #[test]
     fn contracted_norm_inner() {
         let x = [0.6_f32, 0.0, 0.0];
-        let cn = contracted_norm(&x, &CFG).unwrap();
+        let cn = contracted_norm(&x, &CFG).expect("contracted_norm should succeed");
         assert_close(cn, 0.6, 1e-7, "contracted_norm inner");
     }
 
@@ -412,7 +416,7 @@ mod tests {
     #[test]
     fn contracted_norm_outer() {
         let x = [5.0_f32, 0.0, 0.0];
-        let cn = contracted_norm(&x, &CFG).unwrap();
+        let cn = contracted_norm(&x, &CFG).expect("contracted_norm should succeed");
         assert!(cn < 2.0, "contracted_norm outer must be < 2.0, got {cn}");
     }
 
@@ -420,14 +424,20 @@ mod tests {
     #[test]
     fn is_inner_true() {
         let x = [0.5_f32, 0.0, 0.0];
-        assert!(is_inner(&x, &CFG).unwrap(), "should be inner");
+        assert!(
+            is_inner(&x, &CFG).expect("is_inner should succeed"),
+            "should be inner"
+        );
     }
 
     // 17. is_inner false for outer point
     #[test]
     fn is_inner_false() {
         let x = [2.0_f32, 0.0, 0.0];
-        assert!(!is_inner(&x, &CFG).unwrap(), "should not be inner");
+        assert!(
+            !is_inner(&x, &CFG).expect("is_inner should succeed"),
+            "should not be inner"
+        );
     }
 
     // 18. NanEncountered for NaN input
@@ -469,7 +479,7 @@ mod tests {
     #[test]
     fn contract_axis_x() {
         let x = [3.0_f32, 0.0, 0.0];
-        let y = contract_point(&x, &CFG).unwrap();
+        let y = contract_point(&x, &CFG).expect("contract_point should succeed");
         let expected = 5.0_f32 / 3.0;
         assert_close(y[0], expected, 1e-6, "x=[3,0,0] → contract[0] = 5/3");
         assert_close(y[1], 0.0, 1e-9, "x=[3,0,0] → contract[1] = 0");

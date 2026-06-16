@@ -8,7 +8,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.38).
 
 ## Implementation Status
 
-- **Actual SLoC:** 3,611 total lines (2,983 code, 40 files)
+- **Actual SLoC:** 13,280 total lines (2,983 code, 76 files)
 - **Coverage:** state-vector simulation, standard + parametric gates, Pauli/Hamiltonian
   expectation values, Trotter-Suzuki 1/2/4-order evolution, Lindblad master equation,
   VQE with parameter-shift gradients, QAOA Max-Cut/Ising, density matrices with
@@ -66,18 +66,20 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.38).
 - [x] circuit/circuit.rs — `QuantumCircuit`, `GateOp` enum, `exec_on_state`
 
 #### PTX Kernel Generation (ptx_kernels.rs)
-- [x] 7 kernel string generators × 6 SM versions (sm_75/80/86/89/90/100):
+- [x] 8 kernel string generators × 6 SM versions (sm_75/80/86/89/90/100):
   `statevec_apply_1q`, `statevec_apply_2q`, `statevec_apply_cnot`,
-  `expval_pauli`, `partial_trace`, `trotter_step`, `measure_prob`
+  `expval_pauli`, `partial_trace`, `trotter_step`, `measure_prob`,
+  `qft_butterfly`
 
 #### Tests & Benchmarks
-- [x] 14 end-to-end tests in `lib.rs::e2e_tests` (norm, superposition, Bell state,
+- [x] 17 end-to-end tests in `lib.rs::e2e_tests` (norm, superposition, Bell state,
   Pauli-Z eigenvalues, mixed Hamiltonian, VQE convergence, QAOA round-trip,
   pure-state purity, depolarizing reduces purity, amplitude damping trace,
-  circuit-DSL Bell, PTX non-empty × all SM versions)
+  circuit-DSL Bell, PTX non-empty × all SM versions, QFT uniform, QFT round-trip
+  identity, QPE recovers φ=1/4)
 - [x] Benchmarks (`benches/quantum_ops.rs`) — 7 PTX kernel groups × 4 SM versions
   + 5 algorithm benches (H, Bell, ZZ feature map, VQE energy, QAOA)
-- **Tests:** 61 passing
+- **Tests:** 419 passing
 
 ### Future Enhancements
 
@@ -94,6 +96,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.38).
 - [ ] Tensor-network contraction back-end for shallow wide circuits
 - [ ] Open-system quantum trajectories (Monte-Carlo unraveling of Lindblad)
 - [x] Mid-circuit measurement + classical feed-forward conditional gates (midcircuit/measurement.rs -- statevector measure+collapse+renormalize, classical register, predicate-conditioned gates, run executor)
+- [x] Quantum Fourier Transform (QFT) + inverse (fourier/qft.rs -- little-endian H + controlled-phase R_k ladder + bit-reversal; DFT-matrix verified)
 
 #### P1 — Variational Algorithms
 - [x] SPSA optimizer for VQE (stochastic perturbation, fewer evaluations than
@@ -102,9 +105,11 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.38).
 - [x] Natural-gradient VQE via quantum Fisher information matrix (vqe/qfim.rs -- Stokes 2020; Fubini-Study metric via finite-diff statevector derivatives + (F+reg·I)δ=grad natural-gradient solve; reuses HardwareEfficientAnsatz + StateVector)
 - [ ] Layer-wise warm-start initialization to mitigate barren plateaus
 - [x] QAOA warm-start from classical GW / Goemans-Williamson relaxations (qaoa/warm_start.rs -- Egger 2021; projected-gradient continuous MaxCut relaxation c∈[0,1]ⁿ + θ_i=2·arcsin(√c_i) Ry-init angle mapping + zero-init (γ,β))
-- [ ] Quantum Phase Estimation (QPE) primitive
+- [x] Quantum Phase Estimation (QPE) primitive (fourier/qpe.rs -- Hadamard counting register + controlled-U^{2^k} repeated-squaring ladder + inverse-QFT readout; little-endian; recovers φ=j/2^n exactly for phase-gate / Rz eigenstates)
 
 #### P2 — QML Extensions
+- [ ] Surface code logical qubit (`error_correction/surface_code.rs`) — Fowler 2012: distance-d rotated surface code with stabilizer measurement schedule, minimum-weight perfect matching (MWPM) decoder via Blossom V; `SurfaceCode`
+- [ ] Full Lindblad RK4 integrator (`trotter/lindblad_rk4.rs`) — Breuer-Petruccione 2002: fourth-order Runge-Kutta integration of the Lindblad master equation for arbitrary Hamiltonian + collapse operators (distinct from existing first-order `lindblad_step`); `LindbladRk4`
 - [ ] Projected quantum kernels (PQK) beyond overlap fidelity
 - [ ] Trainable quantum kernels with gradient descent over feature-map params
 - [ ] Quantum convolutional neural networks (QCNN) translation-invariant layers
@@ -131,8 +136,9 @@ is delegated to higher-level integrators.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 61 passing (state vector, gates, Pauli, Trotter, VQE, QAOA, density,
-  channels, kernels, circuit, PTX × 6 SM)
+- Tests: 419 passing (state vector, gates, Pauli, Trotter, VQE, QAOA, density,
+  channels, kernels, circuit, stabilizer, MPS, mid-circuit, SPSA, QFIM/natural
+  gradient, QFT/QPE Fourier, PTX × 6 SM)
 - unwrap() calls: 0 in production code
 - macOS: compiles but returns `UnsupportedPlatform` at runtime when actual launch
   is attempted (PTX emission still works on every host)
@@ -203,10 +209,11 @@ the Linux+NVIDIA verification run is executed.
 - [ ] Density-matrix Lindblad evolution numerical agreement with QuTiP reference
 
 ### Implementation Deepening
-- [ ] SPSA / natural-gradient VQE optimizers
-- [ ] Stabilizer / Clifford fast-track simulator
-- [ ] MPS / tensor-network back-ends for low-entanglement regimes
-- [ ] Mid-circuit measurement + classical conditional control
+- [x] SPSA / natural-gradient VQE optimizers (vqe/spsa.rs SPSA + 2SPSA Hessian; vqe/qfim.rs Fubini-Study natural gradient)
+- [x] Stabilizer / Clifford fast-track simulator (stabilizer/tableau.rs Aaronson-Gottesman CHP tableau; circuit/clifford_t.rs Clifford+T decomposition)
+- [x] MPS back-end for low-entanglement regimes (mps/simulator.rs site tensors + adjacent 2q SVD truncation)
+- [ ] Tensor-network contraction back-end for low-entanglement regimes
+- [x] Mid-circuit measurement + classical conditional control (midcircuit/measurement.rs measure+collapse+renormalize + predicate-conditioned gates)
 
 ### Numerical Accuracy
 - [ ] Trotter-error analysis vs. exact `expm` for 4-qubit XX-Ising

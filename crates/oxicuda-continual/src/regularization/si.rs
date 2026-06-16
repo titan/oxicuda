@@ -164,7 +164,8 @@ mod tests {
         let params = vec![1.0_f32, 2.0, 3.0];
         let omega = vec![5.0_f32, 3.0, 1.0];
         let cfg = SiConfig::default();
-        let pen = si_penalty(&params, &params, &omega, &cfg).unwrap();
+        let pen = si_penalty(&params, &params, &omega, &cfg)
+            .expect("SI penalty should compute with matching param dimensions at anchor");
         assert!(
             pen.abs() < 1e-6,
             "SI penalty should be 0 at anchor, got {pen}"
@@ -177,7 +178,8 @@ mod tests {
         let omega = vec![1.0_f32; 4];
         let current = vec![1.0_f32; 4];
         let cfg = SiConfig::default();
-        let pen = si_penalty(&current, &anchor, &omega, &cfg).unwrap();
+        let pen = si_penalty(&current, &anchor, &omega, &cfg)
+            .expect("SI penalty should compute with matching param dimensions");
         assert!(pen > 0.0, "SI penalty should be > 0 after displacement");
     }
 
@@ -194,8 +196,10 @@ mod tests {
             lambda: 2.0,
             xi: 0.1,
         };
-        let p1 = si_penalty(&current, &anchor, &omega, &cfg1).unwrap();
-        let p2 = si_penalty(&current, &anchor, &omega, &cfg2).unwrap();
+        let p1 = si_penalty(&current, &anchor, &omega, &cfg1)
+            .expect("SI penalty should compute with lambda=1.0");
+        let p2 = si_penalty(&current, &anchor, &omega, &cfg2)
+            .expect("SI penalty should compute with lambda=2.0");
         assert!(p2 > p1, "Penalty should grow with lambda");
     }
 
@@ -206,7 +210,8 @@ mod tests {
         // Positive gradient step
         let grad = vec![0.5_f32, -0.3, 0.1, -0.7];
         let params_after = vec![0.1_f32, -0.05, 0.02, -0.1];
-        si_importance_update(&mut state, &grad, &params_after).unwrap();
+        si_importance_update(&mut state, &grad, &params_after)
+            .expect("SI importance update should succeed with valid state");
         for &w in &state.running_omega {
             assert!(w >= 0.0, "SI omega must be non-negative, got {w}");
         }
@@ -230,7 +235,8 @@ mod tests {
         let mut state = SiState::new(&params_init);
         let grad = vec![2.0_f32];
         let params = vec![1.0_f32];
-        si_importance_update(&mut state, &grad, &params).unwrap();
+        si_importance_update(&mut state, &grad, &params)
+            .expect("SI importance update should succeed with valid state");
         assert!((state.running_omega[0] - 2.0).abs() < 1e-6);
     }
 

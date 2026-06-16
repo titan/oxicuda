@@ -559,7 +559,8 @@ mod tests {
     #[test]
     fn domain_new_valid() {
         let cfg = make_cfg(3);
-        let state = domain_new(&cfg, 42).unwrap();
+        let state = domain_new(&cfg, 42)
+            .expect("domain-incremental state should initialize with valid config");
         assert_eq!(state.domain_adapters.len(), 3);
         assert_eq!(state.layer_sizes, vec![8, 16, 4]);
     }
@@ -586,7 +587,8 @@ mod tests {
     #[test]
     fn adapter_identity_init() {
         let cfg = make_cfg(2);
-        let state = domain_new(&cfg, 1).unwrap();
+        let state = domain_new(&cfg, 1)
+            .expect("domain-incremental state should initialize with valid config");
         for adapter in &state.domain_adapters {
             assert!(adapter.scale.iter().all(|&v| (v - 1.0).abs() < 1e-12));
             assert!(adapter.shift.iter().all(|&v| v.abs() < 1e-12));
@@ -598,9 +600,11 @@ mod tests {
     #[test]
     fn predict_valid_class() {
         let cfg = make_cfg(2);
-        let state = domain_new(&cfg, 2).unwrap();
+        let state = domain_new(&cfg, 2)
+            .expect("domain-incremental state should initialize with valid config");
         let x = vec![0.3f64; 8];
-        let pred = domain_predict(&state, &x, 0).unwrap();
+        let pred =
+            domain_predict(&state, &x, 0).expect("domain prediction should succeed on valid input");
         assert!(pred < 4, "prediction {pred} must be in [0,4)");
     }
 
@@ -609,7 +613,8 @@ mod tests {
     #[test]
     fn predict_invalid_domain_err() {
         let cfg = make_cfg(2);
-        let state = domain_new(&cfg, 3).unwrap();
+        let state = domain_new(&cfg, 3)
+            .expect("domain-incremental state should initialize with valid config");
         let x = vec![0.0f64; 8];
         assert!(domain_predict(&state, &x, 5).is_err());
     }
@@ -619,9 +624,11 @@ mod tests {
     #[test]
     fn forward_output_length() {
         let cfg = make_cfg(2);
-        let state = domain_new(&cfg, 4).unwrap();
+        let state = domain_new(&cfg, 4)
+            .expect("domain-incremental state should initialize with valid config");
         let x = vec![0.1f64; 8];
-        let logits = domain_forward(&state, &x, 0).unwrap();
+        let logits = domain_forward(&state, &x, 0)
+            .expect("domain forward pass should succeed on valid input");
         assert_eq!(logits.len(), 4, "logits length must equal output_dim");
     }
 
@@ -630,7 +637,8 @@ mod tests {
     #[test]
     fn forward_wrong_dim_err() {
         let cfg = make_cfg(2);
-        let state = domain_new(&cfg, 5).unwrap();
+        let state = domain_new(&cfg, 5)
+            .expect("domain-incremental state should initialize with valid config");
         assert!(domain_forward(&state, &[0.0; 5], 0).is_err());
     }
 
@@ -639,8 +647,10 @@ mod tests {
     #[test]
     fn adapter_params_identity_before_training() {
         let cfg = make_cfg(2);
-        let state = domain_new(&cfg, 6).unwrap();
-        let (scale, shift) = domain_adapter_params(&state, 0).unwrap();
+        let state = domain_new(&cfg, 6)
+            .expect("domain-incremental state should initialize with valid config");
+        let (scale, shift) =
+            domain_adapter_params(&state, 0).expect("domain adapter params should be accessible");
         assert!(scale.iter().all(|&v| (v - 1.0).abs() < 1e-12));
         assert!(shift.iter().all(|&v| v.abs() < 1e-12));
     }
@@ -650,7 +660,8 @@ mod tests {
     #[test]
     fn adapter_params_invalid_domain_err() {
         let cfg = make_cfg(2);
-        let state = domain_new(&cfg, 7).unwrap();
+        let state = domain_new(&cfg, 7)
+            .expect("domain-incremental state should initialize with valid config");
         assert!(domain_adapter_params(&state, 5).is_err());
     }
 
@@ -659,10 +670,12 @@ mod tests {
     #[test]
     fn fit_task_finite_loss() {
         let cfg = make_cfg(3);
-        let mut state = domain_new(&cfg, 8).unwrap();
+        let mut state = domain_new(&cfg, 8)
+            .expect("domain-incremental state should initialize with valid config");
         let mut rng = LcgRng::new(10);
         let (x, y) = make_xy(20, 8, 4, 100);
-        let loss = domain_fit_task(&mut state, &x, &y, 20, 0, &mut rng).unwrap();
+        let loss = domain_fit_task(&mut state, &x, &y, 20, 0, &mut rng)
+            .expect("domain task fitting should succeed with valid data");
         assert!(loss.is_finite(), "loss must be finite: {loss}");
         assert!(loss >= 0.0, "loss must be non-negative");
     }
@@ -672,7 +685,8 @@ mod tests {
     #[test]
     fn fit_task_empty_err() {
         let cfg = make_cfg(2);
-        let mut state = domain_new(&cfg, 9).unwrap();
+        let mut state = domain_new(&cfg, 9)
+            .expect("domain-incremental state should initialize with valid config");
         let mut rng = LcgRng::new(11);
         assert!(domain_fit_task(&mut state, &[], &[], 0, 0, &mut rng).is_err());
     }
@@ -682,7 +696,8 @@ mod tests {
     #[test]
     fn fit_task_invalid_domain_err() {
         let cfg = make_cfg(2);
-        let mut state = domain_new(&cfg, 10).unwrap();
+        let mut state = domain_new(&cfg, 10)
+            .expect("domain-incremental state should initialize with valid config");
         let mut rng = LcgRng::new(12);
         let (x, y) = make_xy(10, 8, 4, 200);
         assert!(domain_fit_task(&mut state, &x, &y, 10, 5, &mut rng).is_err());
@@ -693,12 +708,14 @@ mod tests {
     #[test]
     fn adapter_changes_after_training() {
         let cfg = make_cfg(2);
-        let mut state = domain_new(&cfg, 11).unwrap();
+        let mut state = domain_new(&cfg, 11)
+            .expect("domain-incremental state should initialize with valid config");
         let mut rng = LcgRng::new(13);
         let (x, y) = make_xy(30, 8, 4, 300);
 
         let scale_before = state.domain_adapters[0].scale.clone();
-        domain_fit_task(&mut state, &x, &y, 30, 0, &mut rng).unwrap();
+        domain_fit_task(&mut state, &x, &y, 30, 0, &mut rng)
+            .expect("domain task fitting should succeed with valid data");
         let scale_after = &state.domain_adapters[0].scale;
 
         // At least some scale values should have changed after gradient updates
@@ -714,12 +731,14 @@ mod tests {
     #[test]
     fn other_domain_adapter_unchanged() {
         let cfg = make_cfg(3);
-        let mut state = domain_new(&cfg, 12).unwrap();
+        let mut state = domain_new(&cfg, 12)
+            .expect("domain-incremental state should initialize with valid config");
         let mut rng = LcgRng::new(14);
         let (x, y) = make_xy(20, 8, 4, 400);
 
         let scale_d1_before = state.domain_adapters[1].scale.clone();
-        domain_fit_task(&mut state, &x, &y, 20, 0, &mut rng).unwrap();
+        domain_fit_task(&mut state, &x, &y, 20, 0, &mut rng)
+            .expect("domain task fitting should succeed with valid data");
         let scale_d1_after = &state.domain_adapters[1].scale;
 
         for (&a, &b) in scale_d1_before.iter().zip(scale_d1_after.iter()) {
@@ -752,10 +771,12 @@ mod tests {
     #[test]
     fn current_domain_updated_after_fit() {
         let cfg = make_cfg(3);
-        let mut state = domain_new(&cfg, 13).unwrap();
+        let mut state = domain_new(&cfg, 13)
+            .expect("domain-incremental state should initialize with valid config");
         let mut rng = LcgRng::new(15);
         let (x, y) = make_xy(10, 8, 4, 500);
-        domain_fit_task(&mut state, &x, &y, 10, 2, &mut rng).unwrap();
+        domain_fit_task(&mut state, &x, &y, 10, 2, &mut rng)
+            .expect("domain task fitting should succeed with valid data");
         assert_eq!(state.current_domain, 2, "current_domain must be set to 2");
     }
 }

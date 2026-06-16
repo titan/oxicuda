@@ -243,18 +243,18 @@ mod tests {
 
     #[test]
     fn temperature_apply_softmax_normalised() {
-        let scaler = TemperatureScaler::new(2.0).unwrap();
+        let scaler = TemperatureScaler::new(2.0).expect("new should succeed");
         let logits = vec![1.0_f32, 2.0, 3.0];
-        let p = scaler.apply(&logits, 3).unwrap();
+        let p = scaler.apply(&logits, 3).expect("apply should succeed");
         let s: f32 = p.iter().sum();
         assert!((s - 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn temperature_apply_preserves_argmax() {
-        let scaler = TemperatureScaler::new(0.3).unwrap();
+        let scaler = TemperatureScaler::new(0.3).expect("new should succeed");
         let logits = vec![1.0_f32, 5.0, 2.0, 3.0, 0.5, 0.1];
-        let p = scaler.apply(&logits, 3).unwrap();
+        let p = scaler.apply(&logits, 3).expect("apply should succeed");
         // first row argmax should still be index 1
         let row0 = &p[0..3];
         let mut best = 0;
@@ -271,15 +271,22 @@ mod tests {
     #[test]
     fn temperature_fit_reduces_ece_when_overconfident() {
         let (logits, labels) = over_confident_dataset(200);
-        let scaler = TemperatureScaler::fit_default(&logits, &labels, 3).unwrap();
+        let scaler = TemperatureScaler::fit_default(&logits, &labels, 3)
+            .expect("fit_default should succeed");
         assert!(scaler.temperature > 0.0);
-        let scaled = scaler.apply(&logits, 3).unwrap();
+        let scaled = scaler.apply(&logits, 3).expect("apply should succeed");
         let baseline = scaler; // copy of struct for use after move
-        let p_before = TemperatureScaler::default().apply(&logits, 3).unwrap();
-        let (c_before, ok_before) = top1_confidences(&p_before, &labels, 3).unwrap();
-        let (c_after, ok_after) = top1_confidences(&scaled, &labels, 3).unwrap();
-        let ece_before = expected_calibration_error(&c_before, &ok_before, 10).unwrap();
-        let ece_after = expected_calibration_error(&c_after, &ok_after, 10).unwrap();
+        let p_before = TemperatureScaler::default()
+            .apply(&logits, 3)
+            .expect("apply should succeed");
+        let (c_before, ok_before) =
+            top1_confidences(&p_before, &labels, 3).expect("top1_confidences should succeed");
+        let (c_after, ok_after) =
+            top1_confidences(&scaled, &labels, 3).expect("top1_confidences should succeed");
+        let ece_before = expected_calibration_error(&c_before, &ok_before, 10)
+            .expect("expected_calibration_error should succeed");
+        let ece_after = expected_calibration_error(&c_after, &ok_after, 10)
+            .expect("expected_calibration_error should succeed");
         assert!(
             ece_after <= ece_before + 1e-4,
             "ECE should not increase: before={ece_before}, after={ece_after}"
@@ -291,14 +298,21 @@ mod tests {
     fn temperature_fit_lowers_nll() {
         let (logits, labels) = over_confident_dataset(200);
         let nll_before = negative_log_likelihood(
-            &TemperatureScaler::default().apply(&logits, 3).unwrap(),
+            &TemperatureScaler::default()
+                .apply(&logits, 3)
+                .expect("apply should succeed"),
             &labels,
             3,
         )
-        .unwrap();
-        let scaler = TemperatureScaler::fit_default(&logits, &labels, 3).unwrap();
-        let nll_after =
-            negative_log_likelihood(&scaler.apply(&logits, 3).unwrap(), &labels, 3).unwrap();
+        .expect("value should be present");
+        let scaler = TemperatureScaler::fit_default(&logits, &labels, 3)
+            .expect("fit_default should succeed");
+        let nll_after = negative_log_likelihood(
+            &scaler.apply(&logits, 3).expect("apply should succeed"),
+            &labels,
+            3,
+        )
+        .expect("value should be present");
         assert!(nll_after <= nll_before + 1e-4);
     }
 
@@ -332,7 +346,7 @@ mod tests {
 
     #[test]
     fn temperature_apply_rejects_bad_shape() {
-        let scaler = TemperatureScaler::new(1.0).unwrap();
+        let scaler = TemperatureScaler::new(1.0).expect("new should succeed");
         let r = scaler.apply(&[1.0_f32, 2.0, 3.0], 2);
         assert!(r.is_err());
     }
@@ -346,7 +360,7 @@ mod tests {
             max_iter: 32,
             tol: 1e-3,
         };
-        let s = TemperatureScaler::fit(&logits, &labels, 3, &cfg).unwrap();
+        let s = TemperatureScaler::fit(&logits, &labels, 3, &cfg).expect("fit should succeed");
         assert!(s.temperature >= cfg.t_lo - 1e-4);
         assert!(s.temperature <= cfg.t_hi + 1e-4);
     }

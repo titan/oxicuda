@@ -203,7 +203,7 @@ mod tests {
             rank,
             ParallelismConfig { tp: 1, sp, ep: 1 },
         )
-        .unwrap()
+        .expect("value should be present")
     }
 
     #[test]
@@ -217,13 +217,15 @@ mod tests {
         let chunks: Vec<Vec<f32>> = (0..sp)
             .map(|r| {
                 let h = handle_sp(sp, r);
-                let s = SeqSplitter::new(h, total, hd).unwrap();
-                s.extract_chunk(&full).unwrap()
+                let s = SeqSplitter::new(h, total, hd).expect("new should succeed");
+                s.extract_chunk(&full)
+                    .expect("extract_chunk should succeed")
             })
             .collect();
 
         // All-gather reconstructs
-        let reconstructed = SeqSplitter::all_gather(total, hd, sp, &chunks).unwrap();
+        let reconstructed =
+            SeqSplitter::all_gather(total, hd, sp, &chunks).expect("all_gather should succeed");
         assert_eq!(reconstructed, full);
     }
 
@@ -238,8 +240,10 @@ mod tests {
 
         // rank 0: reduce_scatter should return chunk[0..hd] = sum of sp ones = 4.0
         let h0 = handle_sp(sp, 0);
-        let s0 = SeqSplitter::new(h0, total, hd).unwrap();
-        let chunk0 = s0.reduce_scatter(&partials).unwrap();
+        let s0 = SeqSplitter::new(h0, total, hd).expect("new should succeed");
+        let chunk0 = s0
+            .reduce_scatter(&partials)
+            .expect("reduce_scatter should succeed");
         // Each element in the chunk: sp * 1.0 = 4.0
         assert_eq!(chunk0, vec![4.0_f32; hd]);
     }
@@ -262,7 +266,7 @@ mod tests {
         let sp = 4;
         for rank in 0..sp {
             let h = handle_sp(sp, rank);
-            let s = SeqSplitter::new(h, 8, 2).unwrap();
+            let s = SeqSplitter::new(h, 8, 2).expect("new should succeed");
             let ci = s.chunk_info();
             assert_eq!(ci.start, rank * 2, "wrong start for rank {rank}");
             assert_eq!(ci.len, 2);
@@ -275,10 +279,11 @@ mod tests {
         let total = 4;
         let hd = 2;
         let h1 = handle_sp(sp, 1);
-        let s1 = SeqSplitter::new(h1, total, hd).unwrap();
+        let s1 = SeqSplitter::new(h1, total, hd).expect("new should succeed");
         let chunk = vec![99.0_f32; 2 * hd]; // rank 1 chunk (tokens 2..3)
         let mut full = vec![0.0_f32; total * hd];
-        s1.insert_chunk(&chunk, &mut full).unwrap();
+        s1.insert_chunk(&chunk, &mut full)
+            .expect("insert_chunk should succeed");
         // First chunk = zeros, second chunk = 99s
         assert_eq!(&full[0..hd * 2], &[0.0, 0.0, 0.0, 0.0]);
         assert_eq!(&full[hd * 2..], &[99.0, 99.0, 99.0, 99.0]);
