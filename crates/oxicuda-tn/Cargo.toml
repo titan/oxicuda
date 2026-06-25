@@ -21,3 +21,7 @@ workspace = true
 [[bench]]
 name = "tn_ops"
 harness = false
+
+[[bench]]
+name = "algo_bench"
+harness = false

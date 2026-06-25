@@ -14,6 +14,7 @@ pub mod plane_ransac;
 pub mod ray_triangle;
 pub mod simplify;
 pub mod smoothing;
+pub mod topology;
 
 pub use barycentric::{
     barycentric_tetrahedron, barycentric_triangle, interpolate_triangle, point_in_tetrahedron,
@@ -31,3 +32,4 @@ pub use ray_triangle::{
 };
 pub use simplify::{SimplifyResult, simplify_mesh};
 pub use smoothing::{laplacian_smooth, taubin_smooth};
+pub use topology::{TopologyReport, analyze_topology, validate_mesh};

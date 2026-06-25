@@ -172,6 +172,14 @@ impl SpvModule {
         self.emit(OP_VARIABLE, &[ty, id, storage_class]);
     }
 
+    /// Emit a scalar `u32` specialization constant (`OpSpecConstant`).
+    ///
+    /// The `value` is the *default* baked into the module; the host overrides
+    /// it through a `VkSpecializationInfo` keyed on the `SpecId` decoration.
+    pub(super) fn emit_spec_constant_u32(&mut self, ty: u32, id: u32, default: u32) {
+        self.emit(super::consts::OP_SPEC_CONSTANT, &[ty, id, default]);
+    }
+
     pub(super) fn emit_load(&mut self, result_ty: u32, result: u32, pointer: u32) {
         self.emit(OP_LOAD, &[result_ty, result, pointer]);
     }

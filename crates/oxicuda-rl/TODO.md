@@ -99,7 +99,13 @@ observation/reward normalization, and a vectorized environment abstraction.
 - [x] (P2) DreamerV3 world-model RL (`world_model/dreamer_v3.rs`) — Hafner 2023: RSSM recurrent state-space model with symlog encoding, KL balancing, two-hot critic targets; `DreamerV3`
 - [x] (P2) Decision Transformer (`policy/decision_transformer.rs`) — Chen 2021 NeurIPS: offline RL via causal Transformer conditioned on return-to-go + state + action; `DecisionTransformer`
 - [x] (P2) Discrete SAC with Gumbel-Softmax (`loss/discrete_sac.rs`) — Christodoulou 2019: SAC extended to discrete action spaces; temperature auto-tuning via target entropy H_target=-|A|; `DiscreteSacLoss`
-- [ ] (P2) Plan2Explore unsupervised exploration (`policy/plan2explore.rs`) — Sekar 2020: ensemble disagreement intrinsic reward + one-step world-model disagreement maximisation; `Plan2Explore`
+- [x] (P2) Plan2Explore unsupervised exploration (`policy/plan2explore.rs`) — Sekar 2020: ensemble disagreement intrinsic reward + one-step world-model disagreement maximisation; `Plan2Explore` (already implemented: `Plan2Explore`/`Plan2ExploreConfig`, K MLP ensemble members with latent-disagreement variance bonus)
+
+#### Offline (Batch) RL Value Correction (`loss/offline.rs`)
+- [x] (P2) CQL — Conservative Q-Learning (`loss/offline.rs`) — Kumar 2020: `logsumexp_a Q(s,a) − E_{a~D}[Q(s,a)]` conservative gap + Bellman MSE/Huber; `cql_loss`/`CqlConfig`/`CqlLoss`
+- [x] (P2) IQL — Implicit Q-Learning (`loss/offline.rs`) — Kostrikov 2021: expectile value regression `|τ−1(u<0)|·u²` + in-sample-V critic bootstrap + advantage-weighted policy extraction; `iql_value_loss`/`iql_critic_loss`/`expectile_weight`/`advantage_weighted_policy_loss`/`IqlConfig`
+- [x] (P2) AWAC — Advantage-Weighted Actor-Critic (`loss/offline.rs`) — Nair 2020: `−E[log π(a|s)·exp(A/λ)]` weighted MLE with clamp/normalise; `awac_actor_loss`/`AwacConfig`
+- [x] (P2) BCQ — Batch-Constrained Q-Learning (`loss/offline.rs`) — Fujimoto 2019: soft clipped-double-Q target `λ·min+(1−λ)·max` + cVAE ELBO (recon + β·KL); `bcq_target`/`bcq_critic_loss`/`bcq_vae_loss`/`BcqConfig`
 
 ## Dependencies
 
@@ -157,8 +163,8 @@ observation/reward normalization, and a vectorized environment abstraction.
 - [x] All 4 loss functions exercised by E2E tests with realistic batch shapes
 - [x] GAE backward scan validated against analytic single-step TD limit
 - [x] PER sampling distribution verified to match priority weights statistically
-- [ ] V-trace clamp ratio sweep across [0.1, 10.0] (currently default 1.0 only)
-- [ ] Retrace traced through multi-episode boundary (n_step buffer interaction)
+- [x] V-trace clamp ratio sweep across [0.1, 10.0] (`estimator/vtrace.rs::tests::vtrace_clamp_ratio_sweep_monotone` — verifies finiteness + monotonicity of v_s in c̄/ρ̄ while capping, and saturation above ρ)
+- [x] Retrace traced through multi-episode boundary (`estimator/retrace.rs::tests::retrace_multi_episode_boundary_severs_trace` — done flag severs the backward trace; pre-boundary step matches episode-only batch, second-episode start matches B-only off-policy trace)
 
 ### Implementation Deepening
 - [x] `CategoricalPolicy` supports Gumbel-max for parallel batch sampling
@@ -166,7 +172,7 @@ observation/reward normalization, and a vectorized environment abstraction.
 - [x] PER segment tree handles dynamic priority updates in O(log N)
 - [x] VecEnv auto-reset preserves terminal observation for correct bootstrap
 - [x] Distributional RL (C51/QR-DQN) policy + loss extension
-- [ ] Multi-discrete and tuple action space support (currently single-discrete and single-continuous)
+- [x] Multi-discrete and tuple action space support (`spaces/multi_discrete.rs` — `Discrete`/`MultiDiscrete`/`TupleSpace`/`Space` trait with factorised log-prob, joint entropy, flat-prob sampling)
 
 ## Notes
 

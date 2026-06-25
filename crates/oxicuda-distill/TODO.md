@@ -6,7 +6,7 @@ Pure Rust knowledge distillation primitives for teacher-student training, coveri
 
 ## Implementation Status
 
-**Actual: 11,889 SLoC (63 files)**
+**Actual: 18,716 SLoC (70 files)**
 
 Current implementation covers the canonical knowledge distillation taxonomy (logit / feature / relation / attention / online / born-again / data-free / metrics), with PTX kernel string templates emitted at runtime for SM 7.5 through SM 10.0.
 
@@ -81,19 +81,19 @@ Current implementation covers the canonical knowledge distillation taxonomy (log
 - [x] Decoupled feature-projection-free distillation (RA-DKD)
 - [x] Layer-wise adaptive temperature scheduling
 - [x] LayerDrop / structured-pruning distillation
-- [ ] Quantisation-aware distillation (INT8 / FP8 student)
-- [ ] `distill/distwrd.rs` — DistWRD (Shen 2022): token-level distribution alignment via Wasserstein-Riesz divergence; soft label matching beyond KL; `DistWrd { lambda_wd: f32 }`
-- [ ] `distill/minkd.rs` — MiniLLM (Gu 2023): KD for LLMs via reverse KL + policy gradient; minimise E_student[-log p_teacher]; REINFORCE gradient estimator; avoids mean-seeking mode collapse of forward KL
-- [ ] `distill/progressive_kd.rs` — Progressive Knowledge Distillation (Wang 2021): curriculum of intermediate checkpoints as teachers; start with checkpoint closest to random init; `ProgressiveKd { n_stages: usize }`
-- [ ] `distill/data_free_dfad.rs` — DFAD (Fang 2022): data-free adversarial distillation; generator + student trained adversarially against frozen teacher; no original training data required; `DfadConfig { gen_lr, stu_lr }`
+- [x] Quantisation-aware distillation (INT8 / FP8 student) (impl `src/losses/qat_distill.rs`; affine INT8 + FP8 e4m3/e5m2 fake-quant, straight-through estimator, KD loss on quantised logits)
+- [x] DistWRD (Shen 2022): token-level distribution alignment via Wasserstein divergence; soft label matching beyond KL (impl `src/losses/distwrd.rs` — `DistWrd { lambda_wd, temperature }`, `wasserstein1_cdf`)
+- [x] MiniLLM (Gu 2023): KD for LLMs via reverse KL + policy gradient; REINFORCE gradient estimator; avoids mean-seeking mode collapse of forward KL (impl `src/losses/minkd.rs` — `MinKd::{reverse_kl, policy_gradient, policy_gradient_sampled}`)
+- [x] Progressive Knowledge Distillation (Wang 2021): curriculum of intermediate checkpoints as teachers; start with checkpoint closest to random init (impl `src/born_again/progressive_kd.rs` — `ProgressiveKdSchedule`, `TeacherCheckpoint`, soft cross-stage blending)
+- [x] DFAD (Fang 2022): data-free adversarial distillation; generator + student trained adversarially against frozen teacher; no original training data required (impl `src/data_free/dfad.rs` — `Dfad`, `DfadConfig`, `DfadDims`)
 
 #### P2 — Optimisations and Tooling
 - [ ] Fused softmax + KL kernel for Hinton KD (reduce two passes to one)
 - [ ] Fused L2-norm + AT-map kernel for AT distillation
 - [ ] CUDA-graph capture for repeated distillation step
 - [ ] Mixed-precision (FP16 / BF16) variants of every kernel
-- [ ] Persistent CTA scheduling for very large class counts (n_classes > 32K)
-- [ ] On-device generator (DAFL / ZSKD) sample synthesis pipeline
+- [ ] Persistent CTA scheduling for very large class counts (n_classes > 32K) (requires GPU hardware)
+- [ ] On-device generator (DAFL / ZSKD) sample synthesis pipeline (requires GPU hardware; CPU generator logic lives in `src/data_free/dafl.rs`, `dafl_deep.rs`, `zskd.rs`)
 
 ## Dependencies
 
@@ -107,7 +107,7 @@ Current implementation covers the canonical knowledge distillation taxonomy (log
 
 ## Quality Status
 
-- Tests: 447 passing (unit + 12 e2e integration tests in `lib.rs`)
+- Tests: 523 passing (unit + 12 e2e integration tests in `lib.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches
@@ -167,15 +167,15 @@ Knowledge distillation kernels are bandwidth-limited (softmax / KL / MSE / Gram)
 - [ ] Performance bench numbers (kd_loss, gram_matrix on A100 / H100) recorded in `benches/distill_ops.rs`
 
 ### Algorithmic Deepening
-- [ ] Born-again iteration up to generation ≥ 5 with empirical convergence study (BAN paper compares 1–6)
-- [ ] CRD with student-projection MLP head (the original paper uses a 2-layer projector)
-- [ ] DAFL / ZSKD with deeper generator MLPs (current is 2-layer) and label-balanced sampling
-- [ ] Progressive distillation with non-uniform step halving schedule
-- [ ] RKD angle loss with full triplet enumeration (currently 500 random triplets)
+- [x] Born-again iteration up to generation ≥ 5 with empirical convergence study (BAN paper compares 1–6) (impl `src/born_again/ban_multigen.rs` — `BanMultiGen` multi-gen scheduler + `GenerationMetric`, BAN-k ensemble, `simulate_ban_trajectory` with monotone-decreasing inter-generation KL)
+- [x] CRD with student-projection MLP head (the original paper uses a 2-layer projector) (impl `src/relation/crd_proj.rs` — `CrdProjectionHead` 2-layer Linear→ReLU→Linear + L2-norm, `crd_proj_loss` InfoNCE)
+- [x] DAFL / ZSKD with deeper generator MLPs (current is 2-layer) and label-balanced sampling (impl `src/data_free/dafl_deep.rs` — `DeepGenerator` 3-layer class-conditional MLP, `label_balanced_classes` round-robin + Fisher-Yates, `conditional_one_hot_loss`)
+- [x] Progressive distillation with non-uniform step halving schedule (impl `src/born_again/progressive.rs` — `ProgressiveConfig::non_uniform_schedule` geometric `initial→final` ratio)
+- [x] RKD angle loss with full triplet enumeration (currently 500 random triplets) (impl `src/relation/rkd_full.rs` — deterministic `full_angle_loss` over all n·(n−1)·(n−2) triplets, guarded `full_rkd_loss`)
 
 ### Coverage Gaps vs Literature
 - [x] MGD (Masked Generative Distillation) — feature masking + generator (impl `src/feature/mgd.rs`; Yang et al. 2022 ECCV "Masked Generative Distillation")
-- [ ] FCFD (Feature Compression by Frequency Decomposition)
+- [x] FCFD (Feature Compression by Frequency Decomposition) (impl `src/feature/fcfd.rs` — orthonormal 2-D DCT-II per channel, zig-zag low/high frequency banding with independent band weights, `low_band_energy_ratio` diagnostic)
 - [x] WCoRD / VID variational mutual-information bounds
 - [x] Relational graph distillation with edge-feature aggregation (impl `src/relation/graph_distill.rs`; Liu et al. 2019 CVPR "Knowledge Distillation via Instance Relationship Graph")
-- [ ] Cross-modal distillation (image teacher → text student, audio → vision)
+- [x] Cross-modal distillation (image teacher → text student, audio → vision) (impl `src/losses/cross_modal.rs` — `CrossModalProjector` shared-space heads, paired cosine/normalised-L2 alignment + CLIP-style cross-modal InfoNCE `cross_modal_loss`)

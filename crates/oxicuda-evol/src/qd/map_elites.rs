@@ -171,6 +171,77 @@ impl MapElitesArchive {
             self.cells[cell_idx] = Some(candidate);
         }
     }
+
+    /// Construct an empty archive from explicit descriptor-space configuration.
+    ///
+    /// This is the public counterpart to the private `new` constructor, intended for
+    /// algorithms (such as CMA-ME) that drive the archive externally rather than through
+    /// the [`map_elites`] entry point. `n_bins`, `descriptor_min`, and `descriptor_max` must
+    /// all have the same length (the number of descriptor dimensions).
+    pub fn with_config(
+        n_bins: Vec<usize>,
+        descriptor_min: Vec<f64>,
+        descriptor_max: Vec<f64>,
+    ) -> Self {
+        Self::new(n_bins, descriptor_min, descriptor_max)
+    }
+
+    /// Immutable view of the occupant of `cell_idx`, if any.
+    pub fn get(&self, cell_idx: usize) -> Option<&Elite> {
+        self.cells.get(cell_idx).and_then(|c| c.as_ref())
+    }
+
+    /// Total number of cells in the grid.
+    pub fn n_cells(&self) -> usize {
+        self.cells.len()
+    }
+
+    /// Attempt to place `candidate` and report the *improvement status* relative to the
+    /// existing archive — the signal CMA-ME's emitters rank on.
+    ///
+    /// Returns an [`InsertStatus`] describing whether the candidate filled a new cell,
+    /// improved an existing one (with the fitness delta over the previous occupant), or was
+    /// discarded. The archive is mutated exactly as `try_insert` would.
+    pub fn add_with_status(&mut self, candidate: Elite) -> InsertStatus {
+        let cell_idx = self.cell_index(&candidate.descriptor);
+        let status = match &self.cells[cell_idx] {
+            None => InsertStatus::NewCell,
+            Some(existing) => {
+                if candidate.fitness > existing.fitness {
+                    InsertStatus::Improved {
+                        delta: candidate.fitness - existing.fitness,
+                    }
+                } else {
+                    InsertStatus::Discarded
+                }
+            }
+        };
+        if matches!(
+            status,
+            InsertStatus::NewCell | InsertStatus::Improved { .. }
+        ) {
+            self.cells[cell_idx] = Some(candidate);
+        }
+        status
+    }
+}
+
+/// Outcome of attempting to insert a candidate into a [`MapElitesArchive`].
+///
+/// CMA-ME's *improvement emitter* converts this into a ranking value: new cells receive a
+/// large discovery bonus, improvements are ranked by their `delta`, and discarded candidates
+/// rank last.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InsertStatus {
+    /// The candidate occupied a previously empty cell.
+    NewCell,
+    /// The candidate replaced a worse occupant; `delta` = fitness improvement (> 0).
+    Improved {
+        /// The fitness improvement over the displaced occupant.
+        delta: f64,
+    },
+    /// The candidate did not improve its cell and was discarded.
+    Discarded,
 }
 
 // ---------------------------------------------------------------------------

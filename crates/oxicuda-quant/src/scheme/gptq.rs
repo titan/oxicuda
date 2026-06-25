@@ -524,4 +524,127 @@ mod tests {
         let mse = out.reconstruction_mse(&weights);
         assert!(mse < 0.05, "Asymmetric INT4 MSE too large: {mse}");
     }
+
+    // ── Pathological-Hessian conditioning stress tests ─────────────────────────
+
+    /// LCG pseudo-random f32 in `[-1, 1]`.
+    fn lcg(n: usize, seed: u64) -> Vec<f32> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let bits = (state >> 32) as u32;
+                let f = (bits as f32) / (u32::MAX as f32);
+                f * 2.0 - 1.0
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rank_deficient_hessian_recovers_via_damping() {
+        // H = v vᵀ is rank-1 (singular), but the percdamp term H + λI makes it
+        // positive definite so Cholesky succeeds and the output stays finite.
+        let n_cols = 6;
+        let n_rows = 4;
+        let v = lcg(n_cols, 11);
+        let mut h = vec![0.0_f32; n_cols * n_cols];
+        for a in 0..n_cols {
+            for b in 0..n_cols {
+                h[a * n_cols + b] = v[a] * v[b];
+            }
+        }
+        let w = lcg(n_rows * n_cols, 22);
+        let q = GptqQuantizer::new(GptqConfig {
+            bits: 4,
+            percdamp: 0.05, // generous damping for the rank-deficient case
+            ..GptqConfig::default()
+        });
+        let out = q
+            .quantize_layer(&w, n_rows, n_cols, &h)
+            .expect("damped rank-1 Hessian should be quantizable");
+        let deq = out.dequantize();
+        assert!(
+            deq.iter().all(|x| x.is_finite()),
+            "all reconstructed weights must be finite"
+        );
+        let mse = out.reconstruction_mse(&w);
+        assert!(
+            mse.is_finite() && mse < 1.0,
+            "MSE should be finite/bounded: {mse}"
+        );
+    }
+
+    #[test]
+    fn ill_conditioned_hessian_stays_finite() {
+        // Diagonal Hessian spanning ~9 orders of magnitude in eigenvalue.
+        let n_cols = 8;
+        let n_rows = 5;
+        let mut h = vec![0.0_f32; n_cols * n_cols];
+        for j in 0..n_cols {
+            // 1e-4 .. 1e5 across the diagonal.
+            let exp = (j as f32 / (n_cols - 1) as f32) * 9.0 - 4.0;
+            h[j * n_cols + j] = 10.0_f32.powf(exp);
+        }
+        let w = lcg(n_rows * n_cols, 33);
+        let q = GptqQuantizer::new(GptqConfig {
+            bits: 4,
+            percdamp: 0.01,
+            ..GptqConfig::default()
+        });
+        let out = q
+            .quantize_layer(&w, n_rows, n_cols, &h)
+            .expect("ill-conditioned diagonal Hessian should still work");
+        assert!(
+            out.dequantize().iter().all(|x| x.is_finite()),
+            "ill-conditioned Hessian must not produce NaN/Inf"
+        );
+    }
+
+    #[test]
+    fn tiny_diagonal_triggers_fallback_without_nan() {
+        // A near-zero diagonal entry drives H⁻¹[j,j] tiny, exercising the
+        // `hinv_jj < 1e-12` round-to-nearest fallback branch. Output must stay
+        // finite even though that column cannot use error compensation.
+        let n_cols = 4;
+        let n_rows = 3;
+        // Mostly identity, but one diagonal is enormous so its H⁻¹ is tiny.
+        let mut h = eye(n_cols);
+        h[2 * n_cols + 2] = 1.0e30;
+        let w = lcg(n_rows * n_cols, 44);
+        let q = GptqQuantizer::new(GptqConfig {
+            bits: 8,
+            percdamp: 0.0, // no damping, so the huge diagonal stays huge
+            ..GptqConfig::default()
+        });
+        let out = q
+            .quantize_layer(&w, n_rows, n_cols, &h)
+            .expect("huge-diagonal Hessian should quantize via fallback");
+        assert!(
+            out.dequantize().iter().all(|x| x.is_finite()),
+            "fallback path must keep outputs finite"
+        );
+    }
+
+    #[test]
+    fn negative_definite_hessian_errors_cleanly() {
+        // A negative-definite H (negated identity) is not PSD; with no damping
+        // Cholesky must fail with SingularHessian rather than panic.
+        let n_cols = 3;
+        let n_rows = 2;
+        let mut h = eye(n_cols);
+        for j in 0..n_cols {
+            h[j * n_cols + j] = -1.0;
+        }
+        let w = lcg(n_rows * n_cols, 55);
+        let q = GptqQuantizer::new(GptqConfig {
+            percdamp: 0.0,
+            ..GptqConfig::default()
+        });
+        assert!(matches!(
+            q.quantize_layer(&w, n_rows, n_cols, &h),
+            Err(QuantError::SingularHessian { .. })
+        ));
+    }
 }

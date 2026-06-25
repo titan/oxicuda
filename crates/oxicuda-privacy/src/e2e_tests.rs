@@ -344,3 +344,90 @@ fn prv_composed_pmf_sums_to_one() {
         "composed PMF should sum to ~1, got {total2}"
     );
 }
+
+// ─── Test 19: PRV accountant accuracy vs Rényi-DP composition ──────────────────
+//
+// For a sequence of k identical Gaussian mechanisms, the (adaptive) PRV
+// accountant and the closed-form Rényi-DP accountant must report agreeing
+// ε(δ) values (the PRV result is the tighter/true value; the RDP value is a
+// valid upper bound, so we check PRV ≤ RDP + slack and that they are close).
+#[test]
+fn prv_accountant_matches_renyi_dp_composition() {
+    use crate::accounting::prv_adaptive::{AdaptivePrvConfig, adaptive_epsilon};
+    use crate::accounting::rdp_gaussian::RenyiDpAccountant;
+
+    // Noise multiplier σ_mult = noise_std/Δ; take Δ=1 so σ = noise_std.
+    let sigma_mult = 2.0_f64;
+    let k = 8usize;
+    let delta = 1e-5_f64;
+
+    // RDP accountant: compose k identical Gaussian steps, convert to ε(δ).
+    let mut rdp = RenyiDpAccountant::new();
+    rdp.compose(k, sigma_mult).expect("compose");
+    let eps_rdp = rdp.epsilon(delta).expect("rdp eps");
+
+    // PRV accountant on the same sequence (sensitivity 1, sigma = σ_mult).
+    let prv = GaussianPrv::new(1.0, sigma_mult).expect("prv");
+    let cfg = AdaptivePrvConfig::new(12.0, 256, 2_048, 1e-6).expect("cfg");
+    let eps_prv = adaptive_epsilon(&prv, k, delta, &cfg)
+        .expect("prv eps")
+        .value;
+
+    // PRV is the true (tighter) accountant; RDP is a valid upper bound, so the
+    // PRV ε must not exceed the RDP ε (up to grid slack).
+    assert!(
+        eps_prv <= eps_rdp + 0.05,
+        "PRV ε={eps_prv} should not exceed RDP ε={eps_rdp} (RDP is an upper bound)"
+    );
+    // PRV legitimately beats the RDP bound; for this moderate regime the gap is
+    // modest, so they should agree within ~1 nat.
+    assert!(
+        (eps_prv - eps_rdp).abs() < 1.0,
+        "PRV ε={eps_prv} and RDP ε={eps_rdp} should agree within 1.0"
+    );
+    assert!(eps_prv > 0.0 && eps_rdp > 0.0);
+}
+
+// ─── Test 20: SVT k-budget exhaustion for k = 100 / 1K / 10K ───────────────────
+//
+// Drive an always-above query stream into the Sparse Vector Technique and
+// verify the mechanism returns exactly k True answers and then halts (errors
+// on the next query) for several budget sizes.
+#[test]
+fn svt_k_budget_exhaustion_behaviour() {
+    for &k in &[100usize, 1_000, 10_000] {
+        let cfg = SvtConfig::new(1.0, -1e12, k, 1.0).expect("cfg");
+        let mut rng = LcgRng::new(0xBEEF ^ k as u64);
+        let mut state = SvtState::new(&cfg, &mut rng).expect("state");
+
+        let mut true_count = 0usize;
+        // Query an enormous value so noisy_query ≥ noisy_threshold almost surely.
+        loop {
+            match state.query(1e12, &cfg, &mut rng) {
+                Ok(Some(true)) => {
+                    true_count += 1;
+                }
+                Ok(Some(false)) => {
+                    // With threshold = -1e12 and value 1e12, False is astronomically
+                    // unlikely; tolerate but do not count.
+                }
+                Ok(None) => break,
+                Err(_) => break, // limit-exceeded error signals exhaustion
+            }
+            if true_count >= k {
+                // Next query past the cap must error.
+                let after = state.query(1e12, &cfg, &mut rng);
+                assert!(
+                    after.is_err(),
+                    "querying after k={k} True answers must error (budget exhausted)"
+                );
+                break;
+            }
+        }
+        assert_eq!(
+            true_count, k,
+            "SVT should return exactly k={k} True answers, got {true_count}"
+        );
+        assert_eq!(state.answered, k, "answered counter should equal k={k}");
+    }
+}

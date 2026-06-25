@@ -68,9 +68,9 @@ let plan_2d = FftPlan::new_2d(256, 256, FftType::C2C).expect("2d plan");
 
 | Metric | Value |
 |--------|-------|
-| Version | 0.2.0 |
-| Tests passing | 418 |
-| Release date | 2026-06-16 |
+| Version | 0.3.0 |
+| Tests passing | 408 |
+| Release date | 2026-06-25 |
 
 ## License
 

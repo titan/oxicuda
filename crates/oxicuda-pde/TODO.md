@@ -11,7 +11,7 @@ discontinuous Galerkin in 1D with Legendre-Gauss-Lobatto nodes. Part of
 
 ## Implementation Status
 
-**Actual: 23,803 SLoC (96 files)** — implements the standard PDE-solver
+**Actual: 33,535 SLoC (99 files)** — implements the standard PDE-solver
 pipeline in pure Rust with no external linear-algebra dependencies. Includes
 7 PTX kernels × 6 SM versions covering the GPU-bandwidth-critical kernels.
 
@@ -99,12 +99,14 @@ pipeline in pure Rust with no external linear-algebra dependencies. Includes
   estimation from refined grids (log-log slope)
 
 #### Tests & Benchmarks
-- [x] `e2e_tests.rs` — 22 cross-module tests: FDM Poisson 1D O(h²) convergence,
+- [x] `e2e_tests.rs` — 26 cross-module tests: FDM Poisson 1D O(h²) convergence,
   Crank-Nicolson exponential decay, multigrid V-cycle convergence to analytic,
   FEM P1 Poisson, Chebyshev exact polynomial differentiation, FFT periodic Poisson,
   RK4 energy conservation, PCG (ILU(0) / SSOR / Jacobi) residual reduction,
   Lax-Wendroff mass conservation, DG1D LGL quadrature exactness, PTX strings
-  non-empty × 6 SM versions, …
+  non-empty × 6 SM versions, 3D P1-tet Poisson O(h²) on a Kuhn-6 cube mesh, and
+  worked-example convergence studies (1D Poisson order, Crank-Nicolson temporal
+  order, multigrid per-cycle residual reduction), …
 - [x] `benches/pde_ops.rs` — Criterion suite: 7 PTX kernels × 4 SM versions plus
   FDM Poisson 1D, Chebyshev, FFT-Poisson, CG, multigrid algorithm benches
 
@@ -150,7 +152,11 @@ pipeline in pure Rust with no external linear-algebra dependencies. Includes
   Dirichlet by interior-only dense solve, BC moved to RHS; spectral max-error ≤1e-8 at N=20)
 - [x] `multigrid/wcycle.rs` — W-cycle and FMG (Full Multigrid) variants
 - [x] `multigrid/amg.rs` — Algebraic Multigrid (AMG) for unstructured problems
-- [ ] `solver/preconditioner_amg.rs` — AMG-as-preconditioner inside PCG
+- [x] `solver/preconditioner_amg.rs` — AMG-as-preconditioner inside PCG
+  (solver/preconditioner_amg.rs -- wraps the smoothed-aggregation AMG hierarchy as a fixed
+  SPD V-cycle operator `M⁻¹` inside PCG; symmetric-Jacobi pre/post smoothing + Galerkin
+  coarsening ⇒ preconditioner symmetry verified numerically; `amg_pcg` converges in fewer
+  iterations than plain CG and matches a dense reference solver)
 - [x] `dg/dg_2d.rs` — 2D nodal DG (P1) on triangles with upwind / Lax-Friedrichs flux
   (dg/dg_2d.rs -- P1 nodal DG for u_t+∇·(βu)=0 and inviscid Burgers; constant barycentric
   gradients; volume term (∫_T f)·∇λ_i; per-edge 2-pt Gauss numerical-flux surface term;
@@ -163,49 +169,101 @@ pipeline in pure Rust with no external linear-algebra dependencies. Includes
 - [x] `bc/periodic.rs` — Periodic-BC helper distinct from the FFT-spectral path
 
 #### P1 — Time Integration & PDE-Specific
-- [ ] `time/rk_implicit.rs` — Implicit Runge-Kutta (RadauIIA, Gauss-Legendre) for
+- [x] `time/rk_implicit.rs` — Implicit Runge-Kutta (RadauIIA, Gauss-Legendre) for
   stiff systems
-- [ ] `time/sdirk.rs` — Singly Diagonally Implicit Runge-Kutta
-- [ ] `time/dirk_imex.rs` — IMEX SDIRK pairs (Ascher-Ruuth-Spiteri)
-- [ ] `time/symplectic.rs` — Symplectic integrators (Velocity Verlet, Forest-Ruth)
+  (time/rk_implicit.rs -- `ImplicitRk` with GaussLegendre4 (order 4, A-stable, symplectic)
+  and RadauIia5 (order 5, L-stable, stiffly accurate); dense Newton on the coupled stage
+  system; tableaux + stage/order accessors)
+- [x] `time/sdirk.rs` — Singly Diagonally Implicit Runge-Kutta
+  (time/sdirk.rs -- `sdirk2`/`sdirk3` step + integrate; Newton per implicit stage)
+- [x] `time/dirk_imex.rs` — IMEX SDIRK pairs (Ascher-Ruuth-Spiteri)
+  (time/dirk_imex.rs -- `ImexArk` additive Runge-Kutta, explicit + SDIRK implicit tableaux)
+- [x] `time/symplectic.rs` — Symplectic integrators (Velocity Verlet, Forest-Ruth)
   for Hamiltonian problems
+  (time/symplectic.rs -- `velocity_verlet`/`forest_ruth` step + integrate; harmonic-oscillator
+  energy conservation over many periods verified)
 - [x] `time/exponential.rs` — Exponential integrators (Lawson / ETD) for stiff linear
   parts via matrix exponential
-- [ ] `pde_apps/heat_equation.rs` — Self-contained heat-equation app with adaptive
+- [x] `pde_apps/heat_equation.rs` — Self-contained heat-equation app with adaptive
   time stepping
-- [ ] `pde_apps/wave_equation.rs` — Self-contained wave-equation app with CFL-aware
+  (pde_apps/heat_equation.rs -- `HeatEquation` + `AdaptiveConfig`: backward-Euler base
+  (unconditionally stable) with step-doubling Richardson local-error estimate driving a
+  PI-free elementary dt controller; Richardson-extrapolated 2nd-order state propagated;
+  verified vs analytic sin(πx)·exp(−π²αt) decay and the linear steady-state profile;
+  dt grows for smooth decay, tighter tol ⇒ more steps)
+- [x] `pde_apps/wave_equation.rs` — Self-contained wave-equation app with CFL-aware
   step adaptation
-- [ ] `pde_apps/advection_diffusion.rs` — Convection-diffusion benchmark
-- [ ] `pde_apps/stokes.rs` — Stokes flow with mixed FEM
+  (pde_apps/wave_equation.rs -- explicit leapfrog; CFL guard returns CflViolation; staggered
+  discrete-energy diagnostic; Dirichlet + periodic BC; nodally exact at Courant=1)
+- [x] `pde_apps/advection_diffusion.rs` — Convection-diffusion benchmark
+  (pde_apps/advection_diffusion.rs -- 1D & 2D upwind/central FDM advection-diffusion)
+- [x] `pde_apps/stokes.rs` — Stokes flow with mixed FEM
+  (pde_apps/stokes.rs -- `StokesMac`: steady incompressible Stokes on a rectangle via the
+  inf-sup-stable MAC staggered scheme; assembles the saddle system [[A,Bᵀ],[B,0]] with
+  velocity-Laplacian A, discrete-divergence B, discrete-gradient Bᵀ; solved by the new
+  `uzawa`/`minres` saddle-point solvers; pressure pinned to zero mean. Verified: Couette
+  linear profile to ~1e-4, divergence-free constant flow exact, max discrete divergence
+  ≤1e-7, A symmetric + diagonally dominant SPD, Uzawa≈MINRES)
 
 #### P2 — Algorithmic Research
-- [ ] `spectral/fourier_3d.rs` — 3D pseudo-spectral NS solver (Canuto 2006): FFT-based Poisson projector for incompressibility; de-aliased 3/2-rule; RK4 in time; `SpectralNS3D { nx, ny, nz, nu: f32 }`
+- [x] `spectral/fourier_3d.rs` — 3D pseudo-spectral NS solver (Canuto 2006): FFT-based Poisson projector for incompressibility; de-aliased 3/2-rule; RK4 in time; `SpectralNS3D { nx, ny, nz, nu: f32 }`
+  (spectral/fourier_3d.rs -- `Fourier3dConfig`, `solve_poisson_3d_fft`, `neg_laplacian_3d_spectral`)
 - [x] `fdm/crank_nicolson_2d.rs` — Crank-Nicolson 2D heat equation: ADI (Alternating Direction Implicit) Peaceman-Rachford splitting; tridiagonal solves in x/y direction alternately; O(n²) per time step; unconditionally stable
-- [ ] `dg/br2_elliptic.rs` — BR2 interior penalty DG (Bassi-Rebay 1997): auxiliary variable formulation for 2nd-order elliptic operators; symmetric, consistent, positive-definite; coercivity condition A≥n_faces/2 on penalty α
-- [ ] `fem/elasticity.rs` — Linear elasticity FEM: displacement formulation σ=λ(∇·u)I+μ(∇u+∇uᵀ); element stiffness via 3-point Gauss; Dirichlet/Neumann BC; `LinearElasticity2D { E: f32, nu: f32 }`
-- [ ] `pde/level_set.rs` — Level set method (Osher-Sethian 1988): signed-distance φ advected by velocity field; reinitialization via fast marching / Sussman redistancing; `LevelSetEvolution { phi: Vec<f32>, dt: f32 }`
+- [x] `dg/br2_elliptic.rs` — BR2 interior penalty DG (Bassi-Rebay 1997): auxiliary variable formulation for 2nd-order elliptic operators; symmetric, consistent, positive-definite; coercivity condition A≥n_faces/2 on penalty α
+  (dg/br2_elliptic.rs -- `Br2Elliptic`, `DEFAULT_BR2_PENALTY`, `BR2_FACES_PER_ELEMENT`)
+- [x] `fem/elasticity.rs` — Linear elasticity FEM: displacement formulation σ=λ(∇·u)I+μ(∇u+∇uᵀ); element stiffness via 3-point Gauss; Dirichlet/Neumann BC; `LinearElasticity2D { E: f32, nu: f32 }`
+  (fem/elasticity.rs -- `LinearElasticity2D`, `ELASTICITY_ELEM_DOFS`; doubles as the
+  `pde_apps/elasticity` displacement-formulation FEM)
+- [x] `pde/level_set.rs` — Level set method (Osher-Sethian 1988): signed-distance φ advected by velocity field; reinitialization via fast marching / Sussman redistancing; `LevelSetEvolution { phi: Vec<f32>, dt: f32 }`
+  (pde/level_set.rs -- `LevelSet`: upwind Hamilton-Jacobi advection, Osher-Sethian normal
+  motion, signed-distance reinitialisation)
 
 #### P2 — Adaptive / Advanced
-- [ ] `amr/octree.rs` — Adaptive mesh refinement via octree subdivision
-- [ ] `amr/error_estimator.rs` — A-posteriori error estimators driving refinement
-- [ ] `solver/multigrid_pcg.rs` — Multigrid-as-preconditioner inside PCG
-- [ ] `solver/saddle_point.rs` — Saddle-point system solvers (Uzawa, MINRES on
+- [x] `amr/octree.rs` — Adaptive mesh refinement via octree subdivision
+  (amr/octree.rs -- `Quadtree`/`Cell`/`Aabb` quadtree (2D analogue of an octree, same
+  algorithms extend to 8 children); refine/coarsen, leaf iteration, face-neighbour queries,
+  2:1 balance enforcement)
+- [x] `amr/error_estimator.rs` — A-posteriori error estimators driving refinement
+  (amr/error_estimator.rs -- `gradient_indicator`/`jump_indicator` + `dorfler_mark`
+  (fixed-fraction) and `threshold_mark` strategies)
+- [x] `solver/multigrid_pcg.rs` — Multigrid-as-preconditioner inside PCG
+  (solver/multigrid_pcg.rs -- `GeometricMgPreconditioner` + `mg_pcg`: geometric V-cycle
+  (full-weighting restrict / linear prolong + weighted-Jacobi smoothing) as a fixed SPD
+  `M⁻¹` for the structured 1D Poisson operator; preconditioner symmetry verified, and the
+  PCG iteration count is mesh-independent across an 4× refinement (≤4 spread) — fewer
+  iterations than plain CG; `poisson_1d_interior_csr` builds the matching CSR operator)
+- [x] `solver/saddle_point.rs` — Saddle-point system solvers (Uzawa, MINRES on
   augmented system) for Stokes / mixed FEM
-- [ ] `solver/eigensolver.rs` — Krylov-Schur eigensolver for elliptic operator
+  (solver/saddle_point.rs -- `uzawa` (inexact Uzawa = Richardson on the pressure Schur
+  complement, one inner CG `A`-solve per outer step) and `minres` (Paige-Saunders MINRES
+  with stable SymOrtho Givens rotations on the symmetric-indefinite augmented operator
+  [[A,Bᵀ],[B,0]]); both verified against a dense Gaussian-elimination reference and shown
+  to agree with each other; CSR-only, from scratch)
+- [x] `solver/eigensolver.rs` — Krylov-Schur eigensolver for elliptic operator
   eigenvalue problems
-- [ ] `dg/spectral_element.rs` — Spectral element method (SEM) combining high-order
+  (solver/eigensolver.rs -- `lanczos`/`lanczos_csr` symmetric Lanczos with full
+  reorthogonalisation; `EigenPair`, `LanczosConfig`, `Which`; targets the modest problem
+  sizes here without the Krylov-Schur restart machinery)
+- [x] `dg/spectral_element.rs` — Spectral element method (SEM) combining high-order
   Chebyshev with element-wise assembly
-- [ ] `pde_apps/cahn_hilliard.rs` — Cahn-Hilliard equation (4th-order non-linear)
-- [ ] `pde_apps/maxwell.rs` — Maxwell's equations FDTD (Yee scheme)
-- [ ] `pde_apps/elasticity.rs` — Linear elasticity with FEM and Newton iteration
+  (spectral/spectral_element.rs -- `GllBasis`/`SpectralElementMesh1d`: Gauss-Lobatto-Legendre
+  nodal SEM, reference stiffness/mass, element assembly, Poisson-Dirichlet solve)
+- [x] `pde_apps/cahn_hilliard.rs` — Cahn-Hilliard equation (4th-order non-linear)
+  (pde_apps/cahn_hilliard.rs -- `CahnHilliard`/`CahnHilliard2d`, stabilised semi-implicit
+  convex-splitting spectral scheme)
+- [x] `pde_apps/maxwell.rs` — Maxwell's equations FDTD (Yee scheme)
+  (pde_apps/maxwell.rs -- `Maxwell1d`/`Maxwell2dTm` Yee-grid FDTD, 1D & 2D TM)
+- [x] `pde_apps/elasticity.rs` — Linear elasticity with FEM and Newton iteration
+  (covered by fem/elasticity.rs `LinearElasticity2D` displacement-formulation FEM)
 - [ ] `benches/algo_bench.rs` — Extended algorithm benches on standard MFEM /
-  deal.II validation suite
+  deal.II validation suite (requires external MFEM/deal.II validation datasets + on-device
+  benchmark numbers)
 
 #### P2 — GPU / Architecture-Specific
-- [ ] PTX kernel for batched CSR SpMV across many right-hand sides
-- [ ] PTX kernel for cooperative-group Gauss-Seidel red-black sweep
-- [ ] PTX kernel for parallel Chebyshev pseudo-spectral differentiation
-- [ ] PTX kernel for warp-cooperative multigrid restriction with shared memory
+- [ ] PTX kernel for batched CSR SpMV across many right-hand sides (requires GPU hardware)
+- [ ] PTX kernel for cooperative-group Gauss-Seidel red-black sweep (requires GPU hardware)
+- [ ] PTX kernel for parallel Chebyshev pseudo-spectral differentiation (requires GPU hardware)
+- [ ] PTX kernel for warp-cooperative multigrid restriction with shared memory (requires GPU hardware)
 
 ## Dependencies
 
@@ -220,9 +278,9 @@ Chebyshev DFT-derivative are all implemented from scratch.
 
 ## Quality Status
 
-- Warnings: 0 (clippy clean; `#![forbid(unsafe_code)]`)
-- Tests: 680 passing (22 e2e host-side tests + module unit tests); PTX kernel strings validated per SM version
-- `unwrap()` calls in production code: 0
+- Warnings: 0 (clippy clean with `-D warnings`; `#![forbid(unsafe_code)]`)
+- Tests: 717 passing (26 e2e host-side tests + module unit tests); PTX kernel strings validated per SM version
+- `unwrap()` / `expect()` calls in production code: 0 (`expect` confined to `#[cfg(test)]`)
 - `unsafe` code: forbidden at the crate level
 - macOS: compiles; GPU integration paths return `UnsupportedPlatform` at runtime
 - Linux + NVIDIA driver 525+: GPU paths exercised behind `#[cfg(feature = "gpu-tests")]`
@@ -269,22 +327,22 @@ CPU. Performance numbers above are targets for the fully GPU-integrated pipeline
 
 ### Volta / Turing (sm_70, sm_75)
 - [x] `csr_spmv` and `cg_axpy_dot` PTX use warp-cooperative reductions for dot products
-- [ ] Verified on T4 / V100 against host reference for CG on a 5-point Laplacian
+- [ ] Verified on T4 / V100 against host reference for CG on a 5-point Laplacian (requires GPU hardware)
 
 ### Ampere (sm_80, sm_86)
 - [x] PTX kernels use `cp.async` for stencil-tile and CSR-row prefetch
-- [ ] `fdm_stencil_5pt` 3-stage software pipeline benchmarked vs. naive load on A100
-- [ ] `mg_restrict` / `mg_prolong` use cooperative groups for cross-thread reductions
+- [ ] `fdm_stencil_5pt` 3-stage software pipeline benchmarked vs. naive load on A100 (requires GPU hardware)
+- [ ] `mg_restrict` / `mg_prolong` use cooperative groups for cross-thread reductions (requires GPU hardware)
 
 ### Ada (sm_89)
 - [x] Reuses Ampere code path with `cp.async` prefetch
-- [ ] Investigate L2 persistence policy for the CSR row-pointer array during repeated SpMV
+- [ ] Investigate L2 persistence policy for the CSR row-pointer array during repeated SpMV (requires GPU hardware)
 
 ### Hopper (sm_90)
 - [x] PTX strings emit `wgmma` warp-group MMA where shape-amenable (e.g. dense FEM
   local matrix products)
-- [ ] TMA-based asynchronous load of CSR row tiles
-- [ ] Distributed shared-memory cooperative multigrid V-cycle across CTAs
+- [ ] TMA-based asynchronous load of CSR row tiles (requires GPU hardware)
+- [ ] Distributed shared-memory cooperative multigrid V-cycle across CTAs (requires GPU hardware)
 
 ---
 
@@ -300,7 +358,12 @@ CPU. Performance numbers above are targets for the fully GPU-integrated pipeline
 - [x] PCG residual reduction with all three preconditioners (Jacobi / SSOR / ILU(0))
 - [x] FEM P1 Poisson with manufactured solution reaches expected H^1 error rate
 - [x] Multigrid V-cycle converges to analytic solution within machine precision
-- [ ] 3D Poisson convergence rate verified on tetrahedral meshes
+- [x] 3D Poisson convergence rate verified on tetrahedral meshes
+  (e2e_tests.rs/fem_p1_tet_3d_poisson_convergence_order_2 -- P1 FEM on the Kuhn-6
+  structured tet decomposition of the unit cube, manufactured u=sin πx·sin πy·sin πz
+  (−Δu=3π²u), global stiffness via `p1_tet_local_stiffness` + vertex-quadrature load,
+  homogeneous Dirichlet, `cg_solve`; nodal-quadrature L2 error over h=1/4,1/8,1/16
+  gives COMPUTED orders 2.034 and 2.008 ⇒ O(h²))
 - [ ] Convergence study on the standard MFEM / deal.II benchmark suite
 
 ### Implementation Deepening
@@ -310,16 +373,32 @@ CPU. Performance numbers above are targets for the fully GPU-integrated pipeline
 - [x] Legendre-Gauss-Lobatto nodes computed by Newton iteration on Legendre
   polynomial derivative
 - [x] Full-weighting restriction and linear prolongation for geometric multigrid
-- [ ] GMRES / Bi-CGSTAB for non-symmetric systems
-- [ ] Algebraic multigrid (AMG) for unstructured problems
-- [ ] Implicit Runge-Kutta / SDIRK for stiff ODE / PDE systems
-- [ ] Exponential integrators for stiff linear parts via Krylov-approximated matrix
+- [x] GMRES / Bi-CGSTAB for non-symmetric systems
+  (solver/gmres.rs `gmres` restarted GMRES(m); solver/bicgstab.rs `bicgstab`)
+- [x] Algebraic multigrid (AMG) for unstructured problems
+  (multigrid/amg.rs `AmgSolver`; also wrapped as a PCG preconditioner in
+  solver/preconditioner_amg.rs)
+- [x] Implicit Runge-Kutta / SDIRK for stiff ODE / PDE systems
+  (time/rk_implicit.rs `ImplicitRk` GaussLegendre4 / RadauIia5; time/sdirk.rs `sdirk2`/`sdirk3`)
+- [x] Exponential integrators for stiff linear parts via Krylov-approximated matrix
   exponential
+  (time/exponential.rs Lawson / ETD-RK4 integrators via diagonal matrix exponential)
 
 ### Documentation Gaps
 - [x] Each public type carries a doc comment summarising its semantics
-- [ ] Worked example: solving −u'' = f on [0, 1] with manufactured solution,
+- [x] Worked example: solving −u'' = f on [0, 1] with manufactured solution,
   showing the O(h²) convergence plot
-- [ ] Worked example: time-stepping the heat equation with Crank-Nicolson and
+  (e2e_tests.rs/worked_example_poisson_1d_convergence -- manufactured u=sin(πx),
+  f=π²sin(πx) via `solve_poisson_1d`; prints the max-error table over h=1/10…1/80
+  and the COMPUTED orders 2.0053, 2.0013, 2.0003 (asymptotic order ≈ 2))
+- [x] Worked example: time-stepping the heat equation with Crank-Nicolson and
   comparing against the analytic exponential decay
-- [ ] Worked example: multigrid V-cycle showing residual reduction per cycle
+  (e2e_tests.rs/worked_example_heat_crank_nicolson -- CN integration of u_t=αu_xx;
+  matches analytic sin(πx)e^(−απ²t) to max|err|=1.1e-5, and a fixed-mesh temporal
+  self-convergence study gives COMPUTED time orders 2.009, 2.018 — halving dt
+  quarters the error ⇒ 2nd order in time)
+- [x] Worked example: multigrid V-cycle showing residual reduction per cycle
+  (e2e_tests.rs/worked_example_multigrid_vcycle_residual -- `v_cycle_1d` on
+  −u''=π²sin(πx), n=129; prints the per-cycle residual history (7.9e1 → 5.1e-7 in
+  8 cycles) with COMPUTED reduction factors settling to a near-constant ≈0.090
+  (geometric / mesh-independent convergence))

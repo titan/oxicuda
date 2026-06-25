@@ -9,7 +9,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
 
 ## Implementation Status
 
-- **Actual SLoC:** 19,975 (82 files)
+- **Actual SLoC:** 27,994 (86 files)
 - **Coverage:** LoRA (low-rank adaptation with configurable r / α,
   Kaiming-uniform A, zero B); QLoRA (NF4 dequantization with 16-bucket lookup
   table, double-quantization absmax); AdaLoRA (SVD-parameterized ΔW = P · diag(Λ) · Q
@@ -93,9 +93,34 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
   AdaLoRA importance ≥ 0, AdaLoRA prune reduces rank, IA³ identity scale,
   prefix shape correctness, soft-prompt length, Houlsby residual-init equals
   input, BitFit trainable-param count, PTX non-empty × all SM versions)
+- [x] AdaLoRA pruning-trajectory parameter accounting
+  (`lora/adalora_schedule.rs::pruning_trajectory_param_count_matches_budget_times_dims`
+  -- steps the cubic-budget importance scheduler over a full trajectory and asserts at
+  every step that active rank == scheduled `budget_at(t)`, retained params ==
+  `budget × (out + in + 1)`, and survivors are exactly the highest-importance triplets)
+- [x] TIES sign-consensus + disjoint-mean hand-computed merge
+  (`merge/dare_ties.rs::ties_sign_consensus_disjoint_mean_handcomputed` -- positive /
+  negative majority, exact sign tie, and unanimous coords vs hand-computed `[2, −8/3, 0, 4]`)
+- [x] TIES trim → sign-consensus hand-computed merge
+  (`merge/dare_ties.rs::ties_trim_then_sign_consensus_handcomputed` -- per-task top-2
+  magnitude trim then election vs hand-computed `[3, 5, 3, 6]`)
+- [x] DARE drop-and-rescale exactness + unbiasedness
+  (`merge/arithmetic.rs::dare_drop_and_rescale_exact` -- survivors scaled by 1/density,
+  drops zeroed, bit-exact vs an independent same-seed RNG reconstruction;
+  `dare_rescale_unbiased_in_expectation` -- pruned mean ≈ original over 16,384 entries)
+- [x] NF4 dequant self-contained correctness
+  (`lora/qlora.rs::nf4_dequant_bit_exact_to_table` -- `nf4_dequantize(i, absmax)` bit-exact
+  to `NF4_TABLE[i]·absmax` for all 16 codes + anchors/sorted;
+  `nf4_quantize_dequantize_identity_on_codebook` -- identity on codebook points;
+  `nf4_block_roundtrip_exact_on_codebook_points`;
+  `nf4_roundtrip_error_bounded_by_codebook_spacing` -- random round-trip error ≤
+  ½·max-codebook-gap·absmax) [self-contained NF4_TABLE check only; no bitsandbytes ref]
+- [x] LoRA merge/unmerge round-trip under a genuinely non-zero delta
+  (`lora/lora.rs::merge_unmerge_roundtrip_nonzero_delta_bounded` -- non-trivial A,B so
+  delta ≠ 0; max-abs recovery error < 1e-5)
 - [x] Benchmarks (`benches/peft_ops.rs`) — PTX bench group (`lora_matmul`,
   `nf4_dequant` × 4 SM) + LoRA forward algorithm bench
-- **Tests:** 643 passing
+- **Tests:** 690 passing
 
 ### Future Enhancements
 
@@ -145,14 +170,25 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
 
 #### P2 — Training & Tooling
 - [x] Gradient checkpointing for memory-efficient adapter training
-- [ ] Quantized-optimizer state storage (bnb-style 8-bit Adam)
-- [ ] Adapter-save / adapter-load oxicode serialization (no zip / bincode)
-- [ ] LoRA hub / registry conventions for shared adapters
-- [ ] Compression-ratio / effective-rank dashboards
-- [ ] `peft/vera.rs` — VeRA (Kopiczko 2023): Very few trainable parameters; share random frozen A,B matrices across all layers; learn per-layer diagonal scaling vectors d,b; <1M trainable parameters for 7B model
+- [x] Quantized-optimizer state storage (bnb-style 8-bit Adam) — `quant/adam8bit.rs`
+  (`Adam8bit`, `BlockwiseInt8` block-wise INT8 moment buffers, Dettmers et al. 2022;
+  tracks full-precision Adam on a quadratic to <5e-2)
+- [x] Adapter-save / adapter-load oxicode serialization (no zip / bincode) — `io/serialize.rs`
+  (`AdapterPayload` self-describing little-endian `OXPA` container: magic + version + named
+  `f32` tensor records + FNV-1a checksum; `to_bytes`/`from_bytes`, temp-file `save_to_file`/
+  `load_from_file`; bounds-checked cursor, rejects bad magic/truncation/checksum/future version)
+- [x] LoRA hub / registry conventions for shared adapters — `io/registry.rs`
+  (`AdapterRegistry` keyed by slug name, `AdapterCard` {base_model, task, `PeftMethod`, rank,
+  alpha, trainable_params}, duplicate-rejection register + upsert, filter by base-model/task,
+  whole-hub `OXPH` serialization with per-entry payload blob + checksum)
+- [x] Compression-ratio / effective-rank dashboards — `metrics/dashboard.rs`
+  (`PeftDashboard` aggregates `AdapterReport` rows: overall compression ratio / trainable
+  fraction, mean & min/max effective rank, mean rank-utilization excluding rank-free adapters,
+  fixed-width `render_table`)
+- [x] `peft/vera.rs` — VeRA (Kopiczko 2023): Very few trainable parameters; share random frozen A,B matrices across all layers; learn per-layer diagonal scaling vectors d,b; <1M trainable parameters for 7B model (`lora/vera.rs` -- `VeraConfig`/`VeraSharedRandom`/`VeraLayer`, frozen shared A,B + trainable d_d,d_b, closed-form gradients)
 - [x] `peft/flora.rs` — Flora (Han 2024): random projection of full gradient into low-rank update; maintain low-rank optimizer state; unbiased gradient estimator; theoretically equivalent to full Adam convergence
-- [ ] `peft/lorafa.rs` — LoRA-FA (Zhang 2023): fix A random (frozen), only train B; halves LoRA memory; equivalent gradient direction as full LoRA when A∼N(0,1); drop-in replacement
-- [ ] `peft/mosa.rs` — MoSA (Zeng 2024): Mixture of Sparse Adapters; sparse update mask per adapter; top-k weight selection + shared sparse structure; combine gating from MoE
+- [x] `peft/lorafa.rs` — LoRA-FA (Zhang 2023): fix A random (frozen), only train B; halves LoRA memory; equivalent gradient direction as full LoRA when A∼N(0,1); drop-in replacement (`lora/lora_fa.rs` -- `LoraFaConfig`/`LoraFaAdapter`, frozen A∼N(0,1/√in), trainable zero-init B, closed-form ∂L/∂B outer product)
+- [x] `peft/mosa.rs` — MoSA (Zeng 2024): Mixture of Sparse Adapters; sparse update mask per adapter; top-k weight selection + shared sparse structure; combine gating from MoE (`lora/mosa.rs` -- `MosaConfig`/`MosaAdapter`, per-expert (A_e,B_e) with static binary density masks, softmax top-k MoE gate)
 
 ## Dependencies
 
@@ -168,8 +204,11 @@ layer.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 643 passing (LoRA zero-B, scale, merge / unmerge, NF4 dequant,
-  AdaLoRA importance + prune, IA³ identity, prefix shape, soft-prompt length,
+- Tests: 690 passing (LoRA zero-B, scale, merge / unmerge incl. non-zero-delta bound,
+  NF4 dequant range + bit-exact-to-table + codebook identity + spacing-bounded round-trip,
+  AdaLoRA importance + prune + pruning-trajectory budget×dims accounting,
+  TIES sign-consensus / trim / disjoint-mean hand-computed, DARE drop-and-rescale exact +
+  unbiased, IA³ identity, prefix shape, soft-prompt length,
   Houlsby residual-init, BitFit param count, PTX × 6 SM)
 - unwrap() calls: 0 in production code
 - macOS: compiles but returns `UnsupportedPlatform` at runtime when actual launch
@@ -255,8 +294,13 @@ the Linux+NVIDIA verification run is executed.
 ### Implementation Deepening
 - [ ] Fused LoRA + base-matmul kernel (eliminate intermediate write-back)
 - [ ] Block-wise NF4 with shared absmax stored on chip
-- [ ] AdaLoRA with continuous importance EMA + scheduled pruning
-- [ ] AdapterFusion composition with attention weights
+- [x] AdaLoRA with continuous importance EMA + scheduled pruning — `lora/adalora_schedule.rs`
+  (`AdaloraScheduler` smooths per-rank sensitivity `Ī=EMA(|λ·g|)` and uncertainty
+  `Ū=EMA(|I−Ī|)`, importance `s=Ī·Ū`; `AdaloraScheduleConfig::budget_at` cubic warm-up→anneal
+  →final-warm-up budget schedule; `step` masks the lowest-importance λ down to `budget_at(t)`)
+- [x] AdapterFusion composition with attention weights — `adapter/adapter_fusion.rs`
+  (scaled-dot-product attention over K adapter outputs, temperature-scaled softmax; see also
+  the P1 AdapterFusion entry above)
 
 ### Numerical Accuracy
 - [ ] LoRA merge-unmerge roundtrip max-abs-error bounded by ε_machine × ||W||

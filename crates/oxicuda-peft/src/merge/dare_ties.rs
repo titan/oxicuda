@@ -468,4 +468,57 @@ mod tests {
             assert!(v.is_finite(), "non-finite output: {v}");
         }
     }
+
+    #[test]
+    fn ties_sign_consensus_disjoint_mean_handcomputed() {
+        // density=1 (DARE identity) and trim_density=1 (keep all) isolate the TIES
+        // sign-consensus + disjoint-mean stage. Three hand-built task vectors cover a
+        // positive majority (the lone opposite-sign contributor is dropped), a
+        // negative majority, an exact sign tie (elected 0 → cancelling contributors,
+        // a literal 0.0 entry skipped), and a unanimous coordinate.
+        let a = vec![3.0_f32, -2.0, 1.0, 4.0];
+        let b = vec![1.0_f32, -5.0, -1.0, 2.0];
+        let c = vec![-2.0_f32, -1.0, 0.0, 6.0];
+        let cfg = DareTiesConfig {
+            density: 1.0,
+            trim_density: 1.0,
+            seed: 5,
+        };
+        let merged = DareTies::merge(&[a, b, c], &cfg).expect("merge");
+        // coord0: sign(3+1-2=+2) → mean of positives {3,1} = 2.0 (−2 dropped)
+        // coord1: sign(−8)       → mean of all three negatives {−2,−5,−1} = −8/3
+        // coord2: sign(0)        → {1,−1} cancel → 0 (the 0.0 entry is skipped)
+        // coord3: sign(+12)      → unanimous mean {4,2,6} = 4.0
+        let expected = vec![2.0_f32, -8.0 / 3.0, 0.0, 4.0];
+        assert!(
+            approx_eq_slice(&merged, &expected, 1e-5),
+            "got {merged:?} expected {expected:?}"
+        );
+    }
+
+    #[test]
+    fn ties_trim_then_sign_consensus_handcomputed() {
+        // density=1 (DARE identity); trim_density=0.5 keeps each task vector's top-2
+        // magnitudes before sign election, so the merged result depends on which
+        // coordinates survive the per-task TIES trim.
+        let a = vec![4.0_f32, -1.0, 3.0, -0.5];
+        let b = vec![2.0_f32, 5.0, -1.0, 0.2];
+        let c = vec![-3.0_f32, 1.0, 2.0, 6.0];
+        let cfg = DareTiesConfig {
+            density: 1.0,
+            trim_density: 0.5,
+            seed: 9,
+        };
+        let merged = DareTies::merge(&[a, b, c], &cfg).expect("merge");
+        // trims (top-2 by |·|): a→[4,0,3,0]  b→[2,5,0,0]  c→[-3,0,0,6]
+        // coord0: sign(4+2−3=+3) → positives {4,2} mean 3.0 (−3 dropped)
+        // coord1: only b survives → 5.0
+        // coord2: only a survives → 3.0
+        // coord3: only c survives → 6.0
+        let expected = vec![3.0_f32, 5.0, 3.0, 6.0];
+        assert!(
+            approx_eq_slice(&merged, &expected, 1e-5),
+            "got {merged:?} expected {expected:?}"
+        );
+    }
 }

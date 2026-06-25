@@ -198,6 +198,165 @@ pub fn scaffold_server_aggregate(
     Ok(())
 }
 
+// ─── Drift diagnostics ───────────────────────────────────────────────────────
+
+/// L2 norm `‖c_i − c‖` between a client's control variate and the server's.
+///
+/// In SCAFFOLD this quantity measures *client drift*: a large value means the
+/// client's local objective pulls the model in a direction far from the global
+/// consensus, which is exactly what the control variates correct. Monitoring
+/// it per round surfaces stragglers / heterogeneous clients.
+///
+/// # Errors
+/// Returns [`FedError::DimensionMismatch`] if the two control variates differ
+/// in length.
+pub fn control_variate_drift(
+    client_state: &ScaffoldClientState,
+    state: &ScaffoldState,
+) -> FedResult<f32> {
+    let c_i = &client_state.client_control;
+    let c = &state.server_control;
+    if c_i.len() != c.len() {
+        return Err(FedError::DimensionMismatch {
+            expected: c.len(),
+            got: c_i.len(),
+        });
+    }
+    let sq: f64 = c_i
+        .iter()
+        .zip(c.iter())
+        .map(|(&a, &b)| {
+            let d = (a - b) as f64;
+            d * d
+        })
+        .sum();
+    Ok(sq.sqrt() as f32)
+}
+
+/// A fixed-width histogram of gradient (or update) L2 norms across clients,
+/// together with summary statistics, for SCAFFOLD drift monitoring.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DriftDiagnostics {
+    /// Per-client values that were binned (e.g. `‖c_i − c‖` or `‖Δy_i‖`).
+    pub values: Vec<f32>,
+    /// Histogram bin counts, `bins.len() == n_bins`.
+    pub bins: Vec<usize>,
+    /// Lower edge of the histogram range (the minimum observed value).
+    pub min: f32,
+    /// Upper edge of the histogram range (the maximum observed value).
+    pub max: f32,
+    /// Arithmetic mean of `values`.
+    pub mean: f32,
+    /// Population standard deviation of `values`.
+    pub std: f32,
+}
+
+impl DriftDiagnostics {
+    /// Width of a single histogram bin (`0` when all values are equal).
+    #[must_use]
+    pub fn bin_width(&self) -> f32 {
+        if self.bins.is_empty() {
+            return 0.0;
+        }
+        (self.max - self.min) / self.bins.len() as f32
+    }
+}
+
+/// Build a [`DriftDiagnostics`] histogram from per-client scalar values.
+///
+/// Each value is placed into one of `n_bins` equal-width buckets spanning
+/// `[min(values), max(values)]`; the maximum value lands in the last bin. Use
+/// it on the output of [`control_variate_drift`] across clients, or on a set of
+/// pre-computed update norms, to obtain a gradient-norm histogram.
+///
+/// # Errors
+/// Returns [`FedError::EmptyClientList`] if `values` is empty,
+/// [`FedError::Internal`] if `n_bins == 0`, or `FedError::NanEncountered`
+/// (mapped to `Internal`) if any value is non-finite.
+pub fn gradient_norm_histogram(values: &[f32], n_bins: usize) -> FedResult<DriftDiagnostics> {
+    if values.is_empty() {
+        return Err(FedError::EmptyClientList);
+    }
+    if n_bins == 0 {
+        return Err(FedError::Internal(
+            "gradient_norm_histogram requires n_bins > 0".into(),
+        ));
+    }
+    if values.iter().any(|v| !v.is_finite()) {
+        return Err(FedError::Internal(
+            "gradient_norm_histogram: non-finite value encountered".into(),
+        ));
+    }
+
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    for &v in values {
+        if v < min {
+            min = v;
+        }
+        if v > max {
+            max = v;
+        }
+    }
+
+    let mut bins = vec![0usize; n_bins];
+    let span = max - min;
+    if span <= 0.0 {
+        // All values identical → drop everything in the first bin.
+        bins[0] = values.len();
+    } else {
+        let inv_width = n_bins as f32 / span;
+        for &v in values {
+            let mut idx = ((v - min) * inv_width) as usize;
+            if idx >= n_bins {
+                idx = n_bins - 1; // clamp the maximum into the last bin
+            }
+            bins[idx] += 1;
+        }
+    }
+
+    let n = values.len() as f64;
+    let mean = values.iter().map(|&v| v as f64).sum::<f64>() / n;
+    let var = values
+        .iter()
+        .map(|&v| {
+            let d = v as f64 - mean;
+            d * d
+        })
+        .sum::<f64>()
+        / n;
+
+    Ok(DriftDiagnostics {
+        values: values.to_vec(),
+        bins,
+        min,
+        max,
+        mean: mean as f32,
+        std: var.sqrt() as f32,
+    })
+}
+
+/// Compute the control-variate drift `‖c_i − c‖` for every client and bin the
+/// results into a [`DriftDiagnostics`] histogram in one call.
+///
+/// # Errors
+/// Propagates [`control_variate_drift`] and [`gradient_norm_histogram`] errors;
+/// returns [`FedError::EmptyClientList`] if `clients` is empty.
+pub fn scaffold_drift_diagnostics(
+    clients: &[ScaffoldClientState],
+    state: &ScaffoldState,
+    n_bins: usize,
+) -> FedResult<DriftDiagnostics> {
+    if clients.is_empty() {
+        return Err(FedError::EmptyClientList);
+    }
+    let drifts: Vec<f32> = clients
+        .iter()
+        .map(|c| control_variate_drift(c, state))
+        .collect::<FedResult<Vec<f32>>>()?;
+    gradient_norm_histogram(&drifts, n_bins)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +422,100 @@ mod tests {
         let mut state = ScaffoldState::new(2);
         assert!(matches!(
             scaffold_server_aggregate(&mut state, &[], &[], 1.0),
+            Err(FedError::EmptyClientList)
+        ));
+    }
+
+    #[test]
+    fn control_variate_drift_matches_l2() {
+        let mut state = ScaffoldState::new(3);
+        state.server_control = vec![1.0, 1.0, 1.0];
+        let mut client = ScaffoldClientState::new(3);
+        client.client_control = vec![1.0, 1.0, 4.0]; // diff = (0,0,3) → norm 3
+        let d = control_variate_drift(&client, &state).expect("drift");
+        assert!((d - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn control_variate_drift_zero_when_aligned() {
+        let state = ScaffoldState::new(4);
+        let client = ScaffoldClientState::new(4);
+        let d = control_variate_drift(&client, &state).expect("drift");
+        assert!(d.abs() < 1e-6, "aligned controls have zero drift");
+    }
+
+    #[test]
+    fn gradient_norm_histogram_bins_correctly() {
+        // Values 0,1,2,3,4 into 5 bins over [0,4] → one per bin.
+        let values = vec![0.0_f32, 1.0, 2.0, 3.0, 4.0];
+        let hist = gradient_norm_histogram(&values, 5).expect("hist");
+        assert_eq!(hist.bins, vec![1, 1, 1, 1, 1]);
+        assert!((hist.min - 0.0).abs() < 1e-6);
+        assert!((hist.max - 4.0).abs() < 1e-6);
+        assert!((hist.mean - 2.0).abs() < 1e-6);
+        // total count preserved
+        assert_eq!(hist.bins.iter().sum::<usize>(), values.len());
+    }
+
+    #[test]
+    fn gradient_norm_histogram_identical_values() {
+        let values = vec![2.5_f32; 6];
+        let hist = gradient_norm_histogram(&values, 4).expect("hist");
+        assert_eq!(hist.bins[0], 6, "identical values fall in the first bin");
+        assert!((hist.std).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gradient_norm_histogram_skewed_distribution() {
+        // Most clients have small drift, one is an outlier → last bin gets it.
+        let values = vec![0.1_f32, 0.2, 0.1, 0.15, 10.0];
+        let hist = gradient_norm_histogram(&values, 5).expect("hist");
+        assert_eq!(hist.bins[0], 4, "the four small values cluster in bin 0");
+        assert_eq!(*hist.bins.last().expect("last"), 1, "outlier in last bin");
+        assert!(hist.std > 0.0);
+    }
+
+    #[test]
+    fn gradient_norm_histogram_rejects_bad_input() {
+        assert!(matches!(
+            gradient_norm_histogram(&[], 4),
+            Err(FedError::EmptyClientList)
+        ));
+        assert!(matches!(
+            gradient_norm_histogram(&[1.0, 2.0], 0),
+            Err(FedError::Internal(_))
+        ));
+        assert!(matches!(
+            gradient_norm_histogram(&[1.0, f32::NAN], 4),
+            Err(FedError::Internal(_))
+        ));
+    }
+
+    #[test]
+    fn scaffold_drift_diagnostics_end_to_end() {
+        let mut state = ScaffoldState::new(2);
+        state.server_control = vec![0.0, 0.0];
+        // Three clients with drifts 0, 1, 2 from the (zero) server control.
+        let mut c0 = ScaffoldClientState::new(2);
+        c0.client_control = vec![0.0, 0.0]; // drift 0
+        let mut c1 = ScaffoldClientState::new(2);
+        c1.client_control = vec![1.0, 0.0]; // drift 1
+        let mut c2 = ScaffoldClientState::new(2);
+        c2.client_control = vec![0.0, 2.0]; // drift 2
+        let clients = vec![c0, c1, c2];
+        let diag = scaffold_drift_diagnostics(&clients, &state, 4).expect("diag");
+        assert_eq!(diag.values.len(), 3);
+        assert!((diag.min - 0.0).abs() < 1e-5);
+        assert!((diag.max - 2.0).abs() < 1e-5);
+        assert_eq!(diag.bins.iter().sum::<usize>(), 3);
+        assert!(diag.bin_width() > 0.0);
+    }
+
+    #[test]
+    fn scaffold_drift_diagnostics_empty_clients_error() {
+        let state = ScaffoldState::new(2);
+        assert!(matches!(
+            scaffold_drift_diagnostics(&[], &state, 4),
             Err(FedError::EmptyClientList)
         ));
     }

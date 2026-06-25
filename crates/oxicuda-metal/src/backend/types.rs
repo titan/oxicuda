@@ -2,11 +2,12 @@
 //!
 //! 🤖 Generated with [SplitRS](https://github.com/cool-japan/splitrs)
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use oxicuda_backend::{BackendError, BackendResult, BackendTranspose, BinaryOp, ReduceOp, UnaryOp};
 
-use crate::{device::MetalDevice, memory::MetalMemoryManager};
+use crate::{device::MetalDevice, memory::MetalMemoryManager, pipeline::MetalComputePipeline};
 
 #[cfg(target_os = "macos")]
 use super::functions::next_power_of_2;
@@ -30,6 +31,11 @@ pub struct MetalBackend {
     pub(super) device: Option<Arc<MetalDevice>>,
     pub(super) memory: Option<Arc<MetalMemoryManager>>,
     pub(super) initialized: bool,
+    /// Cache of compiled custom-MSL pipelines keyed by
+    /// `(function_name, msl-source-hash)`, so repeated
+    /// [`launch_custom_kernel`](MetalBackend::launch_custom_kernel) calls reuse
+    /// the compiled pipeline and its command queue instead of recompiling.
+    pub(super) pipeline_cache: Mutex<HashMap<(String, u64), Arc<MetalComputePipeline>>>,
 }
 impl MetalBackend {
     /// Create a new, uninitialised Metal backend.
@@ -38,6 +44,7 @@ impl MetalBackend {
             device: None,
             memory: None,
             initialized: false,
+            pipeline_cache: Mutex::new(HashMap::new()),
         }
     }
     /// Return an error if the backend has not been initialised yet.
@@ -51,6 +58,76 @@ impl MetalBackend {
     /// Convenience accessor: get the memory manager or return `NotInitialized`.
     pub(super) fn memory(&self) -> BackendResult<&Arc<MetalMemoryManager>> {
         self.memory.as_ref().ok_or(BackendError::NotInitialized)
+    }
+
+    /// Compile (or reuse a cached) compute pipeline from `msl_source` /
+    /// `function_name` and dispatch it over `total_threads` GPU threads (1-D).
+    ///
+    /// Device-buffer `handles` bind to `buffer(0)`, `buffer(1)`, … in order; each
+    /// `scalar_bytes` blob binds with `set_bytes` to the indices immediately
+    /// following the buffers (`buffer(handles.len())`, …). This lets callers pass,
+    /// for example, an element count as a `u32` and clamp constants as `f32`, each
+    /// encoded as raw little-endian bytes.
+    ///
+    /// Compiled pipelines are cached by `(function_name, msl-source-hash)`, so
+    /// repeating a call with the same kernel reuses the pipeline and command
+    /// queue rather than recompiling.
+    ///
+    /// The dispatch is synchronous: it waits for GPU completion before returning.
+    /// Because the grid is rounded up to whole threadgroups, the kernel **must**
+    /// bounds-check its `thread_position_in_grid` against the element count.
+    ///
+    /// # Errors
+    /// * [`BackendError::NotInitialized`] if [`init`](oxicuda_backend::ComputeBackend::init)
+    ///   has not been called — always the case on non-macOS, where Metal is
+    ///   unavailable.
+    /// * [`BackendError::DeviceError`] if MSL compilation or pipeline creation fails.
+    /// * [`BackendError::InvalidArgument`] for an unknown buffer handle or an
+    ///   empty `scalar_bytes` entry.
+    pub fn launch_custom_kernel(
+        &self,
+        msl_source: &str,
+        function_name: &str,
+        handles: &[u64],
+        scalar_bytes: &[&[u8]],
+        total_threads: usize,
+    ) -> BackendResult<()> {
+        self.check_init()?;
+        if total_threads == 0 {
+            return Ok(());
+        }
+        let pipeline = self.custom_pipeline(msl_source, function_name)?;
+        let memory = self.memory()?;
+        pipeline
+            .dispatch(memory, handles, scalar_bytes, total_threads)
+            .map_err(BackendError::from)
+    }
+
+    /// Fetch a cached compiled pipeline for `(function_name, msl_source)`,
+    /// compiling and caching it on first use.
+    fn custom_pipeline(
+        &self,
+        msl_source: &str,
+        function_name: &str,
+    ) -> BackendResult<Arc<MetalComputePipeline>> {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        msl_source.hash(&mut hasher);
+        let key = (function_name.to_string(), hasher.finish());
+        let mut cache = self
+            .pipeline_cache
+            .lock()
+            .map_err(|_| BackendError::DeviceError("pipeline cache mutex poisoned".into()))?;
+        if let Some(existing) = cache.get(&key) {
+            return Ok(Arc::clone(existing));
+        }
+        let device = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
+        let pipeline = Arc::new(
+            MetalComputePipeline::new(device, msl_source, function_name)
+                .map_err(BackendError::from)?,
+        );
+        cache.insert(key, Arc::clone(&pipeline));
+        Ok(pipeline)
     }
 }
 #[cfg(target_os = "macos")]

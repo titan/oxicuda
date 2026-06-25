@@ -373,6 +373,89 @@ pub fn prm_rank_solutions(outputs: &[PrmOutput], cfg: &PrmConfig) -> RlhfResult<
     Ok(indices)
 }
 
+// ── Gradient ──────────────────────────────────────────────────────────────────
+
+/// Gradient of the PRM training loss w.r.t. the per-step logits.
+///
+/// Finite-difference verified against [`prm_loss`]`.total_loss`.
+#[derive(Debug, Clone)]
+pub struct PrmGrad {
+    /// `∂L/∂(step logit)` for each step (length = n_steps).
+    pub d_step_logits: Vec<f32>,
+}
+
+/// Analytic gradient of [`prm_loss`].
+///
+/// Each per-step BCE has the closed-form logit gradient
+/// `∂bce/∂z = σ(z) − ỹ`, where `ỹ = y·(1−ε) + ε/2` is the smoothed label. So the
+/// step term contributes `step_loss_weight·(σ(z_t) − ỹ_t) / N` to every step,
+/// and the solution term (when `solution_loss_weight > 0` and a `solution_label`
+/// is present, scored on the *last* step's logit) adds
+/// `solution_loss_weight·(σ(z_{n−1}) − ỹ_sol)` to the last step.
+///
+/// # Errors
+///
+/// Mirrors [`prm_loss`]: [`RlhfError::EmptyInput`], [`RlhfError::DimensionMismatch`],
+/// [`RlhfError::Internal`] (`n_steps > n_steps_max`), and
+/// [`RlhfError::NanEncountered`].
+pub fn prm_grad(output: &PrmOutput, label: &PrmLabel, cfg: &PrmConfig) -> RlhfResult<PrmGrad> {
+    let n = output.n_steps();
+    if n == 0 || label.n_steps() == 0 {
+        return Err(RlhfError::EmptyInput);
+    }
+    if n != label.n_steps() {
+        return Err(RlhfError::DimensionMismatch {
+            expected: n,
+            got: label.n_steps(),
+        });
+    }
+    if n > cfg.n_steps_max {
+        return Err(RlhfError::Internal {
+            msg: format!("n_steps {n} exceeds n_steps_max {}", cfg.n_steps_max),
+        });
+    }
+
+    let inv_n = 1.0 / n as f32;
+    let mut d_step_logits = Vec::with_capacity(n);
+    for t in 0..n {
+        let logit = output.step_logits[t];
+        let lbl = label.step_labels[t];
+        if !logit.is_finite() || !lbl.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        let smoothed = lbl * (1.0 - cfg.label_smoothing) + cfg.label_smoothing / 2.0;
+        // d(bce)/dlogit = σ(logit) − smoothed, mean-scaled by the step term.
+        let g = cfg.step_loss_weight * (sigmoid(logit) - smoothed) * inv_n;
+        if !g.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        d_step_logits.push(g);
+    }
+
+    // Solution-level term: scored on the last step's logit. Mirrors `prm_loss`,
+    // which only consults `solution_label` when `solution_loss_weight > 0`.
+    let solution_label = if cfg.solution_loss_weight > 0.0 {
+        label.solution_label
+    } else {
+        None
+    };
+    if let Some(sol_lbl) = solution_label {
+        if !sol_lbl.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        let last = n - 1;
+        let logit = output.step_logits[last];
+        let smoothed = sol_lbl * (1.0 - cfg.label_smoothing) + cfg.label_smoothing / 2.0;
+        let extra = cfg.solution_loss_weight * (sigmoid(logit) - smoothed);
+        if !extra.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        d_step_logits[last] += extra;
+    }
+
+    Ok(PrmGrad { d_step_logits })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -760,5 +843,117 @@ mod tests {
             ),
             "NaN logit should return NanEncountered"
         );
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn fd_logits(
+        logits: &[f32],
+        label: &PrmLabel,
+        cfg: &PrmConfig,
+        g: &PrmGrad,
+        h: f32,
+        tag: &str,
+    ) {
+        for i in 0..logits.len() {
+            let fd = central_diff(
+                |v| {
+                    let mut l = logits.to_vec();
+                    l[i] = v;
+                    prm_loss(&PrmOutput::new(l), label, cfg)
+                        .expect("loss")
+                        .total_loss
+                },
+                logits[i],
+                h,
+            );
+            assert_close(g.d_step_logits[i], fd, tag);
+        }
+    }
+
+    #[test]
+    fn prm_grad_matches_fd_step_only() {
+        let logits = vec![0.5_f32, -1.0, 2.0];
+        let label = PrmLabel {
+            step_labels: vec![1.0, 0.0, 1.0],
+            solution_label: None,
+        };
+        let cfg = PrmConfig::default();
+        let g = prm_grad(&PrmOutput::new(logits.clone()), &label, &cfg).expect("grad");
+        fd_logits(&logits, &label, &cfg, &g, 1e-2, "step-only");
+    }
+
+    #[test]
+    fn prm_grad_matches_fd_with_label_smoothing() {
+        let logits = vec![1.5_f32, -0.5];
+        let label = PrmLabel {
+            step_labels: vec![1.0, 0.0],
+            solution_label: None,
+        };
+        let cfg = PrmConfig {
+            label_smoothing: 0.1,
+            step_loss_weight: 0.8,
+            ..Default::default()
+        };
+        let g = prm_grad(&PrmOutput::new(logits.clone()), &label, &cfg).expect("grad");
+        fd_logits(&logits, &label, &cfg, &g, 1e-2, "smoothed");
+    }
+
+    #[test]
+    fn prm_grad_matches_fd_with_solution_term() {
+        let logits = vec![0.5_f32, -1.0, 1.2];
+        let label = PrmLabel {
+            step_labels: vec![1.0, 0.0, 1.0],
+            solution_label: Some(1.0),
+        };
+        let cfg = PrmConfig {
+            solution_loss_weight: 0.5,
+            ..Default::default()
+        };
+        let g = prm_grad(&PrmOutput::new(logits.clone()), &label, &cfg).expect("grad");
+        fd_logits(&logits, &label, &cfg, &g, 1e-2, "with-solution");
+    }
+
+    #[test]
+    fn prm_grad_sign_pushes_logit_toward_label() {
+        // label = 1 with a low logit → σ(z) − 1 < 0 → descent raises the logit.
+        let label = PrmLabel {
+            step_labels: vec![1.0],
+            solution_label: None,
+        };
+        let g = prm_grad(&PrmOutput::new(vec![-1.0]), &label, &PrmConfig::default()).expect("g");
+        assert!(g.d_step_logits[0] < 0.0, "{}", g.d_step_logits[0]);
+    }
+
+    #[test]
+    fn prm_grad_dimension_mismatch_errors() {
+        let label = PrmLabel {
+            step_labels: vec![1.0],
+            solution_label: None,
+        };
+        assert!(matches!(
+            prm_grad(
+                &PrmOutput::new(vec![0.0, 0.0]),
+                &label,
+                &PrmConfig::default()
+            ),
+            Err(RlhfError::DimensionMismatch { .. })
+        ));
     }
 }

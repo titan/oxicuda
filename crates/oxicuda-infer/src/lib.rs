@@ -86,14 +86,20 @@ pub mod error;
 pub mod executor;
 pub mod handle;
 pub mod ptx_kernels;
+pub mod quantization;
 pub mod sampling;
 
 // Re-export the most commonly used types.
 pub use batch::{
-    BatcherConfig, ContinuousBatcher, FinishReason, GenerationOutput, SamplingParams,
-    ScheduledBatch, Scheduler, SchedulerConfig, Sequence, SequenceId, SequenceStatus,
+    BatcherConfig, ChunkPlanner, ChunkedPrefillPlan, ContinuousBatcher, FinishReason,
+    GenerationOutput, PrefillChunk, SamplingOverride, SamplingOverrideTable, SamplingParams,
+    ScheduledBatch, Scheduler, SchedulerConfig, Sequence, SequenceId, SequenceStatus, StepPacking,
 };
-pub use cache::{BlockId, CacheManager, KvBlock, PagedKvCache, PrefixCache, PrefixEntry};
+pub use cache::{
+    BlockId, CacheManager, CompactionPlan, KvBlock, KvQuantConfig, MatchResult, PagedKvCache,
+    PrefixCache, PrefixEntry, QuantizedToken, RadixCache, SlidingWindowConfig,
+    SlidingWindowManager, plan_compaction, quantize_token, rewrite_block_table,
+};
 pub use decoding::{
     BeamCandidate, BeamConfig, PromptLookupDecoder, beam_search, no_repeat_ngram_banned,
 };
@@ -102,12 +108,17 @@ pub use executor::{
     AttentionConfig, MockModelRunner, ModelRunner, RunnerStats, paged_attention_cpu,
 };
 pub use handle::InferHandle;
+pub use quantization::{
+    AwqConfig, AwqResult, GroupParams, awq_dequantize, awq_output_mse, awq_quantize,
+    dense_output_mse, group_dequantize, group_quantize,
+};
 pub use sampling::{
-    BeamHypothesis, BeamSearchConfig, BeamSearchState, ContrastiveSearchConfig, JsonConstraint,
-    JsonToken, LogitsProcessor, LogitsProcessorConfig, MedusaConfig, MedusaDecoder, Mirostat,
-    MirostatConfig, Rng, WatermarkDetection, Watermarker, contrastive_search_select,
-    epsilon_filter, epsilon_sample, greedy_sample, greedy_sample_batch, speculative_verify,
-    top_k_filter, top_k_sample, top_p_filter, top_p_sample, typical_filter, typical_sample,
+    BeamHypothesis, BeamSearchConfig, BeamSearchState, ContrastiveSearchConfig, Dfa, DfaBuilder,
+    GrammarConstraint, JsonConstraint, JsonToken, LogitsProcessor, LogitsProcessorConfig,
+    MedusaConfig, MedusaDecoder, Mirostat, MirostatConfig, Rng, WatermarkDetection, Watermarker,
+    contrastive_search_select, epsilon_filter, epsilon_sample, greedy_sample, greedy_sample_batch,
+    speculative_verify, top_k_filter, top_k_sample, top_p_filter, top_p_sample, typical_filter,
+    typical_sample,
 };
 
 // ─── Integration tests ───────────────────────────────────────────────────────
@@ -270,5 +281,58 @@ mod tests {
             .expect("valid decode inputs with 3 sequences");
         assert_eq!(logits.len(), 3);
         assert!(logits.iter().all(|row| row.len() == 64));
+    }
+
+    /// End-to-end radix prefix reuse: two prompts sharing a system prefix reuse
+    /// the prefix's KV blocks.
+    #[test]
+    fn e2e_radix_prefix_reuse() {
+        let mut radix = RadixCache::new(2).expect("valid block size");
+        // System prompt "100 101 102 103" → blocks 0,1.
+        radix
+            .insert(&[100, 101, 102, 103], vec![BlockId(0), BlockId(1)])
+            .expect("insert system prefix");
+        // A new request with the same prefix then user content reuses both blocks.
+        let m = radix.match_prefix(&[100, 101, 102, 103, 200, 201]);
+        assert_eq!(m.matched_len, 4, "shared system prefix matched");
+        assert_eq!(m.blocks, vec![BlockId(0), BlockId(1)]);
+        assert!(radix.hit_rate() > 0.0);
+    }
+
+    /// End-to-end grammar-constrained decode: the DFA masks every token that
+    /// would break the grammar, and committing the only legal path completes it.
+    #[test]
+    fn e2e_grammar_constrained_decode() {
+        // Accept exactly the bytes "ok".
+        let dfa = Dfa::from_literal(b"ok");
+        let vocab = vec![b"o".to_vec(), b"k".to_vec(), b"x".to_vec()];
+        let mut g = GrammarConstraint::new(dfa, vocab).expect("live start");
+        let mut logits = vec![1.0_f32; 3];
+        g.mask_logits(&mut logits).expect("a legal token exists");
+        // Only "o"(0) is legal from the start; "k"(1) and "x"(2) are masked.
+        assert_eq!(logits[0], 1.0);
+        assert_eq!(logits[1], f32::NEG_INFINITY);
+        assert_eq!(logits[2], f32::NEG_INFINITY);
+        g.commit(0).expect("commit 'o'");
+        g.commit(1).expect("commit 'k'");
+        assert!(g.is_complete(), "'ok' fully formed");
+    }
+
+    /// End-to-end chunked prefill: a long prompt drains across steps while a
+    /// per-step token budget is respected (Sarathi piggybacking).
+    #[test]
+    fn e2e_chunked_prefill_drains() {
+        let planner = ChunkPlanner::new(8).expect("valid budget");
+        let mut prefill = ChunkedPrefillPlan::new(30, 16).expect("valid chunk size");
+        let mut total = 0;
+        let mut steps = 0;
+        while !prefill.is_done() {
+            let step = planner.pack_step(2, &mut prefill); // 2 decodes piggyback
+            assert!(step.total_tokens <= 8, "budget respected");
+            total += step.prefill_chunk.map_or(0, |c| c.len());
+            steps += 1;
+            assert!(steps < 100, "must terminate");
+        }
+        assert_eq!(total, 30, "entire 30-token prompt prefilled");
     }
 }

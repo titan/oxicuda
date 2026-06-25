@@ -21,10 +21,12 @@
 //! └── prelude      — Convenience re-exports of common types
 //! ```
 
+pub mod constitutional;
 pub mod dpo;
 pub mod error;
 pub mod grpo;
 pub mod handle;
+pub mod loss;
 pub mod metrics;
 pub mod orpo;
 pub mod ppo_rlhf;
@@ -36,58 +38,97 @@ pub mod sft;
 pub mod utils;
 
 pub mod prelude {
+    pub use crate::constitutional::{
+        CaiPreferencePair, CaiSlRecord, ConstitutionalConfig, ConstitutionalTrace, RevisionRound,
+        collect_preference_pair, collect_sl_record, heuristic_revision,
+        run_constitutional_revision,
+    };
     pub use crate::dpo::bco::{
-        BcoConfig, RewardShift, bco_loss, bco_loss_from_rewards,
+        BcoConfig, BcoGrad, RewardShift, bco_grad, bco_loss, bco_loss_from_rewards,
         implicit_reward as bco_implicit_reward,
     };
     pub use crate::dpo::cringe::{CringeBatch, CringeConfig, CringeLoss, CringeSample};
-    pub use crate::dpo::dpo::{DpoConfig, dpo_log_ratio, dpo_loss, dpo_loss_per_pair};
-    pub use crate::dpo::dpop::{
-        DpopConfig, dpop_log_ratio, dpop_loss, dpop_loss_per_pair, dpop_penalty,
+    pub use crate::dpo::dpo::{
+        DpoConfig, DpoGrad, dpo_grad, dpo_grad_per_pair, dpo_log_ratio, dpo_loss, dpo_loss_per_pair,
     };
-    pub use crate::dpo::ipo::{IpoConfig, ipo_loss};
-    pub use crate::dpo::kto::{KtoConfig, kto_loss};
-    pub use crate::dpo::length_dpo::{LengthDpo, LengthDpoBatch, LengthDpoConfig, LengthPair};
+    pub use crate::dpo::dpo_ipo_blend::{
+        BlendComponents, BlendGrad, DpoIpoBlendConfig, blend_components_per_pair,
+        blend_grad_per_pair, dpo_ipo_blend_grad, dpo_ipo_blend_loss,
+    };
+    pub use crate::dpo::dpo_sft_mix::{
+        DpoSftMixConfig, MixGrad, MixLoss, dpo_sft_mix_grad, dpo_sft_mix_loss,
+    };
+    pub use crate::dpo::dpop::{
+        DpopConfig, DpopGrad, dpop_grad, dpop_grad_per_pair, dpop_log_ratio, dpop_loss,
+        dpop_loss_per_pair, dpop_penalty,
+    };
+    pub use crate::dpo::ipo::{IpoConfig, IpoGrad, ipo_grad, ipo_loss};
+    pub use crate::dpo::kto::{KtoConfig, KtoGrad, kto_grad, kto_loss};
+    pub use crate::dpo::length_dpo::{
+        LengthDpo, LengthDpoBatch, LengthDpoConfig, LengthDpoGrad, LengthPair,
+    };
     pub use crate::dpo::online_dpo::{
-        OnlineDpoConfig, PairingMode, build_preference_pair, online_dpo_pairs, online_dpo_step,
+        OnlineDpoConfig, OnlineDpoGrad, PairingMode, build_preference_pair, online_dpo_grad,
+        online_dpo_pairs, online_dpo_step,
     };
     pub use crate::dpo::rrhf::{
-        RrhfConfig, RrhfSample, ft_loss as rrhf_ft_loss, length_normalized_scores, ranking_loss,
-        rrhf_loss, rrhf_loss_batch,
+        RrhfConfig, RrhfGrad, RrhfSample, ft_loss as rrhf_ft_loss, length_normalized_scores,
+        ranking_grad, ranking_loss, rrhf_grad, rrhf_loss, rrhf_loss_batch,
     };
     pub use crate::dpo::sdpo::{
-        SdpoConfig, StagedDpo, sdpo_stage_loss, sdpo_stage_margin, sdpo_total_loss,
-        sdpo_update_reference,
+        SdpoConfig, SdpoStageGrad, StagedDpo, sdpo_stage_grad, sdpo_stage_loss, sdpo_stage_margin,
+        sdpo_total_loss, sdpo_update_reference,
     };
     pub use crate::dpo::slic::{
-        SlicConfig, SlicPair, calibration_loss, regularization_loss, slic_loss, slic_loss_batch,
+        SlicConfig, SlicGrad, SlicPair, calibration_loss, regularization_loss, slic_grad,
+        slic_grad_batch, slic_loss, slic_loss_batch,
     };
     pub use crate::dpo::step_dpo::{
-        StepDpoConfig, StepDpoOutput, StepPair, step_dpo_loss, step_dpo_loss_batch,
+        StepDpoConfig, StepDpoGrad, StepDpoOutput, StepPair, step_dpo_grad, step_dpo_loss,
+        step_dpo_loss_batch,
     };
     pub use crate::error::{RlhfError, RlhfResult};
     pub use crate::grpo::{
         GrpoConfig, GrpoOutput, group_advantages, grpo_loss, kl_k3, output_surrogate,
+        output_surrogate_grad,
     };
     pub use crate::handle::{LcgRng, RlhfHandle, SmVersion};
     pub use crate::metrics::alignment::{
         AlignmentMetrics, compute_alignment_metrics, kl_from_ref, perplexity, reward_gap, win_rate,
     };
-    pub use crate::orpo::orpo::{OrpoConfig, log_odds, orpo_loss};
-    pub use crate::orpo::simpo::{SimpoConfig, simpo_loss};
+    pub use crate::metrics::multi_objective::{
+        chebyshev_scalarisation, pareto_front, select_by_weighted_sum, weighted_sum,
+    };
+    pub use crate::orpo::orpo::{
+        OrpoConfig, OrpoGrad, log_odds, log_odds_grad, orpo_grad, orpo_loss,
+    };
+    pub use crate::orpo::simpo::{SimpoConfig, SimpoGrad, simpo_grad, simpo_loss};
     pub use crate::ppo_rlhf::kl_control::{KlController, kl_divergence_from_logps};
     pub use crate::ppo_rlhf::ppo_step::{RlhfPpoConfig, rlhf_ppo_loss};
-    pub use crate::ppo_rlhf::rloo::{RlooConfig, rloo_advantages, rloo_loss, rloo_loss_with_kl};
+    pub use crate::ppo_rlhf::rloo::{
+        RlooConfig, rloo_advantages, rloo_grad, rloo_loss, rloo_loss_with_kl,
+    };
     pub use crate::ppo_rlhf::rollout::RlhfRollout;
-    pub use crate::preference::bradley_terry::{RewardHead, bt_reward_loss};
+    pub use crate::ppo_rlhf::sac_rlhf::{
+        SacPolicyGrad, SacRlhfConfig, SacValueGrad, sac_policy_grad, sac_policy_loss,
+        sac_soft_target, sac_temperature_grad, sac_temperature_loss, sac_update_temperature,
+        sac_value_grad, sac_value_loss,
+    };
+    pub use crate::ppo_rlhf::sampling::{
+        SamplingConfig, TruncatedDistribution, TruncationMode, build_truncated_distribution,
+        greedy_token, sample_token,
+    };
+    pub use crate::preference::bradley_terry::{
+        BtRewardGrad, RewardHead, bt_reward_grad, bt_reward_loss,
+    };
     pub use crate::preference::pair::{PairBatch, PreferencePair};
     pub use crate::ptx_kernels::{
         bt_reward_loss_ptx, dpo_loss_ptx, f32_hex, ipo_loss_ptx, kto_loss_ptx, orpo_odds_ptx,
         rlhf_kl_ptx, sft_mask_ptx,
     };
     pub use crate::rebel::{
-        RebelConfig, RebelPair, predicted_relative_reward, rebel_loss, rebel_loss_slices,
-        rebel_pair_loss,
+        RebelConfig, RebelGrad, RebelPair, predicted_relative_reward, rebel_grad, rebel_loss,
+        rebel_loss_slices, rebel_pair_grad, rebel_pair_loss,
     };
     pub use crate::reward::best_of_n::{BestOfN, BestOfNConfig, ScoreAggregation};
     pub use crate::reward::ensemble::{EnsembleAgg, RewardEnsemble, RewardEnsembleConfig};
@@ -95,13 +136,19 @@ pub mod prelude {
     pub use crate::reward::model::RewardModel;
     pub use crate::reward::normalize::RewardNormalizer;
     pub use crate::reward::process_reward::{
-        PrmConfig, PrmLabel, PrmOutput, prm_aggregate_score, prm_loss, prm_rank_solutions,
+        PrmConfig, PrmGrad, PrmLabel, PrmOutput, prm_aggregate_score, prm_grad, prm_loss,
+        prm_rank_solutions,
+    };
+    pub use crate::reward::rlaif::{
+        SoftBtGrad, debias_position, self_consistency_label, soft_bt_pair_grad, soft_bt_pair_loss,
+        soft_bt_reward_grad, soft_bt_reward_loss, soft_preference_from_logits,
     };
     pub use crate::reward::rm_calibration::{
         RewardModelCalibrator, expected_calibration_error, fit_temperature_pairs,
         isotonic_regression,
     };
     pub use crate::sft::loss::{masked_token_ce, sft_loss};
+    pub use crate::utils::ref_cache::{RefLogProb, RefLogProbCache};
 }
 
 #[cfg(test)]

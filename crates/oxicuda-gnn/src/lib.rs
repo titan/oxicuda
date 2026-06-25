@@ -52,6 +52,7 @@ pub mod prelude {
     pub use crate::layers::graph_transformer::{
         GraphTransformerConfig, GraphTransformerLayer, GraphTransformerWeights,
     };
+    pub use crate::layers::hetero_conv::{HeteroConv, HeteroConvConfig, HeteroConvWeights};
     pub use crate::layers::jk_net::{JkMode, JkNet, JkNetConfig};
     pub use crate::layers::k_wl_gnn::{
         KWlConfig, KWlGnn, PairOp, apply_pair_op, graph_readout_sum,
@@ -65,7 +66,7 @@ pub mod prelude {
     pub use crate::layers::sign::{SignConfig, SignConv, sign_precompute};
     pub use crate::message_passing::aggregate::{
         AggregationType, aggregate, aggregate_degree_norm, aggregate_max, aggregate_mean,
-        aggregate_softmax, aggregate_sum,
+        aggregate_softmax, aggregate_sum, build_edge_messages,
     };
     pub use crate::message_passing::scatter::{
         gather, scatter_add, scatter_max, scatter_min, scatter_mul, segment_softmax,
@@ -73,6 +74,8 @@ pub mod prelude {
     pub use crate::message_passing::update::{
         LinearUpdate, MlpUpdate, elu, leaky_relu, prelu, relu,
     };
+    pub use crate::ops::balanced_spmv::{BalancedSpmvConfig, balanced_spmv};
+    pub use crate::ops::edge_parallel_gat::{EdgeParallelGat, EdgeParallelGatConfig};
     pub use crate::pooling::diff_pool::{DiffPool, DiffPoolConfig, DiffPoolResult};
     pub use crate::pooling::global_pool::{
         GlobalPoolType, batched_global_pool, global_attention_pool, global_max_pool,

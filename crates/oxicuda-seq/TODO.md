@@ -38,7 +38,11 @@ including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
   recovers the ground-truth path on deterministic chains
 - [x] `hmm/baum_welch.rs` — Full EM training: E-step computes (γ, ξ), M-step updates
   π via γ_0, A via Σξ / Σγ, B via class-conditioned γ; log-likelihood is
-  non-decreasing across iterations
+  non-decreasing across iterations. Also `baum_welch_gaussian` for `HmmGaussian`
+  (scalar + multivariate-diagonal): drives the `forward_backward_gaussian` E-step
+  then a γ-weighted M-step re-estimating π, A, per-state mean μ_k and variance σ²_k
+  (floored at 1e-6). +3 unit tests (parameter recovery up to label-switch, monotone
+  log-likelihood, determinism / shapes / finite-output) → 699 crate tests, all pass.
 
 #### Linear-Chain Conditional Random Fields
 - [x] `crf/linear_chain_crf.rs` — `LinearChainCrf { n_labels, n_features, transitions,
@@ -99,12 +103,14 @@ including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
   brevity penalty, `perplexity`, `log_loss`
 
 #### Tests & Benchmarks
-- [x] `e2e_tests.rs` — 15 cross-module tests: HMM forward-backward vs. enumeration,
+- [x] `e2e_tests.rs` — 17 cross-module tests: HMM forward-backward vs. enumeration,
   Viterbi on deterministic chain, Baum-Welch monotone log-likelihood, CRF Viterbi
   sanity, CRF gradient finite-difference check, NW / SW / Gotoh / Hirschberg
   correctness, edit distance kitten → sitting, Kalman 1σ recovery, RTS smoother
   variance reduction, Ising Gibbs magnetisation, beam top-1 vs. enumeration,
-  BLEU-1 identical = 1.0, PTX × 6 SM versions
+  BLEU-1 identical = 1.0, PTX × 6 SM versions, plus two worked examples:
+  Kalman 2D position tracking (filtered RMSE < raw-measurement RMSE) and a CRF
+  BIO chunker trained on a synthetic in-process corpus
 - [x] `benches/seq_ops.rs` — Criterion suite: 7 PTX kernels × all SM versions plus
   Viterbi / alignment algorithm benches
 
@@ -137,34 +143,42 @@ including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
 - [x] `beam/diverse.rs` — Diverse beam search (Vijayakumar 2018) with group penalties
 - [x] `beam/length_penalty.rs` — GNMT-style length penalty
   ((5 + |Y|) / 6)^alpha for translation
-- [ ] `alignment/blast.rs` — Heuristic BLAST-style seed-and-extend alignment for
+- [x] `alignment/blast.rs` — Heuristic BLAST-style seed-and-extend alignment for
   database search
-- [ ] `alignment/banded.rs` — Banded DP for sequences known to be near-identical
-- [ ] `grid_crf/loopy_bp.rs` — Loopy BP on grid CRF (alternative to mean-field)
+  (alignment/blast.rs -- k-mer seed index + ungapped X-drop bidirectional extension → HSPs; `BlastAligner`/`BlastConfig`/`Hsp`)
+- [x] `alignment/banded.rs` — Banded DP for sequences known to be near-identical
+  (alignment/banded.rs -- NW DP restricted to diagonal band |i−j|≤band, O(n·band) cells; `banded_align`)
+- [x] `grid_crf/loopy_bp.rs` — Loopy BP on grid CRF (alternative to mean-field)
+  (grid_crf/loopy_bp.rs -- log-space damped loopy sum-product on 4-connected grid; exact on loop-free chains; `LoopyBp`/`LoopyBpConfig`/`LoopyBpResult`)
 - [x] `kalman/ukf.rs` — Unscented Kalman Filter with sigma-point propagation
 - [x] `kalman/particle.rs` — Particle filter / sequential Monte Carlo for non-linear
   non-Gaussian state-space models
-- [ ] `mrf/swendsen_wang.rs` — Swendsen-Wang cluster sampling for Ising-like models
+- [x] `mrf/swendsen_wang.rs` — Swendsen-Wang cluster sampling for Ising-like models
   (faster mixing than Gibbs at low T)
-- [ ] `mrf/wolff.rs` — Wolff single-cluster algorithm for ferromagnetic Ising
+- [x] `mrf/wolff.rs` — Wolff single-cluster algorithm for ferromagnetic Ising
 
 #### P1 — Modern Neural Decoders
 - [x] `decoders/nucleus.rs` — Top-p (nucleus) sampling (Holtzman et al. 2020) with min_tokens floor + numerically-stable softmax
 - [x] `decoders/top_k.rs` — Top-k sampling (Fan-Lewis-Dauphin 2018) with temperature
 - [x] `decoders/typical.rs` — Typical sampling (Meister 2022) with entropy-distance ordering
 - [x] `decoders/contrastive.rs` — Contrastive search decoding (Su 2022)
-- [ ] `crf/neural_crf.rs` — Neural CRF (Collobert 2011 extended): replace hand-crafted features with LSTM/CNN encoder; end-to-end training with Viterbi decoding; `NeuralCrfConfig { encoder_type: EncoderType }`
-- [ ] `structured/sinkhorn_crf.rs` — Sinkhorn CRF (Shi 2020): replace sum-product with Sinkhorn normalisation for structured prediction; differentiable top-k selection via entropic regularisation
+- [x] `crf/neural_crf.rs` — Neural CRF (Collobert 2011 extended): replace hand-crafted features with LSTM/CNN encoder; end-to-end training with Viterbi decoding; `NeuralCrfConfig { encoder_type: EncoderType }`
+- [x] `structured/sinkhorn_crf.rs` — Sinkhorn CRF (Shi 2020): replace sum-product with Sinkhorn normalisation for structured prediction; differentiable top-k selection via entropic regularisation
+  (structured/sinkhorn_crf.rs -- log-domain Sinkhorn–Knopp scaling for entropy-regularised optimal transport; doubly-stochastic transport plan + dual potentials + regularised OT score; `SinkhornCrf` layer with differentiable structured loss `∂L/∂s = P_gold − P_pred`; uniform & arbitrary margins; sharpens to a permutation as ε→0)
 - [x] `alignment/ctc_advanced.rs` — CTC with language model shallow fusion (Hannun 2014): beam search with LM log-probability addition; blank collapse; prefix probability aggregation; `CtcBeamSearch { beam_width, lm_weight }`
-- [ ] `seq2seq/pointer_network.rs` — Pointer Network (Vinyals 2015): attention mechanism where output token = position in input (not vocabulary); TSP / sorting / parsing applications; `PointerNetwork { hidden_dim }`
+- [x] `seq2seq/pointer_network.rs` — Pointer Network (Vinyals 2015): attention mechanism where output token = position in input (not vocabulary); TSP / sorting / parsing applications; `PointerNetwork { hidden_dim }`
 
 #### P2 — Advanced & Hybrid
 - [x] `metrics/chrf.rs` — Character n-gram F-score (chrF / chrF++) for translation
   quality
-- [ ] `metrics/ter.rs` — Translation Edit Rate
+- [x] `metrics/ter.rs` — Translation Edit Rate
 - [x] `metrics/wer.rs` — Word Error Rate for ASR-style outputs
-- [ ] `metrics/bertscore.rs` — Embedding-based metric scaffold (requires external
-  embeddings; placeholder)
+- [x] `metrics/bertscore.rs` — Embedding-based metric (Zhang 2020): full greedy
+  cosine-matching precision / recall / F1 over caller-supplied token embeddings,
+  optional IDF weighting + baseline rescaling + `corpus_idf` estimator. Embeddings
+  are an honest input (from any encoder); the BERTScore algorithm is computed
+  exactly — not a stub.
+  (metrics/bertscore.rs -- `bert_score`/`bert_score_idf`/`corpus_idf`; `BertScore`/`BertScoreConfig`)
 - [ ] `benches/algo_bench.rs` — Extended algorithm benches: standard NLP corpora
   (CoNLL-2003 NER, Penn Treebank POS)
 
@@ -190,7 +204,7 @@ implemented from scratch; L-BFGS is implemented from scratch with two-loop recur
   intentionally allowed crate-wide because numerical kernels index multiple parallel
   arrays per iteration body and rewriting them in iterator form would obscure the
   math)
-- Tests: 15 e2e tests passing (host-side); PTX kernel strings validated per SM version
+- Tests: 17 e2e tests passing (host-side); PTX kernel strings validated per SM version
 - `unwrap()` calls in production code: 0
 - `unsafe` code: 0
 - macOS: compiles; GPU integration paths return `UnsupportedPlatform` at runtime
@@ -274,12 +288,30 @@ CPU. Performance numbers above are targets for the fully GPU-integrated pipeline
 - [x] Gotoh affine-gap 3-state (M / X / Y) DP with separate open / extend penalties
 - [x] EKF accepting boxed-closure Jacobians for arbitrary non-linear f / h
 - [x] Loopy BP in log-space with sum-product / max-product modes
-- [ ] UKF with sigma-point propagation for highly non-linear systems
-- [ ] Particle filter for non-Gaussian state-space models
-- [ ] Junction-tree algorithm for exact inference on low-treewidth graphs
+- [x] UKF with sigma-point propagation for highly non-linear systems
+  (kalman/ukf.rs — already implemented; see P1 entry above)
+- [x] Particle filter for non-Gaussian state-space models
+  (kalman/particle.rs — already implemented; see P1 entry above)
+- [x] Junction-tree algorithm for exact inference on low-treewidth graphs
+  (mrf/junction_tree.rs — already implemented; see P0 entry above)
 
 ### Documentation Gaps
 - [x] Each public type carries a doc comment summarising its semantics
-- [ ] Worked example: training a CRF chunker on a small CoNLL-format corpus
-- [ ] Worked example: Kalman tracking of a 2D position from noisy measurements
-- [ ] Worked example: HMM Gaussian recovering mixture parameters from synthetic data
+- [x] Worked example: training a CRF chunker on a small synthetic in-process
+  BIO-tagging corpus (NO external corpus — deterministic, seeded)
+  (e2e_tests.rs/crf_chunker_fits_training_data -- 60 synthetic NP-chunking
+  sentences / 368 tokens, one-hot category + bias + is_bos features; L-BFGS
+  training raises total data log-likelihood −404.289 → −0.381; Viterbi per-token
+  train accuracy = 1.0000 vs majority-class baseline 0.4592. The CoNLL-2003
+  reference-F1 variant remains data-gated below.)
+- [x] Worked example: Kalman tracking of a 2D position from noisy measurements
+  (e2e_tests.rs/kalman_2d_position_tracking -- 4-state constant-velocity model
+  [px,py,vx,vy], 60 steps, seeded LcgRng N(0,1²) measurement noise; filtered
+  RMSE 0.7743 vs raw-measurement RMSE 1.4480 (ratio 0.535, a 47% error
+  reduction) — the filter genuinely denoises. Self-contained, no external data.)
+- [x] Worked example: HMM Gaussian recovering mixture parameters from synthetic data
+  (hmm/baum_welch.rs:baum_welch_gaussian + examples/hmm_gaussian.rs -- EM fit,
+  recovery+monotone-LL verified: 2000-sample 3-state scalar Gaussian HMM with means
+  6σ apart, synthesised via seeded LcgRng; EM converges in 8 iterations, recovers
+  μ to <0.06 and σ to <0.03 of truth after nearest-mean (label-switch) matching;
+  per-iteration log-likelihood monotone −5545.80 → −4447.45.)

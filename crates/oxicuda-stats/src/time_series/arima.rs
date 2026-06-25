@@ -249,6 +249,9 @@ fn css_from_eps(eps: &[f64]) -> f64 {
 }
 
 /// Compute CSS with one parameter perturbed by `delta`.
+///
+/// The flat parameter index `param_idx` addresses `[φ₁…φ_p | θ₁…θ_q | c]`, so the
+/// AR/MA orders are read directly from the slice lengths.
 fn css_perturbed(
     x: &[f64],
     phi: &[f64],
@@ -256,9 +259,9 @@ fn css_perturbed(
     constant: f64,
     param_idx: usize,
     delta: f64,
-    ar_order: usize,
-    ma_order: usize,
 ) -> f64 {
+    let ar_order = phi.len();
+    let ma_order = theta.len();
     let mut phi_p = phi.to_vec();
     let mut theta_p = theta.to_vec();
     let mut c_p = constant;
@@ -421,8 +424,8 @@ fn css_finetune(
         let mut max_delta = 0.0_f64;
 
         for k in 0..n_params {
-            let css_plus = css_perturbed(x, &phi, &theta, constant, k, h, ar_order, ma_order);
-            let css_minus = css_perturbed(x, &phi, &theta, constant, k, -h, ar_order, ma_order);
+            let css_plus = css_perturbed(x, &phi, &theta, constant, k, h);
+            let css_minus = css_perturbed(x, &phi, &theta, constant, k, -h);
             let grad = (css_plus - css_minus) / (2.0 * h);
 
             if !grad.is_finite() || grad.abs() < 1e-300 {
@@ -434,8 +437,7 @@ fn css_finetune(
             let mut step_accepted = false;
 
             for _ in 0..10 {
-                let trial_css =
-                    css_perturbed(x, &phi, &theta, constant, k, -lr * grad, ar_order, ma_order);
+                let trial_css = css_perturbed(x, &phi, &theta, constant, k, -lr * grad);
                 if trial_css < cur_css - 1e-12 * cur_css.abs().max(1e-12) {
                     step_accepted = true;
                     break;

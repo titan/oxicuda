@@ -30,6 +30,21 @@ pub enum PeftError {
     /// Weight vectors must have identical length.
     #[error("weight count {weights} does not match adapter count {adapters}")]
     WeightCountMismatch { weights: usize, adapters: usize },
+    /// Serialized byte stream is truncated, malformed, or carries a bad magic / checksum.
+    #[error("corrupt serialized data: {msg}")]
+    CorruptData { msg: String },
+    /// Serialized format version is newer than this build understands.
+    #[error("unsupported format version {found} (this build supports up to {supported})")]
+    UnsupportedVersion { found: u32, supported: u32 },
+    /// A registry entry with the requested name already exists.
+    #[error("adapter '{name}' already registered")]
+    DuplicateAdapter { name: String },
+    /// No registry entry exists for the requested name.
+    #[error("adapter '{name}' not found in registry")]
+    AdapterNotFound { name: String },
+    /// A filesystem operation failed while saving / loading an adapter.
+    #[error("io error: {msg}")]
+    Io { msg: String },
     /// Internal arithmetic failure.
     #[error("internal error: {msg}")]
     Internal { msg: String },

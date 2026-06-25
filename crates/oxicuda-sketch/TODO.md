@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.55).
 
 ## Implementation Status
 
-- **Actual SLoC:** 11,692 (78 files, including 4,832 code + 142 comments + 554 blanks; markdown 543)
-- **Tests:** 456 passing (lib + e2e_tests)
+- **Actual SLoC:** ~20,082 (89 source files)
+- **Tests:** 576 passing (lib + e2e_tests)
 - **Pure Rust:** Zero external dependencies beyond `thiserror`
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -90,9 +90,9 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.55).
 ### Future Enhancements
 
 #### P0 -- Critical
-- [ ] Mergeable sketch unions (HLL union for distributed cardinality [x]; KLL merge [x] -- `quantile/kll.rs::merge` / `merged`; CM column-wise sum [ ])
+- [x] Mergeable sketch unions (HLL union for distributed cardinality [x]; KLL merge [x] -- `quantile/kll.rs::merge` / `merged`; CM column-wise sum [x] -- `frequency/count_min.rs::merge`)
 - [x] Streaming KMV (Bottom-K MinHash) for distinct count + similarity in one structure
-- [ ] Apache DataSketches FI (frequent-items) byte-serialisation compatibility
+- [x] Apache DataSketches FI (frequent-items) byte-serialisation compatibility -- `topk/fi_serde.rs` (`FrequentItemsSerde`: DataSketches FrequentLongsSketch frame -- preLongs/serVer=1/familyId=10/lgMaxMapSize/lgCurMapSize/flags preamble + activeItems/streamLength/offset + counts-then-keys longs)
 
 #### P1 -- Important
 - [x] Theta sketches (Apache DataSketches) for set operations (intersection, A \ B) on cardinalities
@@ -106,13 +106,13 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.55).
 
 #### P2 -- Nice-to-Have
 - [x] Bloomier filter (function-valued Bloom)
-- [ ] Cuckoo filter with 4-byte fingerprints for very low FP rates
+- [x] Cuckoo filter with 4-byte fingerprints for very low FP rates -- `membership/cuckoo.rs::CuckooFilter32` (full 32-bit fingerprints; replaces the `0`-sentinel scheme with a separate occupancy bitmap so all `2^32` values incl. `0` are storable, fixing the sentinel collision; partial-key Fan-2014 displacement preserved via power-of-two buckets + involutive XOR fold; measured FPR 0/200k vs the 8-bit narrow filter's 2985/200k = 1.49%, ~2*b/2^32 ≈ 1.9e-9 ceiling). Narrow `CuckooFilter` path unchanged (backward compatible).
 - [ ] Compressed sensing sketches (covered separately in `oxicuda-cs`)
 - [x] Online change-point detection via PageHinkley / CUSUM (`src/stream/changepoint.rs`; Page 1954, Hinkley 1971)
 - [x] Sliding-window HyperLogLog (Heule extensions) (`src/cardinality/sliding_window_hll.rs`; Chabchoub-Heroum 2010 / Heule 2013)
-- [ ] Streaming graph sketches (graph sparsification via spectral sketch)
+- [x] Streaming graph sketches (graph sparsification via spectral sketch) -- `matrix/graph_sketch.rs` (Spielman-Srivastava 2011 effective-resistance spectral sparsifier + JL estimator)
 - [x] Differential privacy noise on top of CM and HLL queries
-- [ ] Bloom-1 (Putze-Sanders-Singler) for very large filters
+- [x] Bloom-1 (Putze-Sanders-Singler) for very large filters -- `membership/blocked_bloom.rs` (`BlockedBloomFilter`: 512-bit cache-line blocks, one block per item, Poisson-averaged FP rate)
 - [x] `moment/lp_stable.rs` — Lp-stable random projection (Indyk 2006): sketch each update (i, Δ) by S[j]+=Δ·g_ij where gᵢⱼ∼Stable(p); estimate ‖x‖_p from median of |S[j]|; `LpStableSketch { p: f32, width, depth }`
 - [x] `frequency/ada_sketch.rs` — Ada-Sketch (Huang 2021): adaptive Count-Min that allocates extra counters to heavy hitters detected online; ε error guarantee with 2× fewer cells than vanilla CM for skewed distributions
 
@@ -128,7 +128,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 456 passing
+- Tests: 576 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features
@@ -179,10 +179,10 @@ on sm_80, with overall accuracy bounds matching Apache DataSketches once
 All six SM versions produce non-empty PTX strings and pass content-substring checks in `e2e_tests.rs`.
 
 ### Per-Architecture Optimisation Hooks
-- [ ] sm_80 (Ampere) -- warp-cooperative `atom.global.add` for `cm_update` and `bloom_insert`
-- [ ] sm_89 (Ada) -- shared-memory bucket-batching for `hll_register` writes
-- [ ] sm_90 (Hopper) -- TMA + `cp.async.bulk` for streaming reservoir refills
-- [ ] Verify `tdigest_merge` centroid coalescing is monotone on all SM versions
+- [ ] sm_80 (Ampere) -- warp-cooperative `atom.global.add` for `cm_update` and `bloom_insert` (requires GPU hardware)
+- [ ] sm_89 (Ada) -- shared-memory bucket-batching for `hll_register` writes (requires GPU hardware)
+- [ ] sm_90 (Hopper) -- TMA + `cp.async.bulk` for streaming reservoir refills (requires GPU hardware)
+- [ ] Verify `tdigest_merge` centroid coalescing is monotone on all SM versions (requires GPU hardware to execute PTX)
 
 ---
 
@@ -195,13 +195,13 @@ All six SM versions produce non-empty PTX strings and pass content-substring che
 
 ### Algorithmic Deepening
 - [x] Hierarchical HLL (HLL-TailCut) for very low cardinalities
-- [ ] Sliding-window variants of CM / HLL / Bloom with time-decaying buckets
-- [ ] Combined frequency + cardinality sketch (e.g., AMS over distinct elements)
-- [ ] Locality-sensitive hashing for general Lp metrics (p-stable distributions)
-- [ ] Bottom-K MinHash with weighted variant (consistent weighted sampling beyond Ioffe)
+- [x] Sliding-window variants of CM / HLL / Bloom with time-decaying buckets -- CM: `frequency/sliding_window_cm.rs` (`SlidingWindowCm`); Bloom: `membership/sliding_window_bloom.rs` (`SlidingWindowBloom`); HLL: `cardinality/sliding_window_hll.rs` (pre-existing). All use a ring of per-epoch buckets with stale-bucket eviction.
+- [x] Combined frequency + cardinality sketch (e.g., AMS over distinct elements) -- `moment/freq_card.rs` (`FreqCardSketch`: HLL F0 + Count-Min frequency + AMS-over-distinct via first-appearance detection; documents the appearance-count L2 merge semantics)
+- [x] Locality-sensitive hashing for general Lp metrics (p-stable distributions) -- `lsh/p_stable_lsh.rs` (`PStableLsh`: Datar-Immorlica-Indyk-Mirrokni 2004 E2LSH; Gaussian for L2, Cauchy for L1; ⌊(a·x+b)/r⌋ buckets; closed-form collision-probability integration)
+- [x] Bottom-K MinHash with weighted variant (consistent weighted sampling beyond Ioffe) -- `similarity/weighted_bottom_k.rs` (`WeightedBottomK`: exponential rank r(e)=−ln(u_e)/w(e), bottom-k retained, weighted-Jaccard estimator)
 
 ### API Polish
-- [ ] Serialisation / deserialisation (`oxiarc`-compressed binary format) for sketch persistence
-- [ ] Builder-style API for HLL (`HllBuilder::precision(p).build()`) and CM (`CmBuilder::epsilon(0.01).delta(0.001).build()`)
-- [ ] Cross-link with `oxicuda-stats` for inference on sketch-based estimators
-- [ ] Streaming interface trait (`StreamingSketch<T>`) with `update`, `merge`, `query`, `serialize`
+- [x] Serialisation / deserialisation binary format for sketch persistence -- `src/serde.rs` (`SketchSerialize` trait + self-describing little-endian `OXSK` frame for HLL / Count-Min / Bloom, exact round-trip incl. hash coefficients). NB: pure-byte format, not the `oxiarc`-compressed container (oxiarc layer can wrap these bytes downstream).
+- [x] Builder-style API for HLL (`HllBuilder::precision(p).build()`) and CM (`CmBuilder::epsilon(0.01).delta(0.001).build()`) -- `src/builder.rs` (also `BloomBuilder`; accuracy-target shortcuts: HLL standard_error, CM eps/delta, Bloom capacity/false_positive)
+- [ ] Cross-link with `oxicuda-stats` for inference on sketch-based estimators (deferred: requires a cross-crate dependency; out of scope for an `oxicuda-sketch`-only sweep)
+- [x] Streaming interface trait (`StreamingSketch<T>`) with `update`, `merge`, `query`, `serialize` -- `src/stream/sketch_trait.rs` (`StreamingSketch<Item>` + blanket `SerializableStreamingSketch`; impls for HLL, Count-Min, Bloom, Theta)

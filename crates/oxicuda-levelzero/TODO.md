@@ -7,9 +7,8 @@ and dispatch framework. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda)
 
 ## Implementation Status
 
-- **Actual SLoC:** 6,216 across 10 files
-- **Tests:** 103 passing
-- **Status:** Full memory + compute, OpenCL SPIR-V generators, XMX cooperative-matrix, sub-group ops, multi-tile dispatcher
+- **Tests:** 153 passing (was 103; +50 across new host/codegen surface)
+- **Status:** Full memory + compute, OpenCL SPIR-V generators, XMX cooperative-matrix, sub-group ops, multi-tile dispatcher, USM suballocators, host-side command-list recorder, ESIMD/DPAS/FP8 codegen, module-binary cache + EU-occupancy advisor
 - **Targets:** Intel Xe-LP (Gen12), Xe-HPG (Arc Alchemist/Battlemage), Xe-HPC (Ponte Vecchio / Data Center GPU Max)
 
 ### Completed
@@ -54,25 +53,51 @@ and dispatch framework. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda)
 - [x] `TileWorkSlice` -- row range assigned to each tile
 - [x] `MultiTileDispatcher` -- discovers Xe-HPC sub-devices via `zeDeviceGetSubDevices`; transparently falls back to single-device on Arc / Xe-LP
 
+#### USM Memory Logic (`usm.rs`)
+- [x] `UsmKind` (Device/Host/Shared) + alloc-descriptor stype + host-accessibility mapping
+- [x] `UsmSuballocator` -- per-kind first-fit free-list suballocator with alignment padding + boundary-merge coalescing (host-side bookkeeping for `zeMemAlloc{Device,Host,Shared}` blocks)
+- [x] `MemoryPropertyTable` -- memory-ordinal selection from a queried `zeDeviceGetMemoryProperties` table (bandwidth/capacity-aware `select_device_ordinal`)
+- [x] `MemoryAdvice` / `MemoryAdviseState` -- `ze_memory_advice_t` modeling; folds set/clear hints into the minimal effective `effective_advice` set
+
+#### Host-Side Command-List Recording (`command_list.rs`)
+- [x] `CommandListRecorder` -- in-memory recording of memory-copy / fill / kernel-launch / barrier commands with recording→closed→reset lifecycle
+- [x] `GroupCountPlanner` -- `ze_group_count_t` ceil-division dispatch planning (1-D and 3-D) with u32 overflow guards
+- [x] `CommandQueueGroupTable` -- compute vs. dedicated-copy ordinal selection from a queried queue-group property table
+- [x] `EventPoolDesc` / `EventScope` / `Barrier` -- event-pool index allocation + barrier dependency construction
+- [x] `ReusableCommandList` -- reset+reuse loop bookkeeping with reuse counter
+
+#### ESIMD / DPAS / FP8 Codegen (`spirv_esimd.rs`)
+- [x] `esimd_block_copy_spirv` -- `SPV_INTEL_subgroups` block read/write tile transfer
+- [x] `dpas_gemm_spirv` (`DpasTileConfig` DG2 BF16/INT8) -- block-loaded systolic GEMM skeleton
+- [x] `gemm_fp8_coop_matrix_spirv` (`Fp8Format` E4M3/E5M2) -- FP8 cooperative-matrix module with `Float8EXT` capability
+
+#### Module Cache + Occupancy (`module_cache.rs`)
+- [x] `ModuleBinaryCache` / `NativeBinary` / `spirv_cache_key` -- deterministic FNV-1a-keyed native-binary cache with hit/miss statistics
+- [x] `EuOccupancyAdvisor` -- EU-utilisation → workgroup-size heuristic + resident-workgroup estimate
+
+#### Extended Transcendental Codegen (`spirv.rs`)
+- [x] `ExtMathFn` + `ext_math_compute_shader` -- erf/erfc/sin/cos/atan/tanh/cbrt/rsqrt via `OpExtInst`
+- [x] `atan2_compute_shader` -- two-argument extended-instruction kernel
+
 ### Future Enhancements
 
 #### P0 -- Critical
-- [ ] ESIMD (Explicit SIMD) intrinsics -- emit `OpenCL.std::sub_group_block_read/write` for high-throughput tile loads (critical for Xe-HPC GEMM)
-- [ ] Multi-tile slab decomposition for >1 tile on Ponte Vecchio (currently classified but not dispatched cross-tile)
-- [ ] FP8 cooperative-matrix on Xe-HPC (`SPV_INTEL_subgroups`) -- BF8/HF8 inference path
+- [x] ESIMD (Explicit SIMD) intrinsics -- emit `SPV_INTEL_subgroups` `OpSubgroupBlockReadINTEL` / `OpSubgroupBlockWriteINTEL` for high-throughput tile loads (`spirv_esimd.rs::esimd_block_copy_spirv`; `SubgroupBufferBlockIOINTEL` capability)
+- [ ] Multi-tile slab decomposition for >1 tile on Ponte Vecchio -- host-side partition planning is done in `multi_tile.rs::MultiTileDispatcher::partition`; actual cross-tile dispatch *(requires Intel GPU/L0 driver hardware)*
+- [x] FP8 cooperative-matrix on Xe-HPC -- BF8/HF8 SPIR-V module emission (`spirv_esimd.rs::gemm_fp8_coop_matrix_spirv`, `Fp8Format` E4M3/E5M2; `Float8EXT` + `CooperativeMatrixKHR` capabilities). On-device FP8 XMX numerical validation *(requires Intel GPU/L0 driver hardware)*
 
 #### P1 -- Important
-- [ ] IPC handles (`zeMemGetIpcHandle` / `zeMemOpenIpcHandle`) for cross-process device-buffer sharing
-- [ ] Bindless / large-array descriptor (`zeKernelSetIndirectAccess`) for very-wide tensor lists
-- [ ] Module caching (`zeModuleGetNativeBinary`) -- persist compiled L0 modules across runs
-- [ ] Async command-queue groups -- discover and use copy queues separately from compute queues
-- [ ] Event-based dependency graph (`ze_event_handle_t`) for inter-kernel synchronization
-- [ ] `zeFenceQueryStatus` polling for non-blocking completion detection
+- [ ] IPC handles (`zeMemGetIpcHandle` / `zeMemOpenIpcHandle`) for cross-process device-buffer sharing *(requires Intel GPU/L0 driver hardware -- the handle is an opaque driver token)*
+- [ ] Bindless / large-array descriptor (`zeKernelSetIndirectAccess`) for very-wide tensor lists *(requires Intel GPU/L0 driver hardware)*
+- [x] Module caching -- in-memory native-binary cache keyed by stable SPIR-V hash + build flags, hit/miss accounting (`module_cache.rs::ModuleBinaryCache`, `NativeBinary`, `spirv_cache_key`). The `zeModuleGetNativeBinary` retrieval itself *(requires Intel GPU/L0 driver hardware)*
+- [x] Async command-queue groups -- host-side discovery/selection of dedicated copy vs. compute ordinals from a queried property table (`command_list.rs::CommandQueueGroupTable::{select_compute_ordinal, select_copy_ordinal, has_dedicated_copy_engine}`). Concurrent on-device execution *(requires Intel GPU/L0 driver hardware)*
+- [x] Event-based dependency graph -- host-side event-pool sizing + barrier dependency construction (`command_list.rs::EventPoolDesc`, `Barrier`, recorded into `CommandListRecorder`). Live `ze_event_handle_t` signalling *(requires Intel GPU/L0 driver hardware)*
+- [ ] `zeFenceQueryStatus` polling for non-blocking completion detection *(requires Intel GPU/L0 driver hardware)*
 
 #### P2 -- Nice-to-Have
-- [ ] `command/command_list_reuse.rs` — command-list reset + reuse API (L0 spec §3.5.6): reset a completed `ze_command_list_handle_t` with `zeCommandListReset` and re-record kernel dispatches for repeated launches without re-allocation; `ReusableCommandList`
-- [ ] `device/eu_occupancy.rs` — EU occupancy hints via sysman (`zes_device_handle_t`): query active EU utilisation fraction via `zesDeviceProcessesGetState` and feed back into tile-size selection heuristic; `EuOccupancyAdvisor`
-- [ ] `spirv/dpas_gemm.rs` — Intel Arc DPAS (Dot-Product Accumulate Systolic) GEMM (Intel 2022): emit `OpIMad` / `OpDPAS` intrinsics via `SPV_INTEL_subgroups` extension for systolic-array-accelerated INT8/BF16 GEMM on Xe-HPG; `DpasGemm`
+- [x] `command/command_list_reuse.rs` — command-list reset + reuse API (L0 spec §3.5.6): in-memory recorder with reset+reuse lifecycle for repeated launches without re-allocation (`command_list.rs::ReusableCommandList`, `CommandListRecorder::{close, reset}`). The `zeCommandListReset` syscall itself *(requires Intel GPU/L0 driver hardware)*
+- [x] `device/eu_occupancy.rs` — EU occupancy → tile-size selection heuristic (`module_cache.rs::EuOccupancyAdvisor::{recommend_workgroup_size, estimated_resident_workgroups}`). The utilisation *reading* via sysman `zesDeviceProcessesGetState` *(requires Intel GPU/L0 driver hardware)*
+- [x] `spirv/dpas_gemm.rs` — Intel Arc DPAS (Dot-Product Accumulate Systolic) GEMM: block-loaded systolic GEMM skeleton via `SPV_INTEL_subgroups` for INT8/BF16 on Xe-HPG (`spirv_esimd.rs::dpas_gemm_spirv`, `DpasTileConfig` DG2 BF16/INT8). On-device systolic execution *(requires Intel GPU/L0 driver hardware)*
 - [ ] oneCCL collectives integration (`libccl.so`) -- AllReduce/AllGather across multi-GPU
 - [ ] oneMKL GEMM interop (runtime-loaded `libonemkl.so`) for tuned Xe-HPC paths
 - [ ] oneDNN primitive cache integration for fused conv+bias+relu
@@ -91,9 +116,9 @@ and dispatch framework. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda)
 ## Quality Status
 
 - Warnings: 0
-- Tests: 103 passing
-- unwrap() calls: 0
-- Clippy: clean (pedantic + nursery)
+- Tests: 153 passing
+- unwrap() calls: 0 (production code; `unwrap` in `#[cfg(test)]` only)
+- Clippy: clean (`-D warnings`, `--no-deps`)
 
 ## Performance Targets
 
@@ -167,9 +192,9 @@ Intel GPU performance varies by tile architecture and EU count. Xe-HPC targets d
 - [ ] CI matrix across Xe-LP (iGPU), Xe-HPG (Arc), Xe-HPC (PVC) -- currently only emulator/spec tests
 
 ### Implementation Deepening
-- [ ] In-house SPIR-V builder fuzz-tested vs `spirv-val` (validates OpenCL execution model emissions)
-- [ ] OpenCL extended-instruction-set coverage extended (currently relu/gelu/exp/log; add atan2, erf, etc.)
-- [ ] Async copy queues discovered and used (currently single command-queue family)
+- [ ] In-house SPIR-V builder fuzz-tested vs `spirv-val` (validates OpenCL execution model emissions) *(needs the external `spirv-val` tool; structural unit-tests cover header/opcode/capability correctness today)*
+- [x] OpenCL extended-instruction-set coverage extended -- added erf/erfc/sin/cos/atan/cbrt/rsqrt single-arg + atan2 two-arg generators (`spirv.rs::{ExtMathFn, ext_math_compute_shader, atan2_compute_shader}`)
+- [x] Async copy queues discovered and used -- host-side discovery/selection done (`command_list.rs::CommandQueueGroupTable::select_copy_ordinal`); on-device async submission *(requires Intel GPU/L0 driver hardware)*
 - [ ] `zeFenceCreate` instead of `zeCommandListReset` for finer-grained completion tracking
 - [ ] Multi-context support (currently single root context) for multi-process workloads
 - [ ] Driver upgrade negotiation -- pre-1.5 vs 1.5+ feature gating (XMX requires 1.5+)

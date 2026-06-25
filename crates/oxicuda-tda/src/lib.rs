@@ -31,3 +31,6 @@ pub use error::{TdaError, TdaResult};
 
 #[cfg(test)]
 mod e2e_tests;
+
+#[cfg(test)]
+mod worked_examples;

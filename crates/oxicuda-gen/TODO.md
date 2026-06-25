@@ -9,8 +9,8 @@ LoRA adapters, and score-network building blocks. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 13,605 (47 files, Rust 5,685 code + 1,056 comments + 855 blanks)
-- **Tests:** 520 passing (#[test] count in src/)
+- **Files:** 52 `.rs` files in src/
+- **Tests:** 590 passing (#[test] count in src/) + 1 doctest
 - **Crate:** `oxicuda-gen` -- Vol.17 Generative AI Primitives
 
 ### Completed [x]
@@ -62,7 +62,8 @@ LoRA adapters, and score-network building blocks. Part of
 - [x] `vae/encoder.rs` -- `Encoder`, `EncoderConfig`, `EncoderWeights`: ResNet down-blocks
       (GELU + GroupNorm); `EncoderWeights::zeros()`
 - [x] `vae/decoder.rs` -- `Decoder`, `DecoderConfig`, `DecoderWeights`: mirrored up-sampling
-      blocks; `DecoderWeights::zeros()`
+      blocks; `DecoderWeights::zeros()`; `Decoder::forward()` explicit-batch reconstruction
+      (encode→decode spatial round-trip)
 
 #### LoRA (`lora/`, 2 files + mod)
 - [x] `lora/adapter.rs` -- `LoraConfig`, `LoraLinear`, `LoraModel`:
@@ -70,12 +71,19 @@ LoRA adapters, and score-network building blocks. Part of
       correction; named adapter collection with `add_adapter()`/`apply()`
 - [x] `lora/merge.rs` -- `merge_lora`, `unmerge_lora`, `verify_merge_roundtrip`,
       `scale_adapter`, `compose_adapters`
+- [x] `lora/checkpoint.rs` -- `save`/`load` round-trip for `LoraModel` via a hand-rolled
+      versioned little-endian byte format (`OXLORA01`); bit-for-bit A/B/rank/scaling/alpha
+      identity; `LoraLinear::from_parts` exact-scaling constructor
 
 #### Score networks (`score/`, 2 files + mod)
 - [x] `score/timestep.rs` -- `SinusoidalEmbedding`, `FourierEmbedding`: sin+cos pair
       embedding with `sin^2 + cos^2 = 1` invariant verified
 - [x] `score/unet_block.rs` -- `UNetResBlock`, `SelfAttentionBlock`, `CrossAttentionBlock`:
       SiLU activation + time-embedding injection + multi-head attention
+- [x] `score/unet_full.rs` -- `UNet`, `UNetConfig`, `UNetWeights`, `ResBlockWeights`,
+      `AttnWeights`: full down/mid/up assembly with skip connections, 2×2 avg-pool /
+      nearest-neighbour up/downsampling, bottleneck self-attention, and broadcast
+      timestep embedding; resolution + channel count preserved
 
 #### Integration tests (`lib.rs::tests`)
 - [x] 11 E2E tests: DDPM forward/reverse consistency, DDIM eta=0 determinism, DPM-Solver
@@ -91,24 +99,40 @@ LoRA adapters, and score-network building blocks. Part of
 - [x] Classifier-Guidance (gradient-of-classifier) as alternative to CFG
 
 #### P1 -- Important (Model-Architecture Coverage)
-- [ ] Cross-attention KV-cache for fast sampling (1-step text-conditioning reuse)
-- [ ] Rotary positional embedding (RoPE) variant of `SelfAttentionBlock`
-- [ ] FlashAttention-style fused softmax block (link with oxicuda-dnn fused MHA)
-- [ ] `VqCodebook::ema_decay` warm-up schedule + dead-code (unused entry) reinit
+- [x] Cross-attention KV-cache for fast sampling (1-step text-conditioning reuse) —
+      score/kv_cache.rs (`CrossAttentionKvCache`: projects fixed context K/V once via
+      `build()`, reuses across N denoising steps via `attend()`; bit-for-bit identical
+      to `CrossAttentionBlock` verified in test)
+- [x] Rotary positional embedding (RoPE) variant of `SelfAttentionBlock` —
+      score/rope_attention.rs (`RotaryEmbedding`, `RopeSelfAttention`; relative-position
+      invariance via `forward_with_offset`)
+- [x] FlashAttention-style fused softmax block (link with oxicuda-dnn fused MHA) —
+      score/flash_attention.rs (`FlashAttention`: tiled online-softmax recurrence
+      running-max/running-sum/rescaled accumulator, never materialises S×S scores;
+      causal masking; matches naive oracle and is block-size invariant)
+- [x] `VqCodebook::ema_decay` warm-up schedule + dead-code (unused entry) reinit —
+      vae/ema_codebook.rs (`current_decay()` warm-up ramp, `revive_dead_codes()` reinit
+      of unused entries via `steps_since_used`)
 - [x] `Decoder::forward` reference path + test against `Encoder` round-trip
-- [ ] Mixed-rank LoRA: per-layer-different `r` selection
+- [x] Mixed-rank LoRA: per-layer-different `r` selection — lora/mixed_rank.rs
+      (`LayerSpec`/`MixedRankLoraModel`: independent rank+alpha per named layer;
+      `RankBudget` greedily allocates per-layer ranks under a global parameter budget,
+      Uniform / WidthProportional strategies)
 
 #### P2 -- Nice-to-Have (Advanced / Research)
 - [x] Consistency Models (Song et al. 2023) `ConsistencyScheduler` — scheduler/consistency.rs (sigma schedule, c_skip/c_out preconditioning, one-step and multi-step sampling, consistency distillation loss)
 - [x] Rectified Flow (Liu 2023) higher-order solver (scheduler/rectified_flow.rs -- linear interpolation path, constant target velocity x1−x0, Euler/Heun ODE sampling, reflow pair generation, straightness metric)
 - [x] DoRA (weight-decomposed LoRA) adapter variant (lora/dora.rs -- Liu 2024 ICML; W'=m·(W0+BA)/‖W0+BA‖_row per-output-row, trainable magnitude m + LoRA direction update; decoupled magnitude/direction)
-- [ ] QLoRA NF4 quantised base-weight path
+- [x] QLoRA NF4 quantised base-weight path — lora/qlora.rs (Dettmers 2023;
+      `Nf4Tensor` block-wise 4-bit NormalFloat with 16-level normal-quantile codebook +
+      per-block absmax scaling, two codes packed per byte; `QLoraLinear` forward
+      = dequant(NF4 frozen base)·xᵀ + LoRA correction; `NF4_LEVELS` const)
 - [x] Stochastic Interpolants generalisation of flow matching (scheduler/stochastic_interpolant.rs -- Albergo-Vanden-Eijnden 2023; X_t=α(t)x0+β(t)x1+σ(t)z unifying framework, target velocity α'x0+β'x1; LinearFlow/TrigInterpolant/NoisyLinear kinds; Euler ODE sample)
 - [x] V-prediction parameterisation (scheduler/v_prediction.rs -- Salimans & Ho 2022; v=α_t ε−σ_t x orthonormal-rotation parameterization with exact predict_x0/predict_eps inverses, SNR, constant loss weight)
 - [x] `diffusion/flow_matching.rs` — Conditional Flow Matching (Lipman 2022): simple velocity field u_t|x₁=x₁-x₀; Gaussian conditional probability path; simulation-free training; `CfmConfig { sigma_min: f32 }`
-- [ ] `diffusion/consistency.rs` — Consistency Models (Song 2023): learn self-consistency property f(x_t,t)=x₀; consistency distillation from diffusion teacher; one/two-step generation; `ConsistencyModel { steps: usize }`
+- [x] `diffusion/consistency.rs` — Consistency Models (Song 2023): learn self-consistency property f(x_t,t)=x₀; consistency distillation from diffusion teacher; one/two-step generation; `ConsistencyModel { steps: usize }` — IMPLEMENTED under sibling filename scheduler/consistency.rs (`ConsistencyScheduler`: sigma schedule, c_skip/c_out preconditioning, `single_step_sample`/`multi_step_sample`, `consistency_loss` distillation against EMA teacher)
 - [x] `vae/vq_vae2.rs` — VQ-VAE-2 (Razavi 2019): hierarchical two-level discrete codes (top + bottom); PixelSnail prior on top codes; commitment loss + EMA codebook updates
-- [ ] `gan/stylegan3.rs` — StyleGAN3 alias-free operations (Karras 2021): equivariant generator with sinc-filtered up/downsampling; rotation/translation equivariance; `StyleGan3Config { c_dim, w_dim }`
+- [x] `gan/stylegan3.rs` — StyleGAN3 alias-free operations (Karras 2021): equivariant generator with sinc-filtered up/downsampling; rotation/translation equivariance; `StyleGan3Config { c_dim, w_dim }` — IMPLEMENTED gan/stylegan3.rs (`AliasFreeOps` Kaiser low-pass FIR up/downsample + filtered non-linearity, `MappingNetwork`, `SynthesisLayer`, `StyleGan3Generator`)
 
 ## Dependencies
 
@@ -123,7 +147,7 @@ through the oxicuda-driver runtime loader (`libcuda.so` / `nvcuda.dll`).
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 520 passing
+- Tests: 590 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All (largest is `ptx_kernels.rs` at ~890 lines)
 - Pure-Rust default features: Yes (Pure Rust Policy)
@@ -156,6 +180,12 @@ Target: bandwidth-bound kernels at >=90% peak DRAM throughput on sm_80+.
 
 ## Architecture-Specific Deepening
 
+> NOTE: The unchecked `[ ]` items below are **hardware-gated** — Tensor-Core
+> `mma.sync`/`wgmma`, `cp.async`/TMA staging, cluster launch, FP8 (E4M3) and TMEM
+> paths require a real NVIDIA device (sm_80+/sm_90+/sm_100+) to author and verify.
+> They are intentionally left unchecked; PTX *emission* for all kernels across the
+> six SM versions is already tested on CPU. (requires GPU hardware)
+
 ### Ampere (sm_80) / Ada (sm_89)
 - [x] `ddpm_step_ptx` uses `sqrt.approx.f32` / `rcp.approx.f32` (HW SFU)
 - [x] `cfg_combine_ptx` issues coalesced `ld.global.f32` (vectorisable to v4)
@@ -187,22 +217,61 @@ Target: bandwidth-bound kernels at >=90% peak DRAM throughput on sm_80+.
 - [x] Flow-matching boundary conditions `x(0)`, `x(1)` exact (within 1e-6)
 - [x] LoRA `verify_merge_roundtrip()` checks `merge -> unmerge ≈ identity`
 - [x] PTX generation across 6 SM versions: 75 / 80 / 86 / 90 / 100 / 120
-- [ ] GPU-hardware correctness for all 6 kernels (gated behind `gpu-tests`)
+- [ ] GPU-hardware correctness for all 6 kernels (gated behind `gpu-tests`) (requires GPU hardware)
 - [ ] Numerical agreement with reference PyTorch (`diffusers`) implementations within 1e-3
-      relative for full 50-step DDIM sample
+      relative for full 50-step DDIM sample (requires PyTorch/diffusers reference + GPU)
 - [ ] LoRA inference accuracy vs HF `peft` reference within 1e-4 relative
-- [ ] VQ-VAE codebook usage > 80% after training simulation
+      (requires HF peft reference)
+- [x] VQ-VAE codebook usage > 80% after training simulation —
+      vae/ema_codebook.rs::tests::codebook_usage_exceeds_80_percent_after_training
+      (16-cluster grid data, 400 `train_step` iterations with EMA + dead-code revival;
+      asserts > 80% of codes assigned)
 
 ### Implementation Deepening
-- [ ] `Encoder::forward` and `Decoder::forward` end-to-end with batched-tensor reshape
-      (currently `EncoderWeights::zeros` constructors only)
-- [ ] U-Net full forward (down/mid/up assembly) -- currently per-block primitives only
-- [ ] Sampling loop helper (`sample_ddim`, `sample_dpm_solver`) for end-to-end inference
-- [ ] LoRA save/load via `oxicuda-runtime` checkpoint format (round-trip verified)
-- [ ] Adaptive CFG schedule curve plotting / fitting helpers
+- [x] `Encoder::forward` and `Decoder::forward` end-to-end with batched-tensor reshape
+      (vae/decoder.rs -- `Decoder::forward(z, weights, batch)` adds the symmetric
+      explicit-batch counterpart to `Encoder::encode`: validates the per-row
+      `[batch × latent_dim]` reshape before running the shared residual stack and
+      returns `[batch × out_channels]`; test `encode_decode_roundtrip_preserves_spatial_dims`
+      threads encode→decode and asserts reconstruction matches the encoder's input
+      spatial/channel dims, plus finite-output + bad-batch rejection tests)
+- [x] U-Net full forward (down/mid/up assembly) -- score/unet_full.rs
+      (`UNet`/`UNetConfig`/`UNetWeights`: wires `UNetResBlock` + `SelfAttentionBlock`
+      into a real down/mid/up network over channel-last `[H × W × C]` tensors;
+      down path runs per-level residual blocks then 2×2 avg-pool downsample saving
+      skips, mid path is resblock + bottleneck self-attention over flattened tokens,
+      up path 2×2 nearest-neighbour upsamples + adds skips + narrows channels, final
+      block projects back to `in_channels`; timestep embedding broadcast to every
+      token through every block; tests assert H×W resolution + channel count preserved
+      under zero and non-trivial weights, timestep actually influences output, and
+      indivisible-resolution rejection)
+- [x] Sampling loop helper (`sample_ddim`, `sample_dpm_solver`) for end-to-end inference —
+      closure-driven sampling loops exist under sibling names: scheduler/heun.rs
+      (`sample_euler`/`sample_heun`/`sample_euler_ancestral`), solver/dpm_solver_pp.rs
+      (`DpmSolverPp::sample`), solver/unipc.rs (`UniPc::sample`), solver/pndm.rs
+      (`PndmSolver::sample`), scheduler/rectified_flow.rs (`RectifiedFlow::sample`),
+      scheduler/stochastic_interpolant.rs (`StochasticInterpolant::sample_ode`)
+- [x] LoRA save/load via checkpoint format (round-trip verified) -- lora/checkpoint.rs
+      (`save`/`load` for `LoraModel` using a hand-rolled, versioned, length-prefixed
+      little-endian byte layout -- magic `OXLORA01`, config rank/alpha/dropout/target
+      modules, then per-adapter name/in/out/rank/scaling/A/B in sorted key order for
+      determinism; serde deliberately avoided as it is not a dependency of this crate.
+      Added `LoraLinear::from_parts` so the `scaling` field round-trips bit-for-bit;
+      test `save_load_roundtrip_identity` asserts A/B/rank/scaling/alpha reproduced
+      bit-for-bit, plus deterministic-output, forward-output-equivalence, empty-model,
+      bad-magic/truncated/trailing-byte rejection tests)
+- [x] Adaptive CFG schedule curve plotting / fitting helpers -- guidance/adaptive.rs
+      (`AdaptiveCfgScheduler::sample_on_grid`/`sample_uniform_grid` sample the
+      guidance-scale curve over arbitrary/uniform step grids; `fit_polynomial` plus a
+      standalone `PolynomialFit` least-squares-fits a low-order polynomial to the curve
+      by solving the Vandermonde normal equations via in-house f64 Gaussian elimination
+      with partial pivoting (`eval`/`coeffs`/`rmse`); tests assert grid samples match
+      the scheduler exactly, a known quadratic `1+2x+3x²` is recovered within 1e-3, the
+      linear policy is reproduced by a degree-1 fit, the cosine policy gets <0.1 RMSE at
+      degree 4, and under-determined / mismatched-length fits are rejected)
 
 ### Benchmark Coverage
 - [x] `benches/gen_ops.rs` Criterion harness wired (CPU-side PTX generation + scheduler step)
 - [ ] GPU-side throughput numbers vs reference (cuDNN attention, HF Diffusers) once
-      Linux+NVIDIA harness is available
-- [ ] LoRA rank-r ablation (r in 4/8/16/32) on representative GEMM sizes
+      Linux+NVIDIA harness is available (requires GPU hardware)
+- [ ] LoRA rank-r ablation (r in 4/8/16/32) on representative GEMM sizes (requires GPU hardware)

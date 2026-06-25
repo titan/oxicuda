@@ -13,10 +13,10 @@
 //! ├── maml/            — MAML, FOMAML, ANIL meta-update algorithms
 //! ├── metric_learning/ — ProtoNet, MatchingNet, RelationNet
 //! ├── metrics/         — Few-shot accuracy, confidence intervals
-//! ├── network/         — MLP backbone and linear classification head
-//! ├── online/          — OML online-aware (forgetting-aware) meta-learning
+//! ├── network/         — MLP / Conv4 / ResNet-12 backbones, linear head
+//! ├── online/          — OML and ANML online-aware (forgetting-aware) meta-learning
 //! ├── reptile/         — Reptile first-order meta-learner
-//! ├── ssl/             — Self-supervised pretext tasks (rotation prediction)
+//! ├── ssl/             — Self-supervised pretext tasks (rotation prediction, ProtoTransfer)
 //! ├── handle           — LcgRng, MetaHandle, SmVersion
 //! ├── error            — MetaError / MetaResult
 //! ├── ptx_kernels      — GPU PTX kernel strings (8 kernels × 6 SM versions)
@@ -54,6 +54,7 @@ pub mod prelude {
         imaml_task_gradient, proximal_inner_solve,
     };
     pub use crate::maml::maml::{MamlConfig, maml_adapt, maml_meta_update};
+    pub use crate::maml::maml_conv_backbone::{Conv4MamlConfig, Conv4MamlModel};
     pub use crate::meta::meta_sgd_learner::{MetaSgdLearner, MetaSgdLearnerConfig};
     pub use crate::metric_learning::cafs::{CafsConfig, CafsFewShot};
     pub use crate::metric_learning::can::{Can, CanAttentionOutput, CanConfig, CanWeights};
@@ -75,13 +76,18 @@ pub mod prelude {
     pub use crate::network::backbone::MlpBackbone;
     pub use crate::network::conv4_backbone::{Conv4Backbone, Conv4Block, Conv4Config};
     pub use crate::network::linear_head::LinearHead;
+    pub use crate::network::resnet12::{ResBlock, ResNet12, ResNet12Config};
     pub use crate::network::tbn::{TbnConfig, TransductiveBn};
+    pub use crate::online::anml::{Anml, AnmlConfig, AnmlLinear};
     pub use crate::online::oml::{Oml, OmlConfig, OmlLinear};
     pub use crate::ptx_kernels::{
         cosine_sim_ptx, episode_sample_ptx, f32_hex, inner_sgd_ptx, meta_grad_accum_ptx,
         proto_distance_ptx, relation_score_ptx, reptile_update_ptx,
     };
     pub use crate::reptile::reptile::{ReptileConfig, reptile_update};
+    pub use crate::ssl::proto_transfer::{
+        ProtoTransferConfig, ProtoTransferHead, l2_normalize, proto_clr_loss,
+    };
     pub use crate::ssl::rotation::{
         NUM_ROTATIONS, RotationConfig, RotationHead, rotate_chw, rotation_pretext_loss,
     };

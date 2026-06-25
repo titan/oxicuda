@@ -7,6 +7,11 @@
 //!   merged into a single PTX kernel, reducing kernel-launch overhead and
 //!   improving cache behaviour.
 //!
+//! * [`fusion_reduction`] — Identifies reduction-chained element-wise regions
+//!   (`LayerNorm`, `softmax`, …) — single-entry/single-exit broadcast diamonds
+//!   that the linear chain fuser cannot capture — and collapses each into one
+//!   fused kernel.
+//!
 //! * [`memory`] — Assigns device memory slots to logical buffers using
 //!   live-interval graph colouring, maximising buffer reuse and minimising
 //!   peak device memory usage.
@@ -18,9 +23,14 @@
 //! [`ComputeGraph`]: crate::graph::ComputeGraph
 
 pub mod fusion;
+pub mod fusion_reduction;
 pub mod memory;
 pub mod stream;
 
 pub use fusion::{FusionGroup, FusionPlan, analyse as fusion_analyse};
+pub use fusion_reduction::{
+    ReductionFusionGroup, ReductionFusionPlan, ReductionPattern,
+    analyse as reduction_fusion_analyse, rewrite as reduction_fusion_rewrite,
+};
 pub use memory::{MemoryPlan, SlotAssignment, analyse as memory_analyse};
 pub use stream::{StreamPlan, SyncPoint, analyse as stream_analyse};

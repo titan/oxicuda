@@ -9,6 +9,7 @@ pub mod hrr;
 pub mod hrr_fft;
 pub mod integer;
 pub mod quantize;
+pub mod sparse_binary;
 pub mod sparse_block_codes;
 
 pub use fhrr::{
@@ -25,4 +26,5 @@ pub use quantize::{
     binarize_checked, dequantize_levels, quantization_error, quantize_levels, sign_binarize,
     ternarize,
 };
+pub use sparse_binary::{SparseBinaryConfig, SparseBinaryVec};
 pub use sparse_block_codes::{SbcConfig, SbcVec};

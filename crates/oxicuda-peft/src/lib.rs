@@ -14,7 +14,8 @@
 //! ├── bitfit/         — BitFit bias-only fine-tuning
 //! ├── diff_pruning/   — Diff-Pruning with Hard Concrete L0 regularisation
 //! ├── merge/          — Linear merge, TIES, DARE arithmetic
-//! ├── metrics/        — Efficiency metrics and merge quality tests
+//! ├── metrics/        — Efficiency metrics, merge quality tests, efficiency dashboard
+//! ├── io/             — Adapter serialization (OXPA container) and registry/hub
 //! ├── handle          — SmVersion, LcgRng, PeftHandle
 //! ├── error           — PeftError / PeftResult
 //! └── ptx_kernels     — 7 GPU PTX kernel strings × 6 SM versions
@@ -26,6 +27,7 @@ pub mod diff_pruning;
 pub mod error;
 pub mod handle;
 pub mod ia3;
+pub mod io;
 pub mod lora;
 pub mod memory;
 pub mod merge;

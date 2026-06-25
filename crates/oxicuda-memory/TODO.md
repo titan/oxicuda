@@ -35,9 +35,9 @@ The memory crate provides the core buffer types and copy operations that all hig
 - [x] Buffer views and reinterpret cast -- type-safe buffer reinterpretation (P1)
 - [x] Host-registered memory -- cuMemHostRegister for existing host allocations (P2)
 - [x] Memory usage query -- cuMemGetInfo (free/total VRAM) (P1)
-- [ ] Memory compression hints (`compression/compressed_buffer.rs`) -- cuMemCreate with CU_MEM_PROPERTY_COMPRESSION flag for hardware-accelerated lossless memory compression on Ampere+; `CompressedDeviceBuffer` (P1)
-- [ ] NUMA-aware host allocation (`numa/numa_buffer.rs`) -- numa_alloc_onnode / libnuma integration for host-pinned memory physically allocated on the NUMA node closest to the target GPU; `NumaBuffer` (P1)
-- [ ] Memory pressure monitoring (`pool/pressure_monitor.rs`) -- poll cuMemGetInfo periodically + configurable OOM threshold callback + eviction hook for proactive pool trim under memory pressure; `MemoryPressureMonitor` (P2)
+- [x] Memory compression hints (`compression/compressed_buffer.rs`) -- cuMemCreate with CU_MEM_PROPERTY_COMPRESSION flag for hardware-accelerated lossless memory compression on Ampere+; `CompressedDeviceBuffer` (P1) -- CPU-modelable bookkeeping implemented: `CompressionType`, `CompressionSupport` (CC>=8.0 gate, 2 MiB granularity), `CompressionPlan` (granularity-aligned reservation), `CompressedDeviceBuffer` (logical/physical footprint, compression-ratio + effective-bandwidth model). The `cuMemCreate` device call remains GPU-gated.
+- [x] NUMA-aware host allocation (`numa/numa_buffer.rs`) -- numa_alloc_onnode / libnuma integration for host-pinned memory physically allocated on the NUMA node closest to the target GPU; `NumaBuffer` (P1) -- CPU-modelable topology + policy implemented: `NumaTopology` (ACPI SLIT distance matrix), `closest_node_to_gpu`, `NumaBuffer` (node-bound footprint + access-distance), `NumaAllocTracker` (per-node byte accounting / least-loaded balancing). The `numa_alloc_onnode`/`cuMemHostRegister` calls remain platform-gated.
+- [x] Memory pressure monitoring (`pool_pressure.rs`, exposes `MemoryPressureMonitor`) -- poll cuMemGetInfo periodically + configurable OOM threshold callback + eviction hook for proactive pool trim under memory pressure; `MemoryPressureMonitor` (P2) -- CPU-modelable control loop implemented: `PressureLevel` (Nominal/Warning/Critical), warning/critical used-fraction thresholds, `observe()` state machine with transition + eviction hooks (fires once on entering Critical, accumulates reclaimed bytes), `PressureSample` escalation tracking. `poll()` queries live `memory_info()` and is GPU-gated; `observe()` is fully unit-tested on synthetic samples. (Placed at top level rather than `pool/` since the `pool` module is a single feature-gated file; this module is always available.)
 
 ## Dependencies
 
@@ -49,7 +49,7 @@ The memory crate provides the core buffer types and copy operations that all hig
 ## Quality Status
 
 - Warnings: 0
-- Tests: 211 passing
+- Tests: 256 unit + 20 doc passing (all-features); 250 unit + 20 doc (default features)
 - unwrap() calls: 0
 - Drop implementations log errors via tracing::warn, never panic
 

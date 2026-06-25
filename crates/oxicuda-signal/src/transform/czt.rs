@@ -17,7 +17,10 @@ use std::f64::consts::TAU;
 /// Cooley-Tukey radix-2 FFT, in-place. `re` and `im` must have power-of-2 length.
 fn fft_inplace(re: &mut [f64], im: &mut [f64], inverse: bool) {
     let n = re.len();
-    debug_assert!(n.is_power_of_two(), "fft_inplace requires power-of-2 length");
+    debug_assert!(
+        n.is_power_of_two(),
+        "fft_inplace requires power-of-2 length"
+    );
 
     // Bit-reversal permutation.
     let mut j = 0usize;
@@ -106,9 +109,9 @@ impl Default for CztConfig {
 /// Output of the Chirp Z-Transform.
 #[derive(Debug, Clone)]
 pub struct CztOutput {
-    /// Real parts of X[k], length = output_len.
+    /// Real parts of `X[k]`, length = output_len.
     pub re: Vec<f64>,
-    /// Imaginary parts of X[k], length = output_len.
+    /// Imaginary parts of `X[k]`, length = output_len.
     pub im: Vec<f64>,
     /// Number of output samples M.
     pub output_len: usize,
@@ -257,16 +260,9 @@ pub fn czt_real(signal: &[f64], config: &CztConfig) -> SignalResult<CztOutput> {
 /// # Errors
 /// - `InvalidParameter` if `f_lo >= f_hi` or `f_hi > 0.5`.
 /// - `InvalidSize` if `m_points == 0`.
-pub fn zoom_fft(
-    signal: &[f64],
-    f_lo: f64,
-    f_hi: f64,
-    m_points: usize,
-) -> SignalResult<CztOutput> {
+pub fn zoom_fft(signal: &[f64], f_lo: f64, f_hi: f64, m_points: usize) -> SignalResult<CztOutput> {
     if f_lo >= f_hi {
-        return Err(SignalError::InvalidParameter(
-            "f_lo must be < f_hi".into(),
-        ));
+        return Err(SignalError::InvalidParameter("f_lo must be < f_hi".into()));
     }
     if f_hi > 0.5 {
         return Err(SignalError::InvalidParameter(
@@ -399,14 +395,8 @@ mod tests {
         let czt_out = dft_via_czt(&x).expect("dft_via_czt must succeed for n=32");
         let (ref_re, ref_im) = naive_dft(&x);
         for k in 0..n {
-            assert!(
-                (czt_out.re[k] - ref_re[k]).abs() < 1e-8,
-                "re[{k}] mismatch"
-            );
-            assert!(
-                (czt_out.im[k] - ref_im[k]).abs() < 1e-8,
-                "im[{k}] mismatch"
-            );
+            assert!((czt_out.re[k] - ref_re[k]).abs() < 1e-8, "re[{k}] mismatch");
+            assert!((czt_out.im[k] - ref_im[k]).abs() < 1e-8, "im[{k}] mismatch");
         }
     }
 
@@ -450,7 +440,11 @@ mod tests {
         let y: Vec<f64> = (0..n).map(|i| (i as f64 * 0.7).cos()).collect();
         let a = 2.3_f64;
         let b = -1.1_f64;
-        let combined: Vec<f64> = x.iter().zip(y.iter()).map(|(&xi, &yi)| a * xi + b * yi).collect();
+        let combined: Vec<f64> = x
+            .iter()
+            .zip(y.iter())
+            .map(|(&xi, &yi)| a * xi + b * yi)
+            .collect();
 
         let cx = dft_via_czt(&x).expect("czt x");
         let cy = dft_via_czt(&y).expect("czt y");
@@ -459,14 +453,8 @@ mod tests {
         for k in 0..n {
             let expected_re = a * cx.re[k] + b * cy.re[k];
             let expected_im = a * cx.im[k] + b * cy.im[k];
-            assert!(
-                (cc.re[k] - expected_re).abs() < 1e-10,
-                "linearity re[{k}]"
-            );
-            assert!(
-                (cc.im[k] - expected_im).abs() < 1e-10,
-                "linearity im[{k}]"
-            );
+            assert!((cc.re[k] - expected_re).abs() < 1e-10, "linearity re[{k}]");
+            assert!((cc.im[k] - expected_im).abs() < 1e-10, "linearity im[{k}]");
         }
     }
 
@@ -504,7 +492,10 @@ mod tests {
         // Peak should be somewhere in output (narrow window around f0).
         let mag = czt_magnitude(&out);
         let peak_val = mag.iter().cloned().fold(0.0_f64, f64::max);
-        assert!(peak_val > 1e-3, "zoom_fft should resolve the tone, got peak={peak_val}");
+        assert!(
+            peak_val > 1e-3,
+            "zoom_fft should resolve the tone, got peak={peak_val}"
+        );
     }
 
     #[test]
@@ -532,7 +523,11 @@ mod tests {
         let mag = czt_magnitude(&out);
         let pwr = czt_power(&out);
         for (m, p) in mag.iter().zip(pwr.iter()) {
-            assert!((m * m - p).abs() < 1e-12, "power != magnitude²: {m}²={} vs {p}", m * m);
+            assert!(
+                (m * m - p).abs() < 1e-12,
+                "power != magnitude²: {m}²={} vs {p}",
+                m * m
+            );
         }
     }
 
@@ -554,11 +549,7 @@ mod tests {
         let x = vec![1.0_f64; n];
         let out = dft_via_czt(&x).expect("dft_via_czt DC");
         // DC bin should be N, all others ~0.
-        assert!(
-            (out.re[0] - n as f64).abs() < 1e-8,
-            "DC bin: {}",
-            out.re[0]
-        );
+        assert!((out.re[0] - n as f64).abs() < 1e-8, "DC bin: {}", out.re[0]);
         for k in 1..n {
             assert!(
                 out.re[k].abs() < 1e-8 && out.im[k].abs() < 1e-8,
@@ -600,7 +591,11 @@ mod tests {
             w_angle: -TAU,
         };
         let out = czt_real(&x, &config).expect("single-point CZT");
-        assert!((out.re[0] - 3.7).abs() < 1e-12, "single-point: {}", out.re[0]);
+        assert!(
+            (out.re[0] - 3.7).abs() < 1e-12,
+            "single-point: {}",
+            out.re[0]
+        );
         assert!(out.im[0].abs() < 1e-12);
     }
 
@@ -654,7 +649,10 @@ mod tests {
             w_angle: -TAU / 8.0,
         };
         let x = vec![1.0_f64; 8];
-        assert!(matches!(czt_real(&x, &config), Err(SignalError::InvalidParameter(_))));
+        assert!(matches!(
+            czt_real(&x, &config),
+            Err(SignalError::InvalidParameter(_))
+        ));
     }
 
     #[test]
@@ -668,7 +666,10 @@ mod tests {
             w_angle: -TAU / 8.0,
         };
         let x = vec![1.0_f64; 8];
-        assert!(matches!(czt_real(&x, &config), Err(SignalError::InvalidParameter(_))));
+        assert!(matches!(
+            czt_real(&x, &config),
+            Err(SignalError::InvalidParameter(_))
+        ));
     }
 
     #[test]

@@ -6,7 +6,7 @@ Pure Rust Spiking Neural Network primitives covering classical neuron models, su
 
 ## Implementation Status
 
-**Actual: 17,606 SLoC (74 files)**
+**Actual: ~32,700 SLoC (95 files)**
 
 Current implementation covers the classical spiking ML stack: LIF / IF / Izhikevich / AdEx / Poisson neurons; five surrogate-gradient families; BPTT / STBP / SLAYER training; pair-STDP, triplet-STDP, reward-modulated STDP plasticity; ANN→SNN rate conversion with threshold balancing; rate / TTFS / phase / Poisson input encodings; spiking linear / conv / pool / recurrent layers; Liquid State Machine reservoir; and analytical spike-train metrics (firing rate, ISI, CV, van Rossum, Victor-Purpura, sync index, neuronal-avalanche criticality, entropy / mutual information, population-vector decoding, spike-triggered average / covariance).
 
@@ -79,11 +79,11 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 
 ### Future Enhancements [ ]
 
-#### P0 — Verification on GPU Hardware
-- [ ] End-to-end GPU verification of all PTX kernels under Linux + NVIDIA driver 525+
-- [ ] Criterion benchmark suite executed on real hardware
-- [ ] Numerical equivalence between CPU reference and GPU PTX path within FP32 tolerance for the 7 kernels
-- [ ] Memory-leak audit for long-time-window BPTT (T > 1000 steps)
+#### P0 — Verification on GPU Hardware (requires GPU hardware)
+- [ ] End-to-end GPU verification of all PTX kernels under Linux + NVIDIA driver 525+ (requires GPU hardware)
+- [ ] Criterion benchmark suite executed on real hardware (requires GPU hardware)
+- [ ] Numerical equivalence between CPU reference and GPU PTX path within FP32 tolerance for the 7 kernels (requires GPU hardware)
+- [ ] Memory-leak audit for long-time-window BPTT (T > 1000 steps) (requires GPU hardware)
 
 #### P1 — Algorithm Coverage
 - [x] Adaptive-threshold LIF (ALIF) with learnable adaptive threshold (`neuron/alif.rs` -- Bellec et al. 2018)
@@ -91,23 +91,23 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 - [x] Conductance-based synapses (CUBA / COBA variants)
 - [x] Multi-compartment neuron models (Hodgkin-Huxley, two-compartment Pinsky-Rinzel) (`neuron/hodgkin_huxley.rs` -- full HH with RK4 voltage integration + Pinsky-Rinzel 1994 CA3 soma/dendrite model: `hh_step`/`hh_run`/`pr_step`)
 - [x] Backpropagation Through Spike-Time (DECOLLE, e-prop) for online learning (`training/eprop.rs` -- Bellec et al. 2020 e-prop eligibility traces + Kaiser et al. 2020 DECOLLE local readout)
-- [ ] Learnable surrogate gradients (parametric `α(t)`)
-- [ ] Spatio-temporal Backpropagation with Random Feedback Alignment
-- [~] STDP-based homeostatic plasticity (BCM, Oja, intrinsic plasticity) (`plasticity/homeostatic.rs` -- BCM sliding-threshold + Oja Hebbian-PCA done; intrinsic plasticity still pending)
-- [ ] Reward-modulated triplet STDP with eligibility kernels
-- [ ] Local learning rules with three-factor neuromodulation
-- [ ] ANN→SNN conversion with bias absorption and BatchNorm folding
-- [ ] Quantisation-aware SNN training (INT8 / FP8 weight + spike)
-- [x] Population coding for output (rate-decode + winner-take-all)
+- [x] Learnable surrogate gradients (parametric `α(t)`) (`surrogate/learnable.rs` -- α with ∂loss/∂α gradient)
+- [x] Spatio-temporal Backpropagation with Random Feedback Alignment (`training/feedback_alignment.rs`)
+- [x] STDP-based homeostatic plasticity (BCM, Oja, intrinsic plasticity) (`plasticity/homeostatic.rs` BCM+Oja; `plasticity/intrinsic.rs` Triesch 2005 intrinsic plasticity)
+- [x] Reward-modulated triplet STDP with eligibility kernels (`plasticity/reward_triplet_stdp.rs`)
+- [x] Local learning rules with three-factor neuromodulation (`training/eligibility_consolidation.rs` -- three-factor pre×post×neuromod)
+- [x] ANN→SNN conversion with bias absorption and BatchNorm folding (`conversion/bn_fold.rs`)
+- [x] Quantisation-aware SNN training (INT8 / FP8 weight + spike) (`training/quantization.rs` -- fake-quant STE)
+- [x] Population coding for output (rate-decode + winner-take-all) (`metrics/population_coding.rs`)
 
 #### P1 — Spiking Layer Coverage
-- [ ] Spiking transposed convolution (deconv) for spike-based generative models
+- [x] Spiking transposed convolution (deconv) for spike-based generative models (`layer/spiking_deconv.rs`)
 - [x] Spiking attention layer (spike-driven query / key / value) (`layer/spiking_attention.rs` -- Spikformer SSA, Zhou et al. 2023)
-- [ ] Spiking transformer blocks (Spikformer, SpikeGPT-style)
-- [ ] Spiking residual / skip connection layers
+- [x] Spiking transformer blocks (Spikformer, SpikeGPT-style) (`layer/spiking_transformer.rs` -- SSA + spiking MLP/FFN + residual encoder block, Zhou et al. 2023)
+- [x] Spiking residual / skip connection layers (`layer/spiking_residual.rs` -- SEW/MS-ResNet additive skip)
 - [x] Spiking batch normalisation (tdBN) for training stability (`layer/td_bn.rs` -- Zheng et al. 2021)
-- [ ] Spiking dropout and stochastic depth
-- [ ] Recurrent spiking layers with multiple time constants (multi-τ LIF)
+- [x] Spiking dropout and stochastic depth (`layer/spiking_regularization.rs`)
+- [x] Recurrent spiking layers with multiple time constants (multi-τ LIF) (`layer/multi_tau_lif.rs`)
 
 #### P2 — Optimisations and Tooling
 - [ ] Fused LIF + surrogate-gradient kernel (forward + backward in one pass)
@@ -115,24 +115,24 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 - [ ] CUDA-graph capture for repeated spike-time-step iterations
 - [ ] Mixed-precision (FP16 / BF16) training kernels
 - [ ] On-device Poisson sampling with hardware RNG (Philox)
-- [ ] Sparse spike encoding (CSR-style spike packets to reduce bandwidth)
-- [ ] Event-driven simulation backend for very sparse spiking regimes
+- [x] Sparse spike encoding (CSR-style spike packets to reduce bandwidth) (`encoding/sparse_spike.rs` -- `SparseSpikes` CSR per-timestep row_ptr/col_idx/values; `encode_dense_to_sparse` + `to_dense` exact round-trip; `forward` sparse-spike × Wᵀ membrane current touching only active spikes, bit-exact vs `dense_forward`; `nnz`/`density` tracked)
+- [x] Event-driven simulation backend for very sparse spiking regimes (`neuron/event_driven.rs` -- `EventDrivenLif` BinaryHeap time-ordered event queue, exact analytic `exp(−Δ/τ)` lazy decay between events, threshold-crossing reset + delayed recurrent propagation; `clock_stepped_spike_times` reference matched within tolerance while doing ≪ t_steps·n membrane updates)
 - [ ] CUDA-graph capture for ANN→SNN conversion inference loop
 
 #### P2 — Reservoir / LSM
 - [x] Echo State Network (ESN) with leaky integrator units
 - [x] Dendritic computation model (`neuron/dendritic.rs`) — Poirazi 2003 Neuron: multi-compartment nonlinear dendritic integration with sigmoid dendritic sub-unit followed by somatic integration; `DendriticNeuron`
-- [ ] Eligibility trace consolidation (`training/eligibility_consolidation.rs`) — Zenke 2021: three-factor eligibility-trace synaptic tags + neuromodulatory consolidation signal for spike-timing-dependent plasticity with delay; `EligibilityConsolidation`
-- [x] Temporal contrast encoding (`encoder/temporal_contrast.rs`) — Brandli 2014: event-camera-inspired temporal-contrast spike encoder with threshold-crossing hysteresis for asynchronous frame encoding; `TemporalContrastEncoder`
-- [ ] Adaptive spectral-radius scheduling during training
-- [ ] Multi-reservoir hierarchical LSM
-- [ ] Online ridge-regression readout training
-- [ ] Force-learning readout (FORCE-trained LSM)
+- [x] Eligibility trace consolidation (`training/eligibility_consolidation.rs`) — Zenke 2021: three-factor eligibility-trace synaptic tags + neuromodulatory consolidation signal for spike-timing-dependent plasticity with delay; `EligibilityConsolidation`
+- [x] Temporal contrast encoding (`encoding/temporal_contrast.rs`) — Brandli 2014: event-camera-inspired temporal-contrast spike encoder with threshold-crossing hysteresis for asynchronous frame encoding; `TemporalContrastEncoder`
+- [x] Adaptive spectral-radius scheduling during training (`reservoir/adaptive_spectral.rs`)
+- [x] Multi-reservoir hierarchical LSM (`reservoir/hierarchical_lsm.rs`)
+- [x] Online ridge-regression readout training (`reservoir/ridge_readout.rs` -- RLS)
+- [x] Force-learning readout (FORCE-trained LSM) (`reservoir/ridge_readout.rs` -- Sussillo & Abbott 2009 RLS)
 
 #### P2 — Metrics and Analysis
 - [x] Spike-triggered average / covariance analysis (`metrics/decoding.rs` -- STA window-major + STC sample covariance, de Boer & Kuyper 1968 / Schwartz et al. 2006)
 - [x] Population vector decoding (`metrics/decoding.rs` -- Georgopoulos et al. 1986 vector sum + cosine tuning curve)
-- [ ] Time-resolved firing-rate estimation via Kernel Density
+- [x] Time-resolved firing-rate estimation via Kernel Density (`metrics/kde_rate.rs`)
 - [x] Mutual information between spike trains (`metrics/information.rs` -- word-binned joint histogram MI with optional Miller-Madow correction)
 - [x] Avalanche statistics (criticality, branching parameter) (`metrics/avalanche.rs` -- Beggs & Plenz 2003 detection, per/global branching parameter, discrete CSN power-law MLE)
 
@@ -148,15 +148,15 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 
 ## Quality Status
 
-- Tests: 577 passing (unit + 11 e2e integration tests in `e2e_tests.rs`)
-- Warnings: 0 (clippy clean)
+- Tests: 833 passing (unit + 11 e2e integration tests in `e2e_tests.rs`; includes 23 reservoir-task / STDP-verification tests in `tasks/`)
+- Warnings: 0 (`cargo clippy --all-features --all-targets -- -D warnings` clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches
 - All PTX kernels validated as non-empty strings for SM 75 / 80 / 86 / 89 / 90 / 100
 
 ## Performance Targets
 
-Spiking-neural-network kernels exhibit two regimes: dense (every neuron updated each timestep) and event-driven (only spiking neurons trigger downstream updates). Current PTX kernels target the dense regime; event-driven backends are P2 future work.
+Spiking-neural-network kernels exhibit two regimes: dense (every neuron updated each timestep) and event-driven (only spiking neurons trigger downstream updates). Current PTX kernels target the dense regime; a pure-Rust CPU event-driven backend (`neuron/event_driven.rs`) and CSR sparse-spike packing (`encoding/sparse_spike.rs`) now cover the sparse regime on the host side.
 
 | Operation | Target Reference | Notes |
 |-----------|------------------|-------|
@@ -215,21 +215,21 @@ Spiking-neural-network kernels exhibit two regimes: dense (every neuron updated 
 
 ### Algorithmic Deepening
 - [ ] Surrogate-gradient training on a large benchmark (N-MNIST, DVS128, SHD) with reference accuracy numbers
-- [ ] Pair-STDP convergence under realistic Poisson input statistics
-- [ ] Triplet-STDP rate-dependent BCM-like behaviour empirically verified
+- [x] Pair-STDP convergence under realistic Poisson input statistics (`tasks/stdp_protocols.rs:pair_stdp_window`/`pair_stdp_poisson_final_weight` / tests -- measured: window sign LTP Δt>0 / LTD Δt<0 with `A·exp(−|Δt|/τ)` shape; uncorrelated Poisson drifts 0.5→0.038 (LTD-dominated competition), causal pre→post correlation converges higher (0.151 vs 0.038))
+- [x] Triplet-STDP rate-dependent BCM-like behaviour empirically verified (`tasks/stdp_protocols.rs:triplet_pairing_dw` / tests -- measured: triplet-specific extra potentiation grows with pairing rate, +0.339 at period=5 vs +0.199 at period=50, a third-factor effect the pure pair rule cannot produce)
 - [ ] R-STDP RL agent (cart-pole, MountainCar) demo
-- [ ] LSM polynomial-readout task suite (NARMA-10, memory capacity)
+- [x] LSM polynomial-readout task suite (NARMA-10, memory capacity) (`tasks/reservoir_tasks.rs:narma10_sequence`/`narma10_lsm_nmse`/`memory_capacity` / tests -- measured: NARMA-10 test NMSE ≈0.48 vs mean-baseline 1.0; linear memory capacity ≈2.5 (N=40) → ≈6.4 (N=300), rising with reservoir size and bounded by readout-feature count)
 - [ ] ANN→SNN conversion on a CIFAR-10 ResNet with empirical accuracy-vs-time-step curve
-- [ ] Multi-time-constant LIF for temporal multiplexing
+- [x] Multi-time-constant LIF for temporal multiplexing (`layer/multi_tau_lif.rs`)
 
 ### Coverage Gaps vs Literature
 - [x] Brette and Gerstner LIF variations (alpha-function synapses, refractory periods)
-- [ ] Spike-Timing-Dependent Long-Term Potentiation / Depression with metaplasticity
-- [ ] Spike-Timing-Dependent Heterosynaptic Plasticity
-- [ ] STDP-driven self-organising maps (Kohonen-style)
-- [ ] Liquid Time-Constant Networks (LTC) — non-spiking but related to LSM
-- [ ] Neuromorphic-hardware ports (Loihi, TrueNorth instruction emulation)
-- [ ] Spiking-VAE / Spiking-GAN
-- [ ] Differentiable spike encoders (learned rate / TTFS)
-- [ ] Online learning rules: e-prop, RFLO, BPTT-with-feedback-alignment
-- [ ] Bayesian SNN training with variational posterior over spikes
+- [x] Spike-Timing-Dependent Long-Term Potentiation / Depression with metaplasticity (`plasticity/metaplastic_stdp.rs` -- BCM-style sliding metaplastic state)
+- [x] Spike-Timing-Dependent Heterosynaptic Plasticity (`plasticity/heterosynaptic.rs` -- weight-normalising heterosynaptic decay, Chistiakova et al. 2014)
+- [x] STDP-driven self-organising maps (Kohonen-style) (`plasticity/stdp_som.rs`)
+- [x] Liquid Time-Constant Networks (LTC) — non-spiking but related to LSM (`reservoir/ltc.rs` -- Hasani et al. 2021 fused-ODE solver)
+- [ ] Neuromorphic-hardware ports (Loihi, TrueNorth instruction emulation) (requires hardware ISA emulation -- deferred)
+- [x] Spiking-VAE / Spiking-GAN (`layer/spiking_vae.rs` -- spiking variational autoencoder + reparameterised latent)
+- [x] Differentiable spike encoders (learned rate / TTFS) (`encoding/differentiable.rs`)
+- [x] Online learning rules: e-prop, RFLO, BPTT-with-feedback-alignment (e-prop `training/eprop.rs`; RFLO `training/rflo.rs`; feedback-alignment `training/feedback_alignment.rs`)
+- [x] Bayesian SNN training with variational posterior over spikes (`training/bayesian_snn.rs`)

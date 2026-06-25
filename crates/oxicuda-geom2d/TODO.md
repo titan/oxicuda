@@ -10,7 +10,7 @@ CGAL / Boost.Geometry / shapely-style 2D geometry libraries. Part of
 
 - **Actual SLoC:** 10,028 (84 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 6,620
-- **Tests:** 282 passing
+- **Tests:** 294 passing
 - **Vol.61 scope:** Foundational 2D computational geometry (primitives, predicates,
   convex hulls, triangulation, Voronoi, polygon clipping, sweepline intersection,
   spatial indexing). Complements oxicuda-graph and oxicuda-numeric by providing the
@@ -166,8 +166,12 @@ CGAL / Boost.Geometry / shapely-style 2D geometry libraries. Part of
   on large point clouds
 
 #### P2 -- Algorithmic Extensions
-- [ ] Exact-arithmetic predicates (Shewchuk-style adaptive precision) for robust
-  degenerate-input handling
+- [x] Exact-arithmetic predicates (Shewchuk-style adaptive precision) for robust
+  degenerate-input handling -- implemented in `predicate/robust.rs` (`orient2d`,
+  `orient2d_sign`, `incircle`, `incircle_sign`): error-free transformations
+  (`two_sum`/`two_product`/`split`), nonoverlapping floating-point expansion
+  accumulator, a priori forward-error fast path + exact expansion fall-through.
+  Exported via `predicate/mod.rs`.
 - [ ] 3D extensions (Vol.62 candidate): 3D convex hull, 3D Delaunay, 3D point location
 - [x] Generalised polygon Boolean operations (union / intersection / difference /
   xor) on non-convex polygons -- implemented via Greiner-Hormann in
@@ -176,7 +180,14 @@ CGAL / Boost.Geometry / shapely-style 2D geometry libraries. Part of
 - [x] 2D alpha shapes over Delaunay -- `alpha_shape/alpha_shape.rs`
 - [x] Half-plane intersection (bounded / empty / unbounded) --
   `halfplane/half_plane_intersection.rs`
-- [ ] Streaming sweepline for very large segment sets (out-of-core reporting)
+- [x] Streaming sweepline for very large segment sets (out-of-core reporting) --
+  `sweepline/streaming_bentley_ottmann.rs`: full event-driven Bentley-Ottmann
+  `O((n + k) log n)` sweep with a binary event queue + ordered sweep status holding
+  only active segments; results delivered through an `IntersectionSink` trait as they
+  are discovered (in sweep order) so consumers need not retain them (`CountingSink`
+  retains nothing, `CollectingSink` collects). Robust to vertical segments, shared
+  endpoints / multiply-concurrent points, and collinear overlaps (exact `orient2d`
+  ordering). Convenience drivers `report_intersections` / `count_intersections`.
 
 ## Dependencies
 
@@ -194,7 +205,7 @@ clippings, and spatial indices are implemented natively.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 282 passing (unit + 20 e2e cross-module)
+- Tests: 294 passing (unit + 20 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns
@@ -256,7 +267,7 @@ tuning is currently uniform; targeted tuning is tracked under Future Enhancement
 |--------|----------------------------------|--------|
 | SLoC | 70K-120K (median ~95K) | 10,028 |
 | Files | ~40-60 algorithm modules | 84 |
-| Tests | algorithm-grade coverage | 282 |
+| Tests | algorithm-grade coverage | 294 |
 
 The gap to the median estimate reflects the estimation targeting full
 CGAL-grade production parity including exact-arithmetic kernels, full 3D extensions,

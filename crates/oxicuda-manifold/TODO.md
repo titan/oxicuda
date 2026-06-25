@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.53).
 
 ## Implementation Status
 
-- **Actual SLoC:** 26,639 (88 files, including 5,676 code + 205 comments + 339 blanks; markdown 415)
-- **Tests:** 520 passing (lib + e2e_tests)
+- **Actual SLoC:** 26,639 (89 files, including 5,676 code + 205 comments + 339 blanks; markdown 415)
+- **Tests:** 613 lib/e2e + 3 doctests passing (wired 3 orphan modules — config-struct Isomap, parametric t-SNE, SPD geodesic regression — reviving +55 tests)
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -41,6 +41,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.53).
 - [x] `local/hessian_lle.rs` -- Hessian LLE (Donoho-Grimes 2003): per-point local tangent PCA + Hessian design [1 | linear | quadratic] -> orthonormalise -> Phi += H H^T -> smallest eigenvectors (drop constant), identity-covariance rescale
 - [x] `local/ltsa.rs` -- Local Tangent Space Alignment (Zhang-Zha 2005): per-point tangent basis Q_i, G_i = [1/sqrt(k) | Q_i], B += I - G_i G_i^T -> smallest nonzero eigenvectors (drop constant)
 - [x] `local/isomap.rs` -- kNN graph + Dijkstra all-pairs geodesic distance + classical MDS
+- [x] `embed/isomap.rs:isomap` -- wired orphan: `IsomapConfig` + `isomap()` config-struct API over `local::isomap::isomap_fit` (kNN -> Dijkstra geodesics -> classical MDS); +11 revived tests
 - [x] `local/laplacian_eigenmaps.rs` -- Gaussian-weight W -> normalised L_sym -> generalised eigh `L v = lambda D v` -> drop constant eigenvector
 
 #### Diffusion
@@ -89,11 +90,13 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.53).
 #### P1 -- Important
 - [x] Approximate kNN via HNSW (orders-of-magnitude faster than KD-tree above d > 50) (`neighbor/hnsw.rs`)
 - [x] Trimap / PaCMAP (modern alternatives to UMAP/t-SNE with better global structure preservation) (`reduction/trimap.rs`, `reduction/pacmap.rs`)
+- [x] `reduction/parametric_tsne.rs:parametric_tsne_fit` -- wired orphan: MLP-encoder parametric t-SNE (van der Maaten 2009) with Kaiming init + Adam + early exaggeration and out-of-sample `transform`; +22 revived tests
 - [x] PHATE diffusion potential for trajectory-preserving embeddings (`diffusion/phate.rs`)
 - [x] Riemannian Adam on Stiefel and Grassmann (`optim/riemannian_adam.rs`)
 - [x] Symmetric Stiefel (SO(n)) with skew-symmetric tangent and matrix-exponential retraction (`riemannian/so_n.rs`)
 - [x] Wasserstein / Bures geometry on the SPD manifold (alternative to affine-invariant) (`riemannian/spd_bures.rs`)
 - [x] Lorentz model of hyperbolic space as a numerically-stable alternative to the Poincare ball (`riemannian/hyperbolic_lorentz.rs`)
+- [x] `riemannian/geodesic_regression.rs:geodesic_regression_fit` -- wired orphan: least-squares geodesic regression on SPD(d) (Fletcher 2013) -- affine-invariant Exp/Log + parallel transport, Fréchet-mean init, predict/SSE; +22 revived tests
 
 #### P2 -- Nice-to-Have
 - [x] Spectral clustering pipeline (Laplacian eigenmaps + k-means on embedding) (`clustering/spectral.rs`)
@@ -163,10 +166,10 @@ representative dimensions once `oxicuda-launch` orchestrates the emitted PTX on 
 All six SM versions produce non-empty PTX strings and pass content-substring checks in `e2e_tests.rs`.
 
 ### Per-Architecture Optimisation Hooks
-- [ ] sm_80 (Ampere) -- emit `cp.async` for `pairwise_dist_sq` shared-memory tile loads
-- [ ] sm_89 (Ada) -- FP8 (e4m3) accumulation for `tsne_grad` (memory-bound on large n)
-- [ ] sm_90 (Hopper) -- `wgmma` + TMA for `pairwise_dist_sq` and `pca_center` covariance accumulation
-- [ ] Verify `knn_topk` warp-level k-way selection beats per-row sort for k <= 32
+- [ ] sm_80 (Ampere) -- emit `cp.async` for `pairwise_dist_sq` shared-memory tile loads (requires GPU hardware: cp.async timing only meaningful on-device)
+- [ ] sm_89 (Ada) -- FP8 (e4m3) accumulation for `tsne_grad` (memory-bound on large n) (requires GPU hardware: FP8 tensor units)
+- [ ] sm_90 (Hopper) -- `wgmma` + TMA for `pairwise_dist_sq` and `pca_center` covariance accumulation (requires GPU hardware)
+- [ ] Verify `knn_topk` warp-level k-way selection beats per-row sort for k <= 32 (requires GPU hardware: warp-level timing)
 
 ---
 
@@ -178,16 +181,16 @@ All six SM versions produce non-empty PTX strings and pass content-substring che
 - [ ] t-SNE / UMAP visual quality on canonical datasets (MNIST, Fashion-MNIST, Tabula Muris) -- ARI / NMI vs reference implementations
 
 ### Algorithmic Deepening
-- [ ] Barnes-Hut t-SNE quadtree currently CPU-only; lift the tree-traversal kernel to PTX with warp-cooperative descent
-- [ ] UMAP fuzzy simplicial set construction parallelised at the per-vertex level
+- [ ] Barnes-Hut t-SNE quadtree currently CPU-only; lift the tree-traversal kernel to PTX with warp-cooperative descent (requires GPU hardware: warp-cooperative descent runs on-device)
+- [ ] UMAP fuzzy simplicial set construction parallelised at the per-vertex level (requires GPU hardware: per-vertex GPU parallelism)
 - [x] Riemannian SGD with adaptive step size (Riemannian-Adam) for SPD / Stiefel (`optim/riemannian_adam.rs`)
 - [x] Multi-scale t-SNE / UMAP for hierarchical embeddings (preserve both micro- and macro-structure) (`umap/multiscale.rs`)
-- [ ] `riemannian/hyperbolic.rs` — Poincaré ball model (Nickel-Kiela 2017): Möbius addition u⊕v, distance d=2·arctanh(‖-u⊕v‖), exponential/logarithmic maps; Riemannian SGD with Möbius-based parallel transport; `PoincareBall { curvature: f64 }`
+- [x] `riemannian/hyperbolic_ball.rs` — Curvature-parametrised Poincaré ball (Ganea 2018 / Nickel-Kiela 2017): `PoincareBall { curvature, epsilon }` with curvature-`c` Möbius add/sub/scalar-mul, distance `d=(2/√c)·arctanh(√c‖⊖x⊕y‖)`, exp/log maps, gyration-based parallel transport (isometry-verified), egrad→rgrad, Riemannian SGD step (`exp_x(-lr·grad)`), and `poincare_frechet_mean` (Karcher mean). NOTE: distinct from the fixed-unit-curvature `riemannian/hyperbolic_poincare.rs`.
 - [x] `riemannian/wrapped_normal.rs` — Wrapped Normal on hyperbolic space (Nagano 2019): push Euclidean Normal through exponential map at μ; RSVI for hierarchical VAE; `HyperbolicNormal { mu, sigma, manifold: PoincareBall }`
 - [x] `embedding/umap_parametric.rs` — Parametric UMAP (Sainburg 2021): train a neural encoder to approximate UMAP embedding; new points via forward pass (no re-running umap); `ParametricUmap { encoder_dims: Vec<usize> }`
 - [x] `geodesic/heat_method.rs` — Heat method for geodesic distances (Crane 2013): solve heat equation u_t=Δu for small t, normalise gradient, solve Poisson; O(n log n) via sparse Cholesky; output ≈ geodesic from source(s)
 
 ### API Polish
-- [ ] Builder-style configuration for t-SNE (perplexity, learning rate, early exaggeration, momentum schedule)
-- [ ] Builder-style configuration for UMAP (n_neighbours, min_dist, spread, n_epochs, metric)
+- [x] Builder-style configuration for t-SNE (perplexity, learning rate, early exaggeration, momentum schedule) (`TsneConfigBuilder` in `tsne/tsne.rs` — chained `with_*` setters + validating `build() -> ManifoldResult`)
+- [x] Builder-style configuration for UMAP (n_neighbours, min_dist, spread, n_epochs) (`UmapConfigBuilder` in `umap/embedding.rs` — chained setters + validating `build()`; the `metric` knob is not part of `UmapConfig` so it is intentionally out of scope)
 - [x] Cross-decomposition variants: CCA, PLS via the existing PCA backbone (`linear/cca_pls.rs`)

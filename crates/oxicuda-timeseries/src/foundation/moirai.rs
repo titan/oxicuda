@@ -663,6 +663,91 @@ fn ffn(x: &[f32], n: usize, d: usize, lw: &MoiraiLayer, expansion: usize) -> Vec
     out
 }
 
+// ─── Foundation-model adapter (checkpoint export / import) ───────────────────
+
+impl crate::foundation::adapter::FoundationAdapter for MoiraiForecaster {
+    fn export_weights(&self) -> crate::foundation::adapter::WeightStore {
+        let mut s = crate::foundation::adapter::WeightStore::new();
+        s.insert("patch_w", self.patch_w.clone());
+        s.insert("patch_b", self.patch_b.clone());
+        s.insert("variate_emb", self.variate_emb.clone());
+        s.insert("mask_token", self.mask_token.clone());
+        s.insert("final_g", self.final_g.clone());
+        s.insert("final_b", self.final_b.clone());
+        s.insert("head_w", self.head_w.clone());
+        s.insert("head_b", self.head_b.clone());
+        for (li, layer) in self.layers.iter().enumerate() {
+            s.insert(format!("layer{li}.norm1_g"), layer.norm1_g.clone());
+            s.insert(format!("layer{li}.norm1_b"), layer.norm1_b.clone());
+            s.insert(format!("layer{li}.q_w"), layer.q_w.clone());
+            s.insert(format!("layer{li}.k_w"), layer.k_w.clone());
+            s.insert(format!("layer{li}.v_w"), layer.v_w.clone());
+            s.insert(format!("layer{li}.out_w"), layer.out_w.clone());
+            s.insert(format!("layer{li}.norm2_g"), layer.norm2_g.clone());
+            s.insert(format!("layer{li}.norm2_b"), layer.norm2_b.clone());
+            s.insert(format!("layer{li}.ff_w1"), layer.ff_w1.clone());
+            s.insert(format!("layer{li}.ff_b1"), layer.ff_b1.clone());
+            s.insert(format!("layer{li}.ff_w2"), layer.ff_w2.clone());
+            s.insert(format!("layer{li}.ff_b2"), layer.ff_b2.clone());
+        }
+        s
+    }
+
+    fn import_weights(&mut self, store: &crate::foundation::adapter::WeightStore) -> TsResult<()> {
+        self.patch_w = store.require_len("patch_w", self.patch_w.len())?.to_vec();
+        self.patch_b = store.require_len("patch_b", self.patch_b.len())?.to_vec();
+        self.variate_emb = store
+            .require_len("variate_emb", self.variate_emb.len())?
+            .to_vec();
+        self.mask_token = store
+            .require_len("mask_token", self.mask_token.len())?
+            .to_vec();
+        self.final_g = store.require_len("final_g", self.final_g.len())?.to_vec();
+        self.final_b = store.require_len("final_b", self.final_b.len())?.to_vec();
+        self.head_w = store.require_len("head_w", self.head_w.len())?.to_vec();
+        self.head_b = store.require_len("head_b", self.head_b.len())?.to_vec();
+        for (li, layer) in self.layers.iter_mut().enumerate() {
+            layer.norm1_g = store
+                .require_len(&format!("layer{li}.norm1_g"), layer.norm1_g.len())?
+                .to_vec();
+            layer.norm1_b = store
+                .require_len(&format!("layer{li}.norm1_b"), layer.norm1_b.len())?
+                .to_vec();
+            layer.q_w = store
+                .require_len(&format!("layer{li}.q_w"), layer.q_w.len())?
+                .to_vec();
+            layer.k_w = store
+                .require_len(&format!("layer{li}.k_w"), layer.k_w.len())?
+                .to_vec();
+            layer.v_w = store
+                .require_len(&format!("layer{li}.v_w"), layer.v_w.len())?
+                .to_vec();
+            layer.out_w = store
+                .require_len(&format!("layer{li}.out_w"), layer.out_w.len())?
+                .to_vec();
+            layer.norm2_g = store
+                .require_len(&format!("layer{li}.norm2_g"), layer.norm2_g.len())?
+                .to_vec();
+            layer.norm2_b = store
+                .require_len(&format!("layer{li}.norm2_b"), layer.norm2_b.len())?
+                .to_vec();
+            layer.ff_w1 = store
+                .require_len(&format!("layer{li}.ff_w1"), layer.ff_w1.len())?
+                .to_vec();
+            layer.ff_b1 = store
+                .require_len(&format!("layer{li}.ff_b1"), layer.ff_b1.len())?
+                .to_vec();
+            layer.ff_w2 = store
+                .require_len(&format!("layer{li}.ff_w2"), layer.ff_w2.len())?
+                .to_vec();
+            layer.ff_b2 = store
+                .require_len(&format!("layer{li}.ff_b2"), layer.ff_b2.len())?
+                .to_vec();
+        }
+        Ok(())
+    }
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -889,6 +974,46 @@ mod tests {
         assert!(matches!(
             MoiraiForecaster::new(cfg, &mut rng).unwrap_err(),
             TsError::HeadDimMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn moirai_checkpoint_roundtrip_reproduces_forecast() {
+        use crate::foundation::adapter::FoundationAdapter;
+        let mut rng = make_rng();
+        let src = MoiraiForecaster::new(MoiraiConfig::tiny(), &mut rng).expect("build");
+
+        // Export → serialise → load into a freshly-initialised model.
+        let buf = src.to_checkpoint();
+        let mut dst = MoiraiForecaster::new(MoiraiConfig::tiny(), &mut rng).expect("build dst");
+        dst.load_checkpoint(&buf).expect("load");
+
+        // After loading the same weights, the two models must forecast identically.
+        let c = 2;
+        let horizon = 8;
+        let t = src.cfg.patch_size * 3;
+        let series: Vec<f32> = (0..t * c).map(|i| (i as f32 * 0.07).sin()).collect();
+        let f_src = src.forward(&series, c, horizon).expect("f_src");
+        let f_dst = dst.forward(&series, c, horizon).expect("f_dst");
+        for (a, b) in f_src.point.iter().zip(f_dst.point.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "checkpoint forecast mismatch: {a} vs {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn moirai_import_rejects_wrong_shape() {
+        use crate::foundation::adapter::FoundationAdapter;
+        let mut rng = make_rng();
+        let mut m = MoiraiForecaster::new(MoiraiConfig::tiny(), &mut rng).expect("build");
+        let mut store = m.export_weights();
+        // Corrupt one tensor's length.
+        store.insert("head_b", vec![0.0_f32; 1]);
+        assert!(matches!(
+            m.import_weights(&store).unwrap_err(),
+            TsError::WeightShapeMismatch { .. }
         ));
     }
 }

@@ -118,13 +118,15 @@ unit testing; the seven PTX kernels target NVIDIA SM 7.5 through SM 12.0.
 
 #### P0 -- Critical (Performance-Sensitive Paths)
 - [ ] FlashAttention v2 cross-attention kernel -- block-sparse softmax with
-      shared-memory tiling for d_k = 64 / 128 on SM 8.0+
+      shared-memory tiling for d_k = 64 / 128 on SM 8.0+ (requires GPU hardware)
 - [ ] Tensor Core path for cross-attention QK^T -- `mma.sync.aligned.m16n16k16`
       for f16/bf16, dispatch from `CrossAttention::forward` when SM >= 75
+      (requires GPU hardware)
 - [ ] Fused MLB epilogue -- combine tanh + Hadamard + projection into a single
-      kernel to halve global memory traffic
+      kernel to halve global memory traffic (requires GPU hardware)
 - [ ] PTX kernels for `BertEncoder::forward` / `ViTEncoder::forward` -- emit
       single end-to-end transformer kernel instead of CPU loop
+      (requires GPU hardware)
 
 #### P1 -- Important (Feature Completeness)
 - [x] BLIP-2 Q-Former architecture -- learned query tokens cross-attending to
@@ -146,8 +148,11 @@ unit testing; the seven PTX kernels target NVIDIA SM 7.5 through SM 12.0.
       and captioning decoder
       (encoder/coca.rs -- Yu 2022; attentional image pooling + InfoNCE
       contrastive + cross-attn captioning decoder logits + weighted coca_loss)
-- [ ] AudioCLIP three-way (audio-image-text) alignment -- extension of
+- [x] AudioCLIP three-way (audio-image-text) alignment -- extension of
       `imagebind_loss` to AudioCLIP layout
+      (alignment/audio_clip.rs -- Guzhov 2021; three independent per-pair
+      logit-scales τ_ai/τ_at/τ_it + pair weights; symmetric preset reproduces
+      imagebind_loss exactly; AudioClipConfig + audio_clip_loss → AudioClipLoss)
 - [x] PerceiverIO cross-attention -- iterative latent bottleneck for
       heterogeneous modality counts
       (encoder/perceiver_io.rs -- Jaegle 2021; encode cross-attn input→fixed
@@ -160,18 +165,43 @@ unit testing; the seven PTX kernels target NVIDIA SM 7.5 through SM 12.0.
       per-frame and full-waveform forward)
 
 #### P2 -- Nice-to-Have (Advanced Features)
-- [ ] Mixture-of-Modality-Experts (MoME) router -- per-token modality routing
+- [x] Mixture-of-Modality-Experts (MoME) router -- per-token modality routing
       across expert FFNs
-- [ ] Token merging (ToMe) for ViT -- bipartite soft matching to prune
+      (fusion/mome.rs -- VLMo Bao 2022; hard modality routing (Modality tag →
+      vision/language/fusion FfnExpert) + learned Top-1 soft gate forward_soft;
+      MoMeConfig::vlmo + MoMeRouter)
+- [x] Token merging (ToMe) for ViT -- bipartite soft matching to prune
       redundant patch tokens at inference
-- [ ] Beam search and top-k / nucleus sampling for `PrefixLm`
-- [ ] Sparse contrastive negatives via hard-negative mining for `clip_loss`
-- [ ] Multi-resolution ViT (NaViT) -- variable patch grids in a single batch
+      (encoder/tome.rs -- Bolya ICLR 2023; even/odd bipartite partition,
+      per-A-token best-B by key cosine, keep r highest edges, size-weighted
+      proportional-attention mean; merge_tokens + merge_to_length)
+- [x] Beam search and top-k / nucleus sampling for `PrefixLm`
+      (caption/sampling.rs -- temperature_softmax, top_k_filter (Fan 2018),
+      nucleus_filter (Holtzman 2020), inverse-CDF sample_categorical via LcgRng,
+      full sample_token pipeline, length-normalised beam_search over a
+      next_logits closure)
+- [x] Sparse contrastive negatives via hard-negative mining for `clip_loss`
+      (alignment/hard_negative.rs -- mine_hard_negatives (ALBEF Li 2021 one
+      hardest negative per anchor), top-k hard_negative_infonce (k=N-1 ≡ full
+      InfoNCE), VSE++ max-violation vse_plus_plus_loss (Faghri 2018))
+- [x] Multi-resolution ViT (NaViT) -- variable patch grids in a single batch
+      (encoder/navit.rs -- Dehghani 2023 patch-n-pack; variable HxW patchify +
+      embed, factorised row/col positional tables, block-diagonal example
+      attention mask packed_attention_mask; NaViT::patchify_pack → PackedSequence)
 - [ ] FP8 (E4M3 / E5M2) inference path for the encoders (Hopper / Ada)
-- [ ] `vlm/llava_next.rs` — LLaVA-1.5/Next (Liu 2023/2024): visual instruction tuning with MLP connector + high-res image tiles; `LlavaConfig { vision_tower, projector_type: ProjectorType }`
-- [ ] `vlm/qwen_vl.rs` — Qwen-VL (Bai 2023): visual receptive field (ViT + position-aware resampler); mixture of visual/text inputs; spatial bounding box tokens for grounding; `QwenVlConfig`
-- [ ] `audio_vision/av_hubert.rs` — AV-HuBERT (Shi 2022): audio-visual speech recognition; iterative clustering on fused AV features; `AvHubertConfig { n_clusters: usize }`
-- [ ] `grounding/gdino.rs` — Grounding DINO (Liu 2023): open-set detection; language-guided dense cross-modality fusion at feature pyramid levels; `GroundingDino { text_encoder_dim, vision_dim }`
+      (requires GPU hardware)
+- [x] `vlm/llava_next.rs` — LLaVA-1.5/Next (Liu 2023/2024): visual instruction tuning with MLP connector + high-res image tiles; `LlavaConfig { vision_tower, projector_type: ProjectorType }`
+      (vlm/llava_next.rs -- LlavaNext/LlavaNextConfig/LlavaNextWeights;
+      AnyRes tiling, MLP connector, causal-LM fusion -- already present)
+- [x] `vlm/qwen_vl.rs` — Qwen-VL (Bai 2023): visual receptive field (ViT + position-aware resampler); mixture of visual/text inputs; spatial bounding box tokens for grounding; `QwenVlConfig`
+      (vlm/qwen_vl.rs -- QwenVl/QwenVlConfig/QwenVlWeights; position-aware
+      resampler compressing to fixed query count, image markers -- already present)
+- [x] `audio_vision/av_hubert.rs` — AV-HuBERT (Shi 2022): audio-visual speech recognition; iterative clustering on fused AV features; `AvHubertConfig { n_clusters: usize }`
+      (av/av_hubert.rs -- AvHubert/AvHubertConfig/AvHubertWeights, FusedFeatures,
+      ModalityDrop, iterative clustering on fused AV features -- already present)
+- [x] `grounding/gdino.rs` — Grounding DINO (Liu 2023): open-set detection; language-guided dense cross-modality fusion at feature pyramid levels; `GroundingDino { text_encoder_dim, vision_dim }`
+      (grounding/gdino.rs -- GroundingDino/GroundingDinoConfig/GroundingDinoWeights;
+      bidirectional text↔image fusion (reuses masked_mha) -- already present)
 
 ## Dependencies
 
@@ -184,8 +214,8 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 
 ## Quality Status
 
-- Warnings: 0 (clippy clean)
-- Tests: 380 unit + 12 E2E = 392 passing
+- Warnings: 0 (clippy clean, `-D warnings`, lib + tests + benches)
+- Tests: 461 unit + 12 E2E = 473 passing
 - unwrap() calls: 0 (production code)
 - `#![allow(clippy::needless_range_loop)]` at crate root for kernel-style loops
 - All public APIs return `MmResult<T>` or `Result<T, MultiModalError>`
@@ -220,6 +250,11 @@ Reference shapes (cross-attention is the hot path in vision-language inference):
 
 ## Architecture-Specific Deepening
 
+> All items below execute real PTX on NVIDIA Tensor Cores / async-copy / cluster
+> hardware (wgmma, TMA, cp.async, FP8, 2:4-sparse mma, cluster launch). They are
+> hardware-gated: they cannot be validated on the CPU and are intentionally left
+> unchecked until run on the corresponding silicon. **(requires GPU hardware)**
+
 ### Hopper (sm_90 / sm_90a)
 - [ ] `wgmma.mma_async` path for transformer block QK^T / AV in `BertEncoder`
       and `ViTEncoder`
@@ -240,15 +275,30 @@ Reference shapes (cross-attention is the hot path in vision-language inference):
 ### Verification Gaps
 - [x] All 7 PTX generators emit `.version`, `.target sm_X`, and named entry per
       SM version (verified by `e2e_ptx_kernels_all_sm_versions`)
-- [ ] Cross-attention numerical parity vs. reference NumPy/PyTorch within 1e-4
-- [ ] CLIP loss gradient correctness vs. autograd (finite-difference check)
-- [ ] BERT / ViT / Audio / Video encoder shape contracts cross-checked against
+- [x] Cross-attention numerical parity vs. reference within 1e-4
+      (verification.rs -- independent hand-rolled SDPA reference, single- and
+      multi-head, plus uniform-value convex-combination check)
+- [x] CLIP loss gradient correctness vs. autograd (finite-difference check)
+      (verification.rs -- central finite-difference gradient; a descent step
+      against it provably reduces the loss; loss symmetry in its arguments)
+- [x] BERT / ViT / Audio / Video encoder shape contracts cross-checked against
       Hugging Face configurations
+      (verification.rs -- hidden_size for BERT/ViT/video, 2*hidden_size for the
+      audio x-vector mean||std pooling)
 
 ### Implementation Deepening
 - [x] L2-normalisation reused across `clip_loss` and `imagebind_loss`
 - [x] Numerically stable BCE in `itm_loss` (logsumexp-style)
 - [ ] Mixed-precision (bf16 storage, fp32 accumulate) variants of all encoders
+      (requires GPU hardware -- real bf16 storage/accumulate is a device feature;
+      CPU-side f32 emulation would not reflect true numerics)
 - [ ] Fused softmax + dropout for cross-attention (training-only path)
-- [ ] Padding-mask support in `BertEncoder` (currently assumes no padding)
-- [ ] Causal-mask helper for autoregressive `PrefixLm` decoding
+      (requires GPU hardware -- fused training kernel)
+- [x] Padding-mask support in `BertEncoder` (currently assumes no padding)
+      (encoder/text_encoder.rs -- BertEncoder::forward_masked takes a HF-style
+      key-padding mask (&[bool], true=keep), masks padded keys to -inf in
+      self-attention; padding-invariance + all-true-equals-forward verified)
+- [x] Causal-mask helper for autoregressive `PrefixLm` decoding
+      (cross_attn/masked_mha.rs -- mha_with_weights with MhaArgs.causal applies a
+      lower-triangular mask and returns per-query attention weights -- already
+      present; shared by the VLM / grounding decoders)

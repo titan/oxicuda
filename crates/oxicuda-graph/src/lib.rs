@@ -87,25 +87,31 @@
 
 pub mod analysis;
 pub mod builder;
+pub mod capture;
 pub mod centrality;
 pub mod cluster;
 pub mod community;
 pub mod error;
+pub mod exec;
 pub mod executor;
 pub mod flow;
 pub mod graph;
 pub mod node;
 pub mod optimizer;
+pub mod schedule;
 
 // Re-export the most commonly used types at the crate root.
 pub use builder::GraphBuilder;
+pub use capture::{CaptureEvent, CaptureStatus, StreamCapture};
 pub use centrality::betweenness::betweenness_centrality;
 pub use centrality::closeness::closeness_centrality;
 pub use centrality::pagerank::{PageRankConfig, pagerank};
 pub use cluster::spectral::{SpectralClustering, SpectralConfig};
 pub use community::louvain::{LouvainConfig, LouvainResult, louvain_communities};
 pub use error::{GraphError, GraphResult};
+pub use exec::{ExecGraph, ExecGraphDiff, NodeParamUpdate};
 pub use executor::{ExecutionPlan, PlanStep, SequentialExecutor};
 pub use flow::min_cost_flow::{McfEdge, McfResult, min_cost_flow};
 pub use graph::ComputeGraph;
 pub use node::{BufferId, GraphNode, KernelConfig, MemcpyDir, NodeId, NodeKind, StreamId};
+pub use schedule::{Schedule, Wavefront};

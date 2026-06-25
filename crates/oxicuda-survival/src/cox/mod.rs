@@ -2,6 +2,7 @@
 
 pub mod baseline_hazard;
 pub mod breslow_ties;
+pub mod causal_cox;
 pub mod cox_builder;
 pub mod cox_ph;
 pub mod cure_model;
@@ -23,6 +24,9 @@ pub mod trust_region;
 
 pub use baseline_hazard::breslow_baseline_hazard;
 pub use breslow_ties::breslow_log_likelihood;
+pub use causal_cox::{
+    AdjustedSurvival, CausalCoxConfig, CausalCoxFit, fit_causal_cox, fit_naive_cox,
+};
 pub use cox_builder::{CoxBuilder, CoxFitResult};
 pub use cox_ph::{CoxFit, CoxPhConfig, TieMethod, fit_cox_ph};
 pub use cure_model::{

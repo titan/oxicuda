@@ -26,8 +26,11 @@ Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD,
 - [x] Pivot helpers (helpers/pivot.rs) -- Pivot selection and row swapping utilities
 - [x] Condition number (helpers/condition.rs) -- Matrix condition number estimation
 - [x] CG solver (sparse/cg.rs) -- Conjugate Gradient for SPD systems with CgConfig
+- [x] MINRES solver (sparse/minres.rs) -- Minimal Residual for symmetric (possibly indefinite) systems, Paige-Saunders 1975 Lanczos+Givens, MinresConfig
 - [x] BiCGSTAB solver (sparse/bicgstab.rs) -- Biconjugate Gradient Stabilized with BiCgStabConfig
+- [x] QMR solver (sparse/qmr.rs) -- Quasi-Minimal Residual for non-symmetric systems, Freund-Nachtigal 1991 two-sided Lanczos (needs A^T), QmrConfig
 - [x] GMRES solver (sparse/gmres.rs) -- GMRES(m) with restart and GmresConfig
+- [x] LSQR solver (sparse/lsqr.rs) -- Iterative least squares min ||A*x-b|| via Golub-Kahan bidiagonalization (Paige-Saunders 1982), optional Tikhonov damping, rectangular A, LsqrConfig
 - [x] Direct sparse solver (sparse/direct.rs) -- Direct solver via dense LU for small systems
 
 ### Future Enhancements
@@ -46,8 +49,8 @@ Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD,
 - [x] Nested dissection ordering -- Graph-based fill-reducing ordering for sparse direct solvers (P2)
 - [x] Tensor decomposition (tensor_decomp.rs) -- CP, Tucker, and Tensor-Train decompositions for multi-dimensional arrays on GPU (P1)
 - [x] ODE/PDE solver (ode_pde.rs) -- Runge-Kutta (RK4/RK45), implicit Euler, and method-of-lines PDE solver with GPU-accelerated right-hand-side evaluation (P1)
-- [ ] SuperLU left-looking sparse LU (`sparse/superlu_left_looking.rs`) — Li-Demmel 2003 ACM TOMS: left-looking column-by-column sparse LU with supernode detection and dense sub-block BLAS; distinct from existing multifrontal right-looking path; `LeftLookingLu` (P1)
-- [ ] PARDISO-compatible sparse direct solver interface (`sparse/pardiso_compat.rs`) — Schenk-Gärtner 2004: reordering + symbolic factorisation + numerical factorisation + solve pipeline with nested-dissection and AMD ordering; `PardisoCompatSolver` (P1)
+- [x] SuperLU left-looking sparse LU (`sparse/superlu_left_looking.rs`) — Li-Demmel 2003 ACM TOMS: left-looking column-by-column sparse LU (Gilbert–Peierls DFS symbolic + threshold partial pivoting + supernode detection); distinct from existing multifrontal right-looking path; `LeftLookingLu` (P1)
+- [x] PARDISO-compatible sparse direct solver interface (`sparse/pardiso_compat.rs`) — Schenk-Gärtner 2004: phased (analysis / factorize / solve, codes 11/22/33/12/23/13) reordering + symbolic + numerical factorisation + solve pipeline with nested-dissection ordering; `PardisoCompatSolver` (P1)
 - [x] Block tridiagonal solver (`dense/block_tridiagonal.rs`) — block-LU factorisation for block-tridiagonal matrices arising from 2D/3D finite-difference PDE discretisations; distinct from scalar tridiagonal already done; `BlockTridiagonalSolver` (P2)
 - [x] Iterative refinement with mixed precision (`helpers/iterative_refinement.rs`) — Langou 2006: outer solve in FP32 + residual computed in FP64 + correction solve for improved accuracy; `IterativeRefinement` (P2)
 
@@ -66,7 +69,7 @@ Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD,
 
 ## Quality Status
 
-- Tests: 447 passing
+- Tests: 479 passing (+32: MINRES, QMR, LSQR, left-looking sparse LU, PARDISO-compatible direct solver)
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`

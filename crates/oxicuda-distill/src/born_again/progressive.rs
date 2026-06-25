@@ -30,6 +30,47 @@ impl ProgressiveConfig {
     pub fn steps_for_generation(&self, generation: usize) -> usize {
         (self.initial_steps >> generation).max(1)
     }
+
+    /// Non-uniform geometric step schedule from `initial_steps` down to `final_steps`.
+    ///
+    /// Standard progressive distillation halves the step count every generation (ratio = 2),
+    /// reaching `initial_steps / 2^G`. A non-uniform schedule instead picks a *per-generation
+    /// ratio* `r = (initial / final)^(1 / G)` so the trajectory lands exactly on a chosen
+    /// `final_steps` after `total_generations` generations, regardless of whether that ratio
+    /// is an integer. The returned vector has length `total_generations + 1`, is monotonically
+    /// non-increasing, starts at `initial_steps`, and ends at `final_steps` (clamped to ≥ 1).
+    /// This lets the practitioner aim for, say, 1000 → 8 steps over 4 generations
+    /// (ratio ≈ 3.16) rather than being constrained to powers of two.
+    pub fn non_uniform_schedule(&self, final_steps: usize) -> DistillResult<Vec<usize>> {
+        if self.initial_steps == 0 {
+            return Err(DistillError::InvalidConfig {
+                msg: "initial_steps must be > 0".into(),
+            });
+        }
+        if self.total_generations == 0 {
+            return Err(DistillError::InvalidConfig {
+                msg: "total_generations must be > 0".into(),
+            });
+        }
+        let target = final_steps.max(1).min(self.initial_steps);
+        let g = self.total_generations;
+        let ratio = (self.initial_steps as f64 / target as f64).powf(1.0 / g as f64);
+        let mut schedule = Vec::with_capacity(g + 1);
+        schedule.push(self.initial_steps);
+        let mut prev = self.initial_steps;
+        for i in 1..=g {
+            let raw = (self.initial_steps as f64 / ratio.powi(i as i32)).round() as usize;
+            // Enforce monotone non-increasing and clamp to the [target, initial] band.
+            let clamped = raw.clamp(target, self.initial_steps).min(prev);
+            schedule.push(clamped);
+            prev = clamped;
+        }
+        // Pin the final entry exactly on the requested target.
+        if let Some(last) = schedule.last_mut() {
+            *last = target;
+        }
+        Ok(schedule)
+    }
 }
 
 /// Trajectory consistency MSE between student and teacher outputs.
@@ -90,6 +131,53 @@ mod tests {
         assert_eq!(cfg.steps_for_generation(0_usize), 1024);
         assert_eq!(cfg.steps_for_generation(1_usize), 512);
         assert_eq!(cfg.steps_for_generation(10_usize), 1);
+    }
+
+    #[test]
+    fn non_uniform_schedule_endpoints_and_monotone() {
+        let cfg = ProgressiveConfig {
+            initial_steps: 1000,
+            current_steps: 1000,
+            total_generations: 4,
+        };
+        let sched = cfg.non_uniform_schedule(8).expect("schedule");
+        assert_eq!(sched.len(), 5);
+        assert_eq!(sched[0], 1000);
+        assert_eq!(*sched.last().expect("last"), 8);
+        // Monotonically non-increasing.
+        for w in sched.windows(2) {
+            assert!(w[1] <= w[0], "not monotone: {} -> {}", w[0], w[1]);
+        }
+        // Genuinely non-uniform: the per-step ratio is not the power-of-two halving.
+        // 1000 -> 8 over 4 gens implies ratio ~3.16, so the second entry is well below 500.
+        assert!(
+            sched[1] < 500,
+            "expected non-binary ratio, got {}",
+            sched[1]
+        );
+    }
+
+    #[test]
+    fn non_uniform_schedule_matches_geometric() {
+        let cfg = ProgressiveConfig {
+            initial_steps: 64,
+            current_steps: 64,
+            total_generations: 3,
+        };
+        // 64 -> 8 over 3 generations has an integer ratio of 2 (64/8 = 8 = 2^3),
+        // so this degenerates to the exact halving schedule 64,32,16,8.
+        let sched = cfg.non_uniform_schedule(8).expect("schedule");
+        assert_eq!(sched, vec![64, 32, 16, 8]);
+    }
+
+    #[test]
+    fn non_uniform_schedule_rejects_zero_generations() {
+        let cfg = ProgressiveConfig {
+            initial_steps: 100,
+            current_steps: 100,
+            total_generations: 0,
+        };
+        assert!(cfg.non_uniform_schedule(4).is_err());
     }
 
     #[test]

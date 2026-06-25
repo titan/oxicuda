@@ -591,4 +591,60 @@ mod tests {
         let cb = EmaCodebook::new(4, 2, cfg, &mut rng).expect("new should succeed");
         assert!(cb.quantize(&[0.0; 3], 2).is_err());
     }
+
+    /// Training simulation: data drawn from `n_codes` well-separated clusters
+    /// should drive codebook *usage* above 80 % once the EMA updates and
+    /// dead-code revival have had time to spread the codes over the clusters.
+    /// This exercises the full `train_step` loop end-to-end and asserts the
+    /// healthy-utilisation property that motivates EMA + revival.
+    #[test]
+    fn codebook_usage_exceeds_80_percent_after_training() {
+        let n_codes = 16usize;
+        let dim = 2usize;
+        let cfg = EmaCodebookConfig {
+            base_decay: 0.95,
+            warmup_steps: 20,
+            dead_patience: 3,
+            init_scale: 0.05,
+            ..EmaCodebookConfig::default()
+        };
+        let mut rng = LcgRng::new(2024);
+        let mut cb = EmaCodebook::new(n_codes, dim, cfg, &mut rng).expect("new should succeed");
+
+        // 16 cluster centres on a 4×4 grid, spacing 4.0 (well separated).
+        let centers: Vec<[f32; 2]> = (0..n_codes)
+            .map(|k| {
+                let gx = (k % 4) as f32 * 4.0 - 6.0;
+                let gy = (k / 4) as f32 * 4.0 - 6.0;
+                [gx, gy]
+            })
+            .collect();
+
+        let mut data_rng = LcgRng::new(7777);
+        let batch = 32usize;
+        for _ in 0..400 {
+            // Each sample: pick a random centre, add small jitter.
+            let mut z = vec![0.0_f32; batch * dim];
+            for b in 0..batch {
+                let c = centers[data_rng.next_usize(n_codes)];
+                let jx = (data_rng.next_f32() - 0.5) * 0.6;
+                let jy = (data_rng.next_f32() - 0.5) * 0.6;
+                z[b * dim] = c[0] + jx;
+                z[b * dim + 1] = c[1] + jy;
+            }
+            cb.train_step(&z, batch, &mut rng)
+                .expect("train_step should succeed");
+        }
+
+        // Usage = fraction of codes that have been assigned at least once.
+        let used = cb.usage_count().iter().filter(|&&c| c > 0).count();
+        let usage = used as f32 / n_codes as f32;
+        assert!(
+            usage > 0.80,
+            "codebook usage should exceed 80%, got {:.1}% ({used}/{n_codes})",
+            usage * 100.0
+        );
+        // Codes should track their clusters: embeddings remain finite & bounded.
+        assert!(cb.embeddings().iter().all(|v| v.is_finite()));
+    }
 }

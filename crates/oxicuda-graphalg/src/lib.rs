@@ -27,6 +27,7 @@
 //! ├── tsp/             — Christofides approximation, nearest-neighbor, 2-opt
 //! ├── eulerian/        — Hierholzer's Eulerian circuit
 //! ├── hamiltonian/     — Held-Karp DP exact TSP
+//! ├── dynamic/         — Streaming dynamic graph (incremental PageRank, incremental SCC)
 //! └── metrics/         — Diameter, radius, density, clustering coefficient, transitivity
 //! ```
 //!
@@ -53,6 +54,7 @@ pub mod clique;
 pub mod coloring;
 pub mod community;
 pub mod connectivity;
+pub mod dynamic;
 pub mod error;
 pub mod eulerian;
 pub mod flow;

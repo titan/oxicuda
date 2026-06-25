@@ -496,4 +496,59 @@ mod tests {
         assert_eq!(ReduceOp::Max.ptx_instr(PtxType::S64), "max.s64");
         assert_eq!(ReduceOp::Max.ptx_instr(PtxType::F64), "max.f64");
     }
+
+    /// Exhaustive property check: for every `(ReduceOp, numeric PtxType)` pair,
+    /// the instruction mnemonic encodes the operation family (`add`/`mul`/`min`/
+    /// `max`/`and`/`or`/`xor`) and the identity literal is the operation's
+    /// algebraic unit.  This is the full-coverage version of the
+    /// representative-sample checks above.
+    #[test]
+    fn every_op_type_pair_has_consistent_mnemonic_and_identity() {
+        let types = [
+            PtxType::U32,
+            PtxType::U64,
+            PtxType::S32,
+            PtxType::S64,
+            PtxType::F32,
+            PtxType::F64,
+        ];
+        let ops = [
+            ReduceOp::Sum,
+            ReduceOp::Product,
+            ReduceOp::Min,
+            ReduceOp::Max,
+            ReduceOp::And,
+            ReduceOp::Or,
+            ReduceOp::Xor,
+        ];
+        for &ty in &types {
+            for &op in &ops {
+                let instr = op.ptx_instr(ty);
+                let family = match op {
+                    ReduceOp::Sum => "add",
+                    ReduceOp::Product => "mul",
+                    ReduceOp::Min => "min",
+                    ReduceOp::Max => "max",
+                    ReduceOp::And => "and",
+                    ReduceOp::Or => "or",
+                    ReduceOp::Xor => "xor",
+                };
+                assert!(
+                    instr.starts_with(family),
+                    "op {op:?} ty {ty:?}: mnemonic {instr} must start with {family}"
+                );
+            }
+        }
+        // Identity literals, checked per representative type via the generic API.
+        assert_eq!(ReduceOp::Sum.identity_literal::<u32>(), "0");
+        assert_eq!(ReduceOp::Product.identity_literal::<u32>(), "1");
+        assert_eq!(ReduceOp::And.identity_literal::<u32>(), "0xFFFFFFFF");
+        assert_eq!(ReduceOp::Min.identity_literal::<i32>(), "2147483647");
+        assert_eq!(ReduceOp::Max.identity_literal::<i32>(), "-2147483648");
+        assert_eq!(ReduceOp::Sum.identity_literal::<f32>(), "0f00000000");
+        assert_eq!(
+            ReduceOp::Min.identity_literal::<f64>(),
+            "0x7FF0000000000000"
+        );
+    }
 }

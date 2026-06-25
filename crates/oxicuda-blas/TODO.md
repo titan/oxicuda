@@ -114,7 +114,7 @@ to cuBLAS. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.3).
 #### P2 -- Nice-to-Have (Advanced Features)
 - [x] INT4/INT8 GEMM for inference (precision/int_ops.rs) -- dp4a-accelerated INT8 + packed INT4 GEMM for quantized model inference workloads
 - [x] BF16 standalone GEMM API (`precision/bf16_gemm.rs`) -- dedicated `BF16Gemm` struct with per-op scale factors and BF16 weight + BF16 accumulation path for Ampere+ transformer inference; distinct from the existing generic BF16 ops (P1)
-- [ ] Sparse GEMM (SpGEMM) via 2:4 structured sparsity (`sparse/sparse_gemm.rs`) -- 50% sparsity mask + compressed metadata format for Ampere+ sparse Tensor Core path; `SparseGemm` (P1)
+- [x] Sparse GEMM (SpGEMM) via 2:4 structured sparsity (`sparse/sparse_gemm.rs`) -- 50% sparsity mask + compressed 2-bit-lane metadata format for Ampere+ sparse Tensor Core path. CPU reference: `compress_2to4`/`decompress_2to4` (magnitude pruning), `pack_metadata`/`unpack_metadata`, `spgemm_2to4` (validated == dense GEMM of pruned A); `SparseGemmConfig` + `generate_sparse_gemm_ptx` emits the `mma.sp.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32` sparse Tensor-Core kernel source (sm_80+). 17 tests. (P1)
 - [x] Strassen fast matrix multiplication (`advanced/strassen.rs`) — Strassen 1969: recursive 7-multiply sub-cubic algorithm with 128-bit threshold; `StrassenGemm` (P2)
 - [x] Cooperative GEMM across CTAs -- multi-CTA collaboration for very large matrix dimensions (cooperative.rs)
 - [x] Multi-stream batched GEMM -- distribute batched GEMM across multiple CUDA streams (multi_stream_batched.rs)
@@ -138,7 +138,7 @@ to cuBLAS. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.3).
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 776 passing
+- Tests: 799 passing
 - unwrap() calls: 0 (production code)
 
 ## Performance Targets

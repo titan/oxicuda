@@ -11,6 +11,8 @@
 //! - `cudaStreamGetDevice`
 //! - The default stream (`cudaStreamDefault` / `cudaStreamLegacy` / `cudaStreamPerThread`)
 
+use std::collections::HashSet;
+
 use oxicuda_driver::ffi::CUstream;
 use oxicuda_driver::loader::try_driver;
 
@@ -249,6 +251,81 @@ pub fn stream_get_flags(stream: CudaStream) -> CudaRtResult<StreamFlags> {
     Ok(StreamFlags(flags))
 }
 
+// ─── Host-side stream id bookkeeping ──────────────────────────────────────────
+
+/// A GPU-free allocator of unique stream identifiers.
+///
+/// The CUDA Runtime hands back opaque `cudaStream_t` handles; this models the
+/// *host-side bookkeeping* a runtime keeps so that every live stream has a
+/// distinct, monotonically increasing id and teardown is accounted for. It
+/// allocates **no device resources** — it is pure host allocation tracking, so
+/// it runs and self-verifies with no NVIDIA driver present.
+///
+/// Ids start at `1` (id `0` is reserved for the legacy default stream) and
+/// never repeat for the lifetime of the allocator, even across destroy/create
+/// cycles (mirroring the monotonic-handle invariant real runtimes rely on to
+/// surface use-after-destroy bugs).
+#[derive(Debug, Default)]
+pub struct StreamIdAllocator {
+    next_id: u64,
+    live: HashSet<u64>,
+}
+
+impl StreamIdAllocator {
+    /// Create an empty allocator. The first id handed out is `1`.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            next_id: 1,
+            live: HashSet::new(),
+        }
+    }
+
+    /// Allocate a fresh, never-before-seen stream id and mark it live.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaRtError::InvalidResourceHandle`] if the monotonic counter
+    /// would overflow `u64` (practically unreachable).
+    pub fn create(&mut self) -> CudaRtResult<u64> {
+        let id = self.next_id;
+        // The next id is strictly greater, so ids never repeat.
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or(CudaRtError::InvalidResourceHandle)?;
+        self.live.insert(id);
+        Ok(id)
+    }
+
+    /// Mark a previously-allocated id as destroyed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaRtError::InvalidResourceHandle`] if `id` is not currently
+    /// live (double-free or never-allocated), modeling the runtime's
+    /// invalid-handle rejection.
+    pub fn destroy(&mut self, id: u64) -> CudaRtResult<()> {
+        if self.live.remove(&id) {
+            Ok(())
+        } else {
+            Err(CudaRtError::InvalidResourceHandle)
+        }
+    }
+
+    /// Number of currently-live stream ids.
+    #[must_use]
+    pub fn live_count(&self) -> usize {
+        self.live.len()
+    }
+
+    /// The id that will be returned by the next [`Self::create`] call.
+    #[must_use]
+    pub fn peek_next_id(&self) -> u64 {
+        self.next_id
+    }
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -281,5 +358,53 @@ mod tests {
         // Must either succeed (GPU present) or fail with DriverNotAvailable /
         // some other non-panic error.
         assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn stream_id_allocator_starts_at_one() {
+        let mut alloc = StreamIdAllocator::new();
+        assert_eq!(alloc.peek_next_id(), 1);
+        let first = alloc.create().expect("create");
+        assert_eq!(first, 1);
+        assert_eq!(alloc.live_count(), 1);
+    }
+
+    #[test]
+    fn stream_id_allocator_rejects_double_free() {
+        let mut alloc = StreamIdAllocator::new();
+        let id = alloc.create().expect("create");
+        alloc.destroy(id).expect("first destroy ok");
+        // Second destroy of the same id must fail.
+        assert_eq!(alloc.destroy(id), Err(CudaRtError::InvalidResourceHandle));
+        // Destroying a never-allocated id must fail too.
+        assert_eq!(
+            alloc.destroy(999_999),
+            Err(CudaRtError::InvalidResourceHandle)
+        );
+    }
+
+    #[test]
+    fn stream_stress_create_destroy_10k_no_collision() {
+        // Host-only bookkeeping stress: create and destroy 10,000 streams in a
+        // loop, asserting monotonic ids, zero collisions, and clean teardown.
+        const N: usize = 10_000;
+        let mut alloc = StreamIdAllocator::new();
+        let mut seen: HashSet<u64> = HashSet::with_capacity(N);
+        let mut prev: u64 = 0;
+        for _ in 0..N {
+            let id = alloc.create().expect("create must succeed (host-only)");
+            // Strictly monotonic across the whole run.
+            assert!(id > prev, "ids must be strictly increasing: {id} <= {prev}");
+            prev = id;
+            // No id is ever handed out twice.
+            assert!(seen.insert(id), "duplicate stream id {id}");
+            // Immediately destroy to model a create/destroy churn loop.
+            alloc.destroy(id).expect("destroy must succeed");
+        }
+        // Clean teardown: nothing left live, and exactly N distinct ids issued.
+        assert_eq!(alloc.live_count(), 0);
+        assert_eq!(seen.len(), N);
+        // The next id is past everything issued (monotonic invariant holds).
+        assert_eq!(alloc.peek_next_id(), (N as u64) + 1);
     }
 }

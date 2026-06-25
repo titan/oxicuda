@@ -9,8 +9,8 @@ NHiTS, PatchTST, TimesNet, iTransformer, RevIN, series decomposition. Time-major
 
 ## Implementation Status
 
-- **Actual SLoC:** 20,036 (73 files, Rust 4,791 code + 870 comments + 829 blanks)
-- **Tests:** 615 passing (#[test] count in src/)
+- **Actual SLoC:** 29,477 (79 files)
+- **Tests:** 704 passing (lib, `cargo test -p oxicuda-timeseries --all-features`)
 - **Crate:** `oxicuda-timeseries` -- Vol.22 Time-Series Forecasting Architectures
 
 ### Completed [x]
@@ -115,23 +115,24 @@ NHiTS, PatchTST, TimesNet, iTransformer, RevIN, series decomposition. Time-major
 - [x] FEDformer Fourier-enhanced attention (fedformer.rs -- Zhou 2022 ICML; series decomposition + Frequency Enhanced Block: DFT → select M low-freq modes → per-mode complex linear → iDFT)
 - [x] Pyraformer pyramidal attention (pyraformer.rs -- Liu 2022 ICLR; pyramidal multi-scale graph (coarsen by factor c per scale) + PAM intra-scale window + parent/child cross-scale attention, O(L) complexity)
 - [x] TimeMixer multi-scale mixing (timemixer.rs -- Wang 2024 ICLR; series decomp + multi-scale average-pooling downsample + Past-Decomposable-Mixing + Future-Multipredictor-Mixing ensemble pred)
-- [ ] Conformer-TS (audio Conformer adapted for TS)
+- [x] Conformer-TS (conformer/conformer.rs -- Gulati 2020 INTERSPEECH adapted for TS; macaron half-step FFN → MHSA → causal convolution module (pointwise → GLU → depthwise causal conv → LayerNorm → SiLU/Swish → pointwise) → macaron FFN → post-LN; `ConformerEncoder` over time-major `[T, C]`, per-variate linear forecast head)
 - [x] Probabilistic forecasting head (quantile regression / DeepAR-style)
 - [x] N-BEATS (nbeats) basis-expansion backbone (nbeats/nbeats.rs -- Oreshkin 2020 ICLR; trend + seasonality stacks with doubly residual learning; generic / interpretable basis functions; `NBeatsForecast`)
 - [x] SARIMA (sarima/sarima.rs) — Seasonal ARIMA: Box-Jenkins (p,d,q)×(P,D,Q,s) model; Yule-Walker AR initialisation; CSS-MLE parameter estimation; seasonal differencing + backshift operator; `SarimaModel { order, seasonal_order }`
-- [ ] Multi-task forecasting (joint horizon + classification)
+- [x] Multi-task forecasting (joint horizon + classification) (multitask/forecast_classify.rs -- hard-parameter-sharing backbone (2-layer GELU MLP) → regression head (horizon) + classification head (n_classes); combined loss λ·MSE + (1−λ)·CE; `MultiTaskForecaster`)
 
 #### P2 -- Nice-to-Have (Research / Advanced)
 - [x] Temporal Fusion Transformer (TFT) variable-selection + gated residual network
-- [ ] PatchTST-Crossformer hybrid
-- [ ] Foundation-model adapters (TimeGPT / Chronos / Moirai loading interfaces)
-- [ ] Moirai universal forecasting model (`foundation/moirai.rs`) — Salesforce 2024: Masked Encoder with any-variate patching + patch-mixture decoder for zero-shot universal forecasting; `MoiraiForecaster`
-- [ ] Chronos probabilistic foundation model (`foundation/chronos.rs`) — Amazon 2024: quantisation tokenisation of continuous time series → T5 seq2seq language model backbone for zero-shot probabilistic forecasting; `ChronosPredictor`
-- [x] Anomaly Transformer (`anomaly/anomaly_transformer.rs`) — Xu 2022 ICLR: association discrepancy between prior-association (Gaussian kernel) and series-association (attention) for unsupervised anomaly detection; `AnomalyTransformer`
-- [ ] Structural Time Series decomposition (`decomp/sts.rs`) — Harvey 1990: Kalman-filter-based trend + seasonality + irregular state-space decomposition with EM parameter estimation; `StsDecomposer`
-- [ ] Hierarchical reconciliation (MinT-style) for grouped time-series
-- [ ] Online / streaming forecasting helper
-- [ ] Quantised TCN / PatchTST (INT8 / FP8) inference path
+- [x] PatchTST-Crossformer hybrid (hybrid/patch_cross.rs -- fuses PatchTST patch tokenisation with Crossformer Two-Stage Attention: cross-time MHSA per variate + router-bottleneck cross-dimension attention; `PatchCrossformer`)
+- [x] Foundation-model adapters (TimeGPT / Chronos / Moirai loading interfaces) (foundation/adapter.rs -- `WeightStore` self-describing checkpoint format (magic + version + named f32 tensors + FNV-1a checksum, deterministic LE byte layout) + `FoundationAdapter` trait `export_weights`/`import_weights`/`to_checkpoint`/`load_checkpoint`, implemented for `MoiraiForecaster` and `ChronosPredictor`)
+- [x] Moirai universal forecasting model (foundation/moirai.rs -- Salesforce 2024: masked Transformer encoder with any-variate patching, variate-id embedding, block-structured causal attention mask, distributional (mean, log-scale) head; `MoiraiForecaster`)
+- [x] Chronos probabilistic foundation model (foundation/chronos.rs -- Amazon 2024: mean-scaling + uniform-bin quantisation tokenisation → decoder-only causal Transformer LM → autoregressive sampling with per-step quantile forecast; `ChronosPredictor`)
+- [x] Anomaly Transformer (transformer/anomaly.rs) — Xu 2022 ICLR: association discrepancy between prior-association (Gaussian kernel) and series-association (attention) for unsupervised anomaly detection; `AnomalyTransformer`
+- [x] Structural Time Series decomposition (decomp/sts.rs) — Harvey 1990: Kalman-filter + Durbin–Koopman disturbance smoother local-linear-trend + seasonal + irregular state-space decomposition with EM variance estimation; `StsDecomposer`
+- [x] Hierarchical reconciliation (MinT-style) for grouped time-series (decomp/mint_reconcile.rs -- forms M = SᵀW⁻¹S with summing matrix, Cholesky solve per horizon, OLS / WLS-diag; coherence-guaranteed; `MintReconciler`)
+- [x] Online / streaming forecasting helper (online/streaming_forecast.rs -- recursive-least-squares AR(p) with exponential forgetting + ring buffer; `StreamingForecaster`)
+- [x] Quantised TCN / PatchTST (INT8) inference path (quant/int8.rs -- symmetric per-tensor / per-output-channel INT8 quantisation; `QuantLinear` with i32-accumulated integer dot product (DP4A-style) + dequant; dynamic activation quantisation; `relative_quant_error`. NOTE: FP8/E4M3 device path remains GPU-gated.)
+- [x] Dynamic Time Warping distance + alignment (dtw/dtw.rs:dtw -- wired orphan; Sakoe & Chiba 1978 banded accumulated-cost DP + min-cost warping-path backtrack; `dtw` / `dtw_distance` / `dtw_cost_matrix` / `dtw_distance_matrix` (symmetric K×K) / `dtw_barycenter` (Petitjean 2011 DBA averaging); `DtwConfig { band, normalize, n_features }`; +22 tests)
 
 ## Dependencies
 
@@ -146,7 +147,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 615 passing
+- Tests: 704 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)
@@ -177,8 +178,10 @@ Target: bandwidth-bound kernels at >=85% peak DRAM throughput on sm_80+.
 - PatchTST is channel-independent: each variate is processed by the same shared
   Transformer encoder (no cross-variate attention)
 - iTransformer inverts the convention: tokens are *variates*, not time steps
-- TimesNet O(T^2) DFT is the reference path; FFT-based period detection is future
-  work (link with `oxicuda-fft`)
+- TimesNet O(T^2) DFT is the reference path; standalone O(T log T) FFT-based
+  period detection lives in `period/fft_period.rs` (Wiener–Khinchin
+  autocorrelation routed through pure-CPU `oxicuda_fft::rfft`/`irfft`, validated
+  elementwise ≤1e-8 against the direct O(T²) sum)
 - macOS: kernels compile to PTX strings but device launch returns `UnsupportedPlatform`
 
 ---
@@ -231,14 +234,33 @@ Target: bandwidth-bound kernels at >=85% peak DRAM throughput on sm_80+.
 - [ ] Crossformer / TFT / FEDformer benchmark coverage once implemented
 
 ### Implementation Deepening
-- [ ] Autoformer full auto-correlation attention (not just magnitude-squared kernel)
-- [ ] Informer ProbSparse self-attention for very long horizons
-- [ ] Probabilistic forecasting heads (quantile / DeepAR Gaussian / Student-t)
-- [ ] Multi-task heads (jointly forecast horizon + classify regime / event)
-- [ ] FFT-based period detection (link with `oxicuda-fft`) -- O(T log T) vs current
-      O(T^2) DFT
-- [ ] Online / streaming forecasting helper (sliding-window inference)
-- [ ] Hierarchical reconciliation (MinT) for grouped time-series
+- [x] Autoformer full auto-correlation attention (not just magnitude-squared kernel)
+      (transformer/autocorrelation.rs -- time-delay autocorrelation, top-k lag
+      selection, softmax-weighted circular-roll aggregation; `AutocorrelationBlock`)
+- [x] Informer ProbSparse self-attention for very long horizons
+      (informer/prob_sparse.rs -- KL-divergence query-dominance sampling
+      (u = factor·ceil(ln L_K)), top-u query selection, mean fill for the rest;
+      `ProbSparseWeights` / `InformerBlock`)
+- [x] Probabilistic forecasting heads (quantile / DeepAR Gaussian)
+      (head/prob_head.rs -- `QuantileHead` (pinball loss) + `DeepArHead` Gaussian
+      (mean, softplus σ) with NLL; `QuantilePrediction` / `GaussianPrediction`)
+- [x] Multi-task heads (jointly forecast horizon + classify regime / event)
+      (multitask/forecast_classify.rs -- shared backbone + regression head + softmax
+      classification head; `MultiTaskForecaster`)
+- [x] FFT-based period detection (link with `oxicuda-fft`) -- O(T log T) vs current
+      O(T^2) DFT (period/fft_period.rs:`detect_period_fft` -- Wiener–Khinchin
+      autocorrelation `IDFT(|DFT|²)` routed through pure-CPU `oxicuda_fft::rfft`/
+      `irfft`; FFT autocorr == direct O(T²) reference elementwise ≤1e-8
+      (measured 3.3e-12); recovers known periods exactly: sine 12, square-wave 7,
+      sawtooth 20, multi-component strongest-wins 7; pure-noise/constant → `None`;
+      `PeriodCandidate`/`PeriodConfig`/`detect_period_fft_ranked`/
+      `detect_period_fft_with`/`autocorrelation_fft`; +15 tests)
+- [x] Online / streaming forecasting helper (sliding-window inference)
+      (online/streaming_forecast.rs -- RLS AR(p) with forgetting factor + ring
+      buffer; `StreamingForecaster`)
+- [x] Hierarchical reconciliation (MinT) for grouped time-series
+      (decomp/mint_reconcile.rs -- M = SᵀW⁻¹S Cholesky solve, OLS / WLS-diag;
+      `MintReconciler`)
 
 ### Benchmark Coverage
 - [x] `benches/ts_ops.rs` Criterion harness wired: 7 PTX bench groups x 4 SM

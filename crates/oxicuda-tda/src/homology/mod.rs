@@ -3,6 +3,7 @@
 pub mod boundary;
 pub mod cohomology;
 pub mod cohomology_z;
+pub mod gpu_reduction;
 pub mod multi_parameter;
 pub mod persistent;
 pub mod reduction;
@@ -15,6 +16,10 @@ pub use cohomology::{
     persistent_cohomology, reduce_coboundary_matrix, verify_cohomology_homology_agreement,
 };
 pub use cohomology_z::{CohomologyZ, CohomologyZConfig, CohomologyZResult};
+pub use gpu_reduction::{
+    ChunkReductionStats, GpuReductionPlan, batched_column_reduce_ptx, chunked_parallel_reduce,
+    vietoris_rips_edges_ptx, wasserstein_auction_ptx,
+};
 pub use multi_parameter::{
     BiFiltration, BigradedSimplex, HilbertFunction, MultiParameterPersistence,
 };

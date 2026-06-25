@@ -58,20 +58,31 @@
 //!     └── policy.rs             RoutingPolicy (RoundRobin/LeastLoaded/PrefixAffinity)
 //! ```
 
+pub mod collective;
 pub mod distributed_cache;
 pub mod error;
 pub mod expert_parallel;
 pub mod handle;
 pub mod parallel;
+pub mod pipeline_parallel;
 pub mod ptx_kernels;
 pub mod quantisation;
 pub mod router;
+pub mod scheduler;
 pub mod sequence_parallel;
 pub mod speculative;
 pub mod tensor_parallel;
 
+pub use collective::{
+    RingCollective, execute_recursive_halving_all_reduce, execute_ring_all_reduce,
+};
 pub use error::{DistInferError, DistInferResult};
 pub use handle::{DistInferHandle, ParallelismConfig, RankCoordinates, SmVersion};
+pub use pipeline_parallel::{
+    LayerPartition, PipelineSchedule, gpipe_schedule, interleaved_1f1b_schedule,
+    one_f_one_b_schedule,
+};
+pub use scheduler::{ContinuousBatcher, DisaggPdScheduler};
 pub use speculative::{DistInferRng, MedusaConfig, MedusaHeads};
 
 // ─── Integration Tests ───────────────────────────────────────────────────────
@@ -345,6 +356,76 @@ mod tests {
         assert_eq!(dec2.rank, dec1.rank, "prefix hit should route to same rank");
 
         assert!(router.metrics().prefix_hit_rate() > 0.0);
+    }
+
+    // ── E2E-7: Ring all-reduce matches the row-parallel all-reduce oracle ──────
+
+    #[test]
+    fn e2e_ring_all_reduce_matches_tp_all_reduce() {
+        use crate::collective::{RingCollective, execute_ring_all_reduce};
+        use crate::tensor_parallel::row_parallel::RowLinear;
+
+        // Four ranks each hold a full-width partial; the simulated row-parallel
+        // all-reduce and the ring all-reduce schedule must agree exactly.
+        let partials: Vec<Vec<f32>> = vec![
+            vec![1.0, 2.0, 3.0, 4.0],
+            vec![10.0, 20.0, 30.0, 40.0],
+            vec![100.0, 200.0, 300.0, 400.0],
+            vec![1000.0, 2000.0, 3000.0, 4000.0],
+        ];
+        let tp_reduced = RowLinear::all_reduce(&partials).expect("tp all-reduce");
+        let ring = RingCollective::new(4, 4).expect("ring");
+        let ring_reduced = execute_ring_all_reduce(&ring, &partials).expect("ring all-reduce");
+        assert_eq!(
+            tp_reduced, ring_reduced,
+            "ring all-reduce must equal the row-parallel all-reduce sum"
+        );
+        assert_eq!(ring_reduced, vec![1111.0, 2222.0, 3333.0, 4444.0]);
+    }
+
+    // ── E2E-8: 4-D parallelism plan PP×TP×SP×EP layer routing ──────────────────
+
+    #[test]
+    fn e2e_pipeline_partition_plus_tp_world() {
+        use crate::pipeline_parallel::{LayerPartition, one_f_one_b_schedule};
+
+        // A 32-layer model on a 4-stage pipeline, each stage internally tp=2.
+        let part = LayerPartition::balanced(32, 4).expect("partition");
+        assert!(part.is_valid_tiling());
+        // Every layer maps to exactly one stage.
+        for layer in 0..32 {
+            assert!(part.stage_of(layer).is_some(), "layer {layer} unassigned");
+        }
+        // The 1F1B schedule over those 4 stages with 8 micro-batches is
+        // hazard-free and has the analytic 2(p-1) bubble.
+        let sched = one_f_one_b_schedule(4, 8).expect("1f1b");
+        sched.validate().expect("schedule must be hazard-free");
+        assert_eq!(sched.bubble_slots().expect("bubble"), 2 * (4 - 1));
+    }
+
+    // ── E2E-9: disaggregated prefill→decode hand-off drives cache migration ─────
+
+    #[test]
+    fn e2e_disagg_pd_handoff_plan() {
+        use crate::scheduler::{DisaggPdScheduler, PdPhase};
+
+        let mut sched = DisaggPdScheduler::new(2, 4, 16).expect("sched");
+        let req = Request {
+            request_id: 7,
+            token_ids: vec![5u32; 48], // 48 tokens / 16 per block = 3 blocks
+            max_new_tokens: 8,
+            priority: 0,
+        };
+        let pw = sched.schedule_prefill(&req).expect("prefill");
+        assert_eq!(sched.locate(7), Some((PdPhase::Prefill, pw)));
+        let handoff = sched.complete_prefill(7, 48).expect("handoff");
+        assert_eq!(handoff.n_blocks, 3, "3 KV blocks to migrate");
+        assert_eq!(handoff.prefill_worker, pw);
+        // The hand-off plan supplies everything a BlockMigrator needs.
+        assert!(handoff.decode_worker < sched.n_decode());
+        sched.complete_decode(7).expect("decode done");
+        assert_eq!(sched.in_flight(), 0);
+        assert_eq!(sched.stats().blocks_migrated, 3);
     }
 
     // ── E2E-6: PTX kernels valid for all SM versions ───────────────────────────

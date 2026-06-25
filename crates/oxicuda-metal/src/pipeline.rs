@@ -8,6 +8,7 @@
 use crate::{
     device::MetalDevice,
     error::{MetalError, MetalResult},
+    memory::MetalMemoryManager,
 };
 
 // ─── MetalComputePipeline ─────────────────────────────────────────────────────
@@ -20,14 +21,12 @@ use crate::{
 /// them separately.
 pub struct MetalComputePipeline {
     /// The compiled pipeline state — only present on macOS.
-    /// Kept alive for future kernel dispatch wiring.
+    /// Used by [`MetalComputePipeline::dispatch`].
     #[cfg(target_os = "macos")]
-    #[allow(dead_code)]
     pub(crate) pipeline_state: metal::ComputePipelineState,
     /// The command queue used to create command buffers — only present on macOS.
-    /// Kept alive for future kernel dispatch wiring.
+    /// Used by [`MetalComputePipeline::dispatch`].
     #[cfg(target_os = "macos")]
-    #[allow(dead_code)]
     pub(crate) command_queue: metal::CommandQueue,
     /// The MSL entry-point function name (kept for diagnostics).
     function_name: String,
@@ -77,6 +76,86 @@ impl MetalComputePipeline {
     /// The MSL function name this pipeline was compiled for.
     pub fn function_name(&self) -> &str {
         &self.function_name
+    }
+
+    /// Dispatch this compiled pipeline over `total_threads` GPU threads (1-D).
+    ///
+    /// Binding layout:
+    /// * each handle in `handles` is resolved to its `metal::Buffer` through
+    ///   `memory` and bound to `buffer(0)`, `buffer(1)`, … in order;
+    /// * each blob in `scalar_bytes` is bound with `set_bytes` to the buffer
+    ///   index immediately following the buffers — `buffer(handles.len())`,
+    ///   `buffer(handles.len() + 1)`, … — so a kernel that declares `K` device
+    ///   buffers followed by `S` `constant` scalars maps one-to-one.
+    ///
+    /// The threadgroup width is `min(max_total_threads_per_threadgroup, total_threads)`
+    /// and the grid is rounded up to whole threadgroups, so the kernel **must**
+    /// bounds-check its `thread_position_in_grid` against the element count.
+    ///
+    /// The call is synchronous: it commits the command buffer and waits for GPU
+    /// completion before returning, matching the crate's other compute ops.
+    ///
+    /// Returns [`MetalError::UnsupportedPlatform`] on non-macOS, and
+    /// [`MetalError::InvalidArgument`] for an unknown buffer handle or an empty
+    /// `scalar_bytes` entry.
+    pub fn dispatch(
+        &self,
+        memory: &MetalMemoryManager,
+        handles: &[u64],
+        scalar_bytes: &[&[u8]],
+        total_threads: usize,
+    ) -> MetalResult<()> {
+        #[cfg(target_os = "macos")]
+        {
+            if total_threads == 0 {
+                return Ok(());
+            }
+            for blob in scalar_bytes {
+                if blob.is_empty() {
+                    return Err(MetalError::InvalidArgument(
+                        "scalar_bytes entries must be non-empty".into(),
+                    ));
+                }
+            }
+            let buffers = memory.lock_buffers()?;
+            let mut bound: Vec<&metal::Buffer> = Vec::with_capacity(handles.len());
+            for handle in handles {
+                let info = buffers.get(handle).ok_or_else(|| {
+                    MetalError::InvalidArgument(format!("unknown buffer handle {handle}"))
+                })?;
+                bound.push(&info.buffer);
+            }
+            let command_buffer = self.command_queue.new_command_buffer();
+            let encoder = command_buffer.new_compute_command_encoder();
+            encoder.set_compute_pipeline_state(&self.pipeline_state);
+            for (slot, &buffer) in bound.iter().enumerate() {
+                encoder.set_buffer(slot as u64, Some(buffer), 0);
+            }
+            let scalar_base = handles.len() as u64;
+            for (offset, blob) in scalar_bytes.iter().enumerate() {
+                encoder.set_bytes(
+                    scalar_base + offset as u64,
+                    blob.len() as u64,
+                    blob.as_ptr() as *const std::ffi::c_void,
+                );
+            }
+            let max_tg = self.pipeline_state.max_total_threads_per_threadgroup();
+            let tg = max_tg.min(total_threads as u64).max(1);
+            let groups = (total_threads as u64).div_ceil(tg);
+            encoder.dispatch_thread_groups(
+                metal::MTLSize::new(groups, 1, 1),
+                metal::MTLSize::new(tg, 1, 1),
+            );
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+            Ok(())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (memory, handles, scalar_bytes, total_threads);
+            Err(MetalError::UnsupportedPlatform)
+        }
     }
 }
 

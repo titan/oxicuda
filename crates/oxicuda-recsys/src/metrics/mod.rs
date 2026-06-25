@@ -1,8 +1,13 @@
+pub mod calibration;
 pub mod diversity;
 pub mod off_policy;
 #[allow(clippy::module_inception)]
 pub mod recsys_metrics;
 
+pub use calibration::{
+    ReliabilityBin, brier_score, expected_calibration_error, group_calibration_disparity, log_loss,
+    maximum_calibration_error, reliability_bins,
+};
 pub use diversity::{
     catalog_coverage, gini_index, intra_list_diversity, novelty_self_information, personalization,
 };

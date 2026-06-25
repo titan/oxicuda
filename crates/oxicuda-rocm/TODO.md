@@ -7,10 +7,63 @@ providing GPU-accelerated operations on AMD GPUs. Part of [OxiCUDA](https://gith
 
 ## Implementation Status
 
-- **Actual SLoC:** ~3,739 across 9 files
-- **Tests:** 104 passing
-- **Status:** HIP kernel generators, hipBLAS/hipRTC runtime loaders, multi-GPU dispatcher
+- **Actual SLoC:** ~8,800 across 19 files
+- **Tests:** 213 passing (host-side / codegen; +109 over the 0.2.0 baseline)
+- **Status:** HIP kernel generators, hipBLAS/hipBLASLt/hipRTC runtime loaders, multi-GPU dispatcher,
+  gfx-arch capability tables, host-side occupancy calculator, launch-config / stream / hipGraph
+  planners, MFMA/WMMA/FP8 matrix-core codegen, memory-pool suballocator, xGMI peer topology model
 - **Targets:** AMD CDNA1/CDNA2/CDNA3 (MI100/MI200/MI300) and RDNA2/RDNA3 (Radeon RX 7000 series)
+
+> **Note on the "Future Enhancements" / "Deepening" / "Architecture-Specific" checkboxes below.**
+> Items that are *host-side or codegen* surface (the kernel STRING an op would compile to, the
+> data-structure that describes a launch / graph / pool / topology, the per-`gfx*` capability and
+> occupancy MODEL) are CPU-testable and have been implemented — they are flipped `- [x]` with the
+> real source filename. Items requiring an actual AMD GPU / ROCm runtime to **execute** (real
+> kernel dispatch, on-device timing, hardware cross-validation, live driver collectives) remain
+> `- [ ]` annotated `(requires AMD GPU/ROCm hardware)`. The checkbox counts in the original roadmap
+> were stale — each was grep-verified by concept against `src/` before flipping.
+
+### Completed (0.3.0 host-side / codegen sweep)
+
+#### Architecture model & occupancy
+- [x] `gfx_arch.rs` — `GfxArch` table for gfx906/908/90a/940/941/942/1030/1100: VGPR/SGPR/LDS limits,
+  wavefront width (32/64), SIMDs/CU, alloc granularity, MFMA/WMMA/FP8/BF16/FP64 capability flags,
+  XCD chiplet counts, device-name + target-id detection
+- [x] `occupancy.rs` — `OccupancyCalculator`: waves/CU and blocks/CU from VGPR/SGPR/LDS footprint per
+  arch (`hipOccupancyMaxActiveBlocksPerMultiprocessor` model), limiting-resource attribution, and
+  `max_potential_block_size` search (`hipOccupancyMaxPotentialBlockSize` model)
+
+#### Host-side dispatch descriptors
+- [x] `launch_config.rs` — `Dim3` + `LaunchConfig` grid/block/dynamic-LDS/stream validation against
+  per-arch limits (block ≤ 1024, LDS ≤ 64 KiB/CU, grid ≤ INT_MAX), `for_elements` 1-D planner
+- [x] `stream.rs` — `StreamPlan` multi-stream command recording (kernel/memcpy/event), `hipMemcpyKind`
+  modeling, `hipEventRecord`/`hipStreamWaitEvent` cross-stream ordering with deadlock/unsatisfiable-wait
+  detection
+- [x] `hip_graph.rs` — `HipGraph` DAG (kernel/memcpy/memset/empty nodes + dependency edges),
+  `instantiate` with cycle detection + Kahn topological launch order, `ExecutableGraph` kernel-node
+  parameter update (the host-side half of `hipGraphInstantiate`/`hipGraphExecKernelNodeSetParams`)
+
+#### Matrix-core codegen
+- [x] `mfma.rs` — `__builtin_amdgcn_mfma_*` / `__builtin_amdgcn_wmma_*` selection + HIP micro-kernel
+  emission for FP16/BF16/FP64 (CDNA) and FP8 E4M3/E5M2 (`fp8`/`bf8`, CDNA3) and FP16 WMMA (RDNA3),
+  with per-arch support gating
+
+#### Advanced kernel generators
+- [x] `hip_kernels_advanced.rs` — wavefront-shuffle reduction (`__shfl_down`), `__ballot`/`__popcll`
+  active-lane count, LDS-tiled GEMM with +4-byte bank-conflict skew, numerically-stable softmax,
+  LayerNorm (affine), Blelloch inclusive-scan/prefix-sum, bank-skewed tiled transpose
+
+#### Memory & interconnect models
+- [x] `mem_pool.rs` — `MemoryPool` stream-ordered suballocator (`hipMallocAsync`/`hipFreeAsync` model):
+  256-byte alignment math, best-fit reuse, free-block coalescing, trim, high-water-mark stats
+- [x] `peer.rs` — `PeerTopology` xGMI/PCIe peer-access graph (`hipDeviceCanAccessPeer` model),
+  `plan_peer_copy` direct-DMA-vs-host-staging decision, fully-connected MI300X-ring constructor
+
+#### Loaders & attribute hints
+- [x] `hipblaslt.rs` — `HipBlasLt` runtime loader (`libhipblaslt.so`) + `MatmulDesc`/`MatrixLayout`/
+  `Epilogue` fused-GEMM descriptors with shape + FP8-accumulator validation
+- [x] `flat_workgroup.rs` — `FlatWorkgroupHint` emits validated
+  `__attribute__((amdgpu_flat_work_group_size(min, max)))` clauses
 
 ### Completed
 
@@ -49,27 +102,27 @@ providing GPU-accelerated operations on AMD GPUs. Part of [OxiCUDA](https://gith
 ### Future Enhancements
 
 #### P0 -- Critical
-- [ ] CDNA3 (gfx940/gfx941/gfx942) FP8 (`OCP_FP8_E4M3` / `E5M2`) MFMA instruction emission for MI300X inference workloads
-- [ ] Stream-K GEMM scheduling on CDNA3 -- atomic work-stealing across `XCD` chiplets to balance compute on MI300 split-die architecture
-- [ ] RCCL collectives integration -- `ncclAllReduce`/`ncclAllGather`/`ncclReduceScatter` via runtime-loaded `librccl.so` for multi-GPU training
-- [ ] xGMI peer-to-peer copy -- enable `hipDeviceEnablePeerAccess` and `hipMemcpyPeer` for cross-socket MI300A/MI300X transfers without staging through host memory
+- [x] CDNA3 (gfx940/gfx941/gfx942) FP8 (`OCP_FP8_E4M3` / `E5M2`) MFMA instruction emission for MI300X inference workloads — `mfma.rs` (`__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8` / `_bf8_bf8`, arch-gated to CDNA3)
+- [ ] Stream-K GEMM scheduling on CDNA3 -- atomic work-stealing across `XCD` chiplets to balance compute on MI300 split-die architecture *(requires AMD GPU/ROCm hardware to schedule and time; `gfx_arch::xcd_count` models the chiplet count host-side)*
+- [ ] RCCL collectives integration -- `ncclAllReduce`/`ncclAllGather`/`ncclReduceScatter` via runtime-loaded `librccl.so` for multi-GPU training *(requires AMD GPU/ROCm hardware + multi-GPU node)*
+- [x] xGMI peer-to-peer copy modeling — `peer.rs` `PeerTopology` / `plan_peer_copy` (host-side `hipDeviceCanAccessPeer` decision); actual `hipMemcpyPeer` DMA *(requires AMD GPU/ROCm hardware)*
 
 #### P1 -- Important
-- [ ] hipGraph capture/instantiate/launch -- `hipStreamBeginCapture`/`hipGraphInstantiate` for repeated dispatch patterns (transformer decoder layers)
-- [ ] Cooperative groups equivalent -- `hipCooperativeLaunch` for kernels requiring grid-wide synchronization (FlashAttention reductions)
-- [ ] MFMA instruction variants -- emit `v_mfma_f32_16x16x16_f16`, `v_mfma_f32_32x32x8_bf16`, `v_mfma_f64_16x16x4_f64` directly via inline GCN asm
-- [ ] wave32 vs wave64 dispatch heuristic -- RDNA3 prefers wave32 for divergent control flow, CDNA prefers wave64 for memory-bound kernels
-- [ ] LDS (Local Data Share) bank conflict avoidance -- skew GEMM A/B tiles by 4 bytes to eliminate 32-bank conflicts
+- [x] hipGraph capture/instantiate/launch (host-side) -- `hip_graph.rs` DAG + cycle-checked `instantiate` + topological launch order + kernel-node param update; real `hipStreamBeginCapture`/`hipGraphLaunch` *(requires AMD GPU/ROCm hardware)*
+- [ ] Cooperative groups equivalent -- `hipCooperativeLaunch` for kernels requiring grid-wide synchronization (FlashAttention reductions) *(requires AMD GPU/ROCm hardware for grid-wide sync execution)*
+- [x] MFMA instruction variants -- emit `v_mfma_f32_16x16x16_f16`, `v_mfma_f32_32x32x8_bf16`, `v_mfma_f64_16x16x4_f64` via compiler built-ins — `mfma.rs` `mfma_builtin` + `mfma_gemm_hip`
+- [x] wave32 vs wave64 dispatch heuristic -- `gfx_arch.rs` (`native_wavefront`, RDNA→32 / CDNA→64) + `hip_kernels::gemm_hip_waveaware`; occupancy uses the per-arch wave cap
+- [x] LDS (Local Data Share) bank conflict avoidance -- skew GEMM A/B tiles by 4 bytes to eliminate 32-bank conflicts — `hip_kernels_advanced::gemm_lds_tiled_hip` (`[TS][TS+1]`) + `transpose_tiled_hip`
 
 #### P2 -- Nice-to-Have
-- [ ] `hip_kernels/rocm_sdma.rs` — ROCm 6.0 SDMA engine dispatch (AMD 2024): direct submission to System DMA engines via `hipMemcpyWithStream` SDMA path for CPU-GPU zero-copy on unified-memory APU (MI300A); `RocmSdmaTransfer`
-- [ ] `hipblas/hipblaslt.rs` — hipBLASLt runtime loader (`libhipblaslt.so`) for matrix-layout-flexible GEMM with epilogue fusions (bias/activation) on CDNA3/RDNA3; `HipBlasLt`
-- [ ] `device/flat_workgroup.rs` — AMDGPU flat work-group size attribute tuning (AMD 2022): emit `__attribute__((amdgpu_flat_work_group_size(min, max)))` hints to hipRTC for optimal occupancy on divergent kernels; `FlatWorkgroupHint`
-- [ ] AMD MIGraphX backend interop for ONNX model execution
-- [ ] AOMP/AOCC LLVM IR emission as alternative to hipRTC source compilation
-- [ ] HSA (Heterogeneous System Architecture) queue management for fine-grained dispatch
-- [ ] AMD Smart Access Memory (SAM) tuning -- BAR-mapped device memory for direct CPU writes on RDNA3 boards
-- [ ] ROCm SMI integration -- power/thermal telemetry, clock query, ECC error reporting
+- [ ] `hip_kernels/rocm_sdma.rs` — ROCm 6.0 SDMA engine dispatch: direct submission to System DMA engines via `hipMemcpyWithStream` SDMA path for CPU-GPU zero-copy on unified-memory APU (MI300A) *(requires AMD GPU/ROCm hardware; the `hipMemcpyKind` model lives in `stream.rs`)*
+- [x] `hipblaslt.rs` — hipBLASLt runtime loader (`libhipblaslt.so`) for matrix-layout-flexible GEMM with epilogue fusions (bias/activation) on CDNA3/RDNA3; `HipBlasLt` + `MatmulDesc`/`Epilogue` descriptors
+- [x] `flat_workgroup.rs` — AMDGPU flat work-group size attribute tuning: emit `__attribute__((amdgpu_flat_work_group_size(min, max)))` hints; `FlatWorkgroupHint`
+- [ ] AMD MIGraphX backend interop for ONNX model execution *(requires AMD GPU/ROCm hardware + MIGraphX runtime)*
+- [ ] AOMP/AOCC LLVM IR emission as alternative to hipRTC source compilation *(requires LLVM AMDGPU toolchain to lower/assemble)*
+- [ ] HSA (Heterogeneous System Architecture) queue management for fine-grained dispatch *(requires AMD GPU/ROCm hardware)*
+- [ ] AMD Smart Access Memory (SAM) tuning -- BAR-mapped device memory for direct CPU writes on RDNA3 boards *(requires AMD GPU/ROCm hardware + resizable-BAR platform)*
+- [ ] ROCm SMI integration -- power/thermal telemetry, clock query, ECC error reporting *(requires AMD GPU/ROCm hardware + `librocm_smi64.so`)*
 
 ## Dependencies
 
@@ -82,9 +135,9 @@ providing GPU-accelerated operations on AMD GPUs. Part of [OxiCUDA](https://gith
 ## Quality Status
 
 - Warnings: 0
-- Tests: 104 passing
-- unwrap() calls: 0
-- Clippy: clean (pedantic + nursery)
+- Tests: 213 passing (host-side / codegen)
+- unwrap() calls: 0 (production paths)
+- Clippy: clean (`-D warnings`, all-features, all-targets)
 
 ## Performance Targets
 
@@ -114,25 +167,25 @@ ROCm performance is bound by CDNA matrix-core throughput and Infinity Fabric / x
 ## Architecture-Specific Deepening Opportunities
 
 ### CDNA1 (gfx906/gfx908, MI50/MI60/MI100)
-- [ ] `v_mfma_f32_32x32x4f16` for native 32x32x4 FP16 tiles
-- [ ] LDS tile sizes tuned for 64 KiB shared memory budget
-- [ ] Test against rocBLAS-3.x reference for MI100
+- [x] `v_mfma_f32_32x32x4f16` / `16x16x16f16` FP16 tiles — `mfma::mfma_builtin` (CDNA-gated)
+- [x] LDS tile sizes modeled against the 64 KiB budget — `gfx_arch::lds_bytes_per_cu` + `occupancy.rs`
+- [ ] Test against rocBLAS-3.x reference for MI100 *(requires AMD GPU/ROCm hardware)*
 
 ### CDNA2 (gfx90a, MI210/MI250/MI250X)
-- [ ] BF16 MFMA path validated for MI210
-- [ ] Multi-die scheduling for MI250X (two GCDs per package) via xGMI
-- [ ] AOCC/aomp LLVM-IR pipeline as alternative to hiprtc
+- [x] BF16 MFMA path emission — `mfma::mfma_builtin` (`v_mfma_f32_16x16x16bf16_1k`, gated to CDNA2+); numerical *validation* on MI210 *(requires AMD GPU/ROCm hardware)*
+- [x] Multi-die row-slab partitioning model — `multi_device.rs` (`peer_accessible` xGMI flag); on-device dispatch *(requires AMD GPU/ROCm hardware)*
+- [ ] AOCC/aomp LLVM-IR pipeline as alternative to hiprtc *(requires LLVM AMDGPU toolchain)*
 
 ### CDNA3 (gfx940/gfx941/gfx942, MI300A/MI300X)
-- [ ] FP8 E4M3 / E5M2 MFMA emission and accuracy validation
-- [ ] Split-die XCD chiplet-aware tile dispatch
-- [ ] APU shared-memory awareness for MI300A (unified CPU+GPU memory)
-- [ ] Sparse MFMA (`v_mfma_f32_32x32x16f16_sparse`) for 2:4 structured sparsity
+- [x] FP8 E4M3 / E5M2 MFMA emission — `mfma.rs` (`_fp8_fp8` / `_bf8_bf8`); accuracy *validation* *(requires AMD GPU/ROCm hardware)*
+- [x] Split-die XCD chiplet count modeled — `gfx_arch::xcd_count` (8 for gfx942, 6 for gfx940); chiplet-aware *dispatch* *(requires AMD GPU/ROCm hardware)*
+- [ ] APU shared-memory awareness for MI300A (unified CPU+GPU memory) *(requires AMD GPU/ROCm hardware)*
+- [ ] Sparse MFMA (`v_mfma_f32_32x32x16f16_sparse`) for 2:4 structured sparsity *(requires AMD GPU/ROCm hardware to validate sparsity)*
 
 ### RDNA2/RDNA3 (gfx1030/gfx1100, Radeon RX 6000/7000)
-- [ ] wave32 SIMD path with reduced register pressure
-- [ ] WMMA (Wave Matrix Multiply Accumulate) instruction emission for RDNA3
-- [ ] Hardware ray-tracing units left untargeted -- compute path only
+- [x] wave32 SIMD path — `gfx_arch::native_wavefront`=32 for RDNA + `hip_kernels::gemm_hip_wave32`
+- [x] WMMA (Wave Matrix Multiply Accumulate) instruction emission for RDNA3 — `mfma::wmma_builtin` + `mfma_gemm_hip` (`__builtin_amdgcn_wmma_f32_16x16x16_f16_w32`)
+- [ ] Hardware ray-tracing units left untargeted -- compute path only *(intentionally out of scope)*
 
 ## Deepening Opportunities
 
@@ -147,11 +200,11 @@ ROCm performance is bound by CDNA matrix-core throughput and Infinity Fabric / x
 - [ ] Wave32 vs wave64 dispatch decision verified on RDNA3 vs CDNA hardware
 
 ### Implementation Deepening
-- [ ] hipRTC compilation log surfaced through `RocmError::KernelCompileError` with structured ptxas-equivalent diagnostics
-- [ ] hipMemPool / `hipMallocAsync` stream-ordered allocation (CUDA 11.2+ equivalent: HIP 5.0+)
-- [ ] hipGraphInstantiate with kernel-node parameter updates for repeated launches
-- [ ] AMDGPU instruction selection hints via `__attribute__((amdgpu_flat_work_group_size))`
-- [ ] LDS tile padding tuned per CDNA generation (CDNA2: 64 KiB, CDNA3: 64 KiB + split mode)
+- [ ] hipRTC compilation log surfaced through `RocmError::KernelCompileError` with structured ptxas-equivalent diagnostics *(requires hipRTC runtime to produce real diagnostics)*
+- [x] hipMemPool / `hipMallocAsync` stream-ordered allocation MODEL — `mem_pool.rs` `MemoryPool` (alignment, best-fit reuse, coalesce, trim, stats); live `hipMallocAsync` *(requires AMD GPU/ROCm hardware)*
+- [x] hipGraphInstantiate with kernel-node parameter updates (host-side) — `hip_graph.rs` `ExecutableGraph::update_kernel_name`
+- [x] AMDGPU instruction selection hints via `__attribute__((amdgpu_flat_work_group_size))` — `flat_workgroup.rs`
+- [x] LDS tile padding modeled per CDNA generation (64 KiB) — `gfx_arch::lds_bytes_per_cu` consumed by `occupancy.rs` + `+1`-skew tiles in `hip_kernels_advanced.rs`
 
 ## ROCm Version Compatibility
 
@@ -191,4 +244,7 @@ Library candidates searched (in order): `libhiprtc.so.6`, `libhiprtc.so.5`, `lib
 | CDNA3 (gfx942) | `v_mfma_f32_16x16x32bf8_bf8` | 16 x 16 x 32 | FP8 (E5M2) | FP32 | 2048 FLOPS/cycle |
 | RDNA3 (gfx1100) | `v_wmma_f32_16x16x16_f16` | 16 x 16 x 16 | FP16 | FP32 | 256 FLOPS/cycle |
 
-Tile-shape selection is currently hardcoded; future work moves to a `gfx*`-aware tile dispatcher mirroring the `oxicuda-blas` tile-config approach for CUDA.
+Tile-shape selection is now `gfx*`-aware: `mfma::arch_supports` / `mfma_builtin` / `wmma_builtin`
+gate each (M×N×K, dtype) tuple against the target architecture's capabilities from `gfx_arch.rs`,
+and `mfma_gemm_hip` emits the matching matrix-core micro-kernel. Live numerical validation of the
+emitted MFMA/WMMA against rocBLAS *(requires AMD GPU/ROCm hardware)*.

@@ -32,6 +32,13 @@ NF4 QLoRA, FP8 E4M3/E5M2, GPTQ Hessian-OBC, SmoothQuant) are implemented.
 - [x] `scheme/fp8.rs` -- `Fp8Codec` -- E4M3 (max=448) and E5M2 (max=57344) via IEEE 754 bit manipulation
 - [x] `scheme/gptq.rs` -- `GptqQuantizer` -- Hessian-based OBC via Cholesky + L^-1, column-wise weight correction
 - [x] `scheme/smooth_quant.rs` -- `SmoothQuantMigrator` -- alpha-scaled activation/weight migration preserving output
+- [x] `scheme/awq.rs` -- `AwqQuantizer` -- activation-aware per-channel scaling + alpha grid-search (already existed)
+- [x] `scheme/ada_round.rs` -- `AdaRound` -- AdaRound adaptive per-weight rounding with soft-quant + regularizer (already existed)
+- [x] `scheme/ggml.rs` -- GGML/GGUF block codecs `Q8_0` / `Q4_0` / `Q4_1` / `Q4_K` (k-quant super-block) with hand-rolled IEEE-754 f16 scale emulation
+- [x] `scheme/gguf.rs` -- pure-Rust GGUF v3 *container* reader/writer (`read_gguf`/`write_gguf`): `GgufHeader`, typed `GgufMetadataValue`/`GgufArray` (all 13 tags), `GgufTensorInfo` directory, `general.alignment`-aware tensor-data region; hand-rolled little-endian byte I/O, no external deps
+- [x] `scheme/llm_int8.rs` -- `LlmInt8Quantizer` -- outlier-aware mixed-precision decomposition (INT8 regular path + FP16 outlier columns), KIVI/Dettmers emergent-feature threshold
+- [x] `scheme/kv_cache.rs` -- `KvCacheQuantizer` -- INT8/INT4 KV-cache quant, per-channel keys / per-token values (KIVI), streaming `append_token`
+- [x] `scheme/sparse_gptq.rs` -- `SparseGptqQuantizer` -- joint pruning + quantization via OBC (SparseGPT), Hessian-aware saliency or caller mask
 
 #### QAT (`qat/`)
 - [x] `qat/mod.rs` -- module organization
@@ -77,8 +84,9 @@ NF4 QLoRA, FP8 E4M3/E5M2, GPTQ Hessian-OBC, SmoothQuant) are implemented.
 - [x] Magnitude pruning (L1/L2 unstructured + grouped) (`pruning/magnitude.rs`)
 - [x] Structured pruning (channel/filter/head) (`pruning/structured.rs`)
 - [x] Sensitivity-guided greedy bit assignment (`analysis/policy.rs`)
-- [ ] (P2) AWQ activation-aware quantization (no current implementation; could extend `scheme/`)
-- [ ] (P2) GGUF/AutoGPTQ container import/export (requires `oxicuda-arc` integration)
+- [x] (P2) AWQ activation-aware quantization (`scheme/awq.rs` -- `AwqQuantizer`, was already implemented)
+- [x] (P2) GGUF/GGML block quant schemes Q8_0/Q4_0/Q4_1/Q4_K (`scheme/ggml.rs`) -- the codec *math* is pure-Rust + CPU-testable
+- [x] (P2) GGUF *container* file read/write (tensor metadata, alignment, KV header) (`scheme/gguf.rs:read_gguf`/`write_gguf` -- pure-Rust little-endian GGUF v3 container: magic/version/counts header, typed metadata KV section (all 13 scalar/array tags), tensor directory (name/n_dims/dims/ggml_type/offset), `general.alignment` (default 32) aligned tensor-data region; round-trips byte-exactly and rejects bad magic/version/truncation/bad type tag/non-UTF-8 with errors not panics)
 
 ## Dependencies
 
@@ -92,7 +100,7 @@ NF4 QLoRA, FP8 E4M3/E5M2, GPTQ Hessian-OBC, SmoothQuant) are implemented.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 198 passing (root TODO.md count)
+- Tests: 283 passing (+1 doctest) -- was 258; +25 from the `scheme/gguf.rs` GGUF v3 container reader/writer (round-trip, all scalar/array tags, alignment, malformed-input rejection, ggml-payload integration)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime
@@ -139,15 +147,15 @@ NF4 QLoRA, FP8 E4M3/E5M2, GPTQ Hessian-OBC, SmoothQuant) are implemented.
 - [x] All 5 PTQ schemes covered by unit tests with reference FP32 baseline
 - [x] All 3 QAT observers exercise calibration loop in dedicated tests
 - [x] Sensitivity analyzer cross-checked against `compute_metrics` ground truth
-- [ ] GPTQ Hessian conditioning checks against pathological inputs (singular Hessian fallback exists but limited stress test)
-- [ ] SmoothQuant alpha sweep across [0, 1] verified to preserve output identity exactly
+- [x] GPTQ Hessian conditioning checks against pathological inputs (`scheme/gptq.rs` tests: rank-1 damped recovery, ill-conditioned diagonal, tiny-H⁻¹ fallback, negative-definite clean error)
+- [x] SmoothQuant alpha sweep across [0, 1] verified to preserve output identity exactly (`scheme/smooth_quant.rs` tests: 21-point sweep + outlier endpoints)
 
 ### Implementation Deepening
 - [x] PerGroup quantization with arbitrary group size in `MinMaxQuantizer`
 - [x] Distillation `combined` loss supports user-provided weight tuple
 - [x] Mixed-precision policy returns explicit per-layer bit assignment plan
-- [ ] Sparsity-aware GPTQ (combine pruning mask with column-wise weight correction)
-- [ ] AdaRound-style rounding optimization for INT8/INT4 minmax baseline
+- [x] Sparsity-aware GPTQ (combine pruning mask with column-wise weight correction) (`scheme/sparse_gptq.rs` -- SparseGPT joint prune+quant via OBC)
+- [x] AdaRound-style rounding optimization for INT8/INT4 minmax baseline (`scheme/ada_round.rs` -- `AdaRound`, was already implemented)
 
 ## Notes
 

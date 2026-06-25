@@ -668,6 +668,83 @@ fn ffn(x: &[f32], n: usize, d: usize, lw: &ChronosLayer, expansion: usize) -> Ve
     out
 }
 
+// ─── Foundation-model adapter (checkpoint export / import) ───────────────────
+
+impl crate::foundation::adapter::FoundationAdapter for ChronosPredictor {
+    fn export_weights(&self) -> crate::foundation::adapter::WeightStore {
+        let mut s = crate::foundation::adapter::WeightStore::new();
+        s.insert("token_emb", self.token_emb.clone());
+        s.insert("final_g", self.final_g.clone());
+        s.insert("final_b", self.final_b.clone());
+        s.insert("head_w", self.head_w.clone());
+        s.insert("head_b", self.head_b.clone());
+        for (li, layer) in self.layers.iter().enumerate() {
+            s.insert(format!("layer{li}.norm1_g"), layer.norm1_g.clone());
+            s.insert(format!("layer{li}.norm1_b"), layer.norm1_b.clone());
+            s.insert(format!("layer{li}.q_w"), layer.q_w.clone());
+            s.insert(format!("layer{li}.k_w"), layer.k_w.clone());
+            s.insert(format!("layer{li}.v_w"), layer.v_w.clone());
+            s.insert(format!("layer{li}.out_w"), layer.out_w.clone());
+            s.insert(format!("layer{li}.norm2_g"), layer.norm2_g.clone());
+            s.insert(format!("layer{li}.norm2_b"), layer.norm2_b.clone());
+            s.insert(format!("layer{li}.ff_w1"), layer.ff_w1.clone());
+            s.insert(format!("layer{li}.ff_b1"), layer.ff_b1.clone());
+            s.insert(format!("layer{li}.ff_w2"), layer.ff_w2.clone());
+            s.insert(format!("layer{li}.ff_b2"), layer.ff_b2.clone());
+        }
+        s
+    }
+
+    fn import_weights(&mut self, store: &crate::foundation::adapter::WeightStore) -> TsResult<()> {
+        self.token_emb = store
+            .require_len("token_emb", self.token_emb.len())?
+            .to_vec();
+        self.final_g = store.require_len("final_g", self.final_g.len())?.to_vec();
+        self.final_b = store.require_len("final_b", self.final_b.len())?.to_vec();
+        self.head_w = store.require_len("head_w", self.head_w.len())?.to_vec();
+        self.head_b = store.require_len("head_b", self.head_b.len())?.to_vec();
+        for (li, layer) in self.layers.iter_mut().enumerate() {
+            layer.norm1_g = store
+                .require_len(&format!("layer{li}.norm1_g"), layer.norm1_g.len())?
+                .to_vec();
+            layer.norm1_b = store
+                .require_len(&format!("layer{li}.norm1_b"), layer.norm1_b.len())?
+                .to_vec();
+            layer.q_w = store
+                .require_len(&format!("layer{li}.q_w"), layer.q_w.len())?
+                .to_vec();
+            layer.k_w = store
+                .require_len(&format!("layer{li}.k_w"), layer.k_w.len())?
+                .to_vec();
+            layer.v_w = store
+                .require_len(&format!("layer{li}.v_w"), layer.v_w.len())?
+                .to_vec();
+            layer.out_w = store
+                .require_len(&format!("layer{li}.out_w"), layer.out_w.len())?
+                .to_vec();
+            layer.norm2_g = store
+                .require_len(&format!("layer{li}.norm2_g"), layer.norm2_g.len())?
+                .to_vec();
+            layer.norm2_b = store
+                .require_len(&format!("layer{li}.norm2_b"), layer.norm2_b.len())?
+                .to_vec();
+            layer.ff_w1 = store
+                .require_len(&format!("layer{li}.ff_w1"), layer.ff_w1.len())?
+                .to_vec();
+            layer.ff_b1 = store
+                .require_len(&format!("layer{li}.ff_b1"), layer.ff_b1.len())?
+                .to_vec();
+            layer.ff_w2 = store
+                .require_len(&format!("layer{li}.ff_w2"), layer.ff_w2.len())?
+                .to_vec();
+            layer.ff_b2 = store
+                .require_len(&format!("layer{li}.ff_b2"), layer.ff_b2.len())?
+                .to_vec();
+        }
+        Ok(())
+    }
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -887,6 +964,43 @@ mod tests {
         assert!(matches!(
             ChronosPredictor::new(cfg, &mut rng).unwrap_err(),
             TsError::HeadDimMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn chronos_checkpoint_roundtrip_reproduces_logits() {
+        use crate::foundation::adapter::FoundationAdapter;
+        let mut rng = make_rng();
+        let src = ChronosPredictor::new(ChronosConfig::tiny(), &mut rng).expect("build");
+
+        let buf = src.to_checkpoint();
+        let mut dst = ChronosPredictor::new(ChronosConfig::tiny(), &mut rng).expect("dst");
+        dst.load_checkpoint(&buf).expect("load");
+
+        // Same weights ⇒ identical logits for the same token prefix.
+        let series = [0.5_f32, -0.3, 0.2, 0.9, -0.1];
+        let tokens = src.tokenize(&series);
+        let l_src = src.forward(&tokens).expect("l_src");
+        let l_dst = dst.forward(&tokens).expect("l_dst");
+        assert_eq!(l_src.len(), l_dst.len());
+        for (a, b) in l_src.iter().zip(l_dst.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "checkpoint logit mismatch: {a} vs {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn chronos_import_rejects_wrong_shape() {
+        use crate::foundation::adapter::{FoundationAdapter, WeightStore};
+        let mut rng = make_rng();
+        let mut m = ChronosPredictor::new(ChronosConfig::tiny(), &mut rng).expect("build");
+        let mut store: WeightStore = m.export_weights();
+        store.insert("head_b", vec![0.0_f32; 1]);
+        assert!(matches!(
+            m.import_weights(&store).unwrap_err(),
+            TsError::WeightShapeMismatch { .. }
         ));
     }
 }

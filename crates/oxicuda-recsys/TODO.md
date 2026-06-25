@@ -10,16 +10,19 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
 
 ## Implementation Status
 
-- **Actual SLoC:** 15,092 total lines (3,435 code, 59 files)
+- **Actual SLoC:** ~17,400 total lines (64 source files)
 - **Coverage:** ALS implicit-feedback, BPR pairwise ranking, NMF multiplicative
   updates; Neural CF (GMF ⊕ MLP); Two-Tower DSSM; DeepFM (linear + 2nd-order FM
   + Deep MLP); AutoInt multi-head self-attention over field embeddings;
   Wide & Deep; GRU4Rec full GRU cell; SASRec causal self-attention;
   BERT4Rec bidirectional MLM; LightGCN symmetric-normalized propagation;
   NGCF interaction-aware aggregation; MMoE / PLE / ESMM multi-task heads;
-  uniform / popularity-biased / hard-negative samplers; ranking metrics
-  (Precision@K, Recall@K, NDCG@K, MAP@K, MRR, HitRate@K, AUC); and PTX
-  kernel-string generation for 6 SM tiers.
+  uniform / popularity-biased / hard-negative / adaptive-importance samplers;
+  sparse-gradient row-wise AdamW embedding optimizer; CL4SRec & DuoRec
+  contrastive sequence models; content-based cold-start fallback + switching
+  hybrid; ranking metrics (Precision@K, Recall@K, NDCG@K, MAP@K, MRR,
+  HitRate@K, AUC); calibration metrics (ECE/MCE/Brier/log-loss + group
+  calibration disparity); and PTX kernel-string generation for 6 SM tiers.
 
 ### Completed
 
@@ -84,7 +87,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
   contains `.target sm_x` × all SM versions)
 - [x] Benchmarks (`benches/recsys_ops.rs`) — PTX group (`als_step`,
   `dot_score` × 4 SM) + NDCG@10 bench + LCG RNG bench
-- **Tests:** 417 passing
+- **Tests:** 461 passing
 
 ### Future Enhancements
 
@@ -115,26 +118,46 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
 - [x] UltraGCN — pre-computed weighted neighborhood replacing iterative GCN
 
 #### P1 — Sequence Models
-- [ ] CL4SRec / DuoRec contrastive learning losses for sequential recsys
+- [x] CL4SRec / DuoRec contrastive learning losses for sequential recsys
+  (CL4SRec in sequential/cl4srec.rs -- Xie 2022 ICDE; crop/mask/reorder
+  augmentations + InfoNCE/NT-Xent in-batch negatives. DuoRec in
+  sequential/duorec.rs -- Qiu 2022 WSDM; dropout-based unsupervised views +
+  same-target supervised positives + combined L_unsup + λ·L_sup objective)
 - [x] STAMP short-term attention/memory priority model (sequential/stamp.rs -- Liu 2018 KDD; sigmoid local activation unit α_i = v_a · σ(W_a0·x_i + W_a1·x_t + W_a2·m_s + b_a), un-normalised gates, trilinear scoring e_j · (h_s ⊙ h_t))
 - [x] FMLP-Rec frequency-domain filter-MLP (sequential/fmlp_rec.rs -- Zhou 2022 WWW; inline radix-2 Cooley-Tukey FFT + learnable complex filter (real=1, imag=0 init) + residual LayerNorm + position-wise GELU FFN)
 
 #### P2 — Sampling & Training
-- [ ] Adaptive sampler with importance weighting
-- [ ] Mixed-precision (FP16/BF16) embedding tables
+- [x] Adaptive sampler with importance weighting (sampling/adaptive_neg.rs --
+  Rendle-Freudenthaler 2014 WSDM / AdaSIR; uniform-proposal pool resampled
+  ∝ exp(s/τ) with self-normalised importance weight ŵ returned for gradient
+  debiasing of the uniform objective)
+- [ ] Mixed-precision (FP16/BF16) embedding tables (requires GPU hardware /
+  native half-precision storage)
 - [ ] Embedding-table sharding across multiple GPUs (model parallelism)
-- [ ] Sparse gradient AdamW updates for large embeddings
-- [ ] Distributed BPR / contrastive in-batch negatives
+  (requires multi-GPU hardware)
+- [x] Sparse gradient AdamW updates for large embeddings (optim/sparse_adamw.rs
+  -- Loshchilov-Hutter 2019 AdamW; per-row first/second moment + per-row step
+  counter for lazy bias correction + decoupled weight decay; only touched rows
+  time-stepped/updated)
+- [ ] Distributed BPR / contrastive in-batch negatives (in-batch InfoNCE exists
+  in sequential/cl4srec.rs; the *distributed* all-gather across GPUs requires
+  multi-GPU hardware)
 
 #### P2 — Evaluation & Tooling
 - [x] Diversity / coverage / novelty metrics
-- [ ] Calibration & fairness-aware ranking metrics
-- [ ] LLM4Rec LLM-augmented recommendation (`llm/llm4rec.rs`) — Bao 2023: LLM-based item explanation + natural-language user profile construction with in-context learning for cold-start recommendation; `Llm4Rec`
-- [ ] GraphRec interaction-aware graph recommender (`graph_recsys/graphrec.rs`) — Fan 2019 WWW: dual aggregation over item-space and social-space graphs with attention-weighted interactions; `GraphRec`
-- [ ] Fairness-aware ranking exposure control (`ranking/fairness_ranking.rs`) — Singh-Joachims 2018 KDD: exposure-fairness constraint via deterministic ranking + constraint LP for proportional exposure across demographic groups; `FairnessRanker`
+- [x] Calibration & fairness-aware ranking metrics (metrics/calibration.rs --
+  Naeini 2015 / Guo 2017; equal-width reliability bins, Expected & Maximum
+  Calibration Error, Brier score, binary log loss, and group_calibration_disparity
+  surfacing max−min per-group ECE for calibration fairness)
+- [ ] LLM4Rec LLM-augmented recommendation (`llm/llm4rec.rs`) — Bao 2023: LLM-based item explanation + natural-language user profile construction with in-context learning for cold-start recommendation; `Llm4Rec` (requires an actual LLM backend; a pure-Rust stand-in cannot honestly provide LLM behaviour)
+- [x] GraphRec interaction-aware graph recommender (`graph_recsys/graphrec.rs`) — Fan 2019 WWW: dual aggregation over item-space and social-space graphs with attention-weighted interactions; `GraphRec` (ALREADY IMPLEMENTED at graph_recsys/graphrec.rs)
+- [x] Fairness-aware ranking exposure control (`ranking/fairness_ranking.rs`) — Singh-Joachims 2018 KDD: exposure-fairness constraint via deterministic ranking + constraint LP for proportional exposure across demographic groups; `FairnessRanker` (ALREADY IMPLEMENTED at ranking/fairness_ranking.rs)
 - [x] MIND multi-interest network (`sequential/mind.rs`) — Li 2019 CIKM: capsule dynamic routing over user history to extract multiple interest vectors for diverse candidate retrieval; `MindNetwork`
 - [x] Off-policy evaluation (IPS, SNIPS, doubly-robust estimators)
-- [ ] Cold-start handling (content-based fallback)
+- [x] Cold-start handling (content-based fallback) (cold_start.rs -- Schein 2002
+  SIGIR / Burke 2002; item-item content cosine KNN + interaction-weighted content
+  user profile + switching/weighted hybrid that defers to content scoring when
+  either user or item interaction count is below warm_threshold)
 
 ## Dependencies
 
@@ -149,8 +172,10 @@ as strings. No oxicuda-driver / -memory / -launch dependency at this layer.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 417 passing (ALS, BPR, NMF, NCF, TwoTower, DeepFM, WideDeep, SASRec,
-  LightGCN, NDCG, uniform-neg, PTX × 6 SM)
+- Tests: 461 passing (ALS, BPR, NMF, NCF, TwoTower, DeepFM, WideDeep, SASRec,
+  LightGCN, NDCG, uniform-neg, PTX × 6 SM; + adaptive importance sampler,
+  sparse-AdamW optimizer, calibration metrics, DuoRec, cold-start content
+  fallback, AUC-tie / NDCG-IDCG / BPR finite-difference numerical checks)
 - unwrap() calls: 0 in production code
 - macOS: compiles but returns `UnsupportedPlatform` at runtime when actual launch
   is attempted (PTX emission still works on every host)
@@ -224,15 +249,24 @@ the Linux+NVIDIA verification run is executed.
 - [ ] BPR pairwise AUC tracking over training epochs
 
 ### Implementation Deepening
-- [ ] Sparse-gradient embedding optimizer (AdamW with row-wise state)
-- [ ] Distributed embedding-table sharding
-- [ ] CIN / DIN / DLRM model coverage
-- [ ] PinSAGE / KGAT graph recommender extensions
+- [x] Sparse-gradient embedding optimizer (AdamW with row-wise state)
+  (optim/sparse_adamw.rs)
+- [ ] Distributed embedding-table sharding (requires multi-GPU hardware)
+- [x] CIN / DIN / DLRM model coverage (CIN/xDeepFM in deepfm/cin.rs; DIN in
+  sequential/din.rs; DLRM in dlrm.rs -- all ALREADY IMPLEMENTED)
+- [x] PinSAGE / KGAT graph recommender extensions (graph_recsys/pinsage.rs and
+  graph_recsys/kgat.rs -- both ALREADY IMPLEMENTED)
 
 ### Numerical Accuracy
-- [ ] AUC tie-handling unit-tested for synthetic pathological inputs
-- [ ] NDCG IDCG denominator matches sklearn reference exactly
-- [ ] BPR gradient direction verified via finite-difference probe
+- [x] AUC tie-handling unit-tested for synthetic pathological inputs
+  (metrics/recsys_metrics.rs::tests -- all-ties=0.5, symmetric partial ties=0.5,
+  one-tie-breaks-perfect=0.75, single-class=0.5)
+- [x] NDCG IDCG denominator matches sklearn reference exactly
+  (metrics/recsys_metrics.rs::tests::ndcg_idcg_matches_reference vs textbook
+  1/log2(rank+1) binary-relevance reference over 4 cases)
+- [x] BPR gradient direction verified via finite-difference probe
+  (factorization/bpr.rs::tests::gradient_direction_matches_finite_difference --
+  per-coordinate central difference of L=-ln σ(x_ui-x_uj), Δθ == -lr·∂L/∂θ)
 
 ## Performance Verification Harness Status (2026-05-16)
 

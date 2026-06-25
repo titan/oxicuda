@@ -7,9 +7,9 @@ through WGSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/ox
 
 ## Implementation Status
 
-- **Actual SLoC:** ~3,948 across 8 files
-- **Tests:** 129 passing
-- **Status:** Full memory + compute, WGSL generators, WASM target, FP16 path
+- **Actual SLoC:** ~5,300 across 11 files
+- **Tests:** 185 passing (+1 doc-test)
+- **Status:** Full memory + compute, WGSL generators (+ transpose/softmax/scan/layernorm/subgroup/f64-emul/FFT), host-side dispatch planner, WASM target, FP16 path
 - **Targets:** Native (Vulkan / Metal / D3D12 / GL via wgpu) + browser (WebGPU API)
 
 ### Completed
@@ -42,29 +42,45 @@ through WGSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/ox
 #### Backend Tests (`backend_tests.rs`, ~31.7K)
 - [x] Comprehensive integration tests for `WebGpuBackend` -- dispatch, FP16, batched, edge cases
 
+#### Extended WGSL Shader Generators (`shader_ext.rs`, NEW)
+- [x] `transpose_wgsl(tile_size)` -- tiled 2-D transpose with bank-conflict-padded (`tile+1`) shared tile
+- [x] `softmax_wgsl()` -- row-wise numerically-stable softmax (max-subtraction; one workgroup per row, two tree reductions)
+- [x] `scan_wgsl(block_size, ScanKind)` -- Blelloch (1990) work-efficient up-sweep/down-sweep prefix scan, inclusive + exclusive
+- [x] `layernorm_wgsl(eps)` -- row-wise layer normalisation (Ba et al. 2016): mean-centre + `/sqrt(var+eps)` + affine `gamma`/`beta`
+- [x] `f64_emul_add_wgsl()` -- double-single (`vec2<f32>` hi/lo) emulated-f64 add via Knuth TwoSum (WebGPU has no native FP64)
+
+#### Radix-2 FFT (`fft.rs`, NEW -- closes P2 `shader/fft_wgsl.rs`)
+- [x] `WgslFftPlan` -- host plan: bit-reversal permutation + precomputed twiddle LUT (`W_N^k`), forward/inverse, `1/N` inverse scale
+- [x] `fft_bitreverse_wgsl()` -- permutation reorder pass; `fft_stage_wgsl()` -- one radix-2 Cooley-Tukey (1965) DIT butterfly stage (twiddles from buffer, no `sin`/`cos` in shader)
+
+#### Host Dispatch Planner (`planner.rs`, NEW -- closes P1 workgroup auto-tuning)
+- [x] `Limits` (portable/desktop profiles) + `plan_workgroup_1d` / `plan_workgroup_square` -- power-of-two workgroup auto-tuning under `max_compute_invocations_per_workgroup` and per-axis caps
+- [x] `plan_dispatch_1d` -- 1-D dispatch with automatic 2-D fold (`wgid.y * grid_x + wgid.x` decode) past the 65 535-per-axis cap; `plan_dispatch_2d` -- tiled GEMM/batched grids
+- [x] `texture_row_layout` -- 256-byte `bytes_per_row` alignment math for texture copies
+
 ### Future Enhancements
 
 #### P0 -- Critical
-- [ ] WGSL subgroup operations -- `subgroupBroadcast`, `subgroupAdd`, `subgroupMax` (stabilizing in Chrome 125+, Firefox 135+) for warp-style reductions
-- [ ] Indirect dispatch (`wgpu::ComputePass::dispatch_workgroups_indirect`) -- GPU-driven dispatch sizes for dynamic batching / autoregressive decode
-- [ ] Pipeline & shader-module caching -- reuse compiled `wgpu::ShaderModule` and `ComputePipeline` across calls (currently per-dispatch)
+- [x] WGSL subgroup operations -- `subgroupAdd`, `subgroupMax`, `subgroupMin` warp-style reduction **source + `enable subgroups;` gate** generated & tested in `shader_ext.rs::subgroup_reduction_wgsl` (on-device dispatch still requires GPU/adapter hardware reporting `wgpu::Features::SUBGROUP`)
+- [ ] Indirect dispatch (`wgpu::ComputePass::dispatch_workgroups_indirect`) -- GPU-driven dispatch sizes for dynamic batching / autoregressive decode *(requires GPU/adapter hardware)*
+- [ ] Pipeline & shader-module caching -- reuse compiled `wgpu::ShaderModule` and `ComputePipeline` across calls (currently per-dispatch) *(requires GPU/adapter hardware -- caches live `wgpu` device objects)*
 
 #### P1 -- Important
-- [ ] WGSL workgroup size auto-tuning per adapter limits (`max_compute_workgroup_size_x/y/z`, `max_compute_invocations_per_workgroup`)
-- [ ] Push constants (when WebGPU API exposes them) -- avoid uniform-buffer allocation for small param structs
-- [ ] WGSL `enable chromium_experimental_subgroups` path for Chromium native (pre-standard subgroup ops)
-- [ ] Persistent staging buffer pool (avoid `map_async` round-trip per H2D / D2H)
-- [ ] Timestamp queries (`wgpu::QuerySet`) for kernel-level GPU timing
-- [ ] Shader hot-reload during WGSL development (debug-build only)
+- [x] WGSL workgroup size auto-tuning per adapter limits (`max_compute_workgroup_size_x/y/z`, `max_compute_invocations_per_workgroup`) -- pure host math in `planner.rs::{plan_workgroup_1d, plan_workgroup_square}` over a `Limits` profile
+- [ ] Push constants (when WebGPU API exposes them) -- avoid uniform-buffer allocation for small param structs *(requires GPU/adapter hardware + spec stabilization)*
+- [x] WGSL `enable chromium_experimental_subgroups` path for Chromium native (pre-standard subgroup ops) -- emitted by `subgroup_reduction_wgsl(.., chromium_experimental = true)` (on-device dispatch requires Chromium-native adapter)
+- [ ] Persistent staging buffer pool (avoid `map_async` round-trip per H2D / D2H) *(requires GPU/adapter hardware -- pools live staging buffers)*
+- [ ] Timestamp queries (`wgpu::QuerySet`) for kernel-level GPU timing *(requires GPU/adapter hardware)*
+- [ ] Shader hot-reload during WGSL development (debug-build only) *(requires GPU/adapter hardware -- recompiles live pipelines)*
 
 #### P2 -- Nice-to-Have
-- [ ] `shader/fft_wgsl.rs` — WGSL radix-2 Cooley-Tukey FFT butterfly (Cooley-Tukey 1965): shared-memory butterfly kernel with bit-reversal permutation and twiddle-factor LUT for compute-only FFT dispatch in browsers; `WgslFftPlan`
-- [ ] `backend/async_pipeline.rs` — async compute + render pipeline separation (2023): `wgpu::Device::create_compute_pipeline_async` for background shader compilation without blocking the render loop; `AsyncComputePipeline`
-- [ ] Browser WASM threading via `SharedArrayBuffer` + `Atomics` (requires COOP/COEP headers)
-- [ ] Multi-adapter dispatch on systems with discrete + integrated GPU (laptop dGPU/iGPU)
-- [ ] WGSL `f64` emulation (WebGPU has no double precision -- requires double-single arithmetic)
-- [ ] `WGPU_BACKEND` env var documentation for cross-backend testing (`vulkan`/`metal`/`dx12`/`gl`)
-- [ ] OffscreenCanvas / WebWorker integration for non-blocking dispatch in browsers
+- [x] `shader/fft_wgsl.rs` — WGSL radix-2 Cooley-Tukey FFT butterfly (Cooley-Tukey 1965): bit-reversal permutation + twiddle-factor LUT + `WgslFftPlan` for compute-only FFT dispatch — implemented in `fft.rs` (`WgslFftPlan`, `fft_bitreverse_wgsl`, `fft_stage_wgsl`); on-device dispatch requires GPU
+- [ ] `backend/async_pipeline.rs` — async compute + render pipeline separation (2023): `wgpu::Device::create_compute_pipeline_async` for background shader compilation without blocking the render loop; `AsyncComputePipeline` *(requires GPU/adapter hardware)*
+- [ ] Browser WASM threading via `SharedArrayBuffer` + `Atomics` (requires COOP/COEP headers) *(requires browser runtime)*
+- [ ] Multi-adapter dispatch on systems with discrete + integrated GPU (laptop dGPU/iGPU) *(requires GPU/adapter hardware)*
+- [x] WGSL `f64` emulation (WebGPU has no double precision -- double-single arithmetic) -- `shader_ext.rs::f64_emul_add_wgsl` (double-single `vec2<f32>` add via Knuth TwoSum; on-device dispatch requires GPU)
+- [ ] `WGPU_BACKEND` env var documentation for cross-backend testing (`vulkan`/`metal`/`dx12`/`gl`) *(documentation/runtime task)*
+- [ ] OffscreenCanvas / WebWorker integration for non-blocking dispatch in browsers *(requires browser runtime)*
 
 ## Dependencies
 
@@ -77,9 +93,15 @@ through WGSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/ox
 ## Quality Status
 
 - Warnings: 0
-- Tests: 129 passing
+- Tests: 185 passing (+1 doc-test)
 - unwrap() calls: 0
-- Clippy: clean (pedantic + nursery)
+- Clippy: clean (pedantic + nursery), `-D warnings` on `--all-features --all-targets`
+
+> **Remaining unchecked items below are genuinely device-gated**: they need a
+> real `wgpu` adapter/device/queue, on-hardware shader compilation + dispatch,
+> GPU timing, a browser runtime, or a CI matrix — none are CPU-testable in this
+> crate. The CPU-testable host/codegen surface (WGSL string generation, FFT
+> plan, dispatch/workgroup planners) is implemented and tested above.
 
 ## Performance Targets
 

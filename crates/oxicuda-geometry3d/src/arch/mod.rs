@@ -5,6 +5,7 @@ pub mod egnn;
 pub mod kpconv;
 pub mod point_transformer;
 pub mod pointnet;
+pub mod pointnet_batched;
 pub mod pointnet_pp;
 
 pub use egnn::{Egnn, EgnnConfig, EgnnLayer};

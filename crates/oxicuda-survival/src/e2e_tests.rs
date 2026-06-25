@@ -147,6 +147,27 @@ fn rmst_constant_survival() {
     assert!((area - 10.0).abs() < 1.0e-12);
 }
 
+// 9b. rmst_integrate quadrature accuracy: trapezoid beats rectangle on a smooth
+// survivor, and the rmst_integrate PTX kernel is present for every SM version that
+// the on-device path would target (CPU-side reference for the GPU accuracy check).
+#[test]
+fn rmst_integrate_quadrature_accuracy_all_sm() {
+    let tau = 5.0_f64;
+    // ∫₀^τ e^{-t} dt = 1 − e^{-τ}.
+    let reference = 1.0 - (-tau).exp();
+    let cmp = crate::rmst::compare_quadrature(|t| (-t).exp(), tau, 128, reference).expect("ok");
+    assert!(cmp.trapezoid_is_better());
+    // Trapezoid (O(h²)) must be dramatically tighter than rectangle (O(h)).
+    assert!(cmp.trapezoid_abs_error < cmp.rectangle_abs_error * 0.02);
+    assert!(cmp.trapezoid_abs_error < 1.0e-3);
+    // The PTX integrator must be emitted for every targeted SM version.
+    for &sm in &[75u32, 80, 86, 89, 90, 100] {
+        let ptx = rmst_integrate_ptx(sm);
+        assert!(!ptx.is_empty());
+        assert!(ptx.contains(".visible .entry"));
+    }
+}
+
 // 10. Fine-Gray reduces to Cox when no competing events
 #[test]
 fn fine_gray_reduces_to_cox() {

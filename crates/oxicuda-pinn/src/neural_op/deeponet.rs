@@ -132,6 +132,20 @@ impl DeepONet {
         mlp_forward(&self.branch_w, &self.branch_b, func_samples, true)
     }
 
+    /// Read-only view of the trunk network's per-layer weight matrices
+    /// (row-major `[d_out × d_in]`). Exposed so physics-informed extensions can
+    /// propagate dual numbers through the trunk for exact `∂trunk/∂y`.
+    #[must_use]
+    pub fn trunk_weights(&self) -> &[Vec<f32>] {
+        &self.trunk_w
+    }
+
+    /// Read-only view of the trunk network's per-layer bias vectors.
+    #[must_use]
+    pub fn trunk_biases(&self) -> &[Vec<f32>] {
+        &self.trunk_b
+    }
+
     /// Trunk network: encode query coordinate `[d_query]` → `[p]`.
     pub fn trunk_forward(&self, query: &[f32]) -> PinnResult<Vec<f32>> {
         if query.len() != self.config.d_query {

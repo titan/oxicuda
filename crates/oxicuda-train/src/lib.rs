@@ -101,8 +101,12 @@ pub mod ema;
 /// CPU-side optimizer implementations (ADOPT, Muon, LAMB).
 pub mod optimizer;
 
-/// Additional learning rate schedulers (WSD).
+/// Additional learning rate schedulers (WSD, SGDR cosine warm restarts).
 pub mod scheduler;
+
+/// Higher-level training-loop infrastructure (SWA, label smoothing, early
+/// stopping, curriculum learning, data samplers).
+pub mod training;
 
 /// Utility free functions for raw `f32` slices (gradient clipping etc.).
 pub mod utils;
@@ -131,6 +135,12 @@ pub mod prelude {
     pub use crate::lr_scheduler::{
         CosineAnnealingLR, CyclicLR, ExponentialLR, LinearWarmup, LrScheduler, MultiStepLR,
         OneCycleLR, PolynomialDecayLR, ReduceLROnPlateau, StepLR, WarmupCosine,
+    };
+    pub use crate::optimizer::{Adafactor, AdafactorConfig, Shampoo, ShampooConfig};
+    pub use crate::scheduler::{CosineAnnealingWarmRestarts, CosineRestartConfig};
+    pub use crate::training::{
+        Curriculum, EarlyStopMode, EarlyStopping, LabelSmoothingCrossEntropy, Pacing,
+        RandomSampler, SequentialSampler, Swa, SwaLr, WeightedRandomSampler,
     };
     pub use crate::zero::{ZeroConfig, ZeroOptimizer, ZeroStage};
 }

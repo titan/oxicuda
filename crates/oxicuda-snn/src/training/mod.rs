@@ -12,12 +12,20 @@
 //!   a low-pass-filtered post-synaptic-potential kernel and an `MSE` on the
 //!   filtered output spike train.
 
+/// Bayesian SNN via Bayes-by-Backprop variational posterior over weights.
+pub mod bayesian_snn;
 /// Backprop-through-time for SNN with surrogate gradients.
 pub mod bptt;
 /// Three-factor eligibility-trace consolidation (Zenke 2021).
 pub mod eligibility_consolidation;
 /// e-prop online learning rule (Bellec 2020) and DECOLLE variant (Kaiser 2020).
 pub mod eprop;
+/// Random / Direct Feedback Alignment training (Lillicrap 2016, Nøkland 2016).
+pub mod feedback_alignment;
+/// Quantisation-aware training: INT8 / FP8 fake-quant with straight-through estimator.
+pub mod quantization;
+/// Random Feedback Local Online learning (RFLO, Murray 2019).
+pub mod rflo;
 /// SLAYER spike layer error reassignment.
 pub mod slayer;
 /// Spatio-temporal backprop with explicit reset gradient (Wu et al. 2018).

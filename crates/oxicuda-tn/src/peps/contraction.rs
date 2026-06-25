@@ -145,4 +145,44 @@ mod tests {
         assert!(v.is_finite());
         assert!(v >= 0.0);
     }
+
+    #[test]
+    fn boundary_contraction_error_decreases_with_chi() {
+        // Verification gap: the boundary-MPS approximation error must shrink (be
+        // non-increasing) as the boundary bond dimension `chi` grows toward the
+        // exact value. For a 3x3 PEPS with virtual bond 2, a large chi reproduces
+        // the exact contraction; smaller chi truncates the boundary MPS.
+        let mut rng = LcgRng::new(2024);
+        let peps = Peps::random(3, 3, 2, 2, &mut rng).expect("peps");
+        // A generously large boundary bond yields the (effectively exact) reference:
+        // the intermediate boundary MPS bond never exceeds the doubled PEPS bond
+        // squared, so chi=64 is exact here.
+        let exact = boundary_mps_contraction(&peps, 64, 1e-14).expect("exact");
+        assert!(exact.is_finite() && exact > 0.0);
+
+        // Relative error of the boundary-MPS estimate at each boundary bond `chi`.
+        let rel_err = |chi: usize| -> f64 {
+            let approx = boundary_mps_contraction(&peps, chi, 1e-14).expect("approx");
+            (approx - exact).abs() / exact.abs().max(1e-300)
+        };
+        let err_min_chi = rel_err(1);
+        let err_max_chi = rel_err(16);
+
+        // The crude chi=1 estimate carries a real, non-negligible truncation error.
+        assert!(
+            err_min_chi > 1e-3,
+            "chi=1 truncation error unexpectedly tiny: {err_min_chi:.3e}"
+        );
+        // Increasing the boundary bond reduces the error: by the time `chi` reaches the
+        // exact boundary bond the estimate is exact, so the large-chi error is far
+        // smaller than the aggressively truncated chi=1 one and essentially zero.
+        assert!(
+            err_max_chi < err_min_chi,
+            "increasing chi did not reduce error: chi1={err_min_chi:.3e}, chi16={err_max_chi:.3e}"
+        );
+        assert!(
+            err_max_chi < 1e-8,
+            "error at large chi still large: {err_max_chi:.3e}"
+        );
+    }
 }

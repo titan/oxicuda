@@ -108,6 +108,17 @@ impl DeviceHistogramConfig {
             self.block_size
         )
     }
+
+    /// Scratch / output-buffer bytes the caller must allocate.
+    ///
+    /// The histogram needs no global scratch beyond the output bin array
+    /// (`num_bins` `u32` counters); the per-block privatized bins live in shared
+    /// memory.  The `_n` parameter is accepted so this matches the uniform
+    /// `workspace_bytes(input_len)` query shape of the other device templates.
+    #[must_use]
+    pub fn workspace_bytes(&self, _n: u64) -> u64 {
+        u64::from(self.num_bins) * 4
+    }
 }
 
 // ─── Template ────────────────────────────────────────────────────────────────
@@ -551,6 +562,14 @@ mod tests {
         let n = c.count_kernel_name();
         assert!(n.contains("even"), "{n}");
         assert!(n.contains("f32"), "{n}");
+    }
+
+    #[test]
+    fn workspace_bytes_is_bins_times_four() {
+        let c = cfg(PtxType::U32, 256, DeviceHistogramMode::Modulo);
+        // num_bins * 4, independent of n.
+        assert_eq!(c.workspace_bytes(1_000_000), 256 * 4);
+        assert_eq!(c.workspace_bytes(0), 1024);
     }
 
     #[test]

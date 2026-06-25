@@ -108,8 +108,10 @@ pub mod prelude {
     };
     pub use crate::non_contrastive::vicreg::{VicRegConfig, vicreg_loss};
     pub use crate::ptx_kernels::{
-        barlow_cross_corr_ptx, byol_cosine_loss_ptx, cosine_similarity_ptx, f32_hex,
-        gather_features_ptx, momentum_update_ptx, nt_xent_softmax_ptx, random_mask_ptx,
+        barlow_cross_corr_ptx, barlow_cross_corr_wgmma_ptx, byol_cosine_loss_bf16_ptx,
+        byol_cosine_loss_ptx, cosine_similarity_ptx, f32_hex, gather_features_bulk_ptx,
+        gather_features_ptx, momentum_update_f16_ptx, momentum_update_ptx, nt_xent_softmax_ptx,
+        nt_xent_softmax_warp_ptx, random_mask_ptx,
     };
     pub use crate::ssl::data2vec_v2::{Data2VecModel, Data2VecModelConfig};
     pub use crate::ssl::jem::{Jem, JemConfig};

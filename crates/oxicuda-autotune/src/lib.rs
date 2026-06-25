@@ -95,6 +95,7 @@
 pub mod adaptive;
 pub mod bayesian;
 pub mod benchmark;
+pub mod cache;
 pub mod cli;
 pub mod config;
 pub mod cost_model;
@@ -133,6 +134,9 @@ pub use adaptive::{
 };
 pub use bayesian::{AcquisitionFunction, BayesianOptimizer, GaussianProcess, GpPrediction};
 pub use benchmark::{BenchmarkConfig, BenchmarkEngine, BenchmarkResult, WarmupStrategy};
+pub use cache::{
+    CacheKey, CacheSchemaVersion, CacheStats, PersistentTuneCache, kernel_source_hash,
+};
 pub use cli::{
     CliCommand, CliConfig, CliRunner, ConsoleProgressCallback, ProgressCallback, TuneProgress,
     TuneReport,
@@ -217,15 +221,16 @@ pub mod prelude {
         AccessPattern, AcquisitionFunction, AdaptivePolicy, AdaptiveSelector, AdaptiveTuneReport,
         ArchitectureProfile, ArchitectureSimilarity, ArithmeticIntensity, AutotuneError,
         AutotuneResult, BandwidthCeiling, BayesianOptimizer, BenchmarkConfig, BenchmarkEngine,
-        BenchmarkResult, Bound, BudgetSuggestion, BudgetUtilization, Config, ConfigAdapter,
-        ConfigTransferRule, ConfigTransformer, ConstrainedSearchSpace, ConstrainedTuner, CostModel,
-        DispatchTier, Dispatcher, EarlyStoppingConfig, EarlyStoppingSummary, EarlyStoppingTracker,
-        ExplorationScheduler, FeatureCostModel, GaussianProcess, GemmMemoryEstimator,
-        GeneticAlgorithm, GeneticConfig, GpPrediction, GuidedPtxGenerator, GuidedPtxStrategy,
-        HintMerger, KernelDescriptor, KernelSignature, KernelSimilarityIndex, LatencyPredictor,
-        Loop, LoopNest, MemoryBudget, MemoryEstimate, MemoryEstimator, MetricsWindow,
-        MultiObjectiveOptimizer, MultiObjectiveResult, Objective, ObjectiveDirection,
-        ObjectiveSpec, ObjectiveValue, ParetoFront, PerformanceRegression, PerformanceTrend,
+        BenchmarkResult, Bound, BudgetSuggestion, BudgetUtilization, CacheKey, CacheSchemaVersion,
+        CacheStats, Config, ConfigAdapter, ConfigTransferRule, ConfigTransformer,
+        ConstrainedSearchSpace, ConstrainedTuner, CostModel, DispatchTier, Dispatcher,
+        EarlyStoppingConfig, EarlyStoppingSummary, EarlyStoppingTracker, ExplorationScheduler,
+        FeatureCostModel, GaussianProcess, GemmMemoryEstimator, GeneticAlgorithm, GeneticConfig,
+        GpPrediction, GuidedPtxGenerator, GuidedPtxStrategy, HintMerger, KernelDescriptor,
+        KernelSignature, KernelSimilarityIndex, LatencyPredictor, Loop, LoopNest, MemoryBudget,
+        MemoryEstimate, MemoryEstimator, MetricsWindow, MultiObjectiveOptimizer,
+        MultiObjectiveResult, Objective, ObjectiveDirection, ObjectiveSpec, ObjectiveValue,
+        ParetoFront, PerformanceRegression, PerformanceTrend, PersistentTuneCache,
         PowerAwareBenchmarkEngine, PowerAwareBenchmarkResult, PowerAwareSelector, PowerConstraint,
         PowerMonitor, PowerProfile, PowerReading, ProblemDims, ProblemKey, ProblemSize,
         PtxGenerationHint, PtxSpecialization, ReductionType, ResultDb, Roofline,
@@ -233,6 +238,6 @@ pub mod prelude {
         SearchSpaceBuilder, SimilarityMatch, SimilarityScore, SimulatedAnnealing,
         SimulatedAnnealingConfig, SizeInterpolator, StopReason, SwitchDecision, TemplateAutotuner,
         TransferLearningEngine, TransferStrategy, TransferredConfig, Transform, TunableKernel,
-        WarmupStrategy, WeightedScalarization,
+        WarmupStrategy, WeightedScalarization, kernel_source_hash,
     };
 }

@@ -8,9 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.58).
 
 ## Implementation Status
 
-- **Actual SLoC:** 10,537 (73 files, tokei measurement)
-- **Total lines (incl. comments+blanks):** 10,537
-- **Tests:** 253 passing
+- **Actual SLoC:** ~11.1K (74 files, tokei measurement)
+- **Tests:** 279 passing
 - **Vol.58 scope:** Compressed sensing & sparse recovery primitives that complement
   oxicuda-blas / oxicuda-solver by providing L1/L0/nuclear-norm minimisation paths
   not covered by classical dense BLAS/LAPACK semantics.
@@ -118,21 +117,32 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.58).
 
 #### P0 -- Verification Gaps
 - [ ] GPU hardware verification on Linux + NVIDIA driver 525+ for all 7 PTX kernels
-  across SM 75 / 80 / 86 / 89 / 90 / 100
+  across SM 75 / 80 / 86 / 89 / 90 / 100 (requires GPU hardware: real driver + device execution)
 - [ ] Numerical-accuracy regression vs reference implementations (SPGL1, SPAMS, TFOCS)
-  for OMP / FISTA-LASSO / SVT / PCP
+  for OMP / FISTA-LASSO / SVT / PCP (requires external reference toolkits to generate
+  golden vectors; cannot be fabricated -- algorithmic correctness is already asserted by
+  the in-crate exact-recovery unit tests + `e2e_tests.rs`)
 
 #### P1 -- Performance Tuning
-- [ ] Per-SM tuned tile / thread-block configurations for `correlate`, `iht_step`,
-  `amp_onsager`, `svt_threshold` (currently fixed at portable defaults)
+- [x] Per-SM tuned tile / thread-block configurations for `correlate`, `iht_step`,
+  `amp_onsager`, `svt_threshold` -- `ptx_advanced.rs` `TileConfig::for_sm` (Turing 128x1/1-stage;
+  Ampere/Ada 256x1/2-stage; Hopper/Blackwell 512x1/3-stage) with `cp_async`/`tma` capability
+  flags, `grid_x`, `threads_per_block`, `total_smem_bytes` helpers
 - [ ] Streamed batched LASSO path solves (warm-start across regularisation grid on device)
+  (requires GPU hardware: on-device streamed warm-start solve + timing)
 - [ ] FP16 / BF16 storage with FP32 accumulation for `correlate` and `iht_step`
-  on memory-bound large-N problems
+  on memory-bound large-N problems (requires GPU hardware to execute; FP8/e4m3 PTX
+  codegen variant of `correlate` already emitted -- see `ptx_advanced.rs` `correlate_fp8_ptx`)
 
 #### P2 -- Algorithmic Extensions
 - [ ] Multi-GPU SVT / PCP for very large matrix completion (slab decomposition of P_Omega)
+  (requires GPU hardware: multi-device partition + execution)
 - [ ] Persistent kernel path for OMP inner least-squares on repeated small supports
-- [ ] Block-OMP / simultaneous-OMP for multiple-measurement-vector (MMV) recovery
+  (requires GPU hardware: persistent-kernel residency + on-device timing)
+- [x] Block-OMP / simultaneous-OMP for multiple-measurement-vector (MMV) recovery --
+  `greedy/block_omp.rs` (`block_omp`, Eldar-Kuppinger-Bolcskei 2010 block-sparse) and
+  `greedy/somp.rs` (`somp`, Tropp-Gilbert-Strauss 2006 SOMP/M-OMP for the MMV setting,
+  shared-support row-norm atom selection + joint LS)
 - [x] `greedy/lista.rs` — LISTA (Gregor-LeCun 2010): unrolled T-layer ISTA with shared learned weights (W,S) trained by supervision on (y,x*) pairs; T=10 layers matches ISTA accuracy at T=1000; O(Tn) inference
 - [x] `robust_pca/rpca_gd.rs` — RPCA-GD (Yi 2016 non-convex GD): factor L=UVᵀ (r×n), projected GD under incoherence + RIP; O(r²n) per iter vs O(n²) PCP nuclear norm; provable exact recovery for r≤O(n^0.5)
 - [x] `lasso/slope.rs` — SLOPE (Bogdan 2015): Sorted L-One Penalised Estimation; λ₁≥λ₂≥…≥λₚ decreasing penalties + proximal operator via isotonic regression (PAVA); FDR control under Gaussian design
@@ -156,7 +166,7 @@ routines are implemented privately under `linalg/`.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 253 passing (unit + 27 e2e cross-module)
+- Tests: 279 passing (unit + 27 e2e cross-module + 14 architecture-specialised PTX)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns
@@ -204,10 +214,18 @@ Future Enhancements P1.
 | sm_100 (Blackwell) | 512 x 1 | 3 stages | -- |
 
 ### Deepening Opportunities
-- [ ] Hopper: TMA (`cp.async.bulk`) loads for `correlate` on very tall Phi matrices
-- [ ] Ampere: 3-stage `cp.async` pipeline for `iht_step` on M >= 4096
-- [ ] Ada / Hopper: FP8 (e4m3) variant of `correlate` for memory-bound large-n problems
-- [ ] All SMs: warp-shuffle reduction in `svt_threshold` for ranks <= 32
+- [x] Hopper: TMA (`cp.async.bulk`) loads for `correlate` on very tall Phi matrices --
+  `ptx_advanced.rs` `correlate_tma_ptx` (mbarrier + `cp.async.bulk` staging of `r` into
+  shared memory on SM>=90; portable `correlate` fallback below Hopper)
+- [x] Ampere: 3-stage `cp.async` pipeline for `iht_step` on M >= 4096 --
+  `ptx_advanced.rs` `iht_step_cp_async_ptx` (`cp.async.cg.shared.global` + commit/wait
+  groups, stage depth from `TileConfig`; portable `iht_step` fallback below Ampere)
+- [x] Ada / Hopper: FP8 (e4m3) variant of `correlate` for memory-bound large-n problems --
+  `ptx_advanced.rs` `correlate_fp8_ptx` (`cvt.rn.f32.e4m3x2` unpack + FP32 accumulation,
+  pair-stride row loop with odd-tail handling; portable f32 `correlate` fallback below Ada)
+- [x] All SMs: warp-shuffle reduction in `svt_threshold` for ranks <= 32 --
+  `ptx_advanced.rs` `svt_threshold_warpshuffle_ptx` (5-step butterfly `shfl.sync.down.b32`
+  reducing thresholded nuclear-norm contribution, one partial sum written per warp)
 
 ## Estimation vs Actual
 

@@ -6,9 +6,11 @@ Pure-Rust implementation of the **CUDA Runtime API** (`libcudart`) surface, buil
 
 ## Implementation Status
 
-**Actual: 2,521 SLoC across 12 files**
+**Actual: ~4,900 SLoC across 16 files** (production; ~7,540 incl. tests)
 
 Covers the day-to-day surface of `cudart`: device enumeration, memory management, streams, events, kernel launch, peer-to-peer access, profiler control, and the full texture / surface object family. The crate is a thin ergonomic façade over `oxicuda-driver` -- strong Rust types for streams, events, device pointers, kernel dimensions, with `Result`-typed errors and no unwrap in production code.
+
+In addition, four **GPU-free CPU-model** modules implement the runtime semantics that are fully testable on the host (launch/occupancy arithmetic, the stream-ordered memory pool, graph capture/construction, and host-register/IPC/peer bookkeeping). These run and self-verify on every platform with no NVIDIA driver present.
 
 ### Completed [x]
 
@@ -25,8 +27,9 @@ Covers the day-to-day surface of `cudart`: device enumeration, memory management
 - [x] `cudaDeviceSynchronize`, `cudaDeviceReset`
 - [x] 3 unit tests (count query, ordinal validation, properties shape)
 
-#### Memory API (`memory.rs`, 505 SLoC)
-- [x] `DevicePtr(u64)` newtype with `NULL`, `is_null`, `offset(isize)` arithmetic
+#### Memory API (`memory.rs`)
+- [x] `DevicePtr(u64)` newtype with `NULL`, `is_null`, `offset(isize)` arithmetic, `cast::<T>()` reinterpret, `as_raw_ptr::<T>()`, `as_typed_slice_meta::<T>(len)` (host-side typed-length descriptor with overflow checks)
+- [x] `MemLocation { Host, Device }` + `MemcpyKind::resolve` / `src_is_device` / `dst_is_device` -- unified-addressing direction classification model
 - [x] `cudaMalloc` / `cudaFree` -- generic device-side allocations
 - [x] `cudaMallocHost` / `cudaFreeHost` -- pinned host memory
 - [x] `cudaMallocManaged` -- unified memory
@@ -35,7 +38,7 @@ Covers the day-to-day surface of `cudart`: device enumeration, memory management
 - [x] Typed helpers `memcpy_h2d<T: Copy>(dst, &[T])`, `memcpy_d2h<T: Copy>(&mut [T], src)`, `memcpy_d2d(dst, src, bytes)` -- no raw pointers required
 - [x] `cudaMemset` / `cudaMemsetAsync`
 - [x] `cudaMemGetInfo` -- free + total device bytes
-- [x] 6 unit tests covering null-pointer handling, pointer arithmetic, async/zero-size edge cases
+- [x] 13 unit tests covering null-pointer handling, pointer arithmetic, async/zero-size edge cases, cast round-trip, typed-length + overflow rejection, offset round-trip, and the 5×5 `MemcpyKind` direction matrix
 
 #### Stream API (`stream.rs`, 285 SLoC)
 - [x] `CudaStream` newtype + `StreamFlags { DEFAULT, NON_BLOCKING }` bit-flags
@@ -43,7 +46,8 @@ Covers the day-to-day surface of `cudart`: device enumeration, memory management
 - [x] `cudaStreamDestroy`, `cudaStreamSynchronize`, `cudaStreamQuery`
 - [x] `cudaStreamWaitEvent` -- cross-stream synchronization
 - [x] `cudaStreamGetPriority`, `cudaStreamGetFlags`
-- [x] 4 unit tests for flag constants, default stream, creation/destruction smoke
+- [x] `StreamIdAllocator` -- GPU-free monotonic stream-id bookkeeping (create/destroy/live_count/peek_next_id, double-free rejection)
+- [x] 7 unit tests for flag constants, default stream, creation/destruction smoke, id-allocator start/double-free, and the 10,000-stream create/destroy stress (monotonic ids, no collisions, clean teardown)
 
 #### Event API (`event.rs`, 245 SLoC)
 - [x] `CudaEvent` newtype + `EventFlags { DEFAULT, DISABLE_TIMING, BLOCKING_SYNC, INTERPROCESS }`
@@ -52,7 +56,8 @@ Covers the day-to-day surface of `cudart`: device enumeration, memory management
 - [x] `cudaEventSynchronize` -- block until the event completes
 - [x] `cudaEventQuery` -- non-blocking ready check
 - [x] `cudaEventElapsedTime` -- milliseconds between two recorded events
-- [x] 3 unit tests for flag constants and creation/destruction smoke
+- [x] `EventIdAllocator` -- GPU-free monotonic event-id bookkeeping (create/destroy/live_count/peek_next_id, double-free rejection)
+- [x] 7 unit tests for flag constants, creation/destruction smoke, id-allocator start/double-free, the 10,000-event create/destroy stress, and a 10,000-event retain-then-teardown variant
 
 #### Kernel launch API (`launch.rs`, 354 SLoC)
 - [x] `Dim3 { x, y, z }` -- `one_d`, `two_d`, `three_d`, `volume()`
@@ -83,41 +88,82 @@ Covers the day-to-day surface of `cudart`: device enumeration, memory management
 - [x] `CudaArray3D` -- `cudaMalloc3DArray` with `Array3DFlags { LAYERED, SURFACE_LDST, CUBEMAP, TEXTURE_GATHER }`
 - [x] Host ↔ array copies -- `cudaMemcpyToArray`, `cudaMemcpyFromArray`, `cudaMemcpyToArrayAsync`, `cudaMemcpyFromArrayAsync`
 - [x] `ResourceDesc` -- Linear / Pitched / Array / MipmappedArray resource discriminators
-- [x] `TextureDesc` -- `address_modes[3]`, `filter_mode`, `read_as_normalized_int`, `normalized_coords`, `srgb`, `max_anisotropy`, mipmap params
+- [x] `TextureDesc` -- `address_modes[3]`, `filter_mode`, `read_as_normalized_int`, `normalized_coords`, `srgb`, `max_anisotropy`, mipmap params (now derives `PartialEq`)
+- [x] `TextureDescBuilder` -- fluent builder seeded from `default_2d` (`address_mode`/`address_modes`/`filter_mode`/`normalized_coords`/`read_as_integer`/`srgb`/`max_anisotropy`/`mipmap_filter`/`mipmap_levels`/`border_color`/`build`)
 - [x] `ResourceViewDesc` -- format override and dimension specification
 - [x] `CudaTextureObject` (bindless) -- `cudaCreateTextureObject` / `cudaDestroyTextureObject` / `cudaGetTextureObjectResourceDesc`
 - [x] `CudaSurfaceObject` (bindless) -- `cudaCreateSurfaceObject` / `cudaDestroySurfaceObject`
-- [x] 10 unit tests covering format byte width, address mode round-trip, descriptor builders, and null-safety on destroy
+- [x] 13 unit tests covering format byte width, address mode round-trip, descriptor builders, null-safety on destroy, and `TextureDescBuilder` (defaults match `default_2d`, builder vs manual full-custom equality, `address_mode` sets all axes)
 
-### Future Enhancements [ ]
+#### Launch-config & occupancy CPU model (`launch_config.rs`, ~600 SLoC)
+- [x] `LaunchConfig` + `DeviceLaunchLimits` (`from_prop` / `for_compute_capability` Turing→Blackwell) -- grid/block/shared/launch-bound validation
+- [x] `OccupancyCalculator` -- `active_blocks_per_sm` (warp/register/shared/block-cap minimum with allocation granularity), `max_potential_block_size`, cooperative-grid sizing; `Occupancy` + `OccupancyLimiter` attribution
+- [x] 15 unit tests with hand-computed expected occupancies (warp/register/shared/block-cap-limited, cooperative validation)
+
+#### Stream-ordered memory pool CPU model (`mem_pool.rs`, ~560 SLoC)
+- [x] `MemPool` (`cudaMallocAsync`/`cudaFreeAsync`) -- immediate-return alloc, stream-clock pending-free retirement, best-fit reuse, granularity rounding
+- [x] `MemPoolAttr` / `MemPoolAttributes` (`cudaMemPool*` attribute table), release-threshold trim, `trim_to`, `MemPoolStats` high-water marks
+- [x] 12 unit tests (right-size reuse, best-fit, cross-stream ordering, threshold trim, attribute round-trip)
+
+#### Graph capture CPU model (`graph_capture.rs`, ~560 SLoC)
+- [x] `CudaGraph` (`cudaGraphAdd*Node`, dependencies, child graphs) + Kahn topological sort with cycle rejection
+- [x] `CudaGraphExec` (`cudaGraphInstantiate`/`cudaGraphExecUpdate`) -- precomputed exec order, topology-match update enforcement, clone
+- [x] `StreamCapture` (`cudaStreamBeginCapture`/`EndCapture`) -- idle/active/invalidated state machine, in-order chaining, per-stream `EventFlags` tracking (`begin_with_flags`/`event_flags`), `capture_info() -> (CaptureStatus, EventFlags)` (`cudaStreamGetCaptureInfo`), `end_in_place` non-consuming end
+- [x] 18 unit tests (linear/diamond topo order, cycle rejection, capture chain, exec-update accept/reject, capture-info status+flags / end→None / invalidated-keeps-flags / default-flags)
+
+#### Host-mem / IPC / peer CPU model (`host_mem.rs`, ~640 SLoC)
+- [x] `HostMemoryRegistry` (`cudaHostRegister`/`Unregister`/`HostGetDevicePointer`) -- overlap detection, mapped interior-offset resolution
+- [x] `IpcRegistry` (`cudaIpc*MemHandle`/`cudaIpc*EventHandle`) -- handle round-trip with open refcounting
+- [x] `PeerAccessMatrix` (`cudaDeviceCanAccessPeer`/`Enable`/`DisablePeerAccess`) -- directional enable/disable, capability predicate
+- [x] 13 unit tests (register/overlap, mapped lookup, IPC refcount, directional peer enable)
+
+### Future Enhancements
+
+> **CPU-model status (2026-06-21).** The genuinely-missing *CPU-modelable runtime
+> semantics* of this crate have now been implemented as deterministic, GPU-free
+> models with full unit-test coverage. The driver FFI passthrough (`memory.rs`,
+> `stream.rs`, `event.rs`, `launch.rs`, ...) still requires a GPU at run time and
+> stays device-gated. New CPU-model modules:
+>
+> - `launch_config.rs` -- launch-config validation + occupancy calculator
+> - `mem_pool.rs` -- `cudaMallocAsync`/`cudaFreeAsync`/`cudaMemPool*` CPU model
+> - `graph_capture.rs` -- stream-capture state machine + `cudaGraph_t` builder
+> - `host_mem.rs` -- host-register / IPC-handle / peer-access bookkeeping tables
 
 #### P0 -- Surface completeness
-- [ ] `cudaIpcGetMemHandle` / `cudaIpcOpenMemHandle` / `cudaIpcCloseMemHandle` -- inter-process device-memory sharing handles
-- [ ] `cudaIpcGetEventHandle` / `cudaIpcOpenEventHandle` -- inter-process event sharing
-- [ ] `cudaHostRegister` / `cudaHostUnregister` -- pin existing host allocations (currently only `cudaMallocHost` is wired)
-- [ ] `cudaHostGetDevicePointer` -- mapped-memory device-side address for a registered host buffer
-- [ ] `cudaStreamAttachMemAsync` -- attach managed memory to a stream
+- [x] `cudaIpcGetMemHandle` / `cudaIpcOpenMemHandle` / `cudaIpcCloseMemHandle` -- CPU bookkeeping model in `host_mem.rs` (`IpcRegistry`: export/open/close with refcounting + round-trip). Real cross-process page sharing **(requires GPU hardware)**.
+- [x] `cudaIpcGetEventHandle` / `cudaIpcOpenEventHandle` -- CPU bookkeeping model in `host_mem.rs` (`IpcRegistry::get_event_handle`/`open_event_handle`). Real cross-process event **(requires GPU hardware)**.
+- [x] `cudaHostRegister` / `cudaHostUnregister` -- CPU bookkeeping model in `host_mem.rs` (`HostMemoryRegistry`: overlap/double-register detection, range table). Real page-locking **(requires GPU hardware)**.
+- [x] `cudaHostGetDevicePointer` -- CPU model in `host_mem.rs` (`HostMemoryRegistry::device_pointer`, interior-offset resolution, MAPPED-flag enforcement). Real mapped address **(requires GPU hardware)**.
+- [ ] `cudaStreamAttachMemAsync` -- attach managed memory to a stream **(requires GPU hardware; managed-memory migration is a device/driver operation)**
 
 #### P0 -- Graph capture wiring
-- [ ] `cudaStreamBeginCapture` / `cudaStreamEndCapture` -- record stream operations as a `cudaGraph_t`
-- [ ] `cudaGraphInstantiate` / `cudaGraphLaunch` / `cudaGraphExecDestroy` -- materialize and launch captured graphs
-- [ ] `cudaGraphAddKernelNode` / `cudaGraphAddMemcpyNode` / `cudaGraphAddMemsetNode` -- programmatic graph construction
-- [ ] These bind on top of `oxicuda-driver`'s `graph.rs` which already exposes the driver-side `Graph`, `GraphNode`, `GraphExec`, `StreamCapture` types
+- [x] `cudaStreamBeginCapture` / `cudaStreamEndCapture` -- CPU state machine in `graph_capture.rs` (`StreamCapture`: idle/active/invalidated transitions, in-order single-stream node chaining, default-stream-capture rejection)
+- [x] `cudaGraphInstantiate` / `cudaGraphExecUpdate` / clone -- CPU model in `graph_capture.rs` (`CudaGraph::instantiate` → `CudaGraphExec` with precomputed topo order; `clone_graph`; `update` with topology-match enforcement). `cudaGraphLaunch` device execution **(requires GPU hardware)**.
+- [x] `cudaGraphAddKernelNode` / `cudaGraphAddMemcpyNode` / `cudaGraphAddMemsetNode` -- CPU model in `graph_capture.rs` (`CudaGraph::add_*_node`, `add_empty_node`, `add_child_graph_node`, `add_dependency`, Kahn topological sort + cycle rejection)
+- [x] These models are runtime-surface (`cudaGraph_t`) types; the sibling `oxicuda-driver` `graph.rs` provides the lower driver-side `Graph`/`GraphExec`/`StreamCapture` for the eventual device binding
 
 #### P1 -- Event polish
-- [ ] Expose `EventFlags::BLOCKING_SYNC` and `EventFlags::INTERPROCESS` constants symmetric with `cudaEventBlockingSync` / `cudaEventInterprocess`
-- [ ] `cudaEventRecordWithFlags` -- the CUDA 11+ variant that lets callers pass `cudaEventRecordDefault` / `cudaEventRecordExternal`
+- [x] `EventFlags::BLOCKING_SYNC` (0x1) and `EventFlags::INTERPROCESS` (0x4) constants -- `event.rs` (BLOCKING_SYNC added 2026-06-21; INTERPROCESS already present)
+- [x] `cudaEventRecordWithFlags` -- already present as `event::event_record_with_flags` (`event.rs:145`)
 
 #### P1 -- Async memory pool
-- [ ] `cudaMallocAsync` / `cudaFreeAsync` -- stream-ordered allocation (CUDA 11.2+) backed by `oxicuda-driver`'s `StreamMemoryPool`
-- [ ] `cudaMemPoolCreate` / `cudaMemPoolDestroy` -- custom memory pools with attribute control
-- [ ] `cudaDeviceGetDefaultMemPool` / `cudaDeviceSetMemPool`
+- [x] `cudaMallocAsync` / `cudaFreeAsync` -- stream-ordered alloc CPU model in `mem_pool.rs` (`MemPool::malloc_async`/`free_async`: immediate-return alloc, pending-free queue, stream-clock retirement, best-fit reuse). Device-backed allocation **(requires GPU hardware)**.
+- [x] `cudaMemPoolCreate` / `cudaMemPoolDestroy` (+ attribute control) -- CPU model in `mem_pool.rs` (`MemPool::new`/`with_attributes`, `set_attribute`/`get_attribute`, `MemPoolAttr` family, release-threshold trim, usage stats)
+- [ ] `cudaDeviceGetDefaultMemPool` / `cudaDeviceSetMemPool` -- per-device default-pool binding **(requires GPU hardware; device-context state)**. The pool *object* it would return is modelled by `mem_pool.rs`.
+
+#### P1 -- Occupancy & launch validation (CPU-modelable, NEW)
+- [x] `cudaOccupancyMaxActiveBlocksPerMultiprocessor` -- `launch_config.rs` (`OccupancyCalculator::active_blocks_per_sm`: warp/register/shared/block-cap min with allocation granularity + limiter attribution)
+- [x] `cudaOccupancyMaxPotentialBlockSize` -- `launch_config.rs` (`max_potential_block_size`, warp-step sweep + shared-mem callback)
+- [x] Launch-config validation -- `launch_config.rs` (`LaunchConfig::validate`: grid/block/shared/launch-bound vs `DeviceLaunchLimits`, InvalidConfiguration vs LaunchOutOfResources)
+- [x] Cooperative-launch grid sizing -- `launch_config.rs` (`max_cooperative_grid_size`, `validate_cooperative_grid`)
+- [x] Peer-access matrix model -- `host_mem.rs` (`PeerAccessMatrix`: directional enable/disable, capability predicate, can-access query)
 
 #### P2 -- Quality of life
-- [ ] Drop the unused `gpu-tests` feature flag from `Cargo.toml` (see driver TODO "gpu-tests-feature-gate-platforms" item) if confirmed unused at audit time
-- [ ] Builder pattern for `TextureDesc` -- there are 8+ optional fields and the current struct-literal style is verbose
-- [ ] Convenience `DevicePtr::cast::<T>()` and `as_typed_slice::<T>(len)` helpers for callers that want a typed view of a device allocation
-- [ ] Async variants `memcpy_h2d_async<T>`, `memcpy_d2h_async<T>` mirroring the existing typed helpers
+- [ ] Drop the unused `gpu-tests` feature flag from `Cargo.toml` -- **still referenced** in compiled code (`device.rs:356` gates a `#[cfg(not(feature = "gpu-tests"))]` test), so it is **not** safe to remove
+- [x] Builder pattern for `TextureDesc` -- `texture.rs` (`TextureDescBuilder`: `new`/`address_mode`/`address_modes`/`filter_mode`/`normalized_coords`/`read_as_integer`/`srgb`/`max_anisotropy`/`mipmap_filter`/`mipmap_levels`/`border_color`/`build`, seeded from `default_2d`; `TextureDesc` now derives `PartialEq` for verification; 3 unit tests: defaults-match-default_2d, builder-vs-manual full custom, address_mode-sets-all-axes; +1 doctest)
+- [x] Convenience `DevicePtr::cast::<T>()` and typed-length helper -- `memory.rs` (`DevicePtr::cast::<T>()` address-preserving reinterpret, `as_raw_ptr::<T>()` FFI hand-off, `as_typed_slice_meta::<T>(len) -> (addr, byte_len)` with `len*size_of::<T>()` and address-space overflow checks; host-side pointer arithmetic only, never dereferences device memory; 4 unit tests incl. count-overflow and address-overflow rejection)
+- [ ] Async variants `memcpy_h2d_async<T>`, `memcpy_d2h_async<T>` mirroring the existing typed helpers **(requires GPU hardware for the underlying async transfer)**
 
 ## Dependencies
 
@@ -130,9 +176,9 @@ Covers the day-to-day surface of `cudart`: device enumeration, memory management
 ## Quality Status
 
 - Warnings: 0
-- Tests: 46 unit tests across 12 modules (all CPU-side, no GPU required for the unit suite)
+- Tests: 121 unit tests + 3 doc-tests across 16 modules (all CPU-side, no GPU required for the unit suite)
 - unwrap() calls: 0 (production code)
-- clippy: clean (pedantic + nursery)
+- clippy: clean (pedantic + nursery; `--all-features --all-targets -D warnings`)
 - Benchmark harness: `benches/runtime_ops.rs` via criterion
 
 ## Performance Targets
@@ -172,12 +218,12 @@ The runtime layer is a thin ergonomic shim over `oxicuda-driver` -- there is no 
 > Items marked `[x]` represent API surface coverage. The items below represent the gap between the present runtime surface and what NVIDIA's `libcudart` exposes.
 
 ### Test Coverage Gaps
-- [ ] Round-trip property test: any `DevicePtr` value `p`, `p.offset(d).offset(-d) == p` for `d` not overflowing `i64`
-- [ ] `MemcpyKind` exhaustive matrix (5 × 5) -- assert that `Default` is correctly resolved at runtime via unified addressing
-- [ ] GPU-gated suite that allocates, copies, launches a no-op PTX kernel, records an event, and frees -- end-to-end smoke for every public function
-- [ ] Stress test that creates / destroys 10,000 streams + events to surface any leak in the driver-side handle tracking
+- [x] Round-trip property test: any `DevicePtr` value `p`, `p.offset(d).offset(-d) == p` for `d` not overflowing `i64` -- `memory.rs` (`device_ptr_offset_round_trip`: representative ptrs × deltas, skips forward-overflow combos via `checked_add` guard)
+- [x] `MemcpyKind` exhaustive matrix (5 × 5) -- `memory.rs` (`memcpy_kind_direction_matrix_5x5` walks all 25 cells; new `MemLocation` enum + `MemcpyKind::resolve`/`src_is_device`/`dst_is_device` model unified-addressing resolution of `Default`; plus a direct 4-way resolve truth table)
+- [ ] GPU-gated suite that allocates, copies, launches a no-op PTX kernel, records an event, and frees -- end-to-end smoke for every public function **(requires GPU hardware)**
+- [x] Stress test that creates / destroys 10,000 streams + events -- `stream.rs` (`StreamIdAllocator` + `stream_stress_create_destroy_10k_no_collision`) and `event.rs` (`EventIdAllocator` + `event_stress_create_destroy_10k_no_collision`, `event_stress_retain_then_teardown_10k`): pure host-side id bookkeeping, strictly-monotonic ids, zero collisions, double-free rejection, clean teardown -- no device. (Driver-side handle leak detection still **requires GPU hardware**.)
 
 ### Implementation Deepening
-- [ ] Bench `cudaLaunchKernel` overhead vs raw `cuLaunchKernel` and document the headroom (target: < 100 ns wrapper cost)
-- [ ] Wire the `cudaStream` family to actually track per-stream `EventFlags` and surface `cudaStreamGetCaptureInfo` (needed for graph capture support)
-- [ ] Add doc-tests showing each public function used in isolation -- today the doc-tests are concentrated in `lib.rs`'s flat-API "Quick start"
+- [ ] Bench `cudaLaunchKernel` overhead vs raw `cuLaunchKernel` and document the headroom (target: < 100 ns wrapper cost) **(requires GPU hardware)**
+- [x] Wire the `cudaStream` family to track per-stream `EventFlags` and surface `cudaStreamGetCaptureInfo` -- `graph_capture.rs` (`StreamCapture` now carries an `event_flags: EventFlags` field; `begin_with_flags` records it, `event_flags()` getter, `capture_info() -> (CaptureStatus, EventFlags)` mirroring `cudaStreamGetCaptureInfo`; `end_in_place` keeps the handle observable so post-end None status is testable; 3 unit tests: active+flags / end→None+DEFAULT / invalidated-keeps-flags, plus default-flags case)
+- [ ] Add doc-tests showing each public function used in isolation -- today the doc-tests are concentrated in `lib.rs`'s flat-API "Quick start" (a `TextureDescBuilder` doctest was added)

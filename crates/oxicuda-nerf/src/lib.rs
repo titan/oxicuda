@@ -7,16 +7,18 @@
 //! ```text
 //! oxicuda-nerf
 //! ├── camera/       — Pinhole camera model and ray generation
-//! ├── encoding/     — Positional encoding, Instant-NGP hash grid, Mip-NeRF IPE
+//! ├── encoding/     — Positional encoding, Instant-NGP hash grid (+ trainable
+//! │                   backward), Mip-NeRF IPE, spherical harmonics
 //! ├── error         — NerfError / NerfResult
-//! ├── field/        — TensoRF, Instant-NGP hash field
+//! ├── field/        — TensoRF, Instant-NGP hash field, K-Planes, Plenoxel, VM
 //! ├── generative/   — pi-GAN FiLM-SIREN generative radiance field
 //! ├── handle        — NerfHandle (SmVersion + LcgRng)
 //! ├── metrics/      — PSNR, MSE, SSIM, LPIPS perceptual metric
-//! ├── network/      — NeRF MLP, TinyNeRF
+//! ├── network/      — NeRF MLP, TinyNeRF, NeRF-W, HumanNeRF / InstantAvatar
 //! ├── ptx_kernels   — GPU PTX kernel strings (7 kernels × 6 SM versions)
-//! ├── rendering/    — Ray, sampling, volume rendering, Zip-NeRF, Ref-NeRF, EmerNeRF
-//! └── surface/      — Neuralangelo neural SDF surface reconstruction
+//! ├── rendering/    — Ray, sampling, volume rendering, Zip-NeRF, Ref-NeRF,
+//! │                   EmerNeRF, 3DGS (+ deformable), Block-NeRF, NSVF octree
+//! └── surface/      — Neuralangelo neural SDF + marching-cubes mesh export
 //! ```
 
 // ─── Module declarations ─────────────────────────────────────────────────────
@@ -39,6 +41,7 @@ pub mod surface;
 pub mod prelude {
     pub use crate::camera::pinhole::PinholeCamera;
     pub use crate::encoding::hash_grid::{HashGrid, HashGridConfig};
+    pub use crate::encoding::hash_grid_grad::{GridCache, TrainableHashGrid};
     pub use crate::encoding::integrated_pe::{IpeConfig, integrated_pe};
     pub use crate::encoding::positional::{PosEncConfig, positional_encode};
     pub use crate::error::{NerfError, NerfResult};
@@ -52,6 +55,7 @@ pub mod prelude {
     pub use crate::metrics::image_quality::{ImageMetrics, compute_image_metrics, psnr};
     pub use crate::metrics::lpips::{Lpips, LpipsConfig};
     pub use crate::metrics::ssim::{SsimConfig, ssim_gray, ssim_image};
+    pub use crate::network::human_nerf::{HumanNerf, HumanNerfConfig, NO_PARENT, Rigid, Skeleton};
     pub use crate::network::nerf_mlp::{NerfMlp, NerfMlpConfig};
     pub use crate::network::tiny_nerf::TinyNerf;
     pub use crate::ptx_kernels::{
@@ -59,6 +63,7 @@ pub mod prelude {
         positional_encoding_ptx, ray_march_ptx, sh_to_rgb_ptx, volume_render_ptx,
     };
     pub use crate::rendering::aabb::{Aabb as RayAabb, AabbHit};
+    pub use crate::rendering::block_nerf::{Block, BlockNerfConfig, BlockNerfScene};
     pub use crate::rendering::deformable_3dgs::{
         DeformableGaussians, DeformationConfig, DeformationField, GaussianDelta,
     };

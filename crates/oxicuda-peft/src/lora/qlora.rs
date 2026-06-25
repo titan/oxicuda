@@ -8,7 +8,7 @@ pub const NF4_TABLE: [f32; 16] = [
     -1.0,
     -0.6961928009986877,
     -0.5250730514526367,
-    -0.3949468731880188,
+    -0.39491748809814453,
     -0.28444138169288635,
     -0.18477343022823334,
     -0.09105003625154495,
@@ -141,5 +141,112 @@ impl QloraLinear {
             *o += self.scale * d;
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    /// Largest gap between consecutive NF4 codebook entries — the worst-case
+    /// nearest-neighbour quantisation interval. Computed from the table itself so
+    /// the bound stays correct if the table is ever re-tuned.
+    fn max_codebook_gap() -> f32 {
+        NF4_TABLE
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .fold(0.0_f32, f32::max)
+    }
+
+    #[test]
+    fn nf4_dequant_bit_exact_to_table() {
+        // Anchor points pin the canonical NF4 layout.
+        assert_eq!(NF4_TABLE[0], -1.0);
+        assert_eq!(NF4_TABLE[7], 0.0);
+        assert_eq!(NF4_TABLE[15], 1.0);
+        // Strictly ascending.
+        for w in NF4_TABLE.windows(2) {
+            assert!(
+                w[0] < w[1],
+                "NF4_TABLE not strictly sorted: {} >= {}",
+                w[0],
+                w[1]
+            );
+        }
+        // `nf4_dequantize(idx, absmax)` must equal `NF4_TABLE[idx] * absmax` bit-for-
+        // bit for every codebook index and every scale (it is a single multiply).
+        for &absmax in &[1.0_f32, 3.0, 0.25] {
+            for (idx, &entry) in NF4_TABLE.iter().enumerate() {
+                let got = nf4_dequantize(idx as u8, absmax);
+                assert_eq!(
+                    got,
+                    entry * absmax,
+                    "nf4_dequantize({idx}, {absmax}) not bit-exact to table"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nf4_quantize_dequantize_identity_on_codebook() {
+        // A value sitting exactly on a (scaled) codebook point must quantize to that
+        // point's index and dequantize back to itself — round-trip identity.
+        for &absmax in &[1.0_f32, 2.5] {
+            for (idx, &entry) in NF4_TABLE.iter().enumerate() {
+                let val = entry * absmax;
+                let code = nf4_quantize(val, absmax);
+                assert_eq!(
+                    code, idx as u8,
+                    "codebook point {val} did not quantize to index {idx}"
+                );
+                assert_eq!(
+                    nf4_dequantize(code, absmax),
+                    val,
+                    "quantize∘dequantize not identity at index {idx}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nf4_block_roundtrip_exact_on_codebook_points() {
+        // A block whose entries are all scaled codebook points round-trips exactly:
+        // the block absmax is 2.0 (|±1.0|·2 dominates), every entry normalises back
+        // to its table value, re-quantizes to its own index, and dequantizes exactly.
+        let block: Vec<f32> = NF4_TABLE.iter().map(|&e| e * 2.0).collect();
+        let (codes, absmax) = quantize_block(&block);
+        assert_eq!(absmax, 2.0);
+        for (i, &c) in codes.iter().enumerate() {
+            assert_eq!(c, i as u8, "codebook block code mismatch at index {i}");
+        }
+        let dequant = dequantize_block(&codes, absmax);
+        assert_eq!(dequant, block, "codebook block did not round-trip exactly");
+    }
+
+    #[test]
+    fn nf4_roundtrip_error_bounded_by_codebook_spacing() {
+        // For arbitrary values inside the representable range, nearest-neighbour
+        // quantisation error is at most half the largest codebook gap, scaled by the
+        // block's absmax. Round-trip deterministic pseudo-random values and assert it.
+        let max_gap = max_codebook_gap();
+        for &amp in &[1.0_f32, 2.0] {
+            let mut rng = LcgRng::new(2024);
+            let vals: Vec<f32> = (0..512)
+                .map(|_| (rng.next_f32() * 2.0 - 1.0) * amp)
+                .collect();
+            let (codes, absmax) = quantize_block(&vals);
+            let dequant = dequantize_block(&codes, absmax);
+            let max_err = vals
+                .iter()
+                .zip(dequant.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f32, f32::max);
+            let bound = 0.5 * max_gap * absmax + 1e-6;
+            assert!(
+                max_err <= bound,
+                "NF4 round-trip error {max_err} exceeds half-gap bound {bound} (absmax={absmax})"
+            );
+        }
     }
 }

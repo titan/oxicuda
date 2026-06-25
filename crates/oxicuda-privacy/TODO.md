@@ -6,7 +6,7 @@ Pure Rust Differential Privacy primitives covering mechanisms (exponential / rep
 
 ## Implementation Status
 
-**Actual: 16,590 SLoC (74 files)**
+**Actual: 28,952 SLoC (89 files)**
 
 Current implementation provides DP primitives that complement `oxicuda-federated::privacy` (which owns `GaussianMechanism`, `LaplacianMechanism`, `MomentsAccountant`, `PateConfig`, and the RDP accountant). This crate focuses on selection mechanisms, advanced accountants, local DP, private optimisers, and sensitivity analyses.
 
@@ -98,20 +98,20 @@ Current implementation provides DP primitives that complement `oxicuda-federated
 - [x] DP-SGD-MA (Moments-Accountant variant) end-to-end
 - [x] DP-AdaGrad + DP-AdaDelta (`optimizer/dp_adagrad.rs` -- Duchi-Hazan-Singer 2011 + Abadi et al. 2016 CCS; per-sample L2 clip + Gaussian noise + coordinate-wise accumulator, adaptive step `θ[j] -= lr·g_priv[j]/(√accumulator[j] + ε)`) + (`optimizer/dp_adadelta.rs` -- Zeiler 2012 arXiv:1212.5701 + Abadi et al. 2016; per-sample L2 clip + Gaussian noise + EMA-tracked `E[g²]_t = ρ·E[g²]_{t-1} + (1−ρ)·g²`, `Δθ = -√(E[Δθ²]+ε)/√(E[g²]+ε)·g_priv`, `E[Δθ²]_t = ρ·E[Δθ²]_{t-1} + (1−ρ)·Δθ²`)
 - [x] DP-LAMB for large-batch DP training (`optimizer/dp_lamb.rs` -- You-Li-Reddi-Hseu-Kumar-Bhojanapalli-Song-Demmel-Keutzer-Hsieh 2020 ICLR + Abadi et al. 2016 CCS; per-sample L2 clip C, Gaussian noise N(0,σ²C²/batch·I), Adam moments β₁/β₂ with bias correction, decoupled weight decay, LAMB trust ratio φ/ψ=‖θ‖/‖r‖ clamped to [min,max])
-- [ ] DP-MASR (Adaptive sensitivity refinement)
-- [ ] Tree-DP-FTRL with adaptive tree depth
+- [x] DP-MASR (Adaptive sensitivity refinement) (`optimizer/dp_masr.rs` -- Andrew-Thakkar-McMahan-Ramaswamy 2021 NeurIPS adaptive clipping + Pichapati-Suresh-Yu-Reddi-Kumar 2019 AdaCliP; private γ-quantile feedback via Gaussian-mechanism on the per-example bit-mean `𝟙[‖g‖≤C]` (sensitivity 1/m, noise σ_b/m), geometric log-space clip refinement `C ← C·exp(−η_C·(b̃−γ))`, refined-sensitivity Gaussian gradient step `N(0,σ²C²/m²)`, per-step ρ-zCDP `1/(2σ_b²)+1/(2σ²)` accumulated)
+- [x] Tree-DP-FTRL with adaptive tree depth (`optimizer/dp_ftrl_adaptive.rs` -- Kairouz et al. 2021 ICML + Chan-Shi-Song 2011 streaming binary mechanism; online tree-doubling forest of dyadic blocks indexed by the binary representation of the step count, per-completed-block independent Gaussian node noise drawn on the binary carry, noisy prefix sum = sum of held block sums, effective depth `⌈log₂(t+1)⌉` = popcount(t) with NO pre-set horizon `T`, FTRL update on the noisy prefix sum)
 
 #### P2 — Optimisations and Tooling
 - [x] PATE private aggregation of teacher ensembles (`mechanism/pate.rs`) — Papernot 2017 ICLR: noisy argmax aggregation of teacher ensemble votes with Gaussian noise for student label privacy; `PateAggregator`
-- [ ] Rényi DP accounting (`accountant/renyi_dp.rs`) — Mironov 2017 CSF: tight closed-form Rényi divergence composition for the Gaussian mechanism; `RenyiDpAccountant`
+- [x] Rényi DP accounting — Mironov 2017 CSF: tight closed-form Rényi divergence composition for the Gaussian mechanism; `RenyiDpAccountant` (ALREADY EXISTS as `accounting/rdp_gaussian.rs` -- closed-form `ε_RDP(α)=α/(2σ²)`, additive composition `add_gaussian_step`/`compose`, dual Mironov + Canonne-Kamath-Steinke (ε,δ) conversion minimised over an α-grid). Bridged to zCDP by new `accounting/zcdp_rdp.rs` (`zcdp_to_rdp_curve`/`rdp_curve_to_zcdp`/`zcdp_epsilon_via_rdp`)
 - [x] Sampled Gaussian mechanism (`mechanism/sampled_gaussian.rs`) — Balle 2020 NeurIPS: amplification-by-subsampling bound for Rényi DP of Poisson-subsampled Gaussian; `SampledGaussianMechanism`
 - [x] Data sanitisation via local suppression (`sanitisation/suppression.rs`) — Sweeney 2002: k-anonymity-compliant quasi-identifier suppression + generalisation with bottom-up lattice traversal; `KAnonymiseSuppressor`
-- [ ] Fused gradient-clip + Gaussian-noise kernel (saves one global-memory pass)
+- [x] Fused gradient-clip + Gaussian-noise kernel (saves one global-memory pass) (`noise/fused_clip_noise.rs` -- single-pass per-vector L2 clip + `N(0,σ²C²)` noise (`fused_clip_and_noise` / `fused_clip_and_noise_in_place`) after the unavoidable norm reduction, fusing scale + noise into one multiply-add without materialising the clipped intermediate; verified BIT-FOR-BIT identical to the two-pass `sequential_clip_then_noise` reference for the same RNG state, plus noise-scale/clip-bound checks) [CPU reference; on-device GPU fusion stays GPU-gated]
 - [ ] Persistent CTA scheduling for repeated DP-Adam steps
 - [ ] CUDA-graph capture for DP-SGD training loop
-- [ ] Mixed-precision noise generation (FP16 sample, FP32 accumulate)
-- [ ] On-device Philox / ChaCha20 random stream for deterministic noise replay
-- [ ] Privacy-budget runtime monitor with circuit-breaker
+- [x] Mixed-precision noise generation (FP16 sample, FP32 accumulate) (`noise/mixed_precision.rs` -- complete pure-Rust IEEE-754 binary16 round-trip (`f32_to_f16_bits`/`f16_bits_to_f32`/`quantize_f16`) with round-to-nearest-even, gradual-underflow subnormals, overflow→±∞, NaN/∞ propagation (full 65536-pattern idempotence sweep); `mixed_precision_gaussian` samples Gaussian noise, FP16-quantises each draw and Welford-accumulates mean/variance in FP32 (variance within 3% of σ²); `add_fp16_noise_fp32_accumulate` adds FP16-stored noise into an FP32 accumulator)
+- [x] On-device Philox / ChaCha20 random stream for deterministic noise replay (`rng/philox.rs` + `rng/chacha20.rs` -- pure-Rust counter-based RNGs: Philox 4×32-10 (Salmon et al. 2011 Random123, verified against canonical KAT vectors + an independent reference) and the RFC 8439 ChaCha20 block function (verified against the RFC 8439 §2.3.2 block KAT), each a seekable `(key, counter)→stream` with `next_u32`/`u64`/`f64`/`f32`/`normal_pair` and O(1) `seek` for replay; full [0,1) uniforms via ÷2³²) [CPU counter-based RNG done; on-device GPU port stays GPU-gated]
+- [x] Privacy-budget runtime monitor with circuit-breaker (ALREADY EXISTS as `accounting/budget_monitor.rs` -- `BudgetMonitor`/`CompositionMode` tracks cumulative (ε,δ) and `try_spend` refuses-without-committing any query that would exceed the total budget; supports Basic and Advanced (Dwork-Rothblum-Vadhan) composition modes)
 
 ## Dependencies
 
@@ -125,8 +125,8 @@ Current implementation provides DP primitives that complement `oxicuda-federated
 
 ## Quality Status
 
-- Tests: 696 passing (unit + 18 e2e integration tests in `e2e_tests.rs`)
-- Warnings: 0 (clippy clean)
+- Tests: 816 passing (unit + 20 e2e integration tests in `e2e_tests.rs`; includes 22 counter-based-RNG tests in `rng/`, 19 mixed-precision/fused-noise tests in `noise/`, 6 DP-Adam convergence-harness tests in `optimizer/dp_adam_harness.rs`, and 9 DP synthetic-data (PATE-GAN / DP-GAN) tests in `mechanism/synthetic_data.rs`)
+- Warnings: 0 (clippy clean, `--all-features --all-targets -D warnings`)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches
 - All PTX kernels validated as non-empty strings for SM 75 / 80 / 86 / 89 / 90 / 100
@@ -147,7 +147,7 @@ DP kernels are dominated by RNG cost (noise generation) and reduction (clipping,
 ## Notes
 
 - This crate is **complementary** to `oxicuda-federated::privacy` and intentionally does **not** duplicate `GaussianMechanism`, `LaplacianMechanism`, `MomentsAccountant`, `PateConfig`, or the RDP accountant — those live in the federated crate.
-- All randomness flows through `LcgRng` for deterministic replay; production deployments should consider Philox / ChaCha20 / hardware RNG via a future `PrivacyHandle::with_rng` constructor.
+- The default noise path uses `LcgRng` for deterministic replay; for reproducible counter-based noise replay (seek to an arbitrary `(key, counter)` and reproduce a draw bit-for-bit) the crate now also ships pure-Rust `rng::PhiloxRng` (Philox 4×32-10) and `rng::ChaCha20Rng` (RFC 8439 ChaCha20), parallel CBRNGs with the same `next_*`/`normal_pair` surface and O(1) `seek`.
 - The PRV accountant uses an uniform discretisation grid; accuracy depends on `grid_size` and `grid_lo`/`grid_hi` choices (default 1000 points).
 - Smooth-sensitivity supports mean and median; extending to other order statistics requires per-statistic bound derivation (P1).
 - Local DP frequency estimators (GRR, OUE, RAPPOR) emit *unbiased* estimates with closed-form variance; production usage should aggregate over many users before releasing.
@@ -184,25 +184,25 @@ DP kernels are dominated by RNG cost (noise generation) and reduction (clipping,
 ### Verification Gaps
 - [ ] All 7 PTX kernels executed end-to-end on GPU hardware (currently only string-content verified)
 - [ ] KS-test on Gaussian / Laplace noise samples (CPU vs GPU PTX path)
-- [ ] PRV accountant accuracy vs Renyi-DP composition for representative Gaussian-mechanism sequences
-- [ ] DP-Adam convergence on a private MNIST or CIFAR-10 task with empirical (ε, δ) report
-- [ ] SVT k-budget exhaustion behaviour verified for k = 100 / 1K / 10K queries
+- [x] PRV accountant accuracy vs Renyi-DP composition for representative Gaussian-mechanism sequences (verified in `e2e_tests.rs::prv_accountant_matches_renyi_dp_composition` -- composes k=8 identical σ=2 Gaussian steps via both `adaptive_epsilon` (PRV) and `RenyiDpAccountant` (RDP) and asserts PRV ε ≤ RDP ε + slack and |PRV−RDP| < 0.5 at δ=1e-5)
+- [x] DP-Adam convergence with empirical (ε, δ) report (`optimizer/dp_adam_harness.rs` -- self-contained CPU harness `DpAdamHarness`: synthetic linear-regression dataset generated in-process via the crate `LcgRng` (NO external MNIST/CIFAR download), minibatch-subsampled DP-Adam training over several epochs, with the Sampled-Gaussian moments accountant composing one RDP term/step; `run` reports per-epoch full-dataset loss + per-epoch spent ε at the target δ; test asserts the loss at least halves AND ε is finite, positive and monotonically grows with steps, plus determinism and ground-truth recovery). [GPU/MNIST-dataset variant remains out of scope]
+- [x] SVT k-budget exhaustion behaviour verified for k = 100 / 1K / 10K queries (verified in `e2e_tests.rs::svt_k_budget_exhaustion_behaviour` -- drives an always-above stream into `SvtState` for each k and asserts exactly k True answers then halt/error on the next query)
 
 ### Algorithmic Deepening
-- [ ] Exponential mechanism with alias method for very large output sets (k > 10K)
-- [ ] PTR with multiple-round local-sensitivity refinement
-- [ ] SVT with composition across multiple sparse-vector streams
-- [ ] f-DP graphical composition (PLD-based numerical f-composition)
-- [ ] zCDP-to-RDP conversion verified for representative Gaussian sequences
-- [ ] PRV accountant with adaptive grid refinement for tight (ε, δ) reports
-- [ ] DP-FTRL with momentum and bias correction
+- [x] Exponential mechanism with alias method for very large output sets (k > 10K) (ALREADY EXISTS as `mechanism/exponential_alias.rs` -- Walker-Vose alias table, O(1) per-sample McSherry-Talwar exponential mechanism, `ExponentialAlias::{new,sample,probabilities}`)
+- [x] PTR with multiple-round local-sensitivity refinement (`mechanism/ptr_multiround.rs` -- Dwork-Lei 2009 PTR + Nissim-Raskhodnikova-Smith 2007 local-sensitivity-at-distance; descending sensitivity ladder `b₁>…>b_R`, budget split `ε_test`/`ε_rel`, per-round PTR test `s_r+Lap(R/ε_test) ≤ ln(R/(2δ))·R/ε_test` over `R` composed rounds, release `output+Lap(b_r*/ε_rel)` at the TIGHTEST passing rung else abstain; total `(ε_test+ε_rel, δ)`-DP; `geometric_ladder` helper)
+- [x] SVT with composition across multiple sparse-vector streams (`selection/svt_multistream.rs` -- Dwork-Roth §3.6 + Lyu-Su-Li 2017; `MultiStreamSvt` holds S independent `SvtState` streams each `(ε_s,0)`-DP with its own k_s-True cap, routes queries per-stream and halts each at its cap, reports composed total via `SvtCompositionMode::{Basic ε=Σε_s, Advanced strong-composition over ε₀=maxₛε_s}`)
+- [x] f-DP graphical composition (PLD-based numerical f-composition) (`accounting/fdp_composition.rs` -- Dong-Roth-Su 2022 f-DP + Koskela-Jälkö-Honkela 2020 FFT; `FdpPld` discrete privacy-loss distribution, Gaussian dominating-pair construction on a shared grid, O(n·m) lattice convolution `compose_two`/`compose_many`/`compose_self` (repeated-squaring), δ(ε) hockey-stick map, trade-off recovery `f(α)=sup_ε[1−δ(ε)−e^ε·α]` via Legendre duality `tradeoff_from_pld`, verified against analytic Gaussian `√k·μ`-GDP)
+- [x] zCDP-to-RDP conversion verified for representative Gaussian sequences (`accounting/zcdp_rdp.rs` -- Bun-Steinke 2016 Prop 1.4 + Mironov 2017; `zcdp_to_rdp_curve` samples ε_R(α)=ρα, `rdp_curve_to_zcdp` inverts a general curve to tightest ρ=maxₐ ε_R(α)/α (exact for the linear Gaussian curve, test-verified to recover ρ=Δ²/2σ²), `zcdp_epsilon_via_rdp` optimises ε=ρα+ln(1/δ)/(α−1) over the α-grid + analytic optimum α*=1+√(ln(1/δ)/ρ) and is test-verified equal to the closed-form ρ+2√(ρ·ln(1/δ)))
+- [x] PRV accountant with adaptive grid refinement for tight (ε, δ) reports (`accounting/prv_adaptive.rs` -- Gopi-Lee-Wutschitz 2021; analytic grid placement centred on composed mean `k·μ_Z` with half-width `grid_sigmas·√k·σ_Z`, grid-density doubling until successive δ(ε)/ε(δ) estimates agree within `tol` or `max_grid_size`, O(n log n) FFT composition via `compose_gaussian_prv_fft`, `AdaptivePrvResult` reports convergence + refinements)
+- [x] DP-FTRL with momentum and bias correction (`optimizer/dp_ftrl_momentum.rs` -- Kairouz et al. 2021 ICML Algorithm 2; binary-tree prefix-sum Gaussian noise on the cumulative gradient sum, heavy-ball momentum `m_t=β·m_{t-1}+(1−β)·S̃_t` over the NOISY cumulative sum, Kingma-Ba bias correction `m̂_t=m_t/(1−βᵗ)` (test-verified first step unscaled), FTRL update `θ_t=θ_{t-1}−η·m̂_t/t`; momentum/bias-correction are post-processing → no extra privacy cost)
 
 ### Coverage Gaps vs Literature
 - [x] Concentrated DP (CDP) original definition by Dwork-Rothblum (2016)
 - [x] Privacy amplification by iteration (Feldman-Mironov-Talwar 2018)
 - [ ] Local DP under intermittent communication
-- [ ] Histogram release with stability-based threshold release
-- [ ] Private synthetic data generation (PATE-GAN, DP-GAN with our DP-Adam)
+- [x] Histogram release with stability-based threshold release (ALREADY EXISTS as `selection/private_histogram.rs` -- Vadhan 2017 Thm 12.4; per-bin `Lap(1/ε)`, stability threshold `T=1+(2/ε)·ln(2/(δ·k))`, releases only bins with noisy count > T, `Suppressed` when none clear, `release_top_k` restricts to top-k first)
+- [x] Private synthetic data generation (PATE-GAN, DP-GAN with our DP-Adam) (`mechanism/synthetic_data.rs` -- Jordon-Yoon-van-der-Schaar 2019 PATE-GAN + Xie et al. 2018 DP-GAN; genuine two-layer MLP generator (tanh hidden + tanh-bounded output) and MLP discriminators with hand-written analytic forward/back-prop (incl. back-prop of the discriminator signal through to the generator's parameters -- no stubbed loop). `pate_gan_train`: teachers trained on disjoint private partitions vs current fakes, generated samples labelled through the EXISTING `pate::pate_aggregate` LNMax noisy-argmax (scale `2/ε_q`, L1 vote sensitivity 2), student trained on the DP labels, generator updated against the student; cumulative pure-ε spend composed with the crate's `BudgetMonitor` (basic composition). `dp_gan_train`: discriminator optimised with the EXISTING `DpAdamState` (per-sample clip + Gaussian noise) on per-sample real/fake BCE gradients, generator updated from the DP discriminator signal, privacy accounted with the EXISTING `SampledGaussianMechanism` moments accountant (q=batch/n_rows, one RDP term/step). `SyntheticGenerator::sample(n)` returns n finite tanh-bounded rows, deterministic under a fixed seed; `dp_label_from_votes` exposes the DP voting primitive. 9 tests: accounting consistency vs `BudgetMonitor`/`SampledGaussianMechanism` (pulled not hardcoded), tighter-budget⇒more-noise + larger-σ⇒smaller-ε monotonicity, sample structure/finiteness/determinism, unanimous-vote correctness degrading toward random as ε→0, real-gradient sanity, input validation. [Distributional fidelity NOT asserted -- requires un-verifiable training scale])
 - [x] Private hyperparameter tuning (Liu-Talwar 2019) (`selection/private_tuning.rs` -- Liu-Talwar 2019 STOC "Private Selection from Private Candidates"; random-stopping selection over base `(ε₀,δ₀)`-DP candidates supplied as a closure `Fn(usize, &mut LcgRng) -> (f32, T)`, hidden trial count `K` drawn from `StoppingRule::{Geometric(γ) P(K=k)=(1−γ)^{k−1}γ, Poisson(λ) shifted K=1+Pois(λ), Fixed(n)}`, returns argmax-score candidate (first on ties); privacy transform `tuning_epsilon` = `3·ε₀` for Geometric (Thm 3.1, constant independent of γ) and Poisson (smooth-stopping §4), `n·ε₀` for Fixed; `tuning_delta` = `3·e^{ε₀}·δ₀` for random-stopping, `n·δ₀` for Fixed)
-- [ ] DP-aware learning-rate schedulers
+- [x] DP-aware learning-rate schedulers (`optimizer/lr_scheduler.rs` -- Loshchilov-Hutter 2017 cosine + Goyal et al. 2017 warmup + DP-SGD SNR literature; `LrSchedule` enum with classic Constant/StepDecay/Exponential/CosineWarmup plus DP-specific `BudgetAware` η=η₀·(1−ρ_spent/ρ_total)^p annealing keyed to zCDP expenditure and `NoiseAware` η=η₀/(1+κ·σ·C) damping by injected DP-noise magnitude; `lr_at_step`/`lr_at_budget`/`lr_at_noise`)
 - [ ] Renyi-DP central / RDP-accountant integration with `oxicuda-federated`

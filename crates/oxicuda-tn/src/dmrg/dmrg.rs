@@ -481,4 +481,81 @@ mod tests {
         let r = dmrg_two_site(&mpo, init, cfg, &mut rng).expect("ok");
         assert!((r.energy - 1.0).abs() < 1e-6);
     }
+
+    /// Apply the open-boundary spin-1/2 Heisenberg XXX Hamiltonian
+    /// `H = Σ_i [Sz_i Sz_{i+1} + 1/2 (S+_i S-_{i+1} + S-_i S+_{i+1})]` to a state
+    /// vector of length `2^n` in the computational basis (bit i = site i, 0 = up).
+    fn heisenberg_apply(v: &[f64], n: usize) -> Vec<f64> {
+        let dim = 1usize << n;
+        let mut out = vec![0.0_f64; dim];
+        for (basis, &amp) in v.iter().enumerate() {
+            if amp == 0.0 {
+                continue;
+            }
+            for i in 0..n - 1 {
+                let j = i + 1;
+                let bi = (basis >> i) & 1; // 0 = up (Sz=+1/2), 1 = down (Sz=-1/2)
+                let bj = (basis >> j) & 1;
+                let szi = if bi == 0 { 0.5 } else { -0.5 };
+                let szj = if bj == 0 { 0.5 } else { -0.5 };
+                // Diagonal Sz Sz.
+                out[basis] += szi * szj * amp;
+                // Off-diagonal 1/2 (S+ S- + S- S+): flips an antiparallel pair.
+                if bi != bj {
+                    let flipped = basis ^ (1 << i) ^ (1 << j);
+                    out[flipped] += 0.5 * amp;
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn dmrg_heisenberg_matches_exact_diagonalisation() {
+        // Verification gap: finite-size two-site DMRG ground-state energy of the
+        // open Heisenberg chain must match exact diagonalisation (Lanczos on the
+        // full 2^n Hamiltonian) to better than 1e-4.
+        let n = 6usize;
+        let dim = 1usize << n;
+
+        // Exact ground state via Lanczos on the dense Hamiltonian action.
+        let mut rng = LcgRng::new(2024);
+        let v0: Vec<f64> = (0..dim).map(|_| rng.next_normal()).collect();
+        let exact = crate::dmrg::lanczos::lanczos_smallest(
+            |x| heisenberg_apply(x, n),
+            dim,
+            &v0,
+            120,
+            1e-12,
+        )
+        .expect("exact lanczos");
+
+        // Two-site DMRG with ample bond dimension and sweeps.
+        let mpo = Mpo::heisenberg_xxx(n).expect("heisenberg mpo");
+        let init = Mps::random_mps(n, 2, 8, &mut rng).expect("init");
+        let cfg = DmrgConfig {
+            max_sweeps: 12,
+            chi_max: 32,
+            trunc_tol: 1e-12,
+            energy_tol: 1e-12,
+            lanczos_iter: 60,
+            lanczos_tol: 1e-12,
+        };
+        let dmrg = dmrg_two_site(&mpo, init, cfg, &mut rng).expect("dmrg");
+
+        let err = (dmrg.energy - exact.eigenvalue).abs();
+        assert!(
+            err < 1e-4,
+            "DMRG energy {:.8} vs exact {:.8} (err {err:.2e})",
+            dmrg.energy,
+            exact.eigenvalue
+        );
+        // Sanity: the ground-state energy of the 6-site open Heisenberg chain is
+        // around -2.49; ensure we are in the right ballpark (not a trivial state).
+        assert!(
+            dmrg.energy < -2.0,
+            "energy {:.4} unexpectedly high",
+            dmrg.energy
+        );
+    }
 }

@@ -5,13 +5,17 @@
 //! in Monte Carlo integration.
 //!
 //! - [`sobol`] -- Sobol sequences using direction numbers from Joe & Kuo.
+//! - [`niederreiter`] -- Niederreiter base-2 digital-net sequences from
+//!   irreducible polynomials over GF(2).
 
 pub mod halton;
 pub mod latin_hypercube;
+pub mod niederreiter;
 pub mod scrambled_sobol;
 pub mod sobol;
 
 pub use halton::HaltonGenerator;
 pub use latin_hypercube::LatinHypercubeSampler;
+pub use niederreiter::{MAX_NIEDERREITER_DIMENSION, Niederreiter};
 pub use scrambled_sobol::ScrambledSobolGenerator;
 pub use sobol::SobolGenerator;

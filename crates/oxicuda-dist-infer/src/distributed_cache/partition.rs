@@ -175,6 +175,42 @@ impl CachePartition {
         &self.rank_stats
     }
 
+    /// The configured rebalance threshold (utilization spread, in `[0, 1]`).
+    pub fn rebalance_threshold(&self) -> f32 {
+        self.rebalance_threshold
+    }
+
+    /// Current utilization-imbalance metric: `max_util − min_util` across ranks.
+    ///
+    /// Returns `0.0` for a partition with no ranks. This is the same quantity
+    /// the autonomous [`crate::scheduler::RebalanceMonitor`] compares against a
+    /// trigger threshold.
+    pub fn utilization_imbalance(&self) -> f32 {
+        if self.rank_stats.is_empty() {
+            return 0.0;
+        }
+        let utils = self.rank_stats.iter().map(|s| s.utilization());
+        let mut max_u = f32::NEG_INFINITY;
+        let mut min_u = f32::INFINITY;
+        for u in utils {
+            if u > max_u {
+                max_u = u;
+            }
+            if u < min_u {
+                min_u = u;
+            }
+        }
+        (max_u - min_u).max(0.0)
+    }
+
+    /// Read-only snapshot of every tracked sequence ownership record.
+    ///
+    /// Used by the autonomous rebalancer to *project* candidate migrations
+    /// without mutating live state.
+    pub fn ownerships(&self) -> Vec<SeqOwnership> {
+        self.ownership.values().copied().collect()
+    }
+
     /// Suggest sequences to migrate for rebalancing.
     ///
     /// Returns `(seq_id, from_rank, to_rank)` tuples for sequences whose
@@ -334,6 +370,43 @@ mod tests {
         let (sid, from, _to) = suggestions[0];
         assert_eq!(sid, 1);
         assert_eq!(from, 1, "overloaded rank should be 1");
+    }
+
+    #[test]
+    fn utilization_imbalance_reflects_skew() {
+        let h = handle_world(4);
+        let mut part = CachePartition::new(h, &[100, 100, 100, 100], 0.2).expect("new");
+        // Level partition → ~0 imbalance.
+        assert_eq!(part.utilization_imbalance(), 0.0);
+        // Skew: force a sequence onto rank 0.
+        let r = part.assign(1, 50).expect("assign");
+        if r != 0 {
+            part.apply_migration(1, r, 0).expect("force onto rank 0");
+        }
+        // rank0 util 0.5, others 0.0 → imbalance 0.5.
+        assert!((part.utilization_imbalance() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ownerships_snapshot_lists_all_sequences() {
+        let h = handle_world(2);
+        let mut part = CachePartition::new(h, &[100, 100], 0.2).expect("new");
+        part.assign(10, 5).expect("assign");
+        part.assign(20, 7).expect("assign");
+        let mut owns = part.ownerships();
+        owns.sort_by_key(|o| o.seq_id);
+        assert_eq!(owns.len(), 2);
+        assert_eq!(owns[0].seq_id, 10);
+        assert_eq!(owns[1].seq_id, 20);
+        assert_eq!(part.rebalance_threshold(), 0.2);
+    }
+
+    #[test]
+    fn single_rank_imbalance_is_zero() {
+        let h = handle_world(1);
+        let mut part = CachePartition::new(h, &[100], 0.2).expect("new");
+        part.assign(1, 80).expect("assign");
+        assert_eq!(part.utilization_imbalance(), 0.0, "one rank → no spread");
     }
 
     #[test]

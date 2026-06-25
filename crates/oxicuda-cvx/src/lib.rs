@@ -38,9 +38,11 @@
 
 pub mod admm;
 pub mod augmented_lagrangian;
+pub mod builder;
 pub mod constrained;
 pub mod cut;
 pub mod dcp;
+pub mod differentiable;
 pub mod error;
 pub mod gradient;
 pub mod handle;
@@ -50,6 +52,7 @@ pub mod lp;
 pub mod metrics;
 pub mod newton;
 pub mod primal_dual;
+pub mod problem;
 pub mod projection;
 pub mod prox_ops;
 pub mod proximal;
@@ -88,6 +91,57 @@ pub use newton::{
 pub use splitting::{
     DavisYinConfig, DavisYinResult, DavisYinStatus, TsengConfig, TsengResult, TsengStatus,
     davis_yin_three_operator, tseng_fbf,
+};
+
+// Differentiable convex optimization (OptNet: differentiating through the KKT system).
+pub use differentiable::{OptNetConfig, OptNetLayer, QpParamGrads, QpProblem, QpSolution};
+
+// Algorithmic-deepening re-exports: adaptive-ρ ADMM (Boyd residual balancing),
+// FISTA with adaptive restart (O'Donoghue-Candès), and the golden-ratio
+// primal-dual algorithm (Chang-Yang GRPDA).
+pub use admm::{AdaptiveRhoConfig, AdaptiveRhoResult, adaptive_rho_admm};
+pub use primal_dual::{GOLDEN_RATIO, GrpdaConfig, GrpdaResult, grpda};
+pub use proximal::{FistaRestartConfig, FistaRestartResult, RestartRule, fista_restart};
+
+// ── API polish: fluent LP builder and a unified problem-dispatch trait. ──────
+pub use builder::{LpMethod, LpSolution, LpSolverBuilder};
+// Note: `problem::QpProblem` (the standard interior-point QP form) is *not*
+// re-exported here because the crate root already exposes the OptNet
+// `differentiable::QpProblem`.  Reach it as `oxicuda_cvx::problem::QpProblem`.
+pub use problem::{
+    LpProblem, ProblemForm, ProblemSolution, ProblemSpec, SdpProblem, SocpProblem, solve,
+};
+
+pub use projection::{
+    project_box, project_halfspace, project_l1_ball, project_l2_ball, project_psd_cone,
+    project_simplex, project_soc,
+};
+pub use prox_ops::indicator::{
+    prox_indicator_l1_ball, prox_indicator_l2_ball, prox_indicator_simplex,
+};
+/// Ergonomic crate-root re-export of the scalar soft-threshold operator
+/// (the prox of `λ|·|`), reachable as `oxicuda_cvx::soft_threshold` instead of
+/// `oxicuda_cvx::prox_ops::l1::soft_threshold`.  The companion vector prox /
+/// projection operators are re-exported alongside it.
+///
+/// ```
+/// // Soft-thresholding shrinks toward zero by λ.
+/// assert_eq!(oxicuda_cvx::soft_threshold(2.0, 0.5), 1.5);
+/// assert_eq!(oxicuda_cvx::soft_threshold(-2.0, 0.5), -1.5);
+/// assert_eq!(oxicuda_cvx::soft_threshold(0.3, 0.5), 0.0);
+///
+/// // Vector L1 prox is element-wise soft-thresholding.
+/// let v = oxicuda_cvx::prox_l1(&[2.0, 0.5, -0.5, -2.0], 1.0).unwrap();
+/// assert_eq!(v, vec![1.0, 0.0, 0.0, -1.0]);
+///
+/// // Projection onto the probability simplex sums to 1.
+/// let p = oxicuda_cvx::project_simplex(&[3.0, 1.0, 2.0], 1.0).unwrap();
+/// assert!((p.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+/// ```
+pub use prox_ops::soft_threshold;
+pub use prox_ops::{
+    prox_elastic_net, prox_group_lasso, prox_indicator_box, prox_l1, prox_l2, prox_linf,
+    prox_nuclear, prox_tv_1d,
 };
 
 #[cfg(test)]

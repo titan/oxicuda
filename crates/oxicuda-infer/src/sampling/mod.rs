@@ -15,6 +15,7 @@
 //! | [`mirostat`] | Basu et al. 2021 perplexity-controlled sampling (Mirostat v2) |
 //! | [`typical`] | Meister et al. 2022 locally typical sampling by entropy deviation |
 //! | [`epsilon`] | Hewitt et al. 2022 absolute-probability truncation sampling |
+//! | [`grammar_fsm`] | Willard & Louf 2023 DFA-guided decoding (exact illegal-token masking) |
 //!
 //! # Shared RNG
 //!
@@ -24,6 +25,7 @@
 pub mod beam_search;
 pub mod contrastive_search;
 pub mod epsilon;
+pub mod grammar_fsm;
 pub mod greedy;
 pub mod json_constrained;
 pub mod logits_processor;
@@ -38,6 +40,7 @@ pub mod watermark;
 pub use beam_search::{BeamHypothesis, BeamSearchConfig, BeamSearchState};
 pub use contrastive_search::{ContrastiveSearchConfig, contrastive_search_select};
 pub use epsilon::{epsilon_filter, epsilon_sample};
+pub use grammar_fsm::{Dfa, DfaBuilder, GrammarConstraint};
 pub use greedy::{greedy_sample, greedy_sample_batch};
 pub use json_constrained::{JsonConstraint, JsonToken};
 pub use logits_processor::{LogitsProcessor, LogitsProcessorConfig};

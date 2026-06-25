@@ -22,9 +22,20 @@
 //! **lowest index** among tied candidates. Under [`PairingMode::Threshold`] a
 //! reward gap below the margin yields [`RlhfError::NoValidPair`] instead.
 
-use crate::dpo::dpo::{DpoConfig, dpo_loss_per_pair};
+use crate::dpo::dpo::{DpoConfig, dpo_log_ratio, dpo_loss_per_pair};
 use crate::error::{RlhfError, RlhfResult};
 use crate::preference::pair::PreferencePair;
+
+/// Numerically stable sigmoid `σ(x)`.
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let e = x.exp();
+        e / (1.0 + e)
+    }
+}
 
 // ── Pairing mode ────────────────────────────────────────────────────────────
 
@@ -285,6 +296,84 @@ pub fn online_dpo_step(
     let pair = build_preference_pair(candidate_logps, ref_logps, rewards, cfg)?;
     let loss = dpo_loss_per_pair(&pair, &DpoConfig { beta: cfg.beta })?;
     Ok((pair, loss))
+}
+
+// ── Gradient ──────────────────────────────────────────────────────────────────
+
+/// Gradient of the online-DPO step loss w.r.t. the candidate / reference log-probs.
+///
+/// Finite-difference verified against [`online_dpo_step`]'s returned loss. Both
+/// vectors have the full candidate length; every entry is `0` except the chosen
+/// (argmax-reward) and rejected (argmin-reward) candidates.
+#[derive(Debug, Clone)]
+pub struct OnlineDpoGrad {
+    /// `∂L/∂(candidate policy log-prob)` for each candidate.
+    pub d_candidate_logps: Vec<f32>,
+    /// `∂L/∂(candidate reference log-prob)` for each candidate.
+    pub d_ref_logps: Vec<f32>,
+}
+
+/// Analytic gradient of the single-pair online-DPO step ([`PairingMode::BestWorst`]
+/// / [`PairingMode::Threshold`]).
+///
+/// Pair synthesis (argmax/argmin over the *rewards*) is held fixed — perturbing a
+/// log-prob does not change which candidates are chosen/rejected — so the loss is
+/// exactly the DPO loss on the selected pair, and its gradient is the standard
+/// `dL/dΔ = −β·σ(−β·Δ)` distributed to the chosen / rejected candidate (and their
+/// references) with the `+1, −1, −1, +1` sign pattern. All other candidates get
+/// gradient `0`.
+///
+/// # Errors
+///
+/// Returns [`RlhfError::Internal`] for [`PairingMode::BestVsRest`] (mirrors
+/// [`online_dpo_step`]), plus any error from [`build_preference_pair`].
+pub fn online_dpo_grad(
+    candidate_logps: &[f32],
+    ref_logps: &[f32],
+    rewards: &[f32],
+    cfg: &OnlineDpoConfig,
+) -> RlhfResult<OnlineDpoGrad> {
+    if cfg.pairing == PairingMode::BestVsRest {
+        return Err(RlhfError::Internal {
+            msg: "online_dpo_grad is for single-pair modes; use online_dpo_pairs for BestVsRest"
+                .to_string(),
+        });
+    }
+    // Validates inputs / threshold / NaN and returns the pair being differentiated.
+    let pair = build_preference_pair(candidate_logps, ref_logps, rewards, cfg)?;
+    let chosen_idx = argmax_low_index(rewards)?;
+    let rejected_idx = argmin_low_index(rewards)?;
+
+    let logit = dpo_log_ratio(
+        pair.chosen_logp,
+        pair.ref_chosen_logp,
+        pair.rejected_logp,
+        pair.ref_rejected_logp,
+        cfg.beta,
+    );
+    // dL/dΔ = −β·σ(−β·Δ).
+    let d_delta = -cfg.beta * sigmoid(-logit);
+
+    let n = candidate_logps.len();
+    let mut d_candidate_logps = vec![0.0_f32; n];
+    let mut d_ref_logps = vec![0.0_f32; n];
+    // Accumulate (handles the degenerate chosen_idx == rejected_idx case → 0).
+    d_candidate_logps[chosen_idx] += d_delta;
+    d_candidate_logps[rejected_idx] += -d_delta;
+    d_ref_logps[chosen_idx] += -d_delta;
+    d_ref_logps[rejected_idx] += d_delta;
+
+    if d_candidate_logps
+        .iter()
+        .chain(d_ref_logps.iter())
+        .any(|g| !g.is_finite())
+    {
+        return Err(RlhfError::NanEncountered);
+    }
+    Ok(OnlineDpoGrad {
+        d_candidate_logps,
+        d_ref_logps,
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -649,5 +738,93 @@ mod tests {
         };
         let pair = build_preference_pair(&logps, &refs, &rewards, &cfg);
         assert!(pair.is_ok(), "gap == margin should be accepted");
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    #[test]
+    fn online_dpo_grad_matches_fd() {
+        let logps = vec![-0.5_f32, -2.0, -3.0];
+        let refs = vec![-1.0_f32, -1.5, -1.2];
+        let rewards = vec![0.9_f32, 0.1, 0.5]; // chosen=0, rejected=1
+        let cfg = OnlineDpoConfig {
+            beta: 0.5,
+            n_candidates: 3,
+            pairing: PairingMode::BestWorst,
+        };
+        let g = online_dpo_grad(&logps, &refs, &rewards, &cfg).expect("grad");
+        let h = 1e-2;
+        for i in 0..logps.len() {
+            let fd_lp = central_diff(
+                |v| {
+                    let mut l = logps.clone();
+                    l[i] = v;
+                    online_dpo_step(&l, &refs, &rewards, &cfg).expect("step").1
+                },
+                logps[i],
+                h,
+            );
+            let fd_ref = central_diff(
+                |v| {
+                    let mut r = refs.clone();
+                    r[i] = v;
+                    online_dpo_step(&logps, &r, &rewards, &cfg).expect("step").1
+                },
+                refs[i],
+                h,
+            );
+            assert_close(g.d_candidate_logps[i], fd_lp, "d_candidate");
+            assert_close(g.d_ref_logps[i], fd_ref, "d_ref");
+        }
+    }
+
+    #[test]
+    fn online_dpo_grad_zero_off_selected() {
+        let logps = vec![-0.5_f32, -2.0, -3.0];
+        let refs = vec![-1.0_f32, -1.5, -1.2];
+        let rewards = vec![0.9_f32, 0.1, 0.5]; // chosen=0, rejected=1; index 2 unused
+        let cfg = OnlineDpoConfig {
+            beta: 0.5,
+            n_candidates: 3,
+            pairing: PairingMode::BestWorst,
+        };
+        let g = online_dpo_grad(&logps, &refs, &rewards, &cfg).expect("grad");
+        assert_eq!(g.d_candidate_logps[2], 0.0, "unselected candidate grad = 0");
+        assert_eq!(g.d_ref_logps[2], 0.0);
+        // Chosen pushed up (negative), rejected pushed down (positive).
+        assert!(g.d_candidate_logps[0] < 0.0);
+        assert!(g.d_candidate_logps[1] > 0.0);
+    }
+
+    #[test]
+    fn online_dpo_grad_rejects_best_vs_rest() {
+        let logps = vec![-1.0_f32, -2.0];
+        let refs = vec![-1.0_f32, -2.0];
+        let rewards = vec![0.5_f32, 0.1];
+        let cfg = OnlineDpoConfig {
+            beta: 0.1,
+            n_candidates: 2,
+            pairing: PairingMode::BestVsRest,
+        };
+        assert!(matches!(
+            online_dpo_grad(&logps, &refs, &rewards, &cfg),
+            Err(RlhfError::Internal { .. })
+        ));
     }
 }

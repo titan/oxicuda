@@ -13,4 +13,4 @@ pub use heavy_tsne::{
 };
 pub use nerv_jse::{JseConfig, JseResult, NervConfig, NervResult, jse_fit, nerv_fit};
 pub use perplexity::{compute_perplexity_p_matrix, p_row_from_distances};
-pub use tsne::{TsneConfig, TsneResult, tsne_fit};
+pub use tsne::{TsneConfig, TsneConfigBuilder, TsneResult, tsne_fit};

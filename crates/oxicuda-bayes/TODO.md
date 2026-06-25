@@ -9,11 +9,17 @@ calibration metrics and post-hoc recalibration. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 18,258 (57 files)
+- **Actual SLoC:** ~28,400 (61 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
 ### Completed
+
+#### Core Inference Expansion (gradient-free MCMC, model selection, conjugate, spike-slab)
+- [x] `mcmc/metropolis.rs` -- Random-walk Metropolis-Hastings (`MetropolisSampler`) with adaptive per-coordinate proposal scaling (Haario 2001 / Robbins-Monro toward a target acceptance) + univariate coordinate-wise slice sampler (`SliceSampler`, Neal 2003 stepping-out + shrinkage); `−∞` log-density encodes hard constraints; recovers Gaussian / correlated-Gaussian / truncated / bimodal targets; `sample_mean`/`sample_variance` helpers
+- [x] `mc/model_selection.rs` -- Predictive model selection: WAIC (Watanabe 2010; lppd − posterior log-lik variance), PSIS-LOO (Vehtari-Gelman-Gabry 2017; self-normalised LOO importance sampling with an exact-likelihood generalized-Pareto tail fit + per-point Pareto-k̂ diagnostic), DIC (Spiegelhalter 2002), and `compare_elpd` paired model comparison with SE
+- [x] `mc/conjugate.rs` -- Closed-form conjugate updates + posterior-predictives: Beta-Binomial, Gamma-Poisson (→ Negative-Binomial predictive), Normal-Normal (known variance), Normal-Inverse-Gamma (unknown mean+variance → Student-t predictive), Dirichlet-Multinomial; full-precision (`f64`) Lanczos log-gamma; predictive PMFs verified to normalise
+- [x] `sparse/spike_slab.rs` -- Point-mass spike-and-slab Bayesian variable selection (George-McCulloch 1997) via collapsed Gibbs; per-coordinate inclusion log-odds with the slab Bayes factor, Beta-Bernoulli inclusion-probability hyperprior, Inverse-Gamma noise; returns posterior inclusion probabilities + the median-probability model; Marsaglia-Tsang Gamma / Beta / Inverse-Gamma draws (full ÷2³² uniforms); recovers the true sparse support and coefficient magnitudes
 
 #### Core Infrastructure
 - [x] `error.rs` -- `BayesError` (16 variants: DimensionMismatch, EmptyInputs, InvalidDropoutRate, InvalidTemperature, InvalidPriorVariance, NonPositiveSigma, InsufficientSamples, InsufficientEnsembleMembers, CalibrationSetEmpty, NCalibBinsTooSmall, IsotonicNotMonotone, PlattFitFailed, TemperatureNotFinite, FlowDimensionMismatch, NanEncountered, Internal) + `BayesResult<T>`
@@ -65,7 +71,7 @@ calibration metrics and post-hoc recalibration. Part of
 - [x] Full-covariance Laplace approximation -- current `LastLayerLaplace` uses a diagonal Hessian; add KFAC / dense block fits to capture parameter correlations (Daxberger 2021 full-Laplace)
 - [x] Functional Laplace / linearised-Laplace predictive -- exact posterior predictive via Jacobian linearisation rather than probit approximation (uncertainty/functional_laplace.rs -- Immer 2021; GGN posterior precision H=prior_prec·I+Σ JᵀJ, Σ=H⁻¹, predictive var=J Σ Jᵀ, mean=MAP output via local linearization)
 - [x] BayesGRU -- Bayesian Gated Recurrent Unit via BBB (BayesLSTM / BayesAttention remain for a future wave)
-- [ ] `gp/sparse_gp_fitc.rs` — Sparse GP FITC/PITC (Titsias 2009): inducing-points variational lower bound ELBO=log 𝒩(y; KₙₘK_mm⁻¹μ, σ²I+Qₙₙ-diag(Kₙₙ-Qₙₙ)) + KL(q(f_m)‖p(f_m)); O(nm²) per gradient step vs O(n³) full GP
+- [x] Sparse GP FITC/PITC (Titsias 2009): inducing-points variational lower bound ELBO=log 𝒩(y; KₙₘK_mm⁻¹μ, σ²I+Qₙₙ-diag(Kₙₙ-Qₙₙ)) + KL(q(f_m)‖p(f_m)); O(nm²) per gradient step vs O(n³) full GP — **already implemented in `gp/sparse_gp.rs`** (FITC; Snelson-Ghahramani 2006 + Titsias 2009 free energy; Cholesky-based `sparse_gp_fit`/`sparse_gp_predict`/`sparse_gp_elbo`, `InducingInit`)
 - [x] `layers/bayes_lstm.rs` — Bayesian LSTM (BBB, Fortunato 2017): weight mean+log-var reparameterised; forward = deterministic LSTM with noise + KL penalty; `BayesLstm` struct with `sample()` + `kl_divergence()`
 
 #### P1 -- Important (Variational Inference Depth)
@@ -73,15 +79,15 @@ calibration metrics and post-hoc recalibration. Part of
 - [x] Stein Variational Gradient Descent (SVGD) — variational/svgd.rs (RBF kernel, median heuristic, Stein operator with score + kernel-gradient, particle update; Liu & Wang 2016 NeurIPS)
 - [x] Hamiltonian Monte Carlo + NUTS posterior sampler -- gradient-based MCMC for small-network reference posteriors
 - [x] Variational continual learning helpers -- online VI updates with prior replacement for sequential tasks (Nguyen 2018) (variational/vcl.rs -- Nguyen 2018; mean-field Gaussian online VI, closed-form KL(q‖prior), ELBO step, consolidate posterior→next prior, reparameterized sample)
-- [ ] `gp/deep_gp.rs` — Deep Gaussian Processes (Damianou-Lawrence 2013): doubly-stochastic VI; GP layers f^(l+1)=GP(f^(l)); DSVI ELBO = Σ E_q[log p(y|f_L)] - Σ_l KL(q(u_l)‖p(u_l)); inducing-point approx per layer
-- [ ] `variational/nvae.rs` — Nouveau VAE (Vahdat-Kautz 2020): hierarchical VAE with residual normalising flows at each level; bidirectional encoder + top-down decoder; KL balancing via free-bits heuristic
+- [x] `gp/deep_gp.rs` — Deep Gaussian Processes (Damianou-Lawrence 2013): doubly-stochastic VI; GP layers f^(l+1)=GP(f^(l)); DSVI ELBO = Σ E_q[log p(y|f_L)] - Σ_l KL(q(u_l)‖p(u_l)); inducing-point approx per layer — **already implemented in `gp/deep_gp.rs`** (`DeepGp`/`DeepGpConfig`/`DeepGpLayer`; Salimbeni-Deisenroth 2017 doubly-stochastic forward_sample + per-layer KL + Titsias output posterior)
+- [x] `variational/nvae.rs` — Nouveau VAE (Vahdat-Kautz 2020): hierarchical VAE with residual normalising flows at each level; bidirectional encoder + top-down decoder; KL balancing via free-bits heuristic — **already implemented in `variational/nvae.rs`** (`NVae`/`NVaeConfig`/`NVaeOutput`; hierarchical top-down conditional prior p(z_l|z_<l), per-group `kl_gaussian_diag` + `apply_free_bits` floor, single-sample MC ELBO)
 - [x] `variational/iaf_flow.rs` — Inverse Autoregressive Flow (Kingma 2016): IAF posterior q(z|x) = T_t∘…∘T_1(ε); each T invertible autoregressive; exact density via change-of-variables; complements existing `real_nvp.rs`
 
 #### P2 -- Nice-to-Have (Calibration & Reporting Extensions)
 - [x] Histogram binning calibration -- non-parametric bin-wise recalibration as a complement to isotonic / Platt
 - [x] Beta calibration -- three-parameter calibrator generalising Platt scaling for skewed score distributions
 - [x] Multi-class temperature with vector scaling / matrix scaling -- per-class temperature and full affine recalibration heads
-- [ ] Class-conditional calibration metrics -- per-class ECE / reliability diagrams in addition to the existing top-1 metrics
+- [x] Class-conditional calibration metrics -- per-class ECE / reliability diagrams in addition to the existing top-1 metrics — **already implemented in `calibration/ece_classwise.rs`** (Kull 2019 one-vs-rest class-wise ECE, `BinningScheme::Adaptive` equal-mass bins, `ClassReliability`/`ReliabilityPoint`/`per_class_reliability`, `BrierDecomposition` reliability−resolution+uncertainty, `top_label_calibration`)
 - [x] Conformal prediction wrappers -- split / inductive conformal intervals using the existing top-1 score machinery
 - [x] `calibration/ece_classwise.rs` — Class-wise ECE (Kull 2019): per-class calibration curve, adaptive equal-mass binning, multiclass reliability diagram; complements existing top-1 ECE
 - [x] `uncertainty/evidential.rs` — Evidential Deep Learning (Sensoy 2018): Dirichlet output parameterisation; uncertainty = total variance decomposed into aleatoric + epistemic via Dir(α); NIG prior for regression

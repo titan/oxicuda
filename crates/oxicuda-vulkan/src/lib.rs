@@ -33,12 +33,22 @@
 pub mod async_compute;
 pub mod backend;
 pub mod command;
+pub mod descriptor_buffer;
 pub mod device;
 pub mod error;
 pub mod memory;
 pub mod pipeline;
+pub mod push_descriptor;
 pub mod spirv;
+pub mod suballocator;
 
 pub use async_compute::{AsyncComputeManager, VulkanFence, VulkanSemaphore};
 pub use backend::VulkanBackend;
+pub use descriptor_buffer::{
+    BindingOffset, DescriptorBuffer, DescriptorBufferProps, DescriptorKind, LayoutBinding,
+};
 pub use error::{VulkanError, VulkanResult};
+pub use push_descriptor::{
+    PushConstantLayout, PushConstantRange, PushDescriptorSet, PushDescriptorWrite,
+};
+pub use suballocator::{BuddySuballocator, FreeListSuballocator, SubAllocation};

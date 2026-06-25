@@ -9,8 +9,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.56).
 
 ## Implementation Status
 
-- **Actual SLoC:** grown well beyond the original 7,367; see `wc -l src/**/*.rs` (includes Cox residual/influence diagnostics + Aalen-Johansen variance modules)
-- **Tests:** 785 passing (lib + e2e_tests) via `cargo nextest run -p oxicuda-survival --all-features`
+- **Actual SLoC:** ~43,600 (see `wc -l src/**/*.rs`); far beyond the original 7,367 (includes Cox residual/influence diagnostics, Aalen-Johansen variance, frailty, joint models, copula, cure, SIS/CIF-SIS, RF, gradient-boosted Cox, RMST trapezoid quadrature, …)
+- **Tests:** 812 passing (lib + e2e_tests) via `cargo nextest run -p oxicuda-survival --all-features`
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -134,7 +134,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.56).
 - [x] `cox/landmark.rs` — Landmarking (Van Houwelingen 2007): dynamic landmark supermodels; fit Cox at each landmark time s; predict conditional survival P(T>t*|T>s, Z(s)) pooled across landmark datasets; `LandmarkModel { s_seq, max_horizon }`
 - [x] `aft/restricted_spline.rs` — Restricted cubic spline baseline hazard (Royston-Parmar 2002 extended): natural cubic splines on log(-log(S(t))) with boundary + interior knots; smooth and monotone hazard without piecewise assumption; `RcsHazard`
 - [x] `nonparametric/npsurv_bayes.rs` — Nonparametric Bayesian survival (Ferguson 1973, Hjort 1990 Beta process): Dirichlet process prior on F; posterior draws via stick-breaking truncation + KM-compatible hazard atoms; `DpSurvivalPosterior`
-- [ ] `cox/causal_cox.rs` — Causal Cox model (Martinussen 2011): estimating causal hazard ratio under unmeasured confounding via instrumental variable; control-function residual approach; tie with `oxicuda-causal` IV framework
+- [x] `cox/causal_cox.rs` — Causal Cox model (Martinussen 2011): estimating causal hazard ratio under unmeasured confounding via instrumental variable; control-function residual approach; tie with `oxicuda-causal` IV framework
 - [x] `screening/cif_sis.rs` — CIF-SIS (Sure Independence Screening for cumulative incidence, Fu 2017): marginal subdistribution-hazard ranking for variable screening in competing-risks high-dimensional data; `CifSis { threshold: f32 }`
 - [x] `calibration/pseudo_r2.rs` — Royston-Sauerbrei pseudo-R² for survival models (Royston 2004): R²_D based on D statistic; separates explained randomness from baseline hazard; `PseudoR2Survival`
 - [x] `rmst/milestone_analysis.rs` — Milestone analysis (Royston-Parmar 2011): at-risk event rates + RMST differences at pre-specified time milestones; suitable for immunotherapy OS trials; `MilestoneAnalysis { milestones: Vec<f32> }`
@@ -151,7 +151,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `-D warnings` all-targets)
-- Tests: 785 passing
+- Tests: 812 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features
@@ -203,19 +203,19 @@ orchestrates the emitted PTX on Linux + NVIDIA.
 All six SM versions produce non-empty PTX strings and pass content-substring checks in `e2e_tests.rs`.
 
 ### Per-Architecture Optimisation Hooks
-- [ ] sm_80 (Ampere) -- warp-shuffle prefix-sum for `cox_risk_sum` across the sorted risk set
-- [ ] sm_89 (Ada) -- mixed-precision FP16 accumulation for `cox_info` when (n, p) is huge
-- [ ] sm_90 (Hopper) -- TMA-loaded covariate tiles for `cox_score` outer product
-- [ ] Verify `rmst_integrate` rectangular vs. trapezoidal accuracy on all SM versions
+- [ ] sm_80 (Ampere) -- warp-shuffle prefix-sum for `cox_risk_sum` across the sorted risk set (requires GPU hardware: real PTX/SASS execution + warp intrinsics)
+- [ ] sm_89 (Ada) -- mixed-precision FP16 accumulation for `cox_info` when (n, p) is huge (requires GPU hardware)
+- [ ] sm_90 (Hopper) -- TMA-loaded covariate tiles for `cox_score` outer product (requires GPU hardware)
+- [x] Verify `rmst_integrate` rectangular vs. trapezoidal accuracy on all SM versions (`rmst/trapezoid.rs` — `trapezoidal_rmst_from_grid` / `rectangle_rmst_from_grid` / `compare_quadrature`; CPU reference proves O(h²) vs O(h) bias on analytic survivors, e2e test `rmst_integrate_quadrature_accuracy_all_sm` checks all 6 SM PTX variants)
 
 ---
 
 ## Deepening Opportunities
 
 ### Verification Gaps (require Linux + NVIDIA hardware)
-- [ ] GPU run of all 7 PTX kernels under `cargo nextest --features gpu-tests` on sm_80 / sm_89 / sm_90
-- [ ] Cross-validation against `lifelines` / R-`survival` on canonical datasets (Veterans, NWTCO, GBSG2)
-- [ ] Throughput vs. CPU `lifelines` at n = 1e5 with 50 covariates
+- [ ] GPU run of all 7 PTX kernels under `cargo nextest --features gpu-tests` on sm_80 / sm_89 / sm_90 (requires GPU hardware: device execution + timing)
+- [ ] Cross-validation against `lifelines` / R-`survival` on canonical datasets (Veterans, NWTCO, GBSG2) (requires external reference toolchains / datasets)
+- [ ] Throughput vs. CPU `lifelines` at n = 1e5 with 50 covariates (requires GPU hardware: device benchmark)
 
 ### Algorithmic Deepening
 - [x] Backtracking + Wolfe line search (`cox/line_search.rs` -- Armijo + strong Wolfe with cubic zoom)

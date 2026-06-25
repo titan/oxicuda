@@ -100,9 +100,15 @@ GPU-hardware verification.
 - [x] Savitzky-Golay polynomial smoothing (`filter/savgol.rs`) — Savitzky-Golay 1964; least-squares polynomial fitting over sliding window with arbitrary derivative order; `SavgolFilter`
 - [x] Continuous Wavelet Transform (`cwt/cwt.rs`) — scalogram via convolution with Morlet/Ricker/Paul wavelets across log-scale bank; `CwtPlan`
 - [x] Kalman filter + RTS smoother (`filter/kalman.rs`) — linear Kalman predict-update cycle + Rauch-Tung-Striebel backward smoother for optimal linear state estimation; `KalmanFilter`
-- [ ] MP3/AAC aligned DCT basis (`dct/mp3_dct.rs`) — 36-point and 18-point MDCT variants matching ISO 11172-3 short/long block window switching; `Mp3MdctPlan`
+- [x] MP3/AAC aligned DCT basis (`dct/mp3_dct.rs`) — ISO 11172-3 long (36→18) / short (12→6, ×3 interleaved) MDCT with all four block-type windows (Normal/Start/Short/Stop); self-contained TDAC-perfect MDCT/IMDCT core (canonical `cos(π/N(n+½+N/2)(k+½))` phase, verified ~1e-15 overlap-add reconstruction); `Mp3BlockType`, `Mp3MdctPlan`, `mp3_window`/`mp3_short_window`/`mp3_mdct`/`mp3_imdct`
 - [x] `beamform/mvdr.rs` / `MVDR` — Minimum Variance Distortionless Response beamformer: spatial covariance matrix R estimation from multichannel snapshots; MVDR weight w = R⁻¹d / (dᴴR⁻¹d); array gain and beam-pattern metrics; `MvdrBeamformer { n_mics, freq_hz }`
 - [x] `beamform/delay_and_sum.rs` — Delay-and-Sum beamformer: per-microphone fractional-sample delay via polyphase FIR interpolation; steering vector from far-field direction-of-arrival; coherent summation; `DelayAndSumBeamformer`
+- [x] Goertzel algorithm (`spectral/goertzel.rs`) — `O(N)`-per-bin selective DFT via the second-order IIR recurrence + linear-phase correction (exact DFT match), state-based power; `goertzel`/`goertzel_hz`/`goertzel_power_spectrum`; full DTMF keypad decoder (`dtmf_decode`, `DTMF_FREQUENCIES_HZ`, `GoertzelBin`)
+- [x] Cepstral analysis (`cepstrum/cepstrum.rs`) — real / power / **invertible complex** cepstrum (with phase unwrapping + linear-phase removal and exact `inverse_complex_cepstrum`), low/high/sinusoidal liftering, cepstral pitch (`cepstral_pitch`) and echo-delay detection; `real_cepstrum`/`power_cepstrum`/`complex_cepstrum`/`unwrap_phase`
+- [x] Deconvolution (`filter/deconv.rs`) — frequency-domain Wiener/Tikhonov-regularised deconvolution (`wiener_deconvolve`, exact inverse to ~1e-9 on full convolutions) + Richardson-Lucy iterative non-negative flux-conserving ML deconvolution (`richardson_lucy`)
+
+#### Build / Integration Fixes
+- [x] **Latent-bug fix:** `transform/` (CZT/Bluestein — `czt`, `zoom_fft`, `dft_via_czt`) and `timefreq/` (Wigner-Ville — `wvd`, `cross_wvd`, marginals) modules existed fully implemented but were **never registered** in `lib.rs` (`pub mod` missing) — orphaned dead code carrying 44 untested unit tests. Now declared + re-exported in `prelude`; the 44 tests now compile and pass.
 
 #### Outstanding — Hardware Verification
 - [ ] (P0) All DCT/DWT/STFT/MFCC PTX kernels round-trip-verified on Linux + NVIDIA hardware
@@ -128,7 +134,7 @@ GPU-hardware verification.
 ## Quality Status
 
 - Warnings: 0 (clippy + rustdoc clean)
-- Tests: 414 passing
+- Tests: 491 passing (+1 doctest)
 - unwrap() calls: 0 (production code)
 - All public functions return `SignalResult<T>` for fallible paths
 - macOS: compiles, PTX-generation tests run; GPU-execution tests gated behind `feature = "gpu-tests"` and return `UnsupportedPlatform`

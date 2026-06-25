@@ -3,6 +3,8 @@
 //! Pure-Rust implementation providing:
 //! - **`attention`**: Multi-head relative-position self-attention (Conformer-style).
 //! - **`augment`**: SpecAugment (time mask, freq mask, time warp).
+//! - **`codec`**: Residual Vector Quantization (RVQ) neural-codec core
+//!   (SoundStream/EnCodec/Bark acoustic tokens) + coarse/fine token layout.
 //! - **`ctc`**: CTC forward algorithm and prefix beam-search decoder.
 //! - **`encoder`**: Wav2Vec2 CNN feature encoder + Conformer block/encoder.
 //! - **`error`**: Error and result types for audio operations.
@@ -16,12 +18,15 @@
 //! - **`rhythm`**: Dynamic-programming beat tracking (Ellis 2007 / Böck 2011).
 //! - **`separation`**: Conv-TasNet time-domain source separation.
 //! - **`speaker`**: Speaker embedding (x-vector TDNN, stats pool, attentive pool).
+//! - **`synthesis`**: FastSpeech2 acoustic model (variance adaptor + FFT blocks)
+//!   and VITS2 (conditional VAE + normalising flow + stochastic duration).
 //! - **`timescale`**: Phase-vocoder time-stretch and pitch-shift (Laroche-Dolson).
 //! - **`vad`**: Voice-activity detection (energy + spectral-flatness, onset/hangover hysteresis).
 //! - **`vocoder`**: WaveNet + HiFi-GAN neural vocoders.
 
 pub mod attention;
 pub mod augment;
+pub mod codec;
 pub mod ctc;
 pub mod encoder;
 pub mod error;
@@ -33,6 +38,7 @@ pub mod rescoring;
 pub mod rhythm;
 pub mod separation;
 pub mod speaker;
+pub mod synthesis;
 pub mod timescale;
 pub mod vad;
 pub mod vocoder;
@@ -45,20 +51,26 @@ pub use handle::{AudioHandle, LcgRng, SmVersion};
 pub mod prelude {
     pub use crate::attention::{RelPosAttention, RelPosEncoding};
     pub use crate::augment::{SpecAugOp, SpecAugPipeline, freq_mask, time_mask, time_warp};
+    pub use crate::codec::{BarkAcousticTokens, BarkCodec, ResidualVectorQuantizer, RvqFitReport};
     pub use crate::ctc::{
         BeamHypothesis, JointCtcAttention, TransducerGreedyDecoder, ctc_beam_search,
         ctc_forward_log,
     };
     pub use crate::encoder::{
-        ConformerConfig, ConformerEncoder, Wav2VecCnnConfig, Wav2VecCnnEncoder, WhisperEncoder,
-        WhisperEncoderConfig,
+        ConformerConfig, ConformerEncoder, HubertPretrainConfig, HubertPretrainer, KMeansQuantizer,
+        LeftContextCache, MaskedPredictionHead, QuantizedFfn, QuantizedLinear, QuantizedTensor,
+        SpanMaskConfig, StreamingConformerAttention, StreamingConformerConfig, Wav2VecCnnConfig,
+        Wav2VecCnnEncoder, WhisperEncoder, WhisperEncoderConfig, apply_span_mask,
+        compute_mask_indices, compute_scale_symmetric, dequantize_symmetric,
+        quantization_error_rms, quantize_symmetric,
     };
     pub use crate::error::{AudioError, AudioResult};
     pub use crate::features::{
-        A_LAW_A, ChromaConfig, ChromaNorm, CmvnConfig, Formant, LogMelInput, LpcResult, MU_LAW_MU,
-        MelFilterbank, MelFilterbankConfig, MfccConfig, OnsetConfig, PeakPickConfig,
-        SpectralConfig, TempoEstimate, a_law_decode, a_law_encode, apply_cmvn, autocorrelation,
-        chroma, compute_cmvn, compute_delta, compute_delta_delta, de_emphasis, detect_onsets,
+        A_LAW_A, ChromaConfig, ChromaNorm, CmvnConfig, Formant, LogMelExtractor,
+        LogMelExtractorConfig, LogMelInput, LpcResult, MU_LAW_MU, MelFilterbank,
+        MelFilterbankConfig, MfccConfig, OnsetConfig, PeakPickConfig, SpectralConfig,
+        TempoEstimate, a_law_decode, a_law_encode, apply_cmvn, autocorrelation, chroma,
+        compute_cmvn, compute_delta, compute_delta_delta, de_emphasis, detect_onsets,
         estimate_tempo, formants, formants_from_lpc, levinson_durbin, log_mel_spectrogram, lpc,
         mel_spectrogram, mfcc, mu_law_decode, mu_law_dequantize, mu_law_encode, mu_law_quantize,
         onset_strength, onset_times, pick_peaks, pre_emphasis, rms_energy, spectral_bandwidth,
@@ -78,6 +90,13 @@ pub mod prelude {
         hpss_masks, median_filter_1d,
     };
     pub use crate::speaker::{AttentivePool, XVectorConfig, XVectorTdnn, stats_pool};
+    pub use crate::synthesis::{
+        ActNorm, AffineCoupling, ConvFfnWeights, DurationPredictor, FastSpeech2, FastSpeech2Config,
+        FftBlock, PosteriorEncoder, PriorEncoder, RationalQuadraticSpline, RqSplineCoupling,
+        SelfAttnWeights, StochasticDurationPredictor, VariancePredictor, Vits2, Vits2Analysis,
+        Vits2Config, Vits2Flow, embed_and_add, flow_kl, gaussian_kl, length_regulate,
+        length_regulate_with_pace, monotonic_alignment_search, quantize_to_bins, reparameterize,
+    };
     pub use crate::timescale::{
         PhaseVocoderConfig, instantaneous_frequency, phase_vocoder_stretch, pitch_shift,
         resample_linear,

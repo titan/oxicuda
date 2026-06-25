@@ -21,7 +21,10 @@
 //! ├── nhits/        — NHiTS hierarchical forecaster (Challu et al. 2022)
 //! ├── itransformer/ — iTransformer (Liu et al. 2024)
 //! ├── timesnet/     — TimesNet 2-D variation model (Wu et al. 2023)
-//! ├── foundation/   — Universal forecasters (Moirai 2024, Chronos 2024)
+//! ├── conformer/    — Conformer-TS conv-augmented Transformer (Gulati et al. 2020)
+//! ├── hybrid/       — PatchTST × Crossformer hybrid forecaster
+//! ├── foundation/   — Universal forecasters (Moirai 2024, Chronos 2024) + adapter
+//! ├── quant/        — INT8 post-training quantisation inference path
 //! ├── multitask/    — Joint forecast + classification heads
 //! ├── error         — TsError / TsResult
 //! ├── handle        — TsHandle / LcgRng / SmVersion
@@ -30,9 +33,11 @@
 
 pub mod arima;
 pub mod changepoint;
+pub mod conformer;
 pub mod crossformer;
 pub mod decomp;
 pub mod dlinear;
+pub mod dtw;
 pub mod error;
 pub mod expsmooth;
 pub mod fedformer;
@@ -40,6 +45,7 @@ pub mod foundation;
 pub mod handle;
 pub mod head;
 pub mod hmm;
+pub mod hybrid;
 pub mod informer;
 pub mod itransformer;
 pub mod matprofile;
@@ -51,8 +57,10 @@ pub mod norm;
 pub mod online;
 pub mod patch;
 pub mod patchtst;
+pub mod period;
 pub mod ptx_kernels;
 pub mod pyraformer;
+pub mod quant;
 pub mod tcn;
 pub mod theta;
 pub mod timemixer;
@@ -64,19 +72,24 @@ pub mod prelude {
     pub use crate::changepoint::{
         BinSegConfig, CusumResult, PeltConfig, binary_segmentation, cusum, pelt, segment_means,
     };
+    pub use crate::conformer::{ConformerBlock, ConformerConfig, ConformerEncoder};
     pub use crate::crossformer::{Crossformer, CrossformerConfig};
     pub use crate::decomp::{
         DecompResult, MintMethod, MintReconciler, MovingAvg, SeriesDecomp, StsConfig, StsDecomposer,
     };
     pub use crate::dlinear::{DLinear, DLinearConfig, NLinear, NLinearConfig};
+    pub use crate::dtw::dtw::{
+        DtwConfig, DtwResult, dtw, dtw_barycenter, dtw_cost_matrix, dtw_distance,
+        dtw_distance_matrix,
+    };
     pub use crate::error::{TsError, TsResult};
     pub use crate::expsmooth::{
         Croston, CrostonConfig, CrostonMethod, HoltWinters, HoltWintersConfig, Seasonality,
     };
     pub use crate::fedformer::{Fedformer, FedformerConfig, FrequencyEnhancedBlock};
     pub use crate::foundation::{
-        ChronosConfig, ChronosForecast, ChronosPredictor, MoiraiConfig, MoiraiForecast,
-        MoiraiForecaster,
+        ChronosConfig, ChronosForecast, ChronosPredictor, FoundationAdapter, MoiraiConfig,
+        MoiraiForecast, MoiraiForecaster, WeightStore,
     };
     pub use crate::handle::{LcgRng, SmVersion, TsHandle};
     pub use crate::head::{
@@ -87,6 +100,7 @@ pub mod prelude {
         HmmConfig, HmmDecodeResult, HmmModel, HmmObsType, hmm_decode, hmm_decode_gaussian, hmm_fit,
         hmm_fit_gaussian, hmm_generate, hmm_log_likelihood, hmm_stationary,
     };
+    pub use crate::hybrid::{PatchCrossConfig, PatchCrossformer};
     pub use crate::informer::{
         InformerBlock, InformerEncoder, InformerEncoderConfig, InformerResult, ProbSparseConfig,
     };
@@ -102,7 +116,15 @@ pub mod prelude {
     pub use crate::online::StreamingForecaster;
     pub use crate::patch::PatchEmbed1d;
     pub use crate::patchtst::{PatchTst, PatchTstConfig};
+    pub use crate::period::{
+        PeriodCandidate, PeriodConfig, autocorrelation_fft, detect_period_fft,
+        detect_period_fft_ranked, detect_period_fft_with,
+    };
     pub use crate::pyraformer::{Pyraformer, PyraformerConfig};
+    pub use crate::quant::{
+        QuantConfig, QuantGranularity, QuantLinear, dequantise_tensor, quantise_tensor,
+        relative_quant_error,
+    };
     pub use crate::tcn::{TcnBlock, TcnConfig, TcnEncoder};
     pub use crate::theta::{Theta, ThetaConfig};
     pub use crate::timemixer::{TimeMixer, TimeMixerConfig};

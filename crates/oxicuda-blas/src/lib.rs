@@ -33,6 +33,7 @@ pub mod level2;
 pub mod level3;
 pub mod precision;
 pub mod reduction;
+pub mod sparse;
 pub mod types;
 
 #[cfg(test)]
@@ -94,4 +95,7 @@ pub mod prelude {
 
     // Reduction operations
     pub use crate::reduction;
+
+    // Sparse (2:4 structured-sparse GEMM)
+    pub use crate::sparse::{SparseGemmConfig, compress_2to4, decompress_2to4, spgemm_2to4};
 }

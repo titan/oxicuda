@@ -61,6 +61,9 @@ pub use copula::bivariate::{
     BivariateCopulaFit, CopulaConfig, CopulaFamily, WeibullMarginalFit, copula_survival_prob,
     fit_bivariate_copula, kendall_tau_from_theta, theta_from_kendall_tau,
 };
+pub use cox::causal_cox::{
+    AdjustedSurvival, CausalCoxConfig, CausalCoxFit, fit_causal_cox, fit_naive_cox,
+};
 pub use cox::cox_builder::{CoxBuilder, CoxFitResult};
 pub use cox::cure_model::{
     CureModelConfig, CureModelFit, fit_cure_model, predict_cure_prob, predict_cure_survival,
@@ -138,6 +141,9 @@ pub use rmst::milestone_analysis::{
 };
 pub use rmst::pseudo_obs::{
     PseudoObsConfig, PseudoObsOutcome, PseudoObsRegression, PseudoObsResult, pseudo_obs_fit,
+};
+pub use rmst::trapezoid::{
+    QuadratureComparison, compare_quadrature, rectangle_rmst_from_grid, trapezoidal_rmst_from_grid,
 };
 pub use screening::cif_sis::{
     CifSisConfig, CifSisResult, cif_screened_dataset, cif_sure_independence_screening,

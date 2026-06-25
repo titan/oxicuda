@@ -8,6 +8,7 @@
 //! ├── crf/          — Linear-chain CRF: forward-backward in score space, L-BFGS training, Viterbi decoding
 //! ├── memm/         — Maximum-Entropy Markov Models
 //! ├── ssvm/         — Structured SVM (linear-chain) with cutting-plane optimisation
+//! ├── structured/   — Sinkhorn CRF: entropy-regularised optimal-transport normalisation
 //! ├── beam/         — Generic beam search with length normalisation and diversity penalty
 //! ├── ctc/          — CTC loss (forward-backward) + greedy / prefix-beam decoding
 //! ├── decoders/     — Stochastic decoders: top-k, nucleus (top-p), typical sampling
@@ -52,6 +53,7 @@ pub mod perceptron;
 pub mod ptx_kernels;
 pub mod ssvm;
 pub mod string;
+pub mod structured;
 pub mod tagging;
 
 pub use error::{SeqError, SeqResult};

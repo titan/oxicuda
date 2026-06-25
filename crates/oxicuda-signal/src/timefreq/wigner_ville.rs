@@ -348,11 +348,7 @@ pub fn cross_wvd(x: &[f64], y: &[f64], config: &WvdConfig) -> SignalResult<WvdOu
                 1.0
             } else {
                 let center = window.len() / 2;
-                if m <= center {
-                    window[center - m]
-                } else {
-                    0.0
-                }
+                if m <= center { window[center - m] } else { 0.0 }
             };
 
             fft_re[m] = w * k_re;
@@ -364,7 +360,10 @@ pub fn cross_wvd(x: &[f64], y: &[f64], config: &WvdConfig) -> SignalResult<WvdOu
         fft_inplace(&mut fft_re, &mut fft_im, false);
 
         let base = t * n_freq;
-        for (dst, src) in distribution[base..base + n_freq].iter_mut().zip(fft_re.iter()) {
+        for (dst, src) in distribution[base..base + n_freq]
+            .iter_mut()
+            .zip(fft_re.iter())
+        {
             *dst = 2.0 * src;
         }
     }
@@ -486,7 +485,11 @@ mod tests {
     #[test]
     fn test_time_marginal_length() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.1);
         let out = wvd(&x, &config).expect("wvd");
         let tm = wvd_time_marginal(&out);
@@ -496,7 +499,11 @@ mod tests {
     #[test]
     fn test_frequency_marginal_length() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.1);
         let out = wvd(&x, &config).expect("wvd");
         let fm = wvd_frequency_marginal(&out);
@@ -506,7 +513,11 @@ mod tests {
     #[test]
     fn test_instantaneous_frequency_length() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.1);
         let out = wvd(&x, &config).expect("wvd");
         let inst_f = wvd_instantaneous_frequency(&out);
@@ -516,7 +527,11 @@ mod tests {
     #[test]
     fn test_cross_wvd_identical_matches_auto() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.1);
         let auto = wvd(&x, &config).expect("auto wvd");
         let cross = cross_wvd(&x, &x, &config).expect("cross wvd identical");
@@ -531,7 +546,11 @@ mod tests {
     #[test]
     fn test_cross_wvd_shape() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.1);
         let y = sine_signal(n, 0.2);
         let cross = cross_wvd(&x, &y, &config).expect("cross wvd");
@@ -544,7 +563,11 @@ mod tests {
     #[test]
     fn test_no_smoothing_full_wvd() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.15);
         let out = wvd(&x, &config).expect("full WVD must not panic");
         assert_eq!(out.distribution.len(), n * 16);
@@ -553,7 +576,11 @@ mod tests {
     #[test]
     fn test_pwvd_with_smoothing() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 4 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 4,
+        };
         let x = sine_signal(n, 0.15);
         let out = wvd(&x, &config).expect("PWVD must not panic");
         assert_eq!(out.distribution.len(), n * 16);
@@ -562,7 +589,11 @@ mod tests {
     #[test]
     fn test_small_n_freq() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.1);
         let out = wvd(&x, &config).expect("small n_freq");
         assert_eq!(out.n_freq, 16);
@@ -571,7 +602,11 @@ mod tests {
     #[test]
     fn test_n_freq_larger_than_signal() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 32, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 32,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.1);
         let out = wvd(&x, &config).expect("n_freq > N must work");
         assert_eq!(out.n_freq, 32);
@@ -580,7 +615,11 @@ mod tests {
 
     #[test]
     fn test_single_sample_signal() {
-        let config = WvdConfig { signal_len: 1, n_freq: 2, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: 1,
+            n_freq: 2,
+            smoothing_half_len: 0,
+        };
         let x = vec![1.0_f64];
         let out = wvd(&x, &config).expect("single-sample WVD");
         assert_eq!(out.n_time, 1);
@@ -593,7 +632,11 @@ mod tests {
         let n = 32usize;
         let nf = 32usize;
         let f0_norm = 0.125_f64; // 1/8 of sampling rate
-        let config = WvdConfig { signal_len: n, n_freq: nf, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: nf,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, f0_norm);
         let out = wvd(&x, &config).expect("wvd tone");
         let fm = wvd_frequency_marginal(&out);
@@ -606,7 +649,9 @@ mod tests {
             .map(|(i, _)| i)
             .unwrap_or(0);
         // Allow ±2 bins tolerance.
-        let diff = peak_bin.abs_diff(expected_bin).min(nf - peak_bin.abs_diff(expected_bin));
+        let diff = peak_bin
+            .abs_diff(expected_bin)
+            .min(nf - peak_bin.abs_diff(expected_bin));
         assert!(
             diff <= 4,
             "peak at bin {peak_bin}, expected near {expected_bin} (±4), f_marginal={fm:?}"
@@ -623,7 +668,11 @@ mod tests {
         let n = 32usize;
         let nf = 32usize;
         let f0_norm = 0.125_f64;
-        let config = WvdConfig { signal_len: n, n_freq: nf, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: nf,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, f0_norm);
         let out = wvd(&x, &config).expect("wvd");
         let inst_f = wvd_instantaneous_frequency(&out);
@@ -643,34 +692,60 @@ mod tests {
 
     #[test]
     fn test_signal_len_zero_error() {
-        let config = WvdConfig { signal_len: 0, n_freq: 16, smoothing_half_len: 0 };
-        assert!(matches!(wvd(&[], &config), Err(SignalError::InvalidSize(_))));
+        let config = WvdConfig {
+            signal_len: 0,
+            n_freq: 16,
+            smoothing_half_len: 0,
+        };
+        assert!(matches!(
+            wvd(&[], &config),
+            Err(SignalError::InvalidSize(_))
+        ));
     }
 
     #[test]
     fn test_n_freq_zero_error() {
-        let config = WvdConfig { signal_len: 8, n_freq: 0, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: 8,
+            n_freq: 0,
+            smoothing_half_len: 0,
+        };
         let x = vec![1.0_f64; 8];
         assert!(matches!(wvd(&x, &config), Err(SignalError::InvalidSize(_))));
     }
 
     #[test]
     fn test_n_freq_odd_error() {
-        let config = WvdConfig { signal_len: 8, n_freq: 7, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: 8,
+            n_freq: 7,
+            smoothing_half_len: 0,
+        };
         let x = vec![1.0_f64; 8];
         assert!(matches!(wvd(&x, &config), Err(SignalError::InvalidSize(_))));
     }
 
     #[test]
     fn test_signal_len_mismatch_error() {
-        let config = WvdConfig { signal_len: 8, n_freq: 8, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: 8,
+            n_freq: 8,
+            smoothing_half_len: 0,
+        };
         let x = vec![1.0_f64; 5]; // wrong length
-        assert!(matches!(wvd(&x, &config), Err(SignalError::DimensionMismatch { .. })));
+        assert!(matches!(
+            wvd(&x, &config),
+            Err(SignalError::DimensionMismatch { .. })
+        ));
     }
 
     #[test]
     fn test_cross_wvd_length_mismatch_error() {
-        let config = WvdConfig { signal_len: 8, n_freq: 8, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: 8,
+            n_freq: 8,
+            smoothing_half_len: 0,
+        };
         let x = vec![1.0_f64; 8];
         let y = vec![1.0_f64; 5];
         assert!(matches!(
@@ -683,7 +758,11 @@ mod tests {
     fn test_large_n128_smoke() {
         let n = 128usize;
         let nf = 128usize;
-        let config = WvdConfig { signal_len: n, n_freq: nf, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: nf,
+            smoothing_half_len: 0,
+        };
         // Chirp signal: linearly increasing frequency.
         let x: Vec<f64> = (0..n)
             .map(|i| {
@@ -693,7 +772,10 @@ mod tests {
             .collect();
         let out = wvd(&x, &config).expect("large N=128 WVD must complete");
         assert_eq!(out.distribution.len(), n * nf);
-        assert!(out.distribution.iter().all(|v| v.is_finite()), "all values finite");
+        assert!(
+            out.distribution.iter().all(|v| v.is_finite()),
+            "all values finite"
+        );
     }
 
     #[test]
@@ -701,7 +783,11 @@ mod tests {
         // For an analytic signal the time marginal approximates |z(t)|² ≥ 0.
         // Discrete WVD may have small negative values from boundary effects.
         let n = 32usize;
-        let config = WvdConfig { signal_len: n, n_freq: 32, smoothing_half_len: 0 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 32,
+            smoothing_half_len: 0,
+        };
         let x = sine_signal(n, 0.1);
         let out = wvd(&x, &config).expect("wvd");
         let tm = wvd_time_marginal(&out);
@@ -714,7 +800,11 @@ mod tests {
     #[test]
     fn test_wvd_finite_all_values() {
         let n = 16usize;
-        let config = WvdConfig { signal_len: n, n_freq: 16, smoothing_half_len: 2 };
+        let config = WvdConfig {
+            signal_len: n,
+            n_freq: 16,
+            smoothing_half_len: 2,
+        };
         let x: Vec<f64> = (0..n).map(|i| (i as f64 * 0.3).cos()).collect();
         let out = wvd(&x, &config).expect("wvd");
         for v in &out.distribution {

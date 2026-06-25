@@ -17,6 +17,32 @@ fn log_sigmoid(x: f32) -> f32 {
     }
 }
 
+fn sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let e = x.exp();
+        e / (1.0 + e)
+    }
+}
+
+/// Per-element gradients of [`DpoLoss::compute`] w.r.t. its four log-prob slices.
+///
+/// Each vector has the same length / order as the corresponding input slice and
+/// holds the gradient of the *mean* loss (`compute` divides the sum by `n`).
+/// Finite-difference verified against [`DpoLoss::compute`].
+#[derive(Debug, Clone)]
+pub struct DpoGradients {
+    /// `∂L/∂(policy chosen log-prob)`.
+    pub d_log_prob_w: Vec<f32>,
+    /// `∂L/∂(policy rejected log-prob)`.
+    pub d_log_prob_l: Vec<f32>,
+    /// `∂L/∂(reference chosen log-prob)`.
+    pub d_ref_log_prob_w: Vec<f32>,
+    /// `∂L/∂(reference rejected log-prob)`.
+    pub d_ref_log_prob_l: Vec<f32>,
+}
+
 impl DpoLoss {
     pub fn new(config: DpoConfig) -> RlhfResult<Self> {
         if !config.beta.is_finite() || config.beta < 0.0 {
@@ -138,6 +164,83 @@ impl DpoLoss {
     pub fn beta(&self) -> f32 {
         self.config.beta
     }
+
+    /// Analytic gradient of [`DpoLoss::compute`] w.r.t. its four log-prob slices.
+    ///
+    /// With `term_i = (1−s)·log σ(z_i) + s·log σ(−z_i)`,
+    /// `z_i = β·((lp_w − rlp_w) − (lp_l − rlp_l))`, and `L = mean_i(−term_i)`:
+    ///
+    /// `dL/dz_i = (1/n)·[−(1−s)·σ(−z_i) + s·σ(z_i)]`,
+    ///
+    /// then chaining through `z_i` (partials `+β, −β, −β, +β` for
+    /// `lp_w, rlp_w, lp_l, rlp_l`). For `s = 0` this reduces to
+    /// `dL/d lp_w = −(β/n)·σ(−z_i)`.
+    ///
+    /// # Errors
+    /// Mirrors [`DpoLoss::compute`]: [`RlhfError::EmptyInput`],
+    /// [`RlhfError::DimensionMismatch`], an `Internal` error for `batch_size == 0`,
+    /// and [`RlhfError::NanEncountered`] for a non-finite logit / gradient.
+    pub fn grad(
+        &self,
+        log_prob_w: &[f32],
+        log_prob_l: &[f32],
+        ref_log_prob_w: &[f32],
+        ref_log_prob_l: &[f32],
+        batch_size: usize,
+    ) -> RlhfResult<DpoGradients> {
+        if log_prob_w.is_empty() {
+            return Err(RlhfError::EmptyInput);
+        }
+        let n = log_prob_w.len();
+        if log_prob_l.len() != n || ref_log_prob_w.len() != n || ref_log_prob_l.len() != n {
+            return Err(RlhfError::DimensionMismatch {
+                expected: n,
+                got: log_prob_l
+                    .len()
+                    .min(ref_log_prob_w.len())
+                    .min(ref_log_prob_l.len()),
+            });
+        }
+        if batch_size == 0 {
+            return Err(RlhfError::Internal {
+                msg: "batch_size must be > 0".to_string(),
+            });
+        }
+
+        let s = self.config.label_smoothing;
+        let beta = self.config.beta;
+        let inv_n = 1.0 / n as f32;
+
+        let mut d_log_prob_w = Vec::with_capacity(n);
+        let mut d_log_prob_l = Vec::with_capacity(n);
+        let mut d_ref_log_prob_w = Vec::with_capacity(n);
+        let mut d_ref_log_prob_l = Vec::with_capacity(n);
+
+        for i in 0..n {
+            let logit =
+                beta * ((log_prob_w[i] - ref_log_prob_w[i]) - (log_prob_l[i] - ref_log_prob_l[i]));
+            if !logit.is_finite() {
+                return Err(RlhfError::NanEncountered);
+            }
+            // dL/dlogit_i = (1/n)·[−(1−s)·σ(−z) + s·σ(z)]
+            let d_logit = inv_n * (-(1.0 - s) * sigmoid(-logit) + s * sigmoid(logit));
+            let g_w = d_logit * beta;
+            if !g_w.is_finite() {
+                return Err(RlhfError::NanEncountered);
+            }
+            d_log_prob_w.push(g_w);
+            d_log_prob_l.push(-g_w);
+            d_ref_log_prob_w.push(-g_w);
+            d_ref_log_prob_l.push(g_w);
+        }
+
+        Ok(DpoGradients {
+            d_log_prob_w,
+            d_log_prob_l,
+            d_ref_log_prob_w,
+            d_ref_log_prob_l,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -237,20 +340,14 @@ mod tests {
     #[test]
     fn reward_margin_positive_for_good_policy() {
         let dpo = make_dpo(1.0);
-        // Policy assigns higher prob to w
-        let lp_w = vec![0.0f32; 4];
+        // Policy raises prob of w above reference while leaving l at reference:
+        // r_w = 1.0*(1-0)=1, r_l = 1.0*(0-0)=0, margin = 1 > 0
+        let lp_w = vec![1.0f32; 4];
         let rlp_w = vec![0.0f32; 4];
-        let lp_l = vec![-1.0f32; 4];
-        let rlp_l = vec![-1.0f32; 4];
-        // r_w = 1.0*(0 - 0) = 0, r_l = 1.0*(-1 - (-1)) = 0, margin = 0
-        // Let's use different ref probs to get positive margin
-        let lp_w2 = vec![1.0f32; 4];
-        let rlp_w2 = vec![0.0f32; 4];
-        let lp_l2 = vec![0.0f32; 4];
-        let rlp_l2 = vec![0.0f32; 4];
-        // r_w = 1.0*(1-0)=1, r_l = 1.0*(0-0)=0, margin=1
+        let lp_l = vec![0.0f32; 4];
+        let rlp_l = vec![0.0f32; 4];
         let margin = dpo
-            .reward_margin(&lp_w2, &rlp_w2, &lp_l2, &rlp_l2, 4)
+            .reward_margin(&lp_w, &rlp_w, &lp_l, &rlp_l, 4)
             .expect("ok");
         assert!(margin > 0.0, "margin should be positive, got {margin}");
     }
@@ -300,6 +397,110 @@ mod tests {
         let dpo = make_dpo(0.1);
         let result = dpo.compute(&[0.0, 1.0], &[0.0], &[0.0, 1.0], &[0.0, 1.0], 2);
         assert!(result.is_err(), "should return Err on length mismatch");
+    }
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_grad_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    #[test]
+    fn grad_matches_finite_difference_no_smoothing() {
+        let dpo = make_dpo(0.4);
+        let w = [-0.5_f32, -1.2];
+        let l = [-1.4_f32, -0.7];
+        let rw = [-0.7_f32, -1.0];
+        let rl = [-1.1_f32, -0.9];
+        let g = dpo.grad(&w, &l, &rw, &rl, w.len()).expect("grad");
+        let h = 1e-2;
+        for i in 0..w.len() {
+            let fd_w = central_diff(
+                |v| {
+                    let mut x = w.to_vec();
+                    x[i] = v;
+                    dpo.compute(&x, &l, &rw, &rl, w.len()).expect("loss")
+                },
+                w[i],
+                h,
+            );
+            let fd_l = central_diff(
+                |v| {
+                    let mut x = l.to_vec();
+                    x[i] = v;
+                    dpo.compute(&w, &x, &rw, &rl, w.len()).expect("loss")
+                },
+                l[i],
+                h,
+            );
+            let fd_rw = central_diff(
+                |v| {
+                    let mut x = rw.to_vec();
+                    x[i] = v;
+                    dpo.compute(&w, &l, &x, &rl, w.len()).expect("loss")
+                },
+                rw[i],
+                h,
+            );
+            let fd_rl = central_diff(
+                |v| {
+                    let mut x = rl.to_vec();
+                    x[i] = v;
+                    dpo.compute(&w, &l, &rw, &x, w.len()).expect("loss")
+                },
+                rl[i],
+                h,
+            );
+            assert_grad_close(g.d_log_prob_w[i], fd_w, "d_log_prob_w");
+            assert_grad_close(g.d_log_prob_l[i], fd_l, "d_log_prob_l");
+            assert_grad_close(g.d_ref_log_prob_w[i], fd_rw, "d_ref_log_prob_w");
+            assert_grad_close(g.d_ref_log_prob_l[i], fd_rl, "d_ref_log_prob_l");
+        }
+    }
+
+    #[test]
+    fn grad_matches_finite_difference_with_smoothing() {
+        let dpo = DpoLoss::new(DpoConfig {
+            beta: 0.6,
+            label_smoothing: 0.1,
+        })
+        .expect("valid");
+        let w = [0.2_f32];
+        let l = [-0.8_f32];
+        let rw = [0.0_f32];
+        let rl = [0.0_f32];
+        let g = dpo.grad(&w, &l, &rw, &rl, 1).expect("grad");
+        let h = 1e-2;
+        let fd_w = central_diff(
+            |v| dpo.compute(&[v], &l, &rw, &rl, 1).expect("loss"),
+            w[0],
+            h,
+        );
+        assert_grad_close(g.d_log_prob_w[0], fd_w, "d_log_prob_w smoothed");
+    }
+
+    #[test]
+    fn grad_chosen_negative_when_preferred() {
+        let dpo = make_dpo(0.5);
+        let g = dpo.grad(&[0.0], &[0.0], &[0.0], &[0.0], 1).expect("grad");
+        assert!(g.d_log_prob_w[0] < 0.0, "{}", g.d_log_prob_w[0]);
+        assert!(g.d_log_prob_l[0] > 0.0, "{}", g.d_log_prob_l[0]);
+    }
+
+    #[test]
+    fn grad_len_mismatch_error() {
+        let dpo = make_dpo(0.1);
+        assert!(
+            dpo.grad(&[0.0, 1.0], &[0.0], &[0.0, 1.0], &[0.0, 1.0], 2)
+                .is_err()
+        );
     }
 
     #[test]

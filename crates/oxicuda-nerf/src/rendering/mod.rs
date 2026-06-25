@@ -1,6 +1,7 @@
 //! Rendering modules: ray generation, sampling, volume rendering, occupancy.
 
 pub mod aabb;
+pub mod block_nerf;
 pub mod contraction;
 pub mod deformable_3dgs;
 pub mod distortion;
@@ -17,6 +18,7 @@ pub mod volume_render;
 pub mod zip_nerf;
 
 pub use aabb::{Aabb as RayAabb, AabbHit};
+pub use block_nerf::{Block, BlockNerfConfig, BlockNerfScene};
 pub use contraction::{
     ContractionConfig, contract_batch, contract_point, contracted_norm, is_inner, uncontract_batch,
     uncontract_point,

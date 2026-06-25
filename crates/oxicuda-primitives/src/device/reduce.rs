@@ -77,6 +77,16 @@ impl DeviceReduceConfig {
         self.num_blocks(n) * elem
     }
 
+    /// Scratch-buffer bytes the caller must allocate for `n` elements.
+    ///
+    /// For device reduce this is the pass-1 per-block partials buffer; it is an
+    /// alias of [`temp_bytes`](Self::temp_bytes) provided so that every device
+    /// template exposes a uniform `workspace_bytes` query.
+    #[must_use]
+    pub fn workspace_bytes(&self, n: u64) -> u64 {
+        self.temp_bytes(n)
+    }
+
     /// Kernel name for pass 1.
     #[must_use]
     pub fn pass1_name(&self) -> String {
@@ -517,6 +527,13 @@ mod tests {
     fn temp_bytes_f64() {
         let c = cfg(ReduceOp::Sum, PtxType::F64);
         assert_eq!(c.temp_bytes(256), 8); // 1 block × 8 bytes
+    }
+
+    #[test]
+    fn workspace_bytes_aliases_temp_bytes() {
+        let c = cfg(ReduceOp::Sum, PtxType::F32);
+        assert_eq!(c.workspace_bytes(512), c.temp_bytes(512));
+        assert_eq!(c.workspace_bytes(512), 8);
     }
 
     #[test]

@@ -51,6 +51,10 @@ pub use clustering::kohonen_som::{
     som_weight_at,
 };
 pub use diffusion::phate::{PhateConfig, PhateResult, phate_fit};
+// `embed::isomap` exposes a config-struct Isomap (`IsomapConfig` + `isomap` fn). The bare `isomap`
+// here is the free function (value namespace) — analogous to the existing crate-root `sammon` fn —
+// and is unambiguous: `local::isomap` (the underlying module) is never re-exported at the crate root.
+pub use embed::isomap::{IsomapConfig, isomap};
 pub use embed::landmark_mds::{LandmarkMdsConfig, LandmarkMdsResult, landmark_mds};
 pub use embed::random_projection::{
     RandomProjectionConfig, RandomProjectionKind, johnson_lindenstrauss_min_dim, random_projection,
@@ -68,11 +72,21 @@ pub use mds::nonmetric_mds::{NonmetricMdsResult, nonmetric_mds, pava};
 pub use neighbor::hnsw::{
     HnswConfig, HnswDistance, HnswIndex, HnswSearchResult, hnsw_add, hnsw_build, hnsw_search,
 };
+pub use reduction::clustermap::{ClusterMap, ClusterMapConfig, ClusterMapInit, ClusterMapPreset};
 pub use reduction::pacmap::{PaCMapConfig, PaCMapInit, PaCMapResult, pacmap};
+pub use reduction::parametric_tsne::{
+    ParametricTsneConfig, ParametricTsneModel, parametric_tsne_fit, parametric_tsne_forward,
+    parametric_tsne_transform,
+};
 pub use reduction::poincare_embedding::{
     PoincareConfig, PoincareModel, poincare_distances_all, poincare_fit, poincare_rank_relations,
 };
 pub use reduction::trimap::{TrimapConfig, TrimapInit, TrimapResult, trimap};
+pub use riemannian::geodesic_regression::{
+    GeodesicRegressionConfig, GeodesicRegressionFit, geodesic_regression_fit,
+    geodesic_regression_predict, geodesic_regression_sse,
+};
+pub use riemannian::hyperbolic_ball::{PoincareBall, poincare_frechet_mean};
 pub use riemannian::riemannian_median::{
     RiemannianMedianConfig, RiemannianMedianResult, riemannian_median, riemannian_median_objective,
     riemannian_trimmed_mean,
@@ -99,6 +113,8 @@ pub use tsne::heavy_tsne::{
     cauchy_tsne_fit, heavy_tsne_fit, ssne_fit,
 };
 pub use tsne::nerv_jse::{JseConfig, JseResult, NervConfig, NervResult, jse_fit, nerv_fit};
+pub use tsne::tsne::{TsneConfig, TsneConfigBuilder, TsneResult, tsne_fit};
+pub use umap::embedding::{UmapConfig, UmapConfigBuilder, UmapResult, umap_fit};
 pub use umap::multiscale::{
     MultiScaleUmapConfig, MultiScaleUmapResult, combine_fuzzy_sets, multiscale_umap_fit,
 };

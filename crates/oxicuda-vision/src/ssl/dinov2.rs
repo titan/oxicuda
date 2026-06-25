@@ -588,6 +588,93 @@ pub fn ibot_loss(
     Ok(total / count as f32)
 }
 
+// ─── KoLeo regulariser ────────────────────────────────────────────────────────────
+
+/// KoLeo (Kozachenko–Leonenko) differential-entropy regulariser.
+///
+/// Introduced for DINOv2 (Oquab 2023), the KoLeo term encourages a *uniform*
+/// span of the embedding space by maximising the Kozachenko–Leonenko estimate of
+/// the differential entropy of the batch. Concretely, for L2-normalised
+/// embeddings `z_0 … z_{N−1}` it penalises the negative log of each point's
+/// nearest-neighbour distance:
+///
+/// ```text
+/// d_i      = min_{j ≠ i} ‖ẑ_i − ẑ_j‖₂
+/// L_koleo  = (1/N) Σ_i −log(d_i + ε)
+/// ```
+///
+/// Minimising `L_koleo` pushes the closest pair of embeddings apart, which
+/// spreads the batch over the hypersphere and combats representation collapse.
+/// Embeddings are L2-normalised internally (the DINOv2 recipe normalises before
+/// computing distances); a near-zero embedding is renormalised defensively.
+///
+/// - `embeddings`: flat `[batch · dim]` row-major.
+/// - `eps`: small positive stabiliser added inside the log (e.g. `1e-8`).
+///
+/// Returns `0.0` for a single embedding (no neighbour to repel).
+///
+/// # Errors
+/// - [`VisionError::EmptyInput`] if `embeddings` is empty or `dim == 0`.
+/// - [`VisionError::DimensionMismatch`] if `embeddings.len()` is not a multiple
+///   of `dim`.
+/// - [`VisionError::NonFinite`] if an input or `eps` is non-finite.
+pub fn koleo_loss(embeddings: &[f32], dim: usize, eps: f32) -> VisionResult<f32> {
+    if embeddings.is_empty() || dim == 0 {
+        return Err(VisionError::EmptyInput("koleo embeddings"));
+    }
+    if embeddings.len() % dim != 0 {
+        return Err(VisionError::DimensionMismatch {
+            expected: dim,
+            got: embeddings.len(),
+        });
+    }
+    if !eps.is_finite() || eps <= 0.0 {
+        return Err(VisionError::NonFinite("koleo eps"));
+    }
+    if embeddings.iter().any(|v| !v.is_finite()) {
+        return Err(VisionError::NonFinite("koleo embeddings"));
+    }
+    let batch = embeddings.len() / dim;
+    if batch < 2 {
+        return Ok(0.0);
+    }
+
+    // L2-normalise each embedding into a contiguous buffer.
+    let mut z = vec![0.0f32; batch * dim];
+    for i in 0..batch {
+        let src = &embeddings[i * dim..(i + 1) * dim];
+        let norm = src.iter().map(|&v| v * v).sum::<f32>().sqrt().max(1e-12);
+        let dst = &mut z[i * dim..(i + 1) * dim];
+        for (d, &s) in dst.iter_mut().zip(src.iter()) {
+            *d = s / norm;
+        }
+    }
+
+    // Nearest-neighbour distance per point (brute-force O(N²·dim)).
+    let mut acc = 0.0f64;
+    for i in 0..batch {
+        let zi = &z[i * dim..(i + 1) * dim];
+        let mut best = f32::INFINITY;
+        for j in 0..batch {
+            if i == j {
+                continue;
+            }
+            let zj = &z[j * dim..(j + 1) * dim];
+            let mut d2 = 0.0f32;
+            for k in 0..dim {
+                let diff = zi[k] - zj[k];
+                d2 += diff * diff;
+            }
+            if d2 < best {
+                best = d2;
+            }
+        }
+        let dist = best.sqrt();
+        acc += -((dist + eps) as f64).ln();
+    }
+    Ok((acc / batch as f64) as f32)
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -981,5 +1068,77 @@ mod tests {
         let mut rng = LcgRng::new(80);
         let r = DinoHead::new(32, 64, 16, 0, &mut rng);
         assert!(matches!(r, Err(VisionError::InvalidProjDim(0))));
+    }
+
+    // ── KoLeo regulariser ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn koleo_single_embedding_is_zero() {
+        let z = vec![1.0f32, 0.0, 0.0, 0.0];
+        let v = koleo_loss(&z, 4, 1e-8).expect("ok");
+        assert_eq!(v, 0.0);
+    }
+
+    #[test]
+    fn koleo_validation_errors() {
+        assert!(koleo_loss(&[], 4, 1e-8).is_err());
+        assert!(koleo_loss(&[1.0, 2.0, 3.0], 0, 1e-8).is_err());
+        assert!(koleo_loss(&[1.0, 2.0, 3.0], 2, 1e-8).is_err()); // not multiple of dim
+        assert!(koleo_loss(&[1.0, 2.0, 3.0, 4.0], 2, 0.0).is_err()); // eps <= 0
+        assert!(koleo_loss(&[1.0, f32::NAN, 3.0, 4.0], 2, 1e-8).is_err());
+    }
+
+    #[test]
+    fn koleo_spread_embeddings_lower_than_clustered() {
+        // Two well-separated antipodal points (after normalisation) have a large
+        // NN distance → smaller (more negative-log-of-large) KoLeo than two nearly
+        // identical points whose tiny NN distance blows up −log.
+        let dim = 2;
+        // Spread: +x and −x axis → distance 2.
+        let spread = vec![1.0f32, 0.0, -1.0, 0.0];
+        // Clustered: two almost-identical vectors → distance ≈ 0.
+        let clustered = vec![1.0f32, 0.0, 1.0, 0.001];
+        let l_spread = koleo_loss(&spread, dim, 1e-8).expect("ok");
+        let l_clustered = koleo_loss(&clustered, dim, 1e-8).expect("ok");
+        assert!(
+            l_clustered > l_spread,
+            "clustered KoLeo {l_clustered} should exceed spread {l_spread}"
+        );
+    }
+
+    #[test]
+    fn koleo_known_value_orthogonal_pair() {
+        // Two orthonormal vectors: NN distance = sqrt(2). With ε≈0,
+        // L = -log(sqrt(2)) = -0.5·ln(2).
+        let dim = 2;
+        let z = vec![1.0f32, 0.0, 0.0, 1.0];
+        let v = koleo_loss(&z, dim, 1e-9).expect("ok");
+        let expected = -0.5f32 * 2.0f32.ln();
+        assert!((v - expected).abs() < 1e-4, "got {v}, expected {expected}");
+    }
+
+    #[test]
+    fn koleo_normalisation_invariant_to_scaling() {
+        // Scaling every embedding by a constant must not change KoLeo (it
+        // normalises internally).
+        let dim = 3;
+        let mut rng = LcgRng::new(123);
+        let mut base = vec![0.0f32; 6 * dim];
+        rng.fill_normal(&mut base);
+        let scaled: Vec<f32> = base.iter().map(|&v| v * 7.5).collect();
+        let a = koleo_loss(&base, dim, 1e-8).expect("ok");
+        let b = koleo_loss(&scaled, dim, 1e-8).expect("ok");
+        assert!((a - b).abs() < 1e-4, "scale-invariance broken: {a} vs {b}");
+    }
+
+    #[test]
+    fn koleo_finite_for_random_batch() {
+        let dim = 16;
+        let batch = 32;
+        let mut rng = LcgRng::new(321);
+        let mut z = vec![0.0f32; batch * dim];
+        rng.fill_normal(&mut z);
+        let v = koleo_loss(&z, dim, 1e-8).expect("ok");
+        assert!(v.is_finite());
     }
 }

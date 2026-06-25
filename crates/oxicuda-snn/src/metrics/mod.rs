@@ -10,6 +10,8 @@ pub mod avalanche;
 pub mod decoding;
 /// Entropy and mutual information of spike trains via word-binning.
 pub mod information;
+/// Time-resolved firing-rate estimation via kernel density estimation.
+pub mod kde_rate;
 /// Population-coded output readout: rate decode, winner-take-all, softmax.
 pub mod population_coding;
 

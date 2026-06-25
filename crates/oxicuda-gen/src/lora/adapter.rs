@@ -170,6 +170,48 @@ impl LoraLinear {
         })
     }
 
+    /// Create from pre-computed matrices and an explicit scaling factor.
+    ///
+    /// Unlike [`Self::from_matrices`] (which takes `alpha` and derives
+    /// `scaling = alpha / rank`), this stores the supplied `scaling` verbatim.
+    /// It is the exact inverse of the accessor quartet
+    /// (`in_features`, `out_features`, `rank`, `scaling`, `matrix_a`,
+    /// `matrix_b`) and is used by the checkpoint (de)serialiser to guarantee a
+    /// bit-for-bit round-trip of the scaling field.
+    ///
+    /// # Errors
+    /// - `DimensionMismatch` if `matrix_a.len() != rank * in_features` or
+    ///   `matrix_b.len() != out_features * rank`.
+    pub fn from_parts(
+        in_features: usize,
+        out_features: usize,
+        rank: usize,
+        scaling: f32,
+        matrix_a: Vec<f32>,
+        matrix_b: Vec<f32>,
+    ) -> GenResult<Self> {
+        if matrix_a.len() != rank * in_features {
+            return Err(GenError::DimensionMismatch {
+                expected: rank * in_features,
+                got: matrix_a.len(),
+            });
+        }
+        if matrix_b.len() != out_features * rank {
+            return Err(GenError::DimensionMismatch {
+                expected: out_features * rank,
+                got: matrix_b.len(),
+            });
+        }
+        Ok(Self {
+            in_features,
+            out_features,
+            rank,
+            scaling,
+            matrix_a,
+            matrix_b,
+        })
+    }
+
     /// Apply LoRA to a batch of inputs.
     ///
     /// `y = base_output + scaling * (x @ A^T) @ B^T`

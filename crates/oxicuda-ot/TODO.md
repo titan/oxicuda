@@ -17,7 +17,7 @@ Current implementation covers the canonical OT algorithm spectrum: entropic OT (
 - [x] `error.rs` — `OtError` enum + `OtResult<T>` alias
 - [x] `handle.rs` — `SmVersion`, `LcgRng`, `OtHandle`
 - [x] `ptx_kernels.rs` — 7 GPU kernels × 6 SM versions (75 / 80 / 86 / 89 / 90 / 100)
-- [x] `e2e_tests.rs` — 18 cross-module integration tests
+- [x] `e2e_tests.rs` — 19 cross-module integration tests
 
 #### Entropic OT (sinkhorn/)
 - [x] `sinkhorn/sinkhorn.rs` — `SinkhornConfig {eps, max_iter, tol}`, `SinkhornResult {plan, u, v, cost, iters}`; log-domain stabilised iterative Bregman projection with row-LSE / col-LSE updates and column-residual convergence
@@ -75,9 +75,9 @@ Current implementation covers the canonical OT algorithm spectrum: entropic OT (
 ### Future Enhancements [ ]
 
 #### P0 — Verification on GPU Hardware
-- [ ] End-to-end GPU verification of all PTX kernels under Linux + NVIDIA driver 525+
-- [ ] Criterion benchmark suite executed on real hardware
-- [ ] Numerical-stability harness for `eps → 0` regimes (Sinkhorn, UnbalancedOT, GW)
+- [ ] End-to-end GPU verification of all PTX kernels under Linux + NVIDIA driver 525+ (requires GPU hardware)
+- [ ] Criterion benchmark suite executed on real hardware (requires GPU hardware)
+- [x] Numerical-stability harness for `eps → 0` regimes — epsilon-scaling (deterministic-annealing) Sinkhorn with warm-started dual potentials + `stability_sweep` diagnostic over decreasing ε (Schmitzer 2019 §3.2, Kosowsky-Yuille 1994) (`sinkhorn/epsilon_scaling.rs`)
 
 #### P1 — Algorithm Coverage
 - [x] Greenkhorn algorithm (greedy row/column update for faster sparse Sinkhorn) (`sinkhorn/greenkhorn.rs`)
@@ -97,12 +97,12 @@ Current implementation covers the canonical OT algorithm spectrum: entropic OT (
 - [x] `gromov/bregman_gw.rs` — Bregman-projected GW (Xu 2019): mirror descent on coupling Γ under entropic GW objective; Bregman proj. onto transport polytope; convergence guarantee for λ-strongly convex regulariser
 
 #### P2 — Optimisations and Tooling
-- [ ] Fused cost-matrix + Sinkhorn-step kernel (saves global-memory round trip)
-- [ ] Mixed-precision (FP16 / BF16) Sinkhorn with FP32 LSE accumulator
-- [ ] Block-LSE tile scheme for shared-memory cost matrices
-- [ ] CUDA-graph capture for multi-iteration Sinkhorn outer loop
-- [ ] Tensor-Core (mma.sync) path for cost matrix evaluation
-- [ ] On-device random direction generation for SlicedW
+- [ ] Fused cost-matrix + Sinkhorn-step kernel (saves global-memory round trip) (requires GPU hardware)
+- [ ] Mixed-precision (FP16 / BF16) Sinkhorn with FP32 LSE accumulator (requires GPU hardware)
+- [ ] Block-LSE tile scheme for shared-memory cost matrices (requires GPU hardware)
+- [ ] CUDA-graph capture for multi-iteration Sinkhorn outer loop (requires GPU hardware)
+- [ ] Tensor-Core (mma.sync) path for cost matrix evaluation (requires GPU hardware)
+- [ ] On-device random direction generation for SlicedW (requires GPU hardware)
 - [x] `wasserstein/w2_interpolation.rs` — Displacement interpolation (McCann 1997): geodesic (1-t)ρ₀ + t ρ₁ in Wasserstein space via McCann interpolant; (push-forward of ρ₀ under (1-t)Id + t T*); barycentric projection formula
 - [x] `domain/entropic_da.rs` — Entropic domain adaptation (Courty 2017): regularised joint OT plan with group lasso source-label prior; `sinkhorn_lpl1_mm` alternating MM optimisation; transport + classifier training
 - [x] `exact/auction_alg.rs` — Auction algorithm for assignment (Bertsekas 1988): ε-scaling price iterations; O(n³/ε) convergence; complementary-slackness termination; alternative to network simplex for dense small-n problems
@@ -119,7 +119,7 @@ Current implementation covers the canonical OT algorithm spectrum: entropic OT (
 
 ## Quality Status
 
-- Tests: 628 passing (unit + 18 e2e integration tests in `e2e_tests.rs`)
+- Tests: 649 passing (unit + 19 e2e integration tests in `e2e_tests.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches
@@ -178,7 +178,7 @@ Optimal transport kernels are bandwidth-limited at small `n × m` and compute-li
 - [ ] All 7 PTX kernels executed end-to-end on GPU hardware (currently only string-content verified)
 - [ ] Numerical equivalence between CPU reference (Sinkhorn) and GPU PTX path within FP32 tolerance
 - [ ] Benchmark numbers (sinkhorn_step, cost_matrix on A100 / H100) recorded in `benches/ot_ops.rs`
-- [ ] Sinkhorn ↔ network-simplex agreement verified for large `n × m` (currently `n = m = 8`)
+- [x] Sinkhorn ↔ network-simplex agreement verified for large `n × m` (`sinkhorn_agrees_with_network_simplex_on_large_problems` in `e2e_tests.rs` — seeded random 3-D Euclidean-cost instances at `n = m ∈ {16, 32, 64}`: exact network-simplex EMD cost and epsilon-scaled entropic-Sinkhorn cost (`ε` annealed `2.0 → 2e-3`) agree to relative gap `< 8e-3` (measured ≤ 2.6e-3 over 180 random instances), Sinkhorn plan marginals match targets `< 5e-3`, and both plans are feasible/non-negative/unit-mass. **Required first fixing a latent bug in `exact/network_simplex.rs::find_cycle`**: the stepping-stone cycle search used an inverted closing-parity condition and so failed with "could not close cycle" on *every* dense instance with `n ≥ 4` — it was rewritten as a correct iterative alternating-axis DFS (now 100 % solve rate at `n = 5…64`, regression-covered by `solves_generic_instances_above_n3`).)
 
 ### Algorithmic Deepening
 - [x] Sinkhorn-divergence with debiased gradient backprop (Feydy 2020) for differentiable OT (`sinkhorn/debiased_divergence.rs`)

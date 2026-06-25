@@ -22,9 +22,13 @@
 //!   Regression I". *Biometrika* 37(3-4):409-428.
 
 pub mod acf_pacf;
+pub mod arima;
 pub mod garch;
 pub mod var_model;
 pub use acf_pacf::{AcfSeResult, PacfResult, acf_bartlett, correlogram_bounds, pacf};
+pub use arima::{
+    ArimaConfig, ArimaFit, arima_fit, arima_forecast, arima_predict_in_sample, arima_residuals,
+};
 pub use garch::{
     GarchConfig, GarchModel, garch_fit, garch_forecast, garch_log_likelihood, garch_persistence,
     garch_unconditional_variance,

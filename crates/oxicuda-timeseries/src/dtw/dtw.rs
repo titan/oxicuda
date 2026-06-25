@@ -83,13 +83,7 @@ pub fn dtw(a: &[f64], n: usize, b: &[f64], m: usize, config: &DtwConfig) -> TsRe
 /// # Errors
 ///
 /// Same as [`dtw`].
-pub fn dtw_distance(
-    a: &[f64],
-    n: usize,
-    b: &[f64],
-    m: usize,
-    config: &DtwConfig,
-) -> TsResult<f64> {
+pub fn dtw_distance(a: &[f64], n: usize, b: &[f64], m: usize, config: &DtwConfig) -> TsResult<f64> {
     validate_inputs(a, n, b, m, config)?;
     let cost = build_cost_matrix(a, n, b, m, config);
     Ok(cost[(n - 1) * m + (m - 1)])
@@ -99,13 +93,7 @@ pub fn dtw_distance(
 ///
 /// Does not validate inputs; caller should ensure correctness.
 #[must_use]
-pub fn dtw_cost_matrix(
-    a: &[f64],
-    n: usize,
-    b: &[f64],
-    m: usize,
-    config: &DtwConfig,
-) -> Vec<f64> {
+pub fn dtw_cost_matrix(a: &[f64], n: usize, b: &[f64], m: usize, config: &DtwConfig) -> Vec<f64> {
     if n == 0 || m == 0 || config.n_features == 0 {
         return Vec::new();
     }
@@ -254,13 +242,7 @@ pub fn dtw_barycenter(
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-fn validate_inputs(
-    a: &[f64],
-    n: usize,
-    b: &[f64],
-    m: usize,
-    config: &DtwConfig,
-) -> TsResult<()> {
+fn validate_inputs(a: &[f64], n: usize, b: &[f64], m: usize, config: &DtwConfig) -> TsResult<()> {
     if config.n_features == 0 {
         return Err(TsError::InvalidNumVariates(0));
     }
@@ -315,9 +297,7 @@ fn build_cost_matrix(a: &[f64], n: usize, b: &[f64], m: usize, config: &DtwConfi
     let in_band = |i: usize, j: usize| -> bool {
         match config.band {
             None => true,
-            Some(r) => {
-                i.abs_diff(j) <= r
-            }
+            Some(r) => i.abs_diff(j) <= r,
         }
     };
 
@@ -429,7 +409,10 @@ mod tests {
         let cfg = make_cfg();
         let dab = dtw_distance(&a, 4, &b, 5, &cfg).expect("ok");
         let dba = dtw_distance(&b, 5, &a, 4, &cfg).expect("ok");
-        assert!((dab - dba).abs() < 1e-10, "DTW should be symmetric: {dab} vs {dba}");
+        assert!(
+            (dab - dba).abs() < 1e-10,
+            "DTW should be symmetric: {dab} vs {dba}"
+        );
     }
 
     #[test]
@@ -579,15 +562,16 @@ mod tests {
     fn dtw_distance_matrix_symmetric() {
         let k = 3;
         let l = 4;
-        let seqs: Vec<f64> = (0..k * l)
-            .map(|i| (i as f64 * 0.3 + 1.0).sin())
-            .collect();
+        let seqs: Vec<f64> = (0..k * l).map(|i| (i as f64 * 0.3 + 1.0).sin()).collect();
         let cfg = make_cfg();
         let mat = dtw_distance_matrix(&seqs, k, l, &cfg).expect("ok");
         for i in 0..k {
             for j in 0..k {
                 let diff = (mat[i * k + j] - mat[j * k + i]).abs();
-                assert!(diff < 1e-10, "matrix not symmetric at ({i},{j}): diff={diff}");
+                assert!(
+                    diff < 1e-10,
+                    "matrix not symmetric at ({i},{j}): diff={diff}"
+                );
             }
         }
     }

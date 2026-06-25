@@ -9,16 +9,19 @@
 //! oxicuda-ann
 //! ├── distance/    — L2, inner product distance metrics
 //! ├── flat/        — Brute-force flat index (exact search baseline)
+//! ├── fresh_diskann — Incremental (insert/delete) Vamana graph with consolidation
 //! ├── graph/       — NSG, Filtered-DiskANN search, SPANN posting-list index
 //! ├── hnsw/        — Hierarchical Navigable Small World graph (insert + search)
 //! ├── hnsw_pq      — Compressed HNSW with per-node PQ codes + ADC scoring
+//! ├── index/       — Pure-Rust flat-binary index serialiser (no zip/bincode)
 //! ├── ivf/         — Inverted File Index (coarse quantizer + probing)
 //! ├── ivfpq/       — IVF with Product Quantization re-ranking
 //! ├── kmeans/      — k-Means clustering (used for IVF/PQ training)
 //! ├── knn_graph/   — Brute-force and NN-Descent k-NN graph construction
-//! ├── lsh/         — Random Projection LSH and MinHash
+//! ├── lsh/         — Random Projection LSH, MinHash + calibration diagnostics
+//! ├── metrics      — Recall@K and recall–latency Pareto-frontier helpers
 //! ├── ngt/         — NGT/ANNG approximate neighborhood graph (incremental build + ε-greedy search)
-//! ├── pq/          — Product Quantization (train, encode, ADC)
+//! ├── pq/          — Product Quantization (train, encode, ADC, OPQ, anisotropic)
 //! ├── quantize/    — Scalar quantization + Additive Quantization (AQ)
 //! ├── rerank       — Two-stage exact re-ranking of approximate candidates
 //! ├── topk/        — Parallel top-K heap selection
@@ -31,15 +34,18 @@
 pub mod distance;
 pub mod error;
 pub mod flat;
+pub mod fresh_diskann;
 pub mod graph;
 pub mod handle;
 pub mod hnsw;
 pub mod hnsw_pq;
+pub mod index;
 pub mod ivf;
 pub mod ivfpq;
 pub mod kmeans;
 pub mod knn_graph;
 pub mod lsh;
+pub mod metrics;
 pub mod ngt;
 pub mod pq;
 pub mod ptx_kernels;

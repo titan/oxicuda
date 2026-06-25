@@ -12,6 +12,7 @@ use crate::fdm::wave_1d::{WaveState1d, leapfrog_step_1d};
 use crate::fem::dirichlet_apply::apply_dirichlet_csr;
 use crate::fem::mass_stiffness::{assemble_load_centroid, assemble_mass_stiffness};
 use crate::fem::mixed_poisson::{MixedBoundary, element_divergence, mixed_poisson_rt0};
+use crate::fem::p1_tet::p1_tet_local_stiffness;
 use crate::handle::LcgRng;
 use crate::mesh::{Mesh1d, Mesh2d, TriMesh2d};
 use crate::metrics::metrics::{convergence_order, h1_seminorm_1d, l2_norm_1d, max_norm};
@@ -567,5 +568,468 @@ fn dg_2d_burgers_rankine_hugoniot() {
     assert!(
         (front - analytic).abs() < 0.1,
         "shock front {front} vs RH {analytic}"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Verification & worked-example deliverables (TODO "Verification Gaps" /
+//  "Documentation Gaps").  Each computes its convergence rate / residual
+//  reduction at runtime and asserts it — no number is hard-coded from
+//  off-line knowledge.
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Build a structured tetrahedral mesh of the unit cube `[0,1]³`.
+///
+/// `nv` vertices per axis ⇒ `(nv-1)³` hexahedral cells, each split into the six
+/// tetrahedra of the Kuhn / Freudenthal decomposition along the body diagonal
+/// `v0 → v7`.  The six monotone lattice paths from `(0,0,0)` to `(1,1,1)`
+/// tile the cube exactly (no gaps, no overlaps), each tet having volume
+/// `h³/6`.
+///
+/// Returns `(coords, tets)` where `coords[g] = [x,y,z]` for global vertex `g`
+/// (lexicographic id `i + nv*(j + nv*k)`) and each `tets[e]` lists the four
+/// global vertex ids of one tetrahedron.
+fn unit_cube_tet_mesh(nv: usize) -> (Vec<[f64; 3]>, Vec<[usize; 4]>) {
+    assert!(nv >= 2, "need at least 2 vertices per axis");
+    let h = 1.0 / (nv - 1) as f64;
+    let vid = |i: usize, j: usize, k: usize| i + nv * (j + nv * k);
+
+    let mut coords = Vec::with_capacity(nv * nv * nv);
+    for k in 0..nv {
+        for j in 0..nv {
+            for i in 0..nv {
+                coords.push([i as f64 * h, j as f64 * h, k as f64 * h]);
+            }
+        }
+    }
+
+    // Local corner numbering of a cell: bit0 = +x, bit1 = +y, bit2 = +z.
+    //   0=(0,0,0) 1=(1,0,0) 2=(0,1,0) 3=(1,1,0)
+    //   4=(0,0,1) 5=(1,0,1) 6=(0,1,1) 7=(1,1,1)
+    // Kuhn-6 tetrahedra, every one of which shares the body diagonal 0–7.
+    const KUHN6: [[usize; 4]; 6] = [
+        [0, 1, 3, 7],
+        [0, 1, 5, 7],
+        [0, 2, 3, 7],
+        [0, 2, 6, 7],
+        [0, 4, 5, 7],
+        [0, 4, 6, 7],
+    ];
+
+    let mut tets = Vec::with_capacity(6 * (nv - 1).pow(3));
+    for k in 0..nv - 1 {
+        for j in 0..nv - 1 {
+            for i in 0..nv - 1 {
+                // Global ids of the eight cell corners, indexed by the local
+                // bit numbering above.
+                let corner = |c: usize| {
+                    let di = c & 1;
+                    let dj = (c >> 1) & 1;
+                    let dk = (c >> 2) & 1;
+                    vid(i + di, j + dj, k + dk)
+                };
+                for t in &KUHN6 {
+                    tets.push([corner(t[0]), corner(t[1]), corner(t[2]), corner(t[3])]);
+                }
+            }
+        }
+    }
+    (coords, tets)
+}
+
+/// Solve `−Δu = f` on the unit-cube tet mesh with homogeneous Dirichlet BCs and
+/// return the discrete nodal solution together with the nodal-quadrature L²
+/// error against `exact`.
+///
+/// Global P1 assembly uses [`p1_tet_local_stiffness`] per element; the load is
+/// formed with the vertex (trapezoidal) quadrature `b_i += (V/4)·f(p_i)`, which
+/// is exact to O(h²) and keeps the overall P1 rate.  The system is solved with
+/// the crate's [`cg_solve`].  The reported error is
+/// `sqrt(Σ_T (V_T/4) Σ_{i∈T} (u_h(p_i) − u(p_i))²)`, the natural element-wise
+/// L² quadrature consistent with the load rule.
+fn solve_cube_poisson_tet<Ff, Fu>(nv: usize, f: Ff, exact: Fu) -> (Vec<f64>, f64)
+where
+    Ff: Fn(f64, f64, f64) -> f64,
+    Fu: Fn(f64, f64, f64) -> f64,
+{
+    let (coords, tets) = unit_cube_tet_mesh(nv);
+    let n = coords.len();
+
+    // Dense global assembly (n is modest for these meshes) then convert to CSR.
+    let mut k_dense = vec![0.0_f64; n * n];
+    let mut load = vec![0.0_f64; n];
+    for tet in &tets {
+        let nodes = [
+            coords[tet[0]],
+            coords[tet[1]],
+            coords[tet[2]],
+            coords[tet[3]],
+        ];
+        let ke = p1_tet_local_stiffness(&nodes).expect("local stiffness");
+        // Tet volume from the same edge-triple determinant used internally.
+        let e1 = [
+            nodes[1][0] - nodes[0][0],
+            nodes[1][1] - nodes[0][1],
+            nodes[1][2] - nodes[0][2],
+        ];
+        let e2 = [
+            nodes[2][0] - nodes[0][0],
+            nodes[2][1] - nodes[0][1],
+            nodes[2][2] - nodes[0][2],
+        ];
+        let e3 = [
+            nodes[3][0] - nodes[0][0],
+            nodes[3][1] - nodes[0][1],
+            nodes[3][2] - nodes[0][2],
+        ];
+        let triple = e1[0] * (e2[1] * e3[2] - e2[2] * e3[1])
+            + e1[1] * (e2[2] * e3[0] - e2[0] * e3[2])
+            + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0]);
+        let vol = triple.abs() / 6.0;
+        for a in 0..4 {
+            let ga = tet[a];
+            for b in 0..4 {
+                k_dense[ga * n + tet[b]] += ke[a * 4 + b];
+            }
+            let p = nodes[a];
+            load[ga] += 0.25 * vol * f(p[0], p[1], p[2]);
+        }
+    }
+
+    // Convert dense → CSR (drop exact zeros but always keep the diagonal).
+    let mut row_ptr = Vec::with_capacity(n + 1);
+    let mut cols = Vec::new();
+    let mut vals = Vec::new();
+    row_ptr.push(0);
+    for i in 0..n {
+        for j in 0..n {
+            let v = k_dense[i * n + j];
+            if v != 0.0 || i == j {
+                cols.push(j);
+                vals.push(v);
+            }
+        }
+        row_ptr.push(cols.len());
+    }
+    let mut a = SparseCsr::new(n, n, row_ptr, cols, vals).expect("csr");
+
+    // Homogeneous Dirichlet on every face of the cube.
+    let nv1 = nv - 1;
+    let mut bc_nodes = Vec::new();
+    for k in 0..nv {
+        for j in 0..nv {
+            for i in 0..nv {
+                let on_bdy = i == 0 || i == nv1 || j == 0 || j == nv1 || k == 0 || k == nv1;
+                if on_bdy {
+                    bc_nodes.push(i + nv * (j + nv * k));
+                }
+            }
+        }
+    }
+    let bc_vals = vec![0.0; bc_nodes.len()];
+    apply_dirichlet_csr(&mut a, &mut load, &bc_nodes, &bc_vals).expect("dirichlet");
+
+    let u = cg_solve(&a, &load, &vec![0.0; n], 20_000, 1.0e-12).expect("cg");
+
+    // Element-wise nodal-quadrature L² error.
+    let mut err2 = 0.0_f64;
+    for tet in &tets {
+        let nodes = [
+            coords[tet[0]],
+            coords[tet[1]],
+            coords[tet[2]],
+            coords[tet[3]],
+        ];
+        let e1 = [
+            nodes[1][0] - nodes[0][0],
+            nodes[1][1] - nodes[0][1],
+            nodes[1][2] - nodes[0][2],
+        ];
+        let e2 = [
+            nodes[2][0] - nodes[0][0],
+            nodes[2][1] - nodes[0][1],
+            nodes[2][2] - nodes[0][2],
+        ];
+        let e3 = [
+            nodes[3][0] - nodes[0][0],
+            nodes[3][1] - nodes[0][1],
+            nodes[3][2] - nodes[0][2],
+        ];
+        let triple = e1[0] * (e2[1] * e3[2] - e2[2] * e3[1])
+            + e1[1] * (e2[2] * e3[0] - e2[0] * e3[2])
+            + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0]);
+        let vol = triple.abs() / 6.0;
+        for a in 0..4 {
+            let g = tet[a];
+            let p = nodes[a];
+            let d = u[g] - exact(p[0], p[1], p[2]);
+            err2 += 0.25 * vol * d * d;
+        }
+    }
+    (u, err2.sqrt())
+}
+
+// 27. 3D Poisson on TETRAHEDRAL meshes: P1 FEM on a manufactured solution
+// `u = sin(πx)sin(πy)sin(πz)` (so `−Δu = 3π² u`) over the unit cube, solved on
+// three successively refined Kuhn-6 tet meshes.  The discrete L² error must
+// decrease at the expected O(h²) P1 rate.  The observed order is COMPUTED from
+// the measured errors via `convergence_order` (never hard-coded).
+#[test]
+fn fem_p1_tet_3d_poisson_convergence_order_2() {
+    let pi = std::f64::consts::PI;
+    let exact = |x: f64, y: f64, z: f64| (pi * x).sin() * (pi * y).sin() * (pi * z).sin();
+    let f = |x: f64, y: f64, z: f64| 3.0 * pi * pi * exact(x, y, z);
+
+    let nvs = [5usize, 9, 17]; // h = 1/4, 1/8, 1/16
+    let mut hs = Vec::new();
+    let mut errs = Vec::new();
+    for &nv in &nvs {
+        let (_u, err) = solve_cube_poisson_tet(nv, f, exact);
+        hs.push(1.0 / (nv - 1) as f64);
+        errs.push(err);
+        assert!(err.is_finite() && err > 0.0, "nv={nv} err={err}");
+    }
+    // Print the error table + observed orders (visible with `--nocapture`).
+    println!("3D tet P1 Poisson convergence (manufactured sin·sin·sin):");
+    for w in 0..nvs.len() {
+        if w == 0 {
+            println!("  h={:.5}  L2err={:.3e}", hs[w], errs[w]);
+        } else {
+            let p = convergence_order(hs[w - 1], errs[w - 1], hs[w], errs[w]).expect("order");
+            println!(
+                "  h={:.5}  L2err={:.3e}  observed order={:.3}",
+                hs[w], errs[w], p
+            );
+        }
+    }
+
+    // Errors must monotonically shrink under refinement.
+    assert!(
+        errs[1] < errs[0] && errs[2] < errs[1],
+        "errors not decreasing: {errs:?}"
+    );
+    // Each refinement (h → h/2) must show ≈ O(h²): order in [1.7, 2.3].
+    let p1 = convergence_order(hs[0], errs[0], hs[1], errs[1]).expect("order");
+    let p2 = convergence_order(hs[1], errs[1], hs[2], errs[2]).expect("order");
+    assert!(
+        (1.7..=2.3).contains(&p1),
+        "first refinement order {p1} not ≈ 2 (errs {errs:?})"
+    );
+    assert!(
+        (1.7..=2.3).contains(&p2),
+        "second refinement order {p2} not ≈ 2 (errs {errs:?})"
+    );
+}
+
+// 28. Worked example (TODO "Documentation Gaps"): solve −u'' = f on [0,1] with
+// the manufactured solution `u = sin(πx)` (so `f = π² sin(πx)`) on four
+// successively refined uniform meshes, print the max-error table + observed
+// convergence orders, and assert the rate is the expected O(h²).
+#[test]
+fn worked_example_poisson_1d_convergence() {
+    let pi = std::f64::consts::PI;
+    let exact = |x: f64| (pi * x).sin();
+    let f = |x: f64| pi * pi * (pi * x).sin();
+
+    let ns = [11usize, 21, 41, 81]; // h = 1/10, 1/20, 1/40, 1/80
+    let mut hs = Vec::new();
+    let mut errs = Vec::new();
+    for &n in &ns {
+        let mesh = Mesh1d::uniform(0.0, 1.0, n).expect("mesh");
+        let fvals: Vec<f64> = mesh.nodes.iter().map(|&x| f(x)).collect();
+        let u = solve_poisson_1d(&mesh, &fvals, Dirichlet1d { ua: 0.0, ub: 0.0 }).expect("solve");
+        let err = u
+            .iter()
+            .zip(mesh.nodes.iter())
+            .map(|(&ui, &x)| (ui - exact(x)).abs())
+            .fold(0.0_f64, f64::max);
+        hs.push(mesh.h());
+        errs.push(err);
+    }
+
+    println!("1D Poisson −u''=π²sin(πx), manufactured u=sin(πx):");
+    println!("        h          max-error      order");
+    let mut orders = Vec::new();
+    for w in 0..ns.len() {
+        if w == 0 {
+            println!("  {:.6e}   {:.6e}      -", hs[w], errs[w]);
+        } else {
+            let p = convergence_order(hs[w - 1], errs[w - 1], hs[w], errs[w]).expect("order");
+            orders.push(p);
+            println!("  {:.6e}   {:.6e}   {:.4}", hs[w], errs[w], p);
+        }
+    }
+
+    // Every successive order must be ≈ 2, and the finest (asymptotic) one tight.
+    for (w, &p) in orders.iter().enumerate() {
+        assert!(
+            (1.9..=2.1).contains(&p),
+            "refinement {w} order {p} not ≈ 2 (errs {errs:?})"
+        );
+    }
+    let finest = *orders.last().expect("≥1 order");
+    assert!(
+        (finest - 2.0).abs() < 0.05,
+        "asymptotic order {finest} not ≈ 2"
+    );
+}
+
+// 29. Worked example (TODO "Documentation Gaps"): time-step the heat equation
+// `u_t = α u_xx` with Crank–Nicolson and verify BOTH
+//   (a) the numerical solution matches the analytic `u(x,t)=sin(πx)e^{−απ²t}`
+//       to tolerance, and
+//   (b) Crank–Nicolson is 2nd-order in time — halving dt quarters the temporal
+//       error.  The temporal error is isolated by self-comparison against a
+//       reference solution on the SAME (fixed, fine) spatial mesh with a very
+//       small dt, which cancels the spatial discretisation error exactly.
+#[test]
+fn worked_example_heat_crank_nicolson() {
+    let pi = std::f64::consts::PI;
+    let alpha = 1.0_f64;
+    let t_final = 0.1_f64;
+    // Fine spatial mesh so the spatial O(h²) error is far below the temporal
+    // errors probed by the dt sweep.
+    let mesh = Mesh1d::uniform(0.0, 1.0, 201).expect("mesh");
+    let u0: Vec<f64> = mesh.nodes.iter().map(|&x| (pi * x).sin()).collect();
+
+    let integrate = |dt: f64| -> Vec<f64> {
+        let nsteps = (t_final / dt).round() as usize;
+        let dt_used = t_final / nsteps as f64;
+        let mut u = u0.clone();
+        for _ in 0..nsteps {
+            crank_nicolson_step(&mesh, &mut u, alpha, dt_used, 0.0, 0.0).expect("cn step");
+        }
+        u
+    };
+
+    // (a) Accuracy vs the analytic exponential-decay solution.
+    let decay = (-pi * pi * alpha * t_final).exp();
+    let u_acc = integrate(0.0025);
+    let mut max_abs = 0.0_f64;
+    for (&uh, &x) in u_acc.iter().zip(mesh.nodes.iter()) {
+        let analytic = (pi * x).sin() * decay;
+        max_abs = max_abs.max((uh - analytic).abs());
+    }
+    println!("Heat CN vs analytic sin(πx)e^(−απ²t) at t={t_final}: max|err|={max_abs:.3e}");
+    assert!(max_abs < 1.0e-3, "CN solution off analytic: {max_abs}");
+
+    // (b) Temporal order via self-convergence on the fixed mesh.  Reference
+    // uses a dt 8× smaller than the smallest probed dt, so its temporal error
+    // is ~64× smaller and acts as ground truth for the time discretisation.
+    let dts = [0.02_f64, 0.01, 0.005];
+    let u_ref = integrate(dts[2] / 8.0);
+    let l2_diff = |a: &[f64], b: &[f64]| -> f64 {
+        let s: f64 = a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum();
+        (mesh.h() * s).sqrt()
+    };
+    let mut terr = Vec::new();
+    for &dt in &dts {
+        let u = integrate(dt);
+        terr.push(l2_diff(&u, &u_ref));
+    }
+    println!("Crank–Nicolson temporal self-convergence (fixed mesh):");
+    let mut torders = Vec::new();
+    for w in 0..dts.len() {
+        if w == 0 {
+            println!("  dt={:.4}  L2(time-err)={:.3e}", dts[w], terr[w]);
+        } else {
+            // order = log(e_coarse/e_fine)/log(dt_coarse/dt_fine).
+            let p = (terr[w - 1] / terr[w]).ln() / (dts[w - 1] / dts[w]).ln();
+            torders.push(p);
+            println!(
+                "  dt={:.4}  L2(time-err)={:.3e}  order={:.3}  (err ratio {:.2})",
+                dts[w],
+                terr[w],
+                p,
+                terr[w - 1] / terr[w]
+            );
+        }
+    }
+    // Halving dt must roughly quarter the error ⇒ order ≈ 2.
+    for (w, &p) in torders.iter().enumerate() {
+        assert!(
+            (1.8..=2.2).contains(&p),
+            "CN temporal order {p} (step {w}) not ≈ 2 (terr {terr:?})"
+        );
+    }
+}
+
+// 30. Worked example (TODO "Documentation Gaps"): geometric multigrid V-cycle
+// on the 1D Poisson problem `−u'' = π² sin(πx)`.  Run several V-cycles, record
+// the residual norm after each, print the per-cycle residual history and its
+// reduction factor, and assert the residual drops by a roughly constant factor
+// (< 1) every cycle — i.e. geometric (mesh-independent) convergence.
+#[test]
+fn worked_example_multigrid_vcycle_residual() {
+    let pi = std::f64::consts::PI;
+    let n = 129; // 2^7 + 1 ⇒ a full coarsening hierarchy down to n=3
+    let h = 1.0 / (n - 1) as f64;
+    let f: Vec<f64> = (0..n)
+        .map(|i| {
+            let x = i as f64 * h;
+            pi * pi * (pi * x).sin()
+        })
+        .collect();
+
+    // Residual r = f − A u for the interior 1D Poisson stencil.
+    let residual_norm = |u: &[f64]| -> f64 {
+        let inv_h2 = 1.0 / (h * h);
+        let mut s = 0.0;
+        for i in 1..n - 1 {
+            let lap = inv_h2 * (2.0 * u[i] - u[i - 1] - u[i + 1]);
+            let r = f[i] - lap;
+            s += r * r;
+        }
+        s.sqrt()
+    };
+
+    let mut u = vec![0.0; n];
+    let mut history = vec![residual_norm(&u)];
+    let n_cycles = 8;
+    for _ in 0..n_cycles {
+        v_cycle_1d(&mut u, &f, h, 2, 2).expect("v-cycle");
+        history.push(residual_norm(&u));
+    }
+
+    println!("Multigrid V-cycle residual history (1D Poisson, n={n}):");
+    let mut factors = Vec::new();
+    for c in 0..history.len() {
+        if c == 0 {
+            println!("  cycle {c}: residual={:.6e}", history[c]);
+        } else {
+            let factor = history[c] / history[c - 1];
+            factors.push(factor);
+            println!(
+                "  cycle {c}: residual={:.6e}  reduction factor={:.4}",
+                history[c], factor
+            );
+        }
+    }
+
+    // Total reduction must be large (textbook MG drives the residual to ~0).
+    assert!(
+        history.last().expect("hist") < &(1.0e-6 * history[0]),
+        "MG did not reduce residual enough: {history:?}"
+    );
+    // Each cycle must contract the residual (factor < 1)…
+    for (c, &factor) in factors.iter().enumerate() {
+        assert!(
+            factor < 1.0,
+            "cycle {c} factor {factor} ≥ 1 (no contraction)"
+        );
+    }
+    // …and once the iteration settles, the per-cycle factor is roughly
+    // constant (geometric convergence): the asymptotic contraction factors
+    // stay well below 1 and within a bounded band of each other.
+    let tail = &factors[factors.len().saturating_sub(3)..];
+    let tail_max = tail.iter().cloned().fold(f64::MIN, f64::max);
+    let tail_min = tail.iter().cloned().fold(f64::MAX, f64::min);
+    assert!(
+        tail_max < 0.6,
+        "asymptotic V-cycle contraction {tail_max} too weak (factors {factors:?})"
+    );
+    assert!(
+        tail_max - tail_min < 0.35,
+        "V-cycle factor not roughly constant: [{tail_min}, {tail_max}]"
     );
 }

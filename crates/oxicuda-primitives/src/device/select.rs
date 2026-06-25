@@ -168,6 +168,16 @@ impl DeviceSelectConfig {
             self.block_size
         )
     }
+
+    /// Scratch-buffer bytes the caller must allocate for `n` elements: the
+    /// per-element `u32` flag array plus the `u64` exclusive-scan offset array.
+    /// (The compact output buffer is sized separately by the caller, at most
+    /// `n` elements of the data type.)
+    #[must_use]
+    pub fn workspace_bytes(&self, n: u64) -> u64 {
+        // flags[n] (u32) + offsets[n] (u64)
+        n * 4 + n * 8
+    }
 }
 
 // ─── Template ────────────────────────────────────────────────────────────────
@@ -468,6 +478,14 @@ mod tests {
             .expect("PTX generation should succeed in test");
         assert!(ptx.contains("ld.global.f64"), "PTX: {ptx}");
         assert!(ptx.contains("st.global.f64"), "PTX: {ptx}");
+    }
+
+    #[test]
+    fn workspace_bytes_flags_plus_offsets() {
+        let c = cfg(PtxType::F32, SelectPredicate::NonZero);
+        // flags[n]*4 + offsets[n]*8 = 12*n.
+        assert_eq!(c.workspace_bytes(10), 120);
+        assert!(c.workspace_bytes(1000) > c.workspace_bytes(500));
     }
 
     #[test]

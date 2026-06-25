@@ -212,6 +212,73 @@ mod tests {
     }
 
     #[test]
+    fn vtrace_clamp_ratio_sweep_monotone() {
+        // Sweep c̄ = ρ̄ across [0.1, 10.0]. The behaviour policy assigns higher
+        // probability than the target (lp_old > lp_new), so the raw IS ratio
+        // ρ = exp(lp_new − lp_old) = exp(−2) ≈ 0.135 is *below* 1. Increasing the
+        // clamp threshold above ρ leaves ρ̄ = ρ unchanged; decreasing it below ρ
+        // shrinks ρ̄, which scales the (positive) TD error δ and hence the
+        // v-trace correction. We assert: (a) every sweep point is finite, and
+        // (b) the v-trace target at s=0 is non-decreasing in the clamp threshold
+        // over the regime where the threshold caps ρ (positive δ ⇒ larger ρ̄ ⇒
+        // larger v_s above V).
+        let t = 6;
+        let r = vec![1.0_f32; t];
+        let v = vec![0.0_f32; t + 1]; // V=0 ⇒ δ = ρ̄·(r + 0 − 0) = ρ̄·1 > 0
+        let d = vec![0.0_f32; t];
+        let lp_new = vec![0.0_f32; t];
+        let lp_old = vec![2.0_f32; t]; // ρ = exp(−2) ≈ 0.1353
+        let rho_raw = (-2.0_f32).exp();
+
+        let bars = [0.1_f32, 0.135_3, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
+        let mut prev_vs0 = f32::NEG_INFINITY;
+        let mut prev_capped = true;
+        for &bar in &bars {
+            let cfg = VtraceConfig {
+                gamma: 0.99,
+                c_bar: bar,
+                rho_bar: bar,
+            };
+            let out = compute_vtrace(&r, &v, &d, &lp_new, &lp_old, cfg)
+                .expect("valid slices sweep should not fail");
+            for (i, &x) in out.vs.iter().enumerate() {
+                assert!(x.is_finite(), "vs[{i}]={x} at bar={bar}");
+            }
+            for (i, &a) in out.advantages.iter().enumerate() {
+                assert!(a.is_finite(), "adv[{i}]={a} at bar={bar}");
+            }
+            // ρ̄ = min(bar, ρ). While bar < ρ the target grows with bar.
+            let capped = bar < rho_raw;
+            if prev_capped && capped {
+                assert!(
+                    out.vs[0] >= prev_vs0 - 1e-5,
+                    "v-trace target should be non-decreasing in clamp while capping: {} < {} (bar={bar})",
+                    out.vs[0],
+                    prev_vs0
+                );
+            }
+            // Once bar ≥ ρ the result saturates: identical to bar = 10.0.
+            if !capped {
+                let cfg_big = VtraceConfig {
+                    gamma: 0.99,
+                    c_bar: 1e6,
+                    rho_bar: 1e6,
+                };
+                let out_big = compute_vtrace(&r, &v, &d, &lp_new, &lp_old, cfg_big)
+                    .expect("valid slices should not fail");
+                assert!(
+                    (out.vs[0] - out_big.vs[0]).abs() < 1e-4,
+                    "above-ρ clamp should saturate: {} vs {} (bar={bar})",
+                    out.vs[0],
+                    out_big.vs[0]
+                );
+            }
+            prev_vs0 = out.vs[0];
+            prev_capped = capped;
+        }
+    }
+
+    #[test]
     fn vtrace_clipping_reduces_large_rho() {
         // Large rho (off-policy) should be clipped to c̄/ρ̄
         let cfg = VtraceConfig {

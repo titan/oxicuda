@@ -129,3 +129,51 @@ pub(crate) fn mat_vec_mul(m: &[f32], v: &[f32], rows: usize, cols: usize) -> Vec
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_unmerge_roundtrip_nonzero_delta_bounded() {
+        // The existing e2e roundtrip leaves B = 0 (delta = 0), so its round-trip is
+        // trivially exact. Here A and B are both non-trivial, so the LoRA delta is
+        // genuinely non-zero; merge→unmerge must still recover W to within f32
+        // round-off (merge adds delta, unmerge subtracts the bit-identical delta).
+        let mut rng = LcgRng::new(31);
+        let cfg = LoraConfig {
+            r: 4,
+            alpha: 8.0,
+            init_scale: 0.5,
+        };
+        let mut lora = LoraLinear::new(6, 5, &cfg, &mut rng); // in=6, out=5
+        for (i, w) in lora.w.iter_mut().enumerate() {
+            *w = (i as f32 * 0.013) - 0.2;
+        }
+        // Give B non-trivial values (it is zero-initialised by `new`).
+        rng.fill_normal(&mut lora.b);
+        for v in lora.b.iter_mut() {
+            *v *= 0.25;
+        }
+        // The delta must be genuinely non-zero for this test to mean anything.
+        let delta = lora.lora_delta();
+        let max_delta = delta.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
+        assert!(
+            max_delta > 1e-3,
+            "delta should be non-trivial, got {max_delta}"
+        );
+
+        let w_before = lora.w.clone();
+        lora.merge_into_w();
+        lora.unmerge_from_w();
+        let max_err = w_before
+            .iter()
+            .zip(lora.w.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_err < 1e-5,
+            "merge/unmerge roundtrip max-abs error {max_err} exceeds 1e-5"
+        );
+    }
+}

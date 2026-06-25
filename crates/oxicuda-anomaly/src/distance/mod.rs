@@ -1,5 +1,5 @@
-//! Distance-based anomaly detection (LOF, kNN score, LOF with k-d tree, CBLOF, ABOD, COF,
-//! FastABOD, SOD).
+//! Distance-based anomaly detection (LOF, kNN score, LOF with k-d tree, online/incremental
+//! LOF, CBLOF, ABOD, COF, FastABOD, SOD).
 pub mod abod;
 pub mod abod_approx;
 pub mod cblof;
@@ -7,6 +7,7 @@ pub mod cof;
 pub mod knn_score;
 pub mod lof;
 pub mod lof_kdtree;
+pub mod lof_online;
 pub mod sod;
 
 pub use abod::Abod;
@@ -17,4 +18,5 @@ pub use lof_kdtree::{
     KdNode, KdTree, LofKdConfig, LofKdFit, kd_build, kd_knn, kd_knn_ex, lof_kd_fit, lof_kd_predict,
     lof_kd_score,
 };
+pub use lof_online::{OnlineLof, OnlineLofConfig};
 pub use sod::{Sod, SodConfig};

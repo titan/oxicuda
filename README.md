@@ -5,7 +5,7 @@
 [![CI](https://github.com/cool-japan/oxicuda/workflows/CI/badge.svg)](https://github.com/cool-japan/oxicuda/actions)
 [![License](https://img.shields.io/crates/l/oxicuda.svg)](LICENSE)
 
-**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~783K lines of safe Rust across 73 crates.**
+**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~1.06M SLoC of safe Rust across 73 crates.**
 
 OxiCUDA replaces the entire NVIDIA CUDA Toolkit software stack with type-safe,
 memory-safe Rust code. The only runtime dependency is the NVIDIA driver
@@ -455,7 +455,15 @@ cargo nextest run --all-features
 - Vol.25: Neural Architecture Search -- DARTS, supernet, NSGA-II, hardware-aware predictor
 - Vol.26--61: SSL, Adversarial, Multimodal, Continual, 3D Geometry, PINN, RLHF, Meta-Learning, NeRF, MoE, Tabular, Anomaly, Quantum, ANN, RecSys, Causal, PEFT, Distillation, OT, SNN, DP, HDC, Evolutionary, TDA, Tensor Networks, Sequence Models, PDE, Manifold, Statistics, Sketches, Survival, CVX, Compressed Sensing, Graph Algorithms, Numerical Analysis, 2D Geometry
 
-**Next**
+**Released (v0.3.0) -- 2026-06-25** *(36,984 tests passing, ~1.23M SLoC, 73 crates)*
+- Workspace-wide CPU algorithm implementation depth across all volumes
+- `oxicuda-rlhf` now fully gradient-capable: 20+ loss gradients verified against finite differences
+- Cross-crate integration: `oxicuda-gnn` -> `oxicuda-sparse` SpMM, `oxicuda-timeseries` -> `oxicuda-fft`
+- Research cores: PointFlow CNF (`oxicuda-geometry3d`), Bark RVQ neural codec (`oxicuda-audio`)
+- `oxicuda-ptx`: CpAsyncGenerator (cp.async codegen) and cost-gated FusionCostModel
+- Latent-bug fixes, notably the `oxicuda-ot` network-simplex EMD solver that was silently broken for all n>=4
+
+**Next (v0.4.0) -- Unreleased**
 - Published documentation on docs.rs
 - GPU hardware benchmark validation (CI regression tracking)
 - v1.0 completion criteria verification (see TODO.md)

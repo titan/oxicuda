@@ -222,12 +222,7 @@ fn philox_round(c: [u32; 4], k: [u32; 2]) -> [u32; 4] {
     let hi1 = ((c[2] as u64).wrapping_mul(PHILOX_M4X32_1 as u64) >> 32) as u32;
     let lo1 = c[2].wrapping_mul(PHILOX_M4X32_1);
 
-    [
-        hi1 ^ c[1] ^ k[0],
-        lo1,
-        hi0 ^ c[3] ^ k[1],
-        lo0,
-    ]
+    [hi1 ^ c[1] ^ k[0], lo1, hi0 ^ c[3] ^ k[1], lo0]
 }
 
 /// Runs 10 rounds of Philox-4x32 and returns the 4-word output.
@@ -330,7 +325,7 @@ impl Mrg32k3aState {
         }
     }
 
-    /// Advances state and returns next value in [0, 1).
+    /// Advances state and returns next value in (0, 1).
     fn next_f64(&mut self) -> f64 {
         // Component 1: p1 = a12*s11 - a13n*s10  mod m1
         let p1 = (MRG_A12.wrapping_mul(self.s1[1]) + MRG_M1.wrapping_mul(2))
@@ -348,13 +343,15 @@ impl Mrg32k3aState {
         self.s2[1] = self.s2[2];
         self.s2[2] = p2;
 
-        // Combine
-        let result = if p1 > p2 {
-            (p1 - p2) as f64 / MRG_M1 as f64
+        // Combine using L'Ecuyer's normalization 1/(m1 + 1) so the result is
+        // strictly within (0, 1). Dividing by m1 alone yields exactly 1.0 when
+        // p1 == p2, which violates the documented half-open [0, 1) contract.
+        let norm = (MRG_M1 + 1) as f64;
+        if p1 > p2 {
+            (p1 - p2) as f64 / norm
         } else {
-            (p1 + MRG_M1 - p2) as f64 / MRG_M1 as f64
-        };
-        result
+            (p1 + MRG_M1 - p2) as f64 / norm
+        }
     }
 }
 
@@ -526,16 +523,16 @@ impl CurandGenerator {
                 values
             }
             CurandRngType::QuasiScrambledSobol32 => {
-                // Use sobol with seed-based scrambling
-                let mut values = sobol_generate(n, self.offset);
+                // Seed-derived digital (XOR) scrambling of the Sobol points.
+                // The scramble is applied to the 32-bit integer representation
+                // of each point -- not to its float bit pattern -- so the result
+                // always stays in [0, 1) and can never become Inf or NaN.
+                let two_pow_32 = (1u64 << 32) as f32;
                 let scramble = (self.seed & 0xFFFF_FFFF) as u32;
+                let mut values = sobol_generate(n, self.offset);
                 for v in &mut values {
-                    let bits = v.to_bits() ^ scramble;
-                    *v = f32::from_bits(bits & 0x7FFF_FFFF) / (1u64 << 31) as f32;
-                    // Ensure [0, 1)
-                    if *v >= 1.0 {
-                        *v = 1.0 - f32::EPSILON;
-                    }
+                    let point = (*v * two_pow_32) as u32;
+                    *v = (point ^ scramble) as f32 / two_pow_32;
                 }
                 self.offset += n as u64;
                 values
@@ -591,7 +588,7 @@ impl CurandGenerator {
         }
 
         // Generate pairs of uniforms for Box-Muller
-        let n_pairs = (n + 1) / 2;
+        let n_pairs = n.div_ceil(2);
         let uniforms = self.generate_uniform_f32(n_pairs * 2)?;
         let mut result = Vec::with_capacity(n);
 
@@ -627,7 +624,7 @@ impl CurandGenerator {
             return Ok(Vec::new());
         }
 
-        let n_pairs = (n + 1) / 2;
+        let n_pairs = n.div_ceil(2);
         let uniforms = self.generate_uniform_f64(n_pairs * 2)?;
         let mut result = Vec::with_capacity(n);
 
@@ -743,12 +740,7 @@ impl CurandGenerator {
                 let mut idx = 0u64;
                 while values.len() < n {
                     let counter_val = base_offset.wrapping_add(idx);
-                    let counter = [
-                        counter_val as u32,
-                        (counter_val >> 32) as u32,
-                        0,
-                        0,
-                    ];
+                    let counter = [counter_val as u32, (counter_val >> 32) as u32, 0, 0];
                     let output = philox_4x32_10(counter, key);
                     for &w in &output {
                         if values.len() < n {
@@ -757,7 +749,7 @@ impl CurandGenerator {
                     }
                     idx += 1;
                 }
-                self.offset += ((n + 3) / 4) as u64;
+                self.offset += n.div_ceil(4) as u64;
                 values
             }
             CurandRngType::PseudoMrg32k3a => {
@@ -805,7 +797,7 @@ impl CurandGenerator {
             counter_idx += 1;
         }
 
-        self.offset += ((n + 3) / 4) as u64;
+        self.offset += n.div_ceil(4) as u64;
         result
     }
 
@@ -834,7 +826,7 @@ impl CurandGenerator {
             counter_idx += 1;
         }
 
-        self.offset += ((n + 1) / 2) as u64;
+        self.offset += n.div_ceil(2) as u64;
         result
     }
 
@@ -910,11 +902,7 @@ impl CurandGenerator {
     }
 
     /// Poisson generation using normal approximation for large lambda.
-    fn generate_poisson_normal_approx(
-        &mut self,
-        n: usize,
-        lambda: f64,
-    ) -> RandResult<Vec<u32>> {
+    fn generate_poisson_normal_approx(&mut self, n: usize, lambda: f64) -> RandResult<Vec<u32>> {
         let mean = lambda;
         let stddev = lambda.sqrt();
         let normals = self.generate_normal_f64(n, mean, stddev)?;
@@ -1059,8 +1047,8 @@ mod tests {
 
     #[test]
     fn generator_debug_display() {
-        let rng = CurandGenerator::new(CurandRngType::PseudoDefault)
-            .expect("should create generator");
+        let rng =
+            CurandGenerator::new(CurandRngType::PseudoDefault).expect("should create generator");
         let debug = format!("{rng:?}");
         assert!(debug.contains("CurandGenerator"));
         assert!(debug.contains("PseudoDefault"));
@@ -1102,13 +1090,13 @@ mod tests {
 
     #[test]
     fn xorwow_uniform_f32_range() {
-        let mut rng = CurandGenerator::new(CurandRngType::PseudoXorwow)
-            .expect("should create generator");
+        let mut rng =
+            CurandGenerator::new(CurandRngType::PseudoXorwow).expect("should create generator");
         rng.set_seed(123);
         let values = rng.generate_uniform_f32(5_000).expect("should generate");
         assert_eq!(values.len(), 5_000);
         for &v in &values {
-            assert!(v >= 0.0 && v < 1.0, "value {v} out of range");
+            assert!((0.0..1.0).contains(&v), "value {v} out of range");
         }
     }
 
@@ -1118,13 +1106,13 @@ mod tests {
 
     #[test]
     fn mrg_uniform_f64_range() {
-        let mut rng = CurandGenerator::new(CurandRngType::PseudoMrg32k3a)
-            .expect("should create generator");
+        let mut rng =
+            CurandGenerator::new(CurandRngType::PseudoMrg32k3a).expect("should create generator");
         rng.set_seed(999);
         let values = rng.generate_uniform_f64(5_000).expect("should generate");
         assert_eq!(values.len(), 5_000);
         for &v in &values {
-            assert!(v >= 0.0 && v < 1.0, "value {v} out of range");
+            assert!((0.0..1.0).contains(&v), "value {v} out of range");
         }
     }
 
@@ -1144,14 +1132,10 @@ mod tests {
         assert_eq!(values.len(), n);
 
         let mean: f32 = values.iter().sum::<f32>() / n as f32;
-        let variance: f32 =
-            values.iter().map(|&x| (x - mean) * (x - mean)).sum::<f32>() / n as f32;
+        let variance: f32 = values.iter().map(|&x| (x - mean) * (x - mean)).sum::<f32>() / n as f32;
 
         // Loose bounds for statistical tests
-        assert!(
-            mean.abs() < 0.1,
-            "mean {mean} should be close to 0.0"
-        );
+        assert!(mean.abs() < 0.1, "mean {mean} should be close to 0.0");
         assert!(
             (variance - 1.0).abs() < 0.2,
             "variance {variance} should be close to 1.0"
@@ -1251,19 +1235,19 @@ mod tests {
 
     #[test]
     fn sobol_uniform_range() {
-        let mut rng = CurandGenerator::new(CurandRngType::QuasiSobol32)
-            .expect("should create generator");
+        let mut rng =
+            CurandGenerator::new(CurandRngType::QuasiSobol32).expect("should create generator");
         let values = rng.generate_uniform_f32(1_000).expect("should generate");
         assert_eq!(values.len(), 1_000);
         for &v in &values {
-            assert!(v >= 0.0 && v < 1.0, "Sobol value {v} out of range");
+            assert!((0.0..1.0).contains(&v), "Sobol value {v} out of range");
         }
     }
 
     #[test]
     fn quasi_normal_rejected() {
-        let mut rng = CurandGenerator::new(CurandRngType::QuasiSobol32)
-            .expect("should create generator");
+        let mut rng =
+            CurandGenerator::new(CurandRngType::QuasiSobol32).expect("should create generator");
         assert!(rng.generate_normal_f32(100, 0.0, 1.0).is_err());
     }
 

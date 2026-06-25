@@ -14,16 +14,24 @@
 //! * [`resume`] — Remote Supervised Method matching an output spike train to a
 //!   teacher train via STDP/anti-STDP windows (Ponulak & Kasiński 2010).
 
+/// Heterosynaptic plasticity: weight-normalising competition (Chistiakova 2014).
+pub mod heterosynaptic;
 /// BCM sliding-threshold rule and Oja Hebbian PCA rule (homeostatic plasticity).
 pub mod homeostatic;
 /// Intrinsic plasticity adapting transfer-function gain and bias (Triesch 2005).
 pub mod intrinsic;
+/// Metaplastic STDP with a BCM-like sliding metaplastic state (Abraham 2008).
+pub mod metaplastic_stdp;
 /// Reward-modulated STDP using eligibility traces.
 pub mod r_stdp;
 /// ReSuMe supervised spike-train learning (Ponulak-Kasiński 2010).
 pub mod resume;
+/// Reward-modulated triplet STDP with decaying eligibility kernels.
+pub mod reward_triplet_stdp;
 /// Pair-based spike-timing dependent plasticity.
 pub mod stdp;
+/// STDP-driven self-organising map (Kohonen-style competitive learning).
+pub mod stdp_som;
 /// Tempotron binary temporal spike classifier (Gütig-Sompolinsky 2006).
 pub mod tempotron;
 /// Triplet STDP with longer post-synaptic traces (Pfister-Gerstner 2006).

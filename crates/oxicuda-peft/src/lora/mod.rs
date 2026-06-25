@@ -1,5 +1,7 @@
 /// AdaLoRA: adaptive rank allocation via singular value decomposition structure.
 pub mod adalora;
+/// AdaLoRA importance EMA + cubic-budget scheduled pruning (Zhang et al. 2023 ICLR).
+pub mod adalora_schedule;
 /// AWQ: activation-aware weight quantization (Lin et al. 2024).
 pub mod awq;
 #[cfg(test)]
@@ -59,6 +61,7 @@ pub mod relora;
 /// VeRA: vector-based random adaptation with shared frozen projections.
 pub mod vera;
 
+pub use adalora_schedule::{AdaloraScheduleConfig, AdaloraScheduler};
 pub use awq::{Awq, AwqConfig, AwqQuantized};
 pub use boft::{BoftConfig, BoftLinear};
 pub use dora_new::{DoraConfig, DoraLayer};

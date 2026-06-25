@@ -293,6 +293,59 @@ impl Decoder {
         Ok(out)
     }
 
+    /// Run the full batched decoder forward pass (latent → reconstruction).
+    ///
+    /// This is the symmetric counterpart of [`crate::vae::Encoder::encode`]:
+    /// where the encoder maps `[batch × in_channels] → [batch × latent_dim]`,
+    /// this maps `[batch × latent_dim] → [batch × out_channels]` with an
+    /// **explicit** batch argument so that the per-sample reshape is validated
+    /// (rather than inferred). Together they form a shape-preserving round-trip
+    /// when `out_channels == encoder.in_channels`.
+    ///
+    /// # Arguments
+    /// - `z`: Latent tensor laid out row-major as `[batch × latent_dim]`.
+    /// - `weights`: Decoder weights (see [`DecoderWeights::zeros`]).
+    /// - `batch`: Number of latent rows. Must satisfy `z.len() == batch * latent_dim`.
+    ///
+    /// # Returns
+    /// Reconstruction tensor of shape `[batch × out_channels]`, row-major.
+    ///
+    /// # Errors
+    /// - `EmptyInput` if `z` is empty or `batch == 0`.
+    /// - `DimensionMismatch` if `z.len() != batch * latent_dim`.
+    /// - `WeightShapeMismatch` if any weight buffer is mis-sized.
+    pub fn forward(
+        &self,
+        z: &[f32],
+        weights: &DecoderWeights,
+        batch: usize,
+    ) -> GenResult<Vec<f32>> {
+        if z.is_empty() {
+            return Err(GenError::EmptyInput("z is empty"));
+        }
+        if batch == 0 {
+            return Err(GenError::EmptyInput("batch must be > 0"));
+        }
+        // Validate the explicit batched reshape: every row must be `latent_dim` wide.
+        let expected = batch
+            .checked_mul(self.config.latent_dim)
+            .ok_or(GenError::Internal(
+                "batch * latent_dim overflow".to_string(),
+            ))?;
+        if z.len() != expected {
+            return Err(GenError::DimensionMismatch {
+                expected,
+                got: z.len(),
+            });
+        }
+        // The reshape is validated; the underlying residual stack is shared with
+        // `decode`, which infers the batch from `latent_dim` and therefore yields
+        // the identical `[batch × out_channels]` result.
+        let out = self.decode(z, weights)?;
+        debug_assert_eq!(out.len(), batch * self.config.out_channels);
+        Ok(out)
+    }
+
     /// Return the decoder config.
     pub fn config(&self) -> &DecoderConfig {
         &self.config
@@ -401,5 +454,115 @@ mod tests {
         assert!(!weights.proj_in.is_empty());
         assert!(!weights.proj_out.is_empty());
         assert_eq!(weights.block_w1.len(), config.total_blocks());
+    }
+
+    #[test]
+    fn decoder_forward_explicit_batch_shape() {
+        let config = make_config();
+        let weights = DecoderWeights::zeros(&config);
+        let dec = Decoder::new(config.clone()).expect("decoder should construct");
+        let batch = 4;
+        let z = vec![0.25_f32; batch * config.latent_dim];
+        let out = dec
+            .forward(&z, &weights, batch)
+            .expect("batched forward should succeed");
+        assert_eq!(out.len(), batch * config.out_channels);
+    }
+
+    #[test]
+    fn decoder_forward_finite_on_small_batch() {
+        let config = make_config();
+        let mut weights = DecoderWeights::zeros(&config);
+        // Populate with small deterministic non-zero values so the output is a
+        // genuine transform (not the trivial all-zero path).
+        let mut tick = 0.0_f32;
+        let mut nudge = |buf: &mut [f32]| {
+            for v in buf.iter_mut() {
+                tick += 1.0;
+                *v = (tick * 0.013).sin() * 0.1;
+            }
+        };
+        nudge(&mut weights.proj_in);
+        for w in &mut weights.block_w1 {
+            nudge(w);
+        }
+        for w in &mut weights.block_w2 {
+            nudge(w);
+        }
+        nudge(&mut weights.proj_out);
+        let batch = 3;
+        let z: Vec<f32> = (0..batch * config.latent_dim)
+            .map(|i| (i as f32 * 0.07).cos())
+            .collect();
+        let out = dec_forward(&config, &weights, &z, batch);
+        assert_eq!(out.len(), batch * config.out_channels);
+        assert!(
+            out.iter().all(|v| v.is_finite()),
+            "batched forward output must be finite"
+        );
+    }
+
+    fn dec_forward(
+        config: &DecoderConfig,
+        weights: &DecoderWeights,
+        z: &[f32],
+        batch: usize,
+    ) -> Vec<f32> {
+        let dec = Decoder::new(config.clone()).expect("decoder should construct");
+        dec.forward(z, weights, batch)
+            .expect("batched forward should succeed")
+    }
+
+    #[test]
+    fn decoder_forward_rejects_bad_batch() {
+        let config = make_config();
+        let weights = DecoderWeights::zeros(&config);
+        let dec = Decoder::new(config.clone()).expect("decoder should construct");
+        // batch claims 5 rows but buffer only holds 2 rows worth of data.
+        let z = vec![0.1_f32; 2 * config.latent_dim];
+        assert!(matches!(
+            dec.forward(&z, &weights, 5),
+            Err(GenError::DimensionMismatch { .. })
+        ));
+        assert!(matches!(
+            dec.forward(&z, &weights, 0),
+            Err(GenError::EmptyInput(_))
+        ));
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_preserves_spatial_dims() {
+        use crate::vae::encoder::{Encoder, EncoderConfig, EncoderWeights};
+        // Encoder: in_channels = 4, latent_dim = 16.
+        // Decoder: latent_dim = 16, out_channels = 4  → spatial (channel) dims match.
+        let enc_cfg = EncoderConfig::new(4, 8, vec![1, 2], 1, 16).expect("encoder cfg");
+        let dec_cfg = DecoderConfig::new(16, 8, vec![1, 2], 1, 4).expect("decoder cfg");
+        assert_eq!(
+            enc_cfg.in_channels, dec_cfg.out_channels,
+            "round-trip requires in_channels == out_channels"
+        );
+        assert_eq!(
+            enc_cfg.latent_dim, dec_cfg.latent_dim,
+            "round-trip requires matching latent_dim"
+        );
+        let enc = Encoder::new(enc_cfg.clone()).expect("encoder");
+        let enc_w = EncoderWeights::zeros(&enc_cfg);
+        let dec = Decoder::new(dec_cfg.clone()).expect("decoder");
+        let dec_w = DecoderWeights::zeros(&dec_cfg);
+
+        let batch = 3;
+        let x: Vec<f32> = (0..batch * enc_cfg.in_channels)
+            .map(|i| (i as f32 * 0.11).sin())
+            .collect();
+        let latent = enc.encode(&x, &enc_w).expect("encode");
+        // Latent μ is the reconstruction input; it must be `[batch × latent_dim]`.
+        assert_eq!(latent.mu.len(), batch * dec_cfg.latent_dim);
+        let recon = dec
+            .forward(&latent.mu, &dec_w, batch)
+            .expect("decode forward");
+        // Spatial dims preserved: reconstruction has exactly the encoder's input shape.
+        assert_eq!(recon.len(), x.len());
+        assert_eq!(recon.len(), batch * enc_cfg.in_channels);
+        assert!(recon.iter().all(|v| v.is_finite()));
     }
 }

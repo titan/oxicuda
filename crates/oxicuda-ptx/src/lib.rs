@@ -157,6 +157,7 @@ pub mod tui_explorer;
 pub use analysis::bank_conflict::{BankConflict, BankConflictReport, analyze_bank_conflicts};
 pub use analysis::constant_folding::fold_constants;
 pub use analysis::dead_code::eliminate_dead_code;
+pub use analysis::fusion_cost_model::{FusionCostModel, FusionDecision, FusionVerdict};
 pub use analysis::instruction_scheduling::{
     SchedulingReport, SchedulingStrategy, schedule_instructions,
 };
@@ -201,6 +202,7 @@ pub use emit::validator::{
 
 // Templates
 pub use templates::broadcast::{BroadcastTemplate, MAX_BROADCAST_RANK};
+pub use templates::cp_async_gen::{CpAsyncCachePolicy, CpAsyncGenerator};
 pub use templates::elementwise::{ElementwiseOp, ElementwiseTemplate};
 pub use templates::gemm::{EpilogueKind, GemmTemplate};
 pub use templates::reduction::{ReductionOp, ReductionTemplate};
@@ -252,6 +254,7 @@ pub mod prelude {
     pub use crate::emit::validator::{ValidationResult, validate_ptx};
 
     // Template types
+    pub use crate::templates::cp_async_gen::{CpAsyncCachePolicy, CpAsyncGenerator};
     pub use crate::templates::elementwise::{ElementwiseOp, ElementwiseTemplate};
     pub use crate::templates::gemm::{EpilogueKind, GemmTemplate};
     pub use crate::templates::reduction::{ReductionOp, ReductionTemplate};

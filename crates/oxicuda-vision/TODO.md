@@ -9,8 +9,8 @@ multi-scale features, DETR decoder, and bipartite set matching. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 19,287 (61 files, Rust 7,119 code + 1,479 comments + 1,227 blanks)
-- **Tests:** 768 passing (#[test] count in src/)
+- **Actual SLoC:** ~29,949 total lines across 67 `src/` files
+- **Tests:** 840 `#[test]` in src/ (all passing under `--all-features`)
 - **Crate:** `oxicuda-vision` -- Vol.20 Vision Transformer & CLIP Primitives
 
 ### Completed [x]
@@ -89,30 +89,30 @@ multi-scale features, DETR decoder, and bipartite set matching. Part of
 ### Future Enhancements [ ]
 
 #### P0 -- Critical (Mainstream Vision Coverage)
-- [ ] FlashAttention-2 fused MHSA (link with `oxicuda-dnn` fused-MHA when available)
+- [x] FlashAttention-2 fused MHSA CPU reference (vit/flash_attention.rs -- Dao 2023; online-softmax single-pass attention with running max/sum + per-tile rescale, causal-optional, cross-attention; block-size-invariant, validated bit-close to a 3-pass `reference_attention` oracle). NOTE: the on-device fused PTX/`oxicuda-dnn` Tensor-Core kernel remains hardware-gated.
 - [x] Swin Transformer windowed + shifted-window attention (vit/swin.rs -- Liu 2021 ICCV; window partition/reverse, cyclic shift, SW-MSA attention mask, relative position bias table, W-MSA/SW-MSA pre-norm block)
 - [x] ConvNeXt modern-CNN block (convnext/block.rs -- Liu 2022 CVPR; depthwise 7×7 same-pad conv + channel LayerNorm + 1×1 4× expansion + GELU + 1×1 projection + layer scale + residual)
 - [x] EfficientNet-V2 fused-MBConv block
 - [x] BatchNorm folding into Conv2d for inference
 
 #### P1 -- Important (Architecture and Feature Coverage)
-- [ ] DeiT / BEiT / DINO ViT training-time tricks (DropPath, stochastic depth)
-- [ ] CLIP text encoder (Transformer encoder + BPE tokenizer adapter)
-- [ ] OWL-ViT / GLIP open-vocabulary detection head
+- [x] DeiT / BEiT / DINO ViT training-time tricks: DropPath / stochastic depth (vit/drop_path.rs -- Huang 2016; per-sample (row-wise) residual-branch drop with inverted `1/keep_prob` rescale, eval = identity, `residual_add_train`, linear `drop_path_schedule` across depth; expectation-preservation verified by Monte-Carlo)
+- [x] CLIP text encoder (text/clip_text.rs -- token + positional embeddings, causal self-attention transformer blocks, EOS/largest-id pooling, joint-space projection; accepts pre-tokenised id sequences -- BPE byte-pair merge table is an external tokenizer-data concern)
+- [x] OWL-ViT open-vocabulary detection head (detection/owl_vit.rs -- per-patch image embeddings + text-query cosine matching + box-regression head; `OwlVit::forward`, `score_queries`)
 - [x] Mask R-CNN segmentation head (link with FPN + RoI Align) (detection/mask_head.rs -- He 2017; per-RoI FCN n_conv 3×3 + 2× deconv + 1×1 to n_classes → per-class sigmoid masks; reuses RoIAlign)
 - [x] Anchor generator / NMS helper for two-stage detectors (detection/anchor_nms.rs -- multi-scale anchor grid (sizes×ratios×strides), IoU, greedy NMS + Soft-NMS linear/gaussian decay)
-- [ ] SAM (Segment Anything) image-encoder building blocks
+- [x] SAM (Segment Anything) image-encoder building blocks (segmentation/sam.rs -- ViT image encoder + `PositionEmbeddingRandom` + sparse/dense `PromptEncoder` + two-way transformer `MaskDecoder`)
 
 #### P2 -- Nice-to-Have (Research / Advanced)
-- [ ] RTMDet real-time detection transformer (`detection/rtmdet.rs`) — Lyu 2022: CSPNeXt backbone + PAFPNv2 neck + decoupled head with dynamic soft labels; `RtmDet`
-- [ ] SAM image-encoder + prompt encoder + mask decoder (`segmentation/sam.rs`) — Kirillov 2023 ICCV: MAE-pretrained ViT-H image encoder + positional + sparse/dense prompt encoders + two-way transformer mask decoder; `SamModel`
-- [ ] Point Transformer for 3D point-cloud classification (`pointcloud/point_transformer.rs`) — Zhao 2021 ICCV: vector self-attention with subtraction relation function + position encoding; `PointTransformer`
-- [ ] DINOv2 self-supervised pre-training loss
+- [x] RTMDet real-time detection transformer (detection/rtmdet.rs -- Lyu 2022: CSPNeXt backbone + PAFPN neck + decoupled head + SimOTA-lite cost; `RtmDet`, `decode_level`, `simota_cost`)
+- [x] SAM image-encoder + prompt encoder + mask decoder (segmentation/sam.rs -- Kirillov 2023 ICCV: ViT image encoder + positional + sparse/dense prompt encoders + two-way transformer mask decoder; `Sam`, `SamConfig`)
+- [x] Point Transformer for 3D point-cloud classification (pointcloud/point_transformer.rs -- Zhao 2021 ICCV: vector self-attention with subtraction relation + position encoding; `PointTransformerLayer`, `PointAttention`)
+- [x] DINOv2 self-supervised pre-training loss (ssl/dinov2.rs -- Oquab 2023: centred/sharpened `dino_loss`, patch-level `ibot_loss`, EMA-teacher head update, `CenteringBuffer`, and `koleo_loss` Kozachenko–Leonenko differential-entropy regulariser over L2-normalised embeddings)
 - [x] MAE (Masked Autoencoder) random-mask + decoder (vit/mae.rs -- He 2022 CVPR; partial Fisher–Yates random mask, encoder over visible tokens only, decoder reconstructs full sequence with shared mask_token, MSE loss over masked positions only)
-- [ ] EVA / EVA-CLIP large-scale variant configurations
-- [ ] Tokens-to-Token ViT, CaiT, XCiT variants
+- [x] EVA / EVA-CLIP large-scale variant configurations (vit/eva.rs -- `EvaVariant` presets EVA-02-Ti/S/B/L + EVA-g/14 → validated `ViTConfig`; `EvaPoolHead` mean-pool + post-LayerNorm + joint-space projection)
+- [x] Tokens-to-Token ViT, CaiT, XCiT variants (vit/t2t.rs -- `soft_split` overlapping unfold / re-tokenization; vit/cait.rs -- `ClassAttention` + `LayerScale`; vit/xcit.rs -- `cross_covariance_attention` channel-wise attention, linear in tokens)
 - [x] Mixup / CutMix data-augmentation helpers
-- [ ] Quantised ViT (INT8 / FP8) inference path
+- [x] Quantised ViT (INT8) inference path (vit/quantize.rs -- symmetric & affine `QuantParams`, per-output-channel `QuantWeight`, dynamic-per-row-activation integer-domain `QuantLinear`, `fake_quantize_symmetric`; round-trip error ≤ half-step, INT8 GEMM within normalised-RMS tolerance of f32). NOTE: FP8 (E4M3) inference is hardware-gated and intentionally not implemented.
 
 ## Dependencies
 
@@ -127,9 +127,9 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 768 passing
+- Tests: 840 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
-- Files under 2000 SLoC: All (largest is `ptx_kernels.rs` at ~1280 lines)
+- Files under 2000 SLoC: All (largest is `ptx_kernels.rs` at ~1741 lines)
 - Pure-Rust default features: Yes (Pure Rust Policy)
 
 ## Performance Targets
@@ -170,21 +170,21 @@ Target: bandwidth-bound kernels at >=90% peak DRAM throughput on sm_80+.
 - [x] `patch_embed_ptx` uses `fma.rn.f32` for accumulation
 - [x] `contrastive_loss_ptx` uses warp-shuffle reduction for row-softmax
 - [x] PTX × SM 80, 86 generation verified in integration tests
-- [ ] `cp.async` 3-stage pipeline in patch-embed for large images
-- [ ] FP16 MHSA path with FP32 softmax (link with Tensor Cores)
+- [ ] `cp.async` 3-stage pipeline in patch-embed for large images (requires GPU hardware)
+- [ ] FP16 MHSA path with FP32 softmax (link with Tensor Cores) (requires GPU hardware)
 
 ### Hopper (sm_90 / sm_90a)
 - [x] PTX SM 90 emission tested for all 7 kernels
-- [ ] TMA (`cp.async.bulk`) for image-tile staging in patch-embed
-- [ ] `wgmma.mma_async` for MHSA QK^T and PV paths
-- [ ] FlashAttention-2 with Hopper-specific warp specialisation
-- [ ] Cluster-launch contrastive loss for very large CLIP batch (>=65536)
+- [ ] TMA (`cp.async.bulk`) for image-tile staging in patch-embed (requires GPU hardware)
+- [ ] `wgmma.mma_async` for MHSA QK^T and PV paths (requires GPU hardware)
+- [ ] FlashAttention-2 with Hopper-specific warp specialisation (requires GPU hardware; CPU online-softmax reference done in vit/flash_attention.rs)
+- [ ] Cluster-launch contrastive loss for very large CLIP batch (>=65536) (requires GPU hardware)
 
 ### Blackwell (sm_100 / sm_120)
 - [x] PTX SM 100 / 120 emission tested
-- [ ] FP8 (E4M3) ViT inference path
-- [ ] Tensor-Memory (TMEM) staging for attention KV
-- [ ] FP4 MHSA experimental path
+- [ ] FP8 (E4M3) ViT inference path (requires GPU hardware; INT8 CPU path done in vit/quantize.rs)
+- [ ] Tensor-Memory (TMEM) staging for attention KV (requires GPU hardware)
+- [ ] FP4 MHSA experimental path (requires GPU hardware)
 
 ---
 
@@ -207,22 +207,22 @@ Target: bandwidth-bound kernels at >=90% peak DRAM throughput on sm_80+.
 - [x] DETR decoder cross-attn / self-attn shape consistency
 - [x] Bipartite match assigns N x M unique pairs; GIoU in `[-1, 1]`
 - [x] PTX generation across 6 SM versions: 75 / 80 / 86 / 90 / 100 / 120
-- [ ] GPU-hardware correctness for all 7 kernels (gated behind `gpu-tests`)
-- [ ] Numerical agreement with `torchvision` / `transformers` reference within 1e-4
-- [ ] ImageNet-1K top-1 accuracy match for reference ViT-Tiny checkpoint
-- [ ] CLIP zero-shot accuracy match on small reference dataset
+- [ ] GPU-hardware correctness for all 7 kernels (gated behind `gpu-tests`) (requires GPU hardware)
+- [ ] Numerical agreement with `torchvision` / `transformers` reference within 1e-4 (requires reference checkpoints)
+- [ ] ImageNet-1K top-1 accuracy match for reference ViT-Tiny checkpoint (requires reference checkpoint + dataset)
+- [ ] CLIP zero-shot accuracy match on small reference dataset (requires reference checkpoint + dataset)
 
 ### Implementation Deepening
-- [ ] CLIP text encoder (Transformer encoder + BPE / SentencePiece adapter)
+- [x] CLIP text encoder (text/clip_text.rs -- Transformer encoder; consumes pre-tokenised id sequences -- BPE / SentencePiece merge-table adapter is external tokenizer data)
 - [x] Full Hungarian algorithm in `bipartite_match` (currently greedy + 2-opt) (detection/hungarian.rs -- Kuhn 1955 / Munkres 1957; O(n^3) Kuhn-Munkres with potentials u/v + alternating-tree augmenting paths + slack updates, f64 internal accumulation, rectangular padding to max(n_workers, n_jobs); `exact_bipartite_match` wraps it in the existing greedy signature)
 - [x] Anchor generator + NMS post-processing for two-stage detectors
-- [ ] Mask head (mask R-CNN style) for instance segmentation
-- [ ] DropPath / stochastic-depth helpers in `ViTBlock` for training regularisation
-- [ ] Multi-GPU CLIP contrastive (all-gather batch across devices)
+- [x] Mask head (mask R-CNN style) for instance segmentation (detection/mask_head.rs -- He 2017; per-RoI FCN 3×3 + 2× deconv + 1×1 → per-class sigmoid masks)
+- [x] DropPath / stochastic-depth helpers for training regularisation (vit/drop_path.rs -- per-sample residual drop + inverted rescale + linear depth schedule)
+- [ ] Multi-GPU CLIP contrastive (all-gather batch across devices) — requires multi-device runtime (distributed all-gather)
 
 ### Benchmark Coverage
 - [x] `benches/vision_ops.rs` Criterion harness wired (CPU-side PTX generation +
       patch-embed + ViT-tiny forward)
 - [ ] GPU-side throughput vs reference (`torchvision`, OpenCLIP) once Linux+NVIDIA
-      harness is available
-- [ ] CLIP batch-size sweep (256 / 1024 / 4096 / 16384)
+      harness is available (requires GPU hardware)
+- [ ] CLIP batch-size sweep (256 / 1024 / 4096 / 16384) (requires GPU hardware for throughput numbers)

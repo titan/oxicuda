@@ -53,6 +53,7 @@ pub mod error;
 pub mod handle;
 pub mod layer;
 pub mod model;
+pub mod ngram;
 pub mod ptx_kernels;
 pub mod tokenizer;
 pub mod weights;
@@ -67,7 +68,8 @@ pub use layer::{
     RmsNorm, RotaryEmbedding, SwiGluFfn, TokenEmbedding,
 };
 pub use model::{Gpt2Model, LlamaModel};
-pub use tokenizer::{BpeBuilder, BpeTokenizer, Vocab};
+pub use ngram::{NgramConfig, NgramModel, Smoothing};
+pub use tokenizer::{BpeBuilder, BpeTokenizer, UnigramTokenizer, Vocab, WordPieceTokenizer};
 pub use weights::{ModelWeights, WeightTensor};
 
 // ─── Integration tests ───────────────────────────────────────────────────────

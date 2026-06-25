@@ -26,6 +26,9 @@ pub mod prelude {
         gather_tokens, scatter_tokens,
     };
     pub use crate::expert::ffn::{ExpertActivation, ExpertFfn, SwiGluExpert};
+    pub use crate::expert::prune_merge::{
+        CompressionResult, merge_experts, prune_experts, remap_indices,
+    };
     pub use crate::handle::{LcgRng, MoeHandle, SmVersion};
     pub use crate::layer::moe_layer::{MoeLayer, MoeLayerConfig, MoeLayerOutput};
     pub use crate::loss::entropy::routing_entropy;
@@ -40,10 +43,17 @@ pub mod prelude {
         MixtralConfig, MixtralMoeLayer, MixtralOutput, MixtralRoutingInfo,
         mixtral_load_balance_loss,
     };
+    pub use crate::moe::upcycle::{
+        DenseFfnCheckpoint, UpcycleConfig, upcycle_expert_bank, upcycle_moe_layer,
+    };
     pub use crate::ptx_kernels::{
         expert_combine_ptx, expert_dispatch_ptx, expert_ffn_ptx, f32_hex, load_balance_loss_ptx,
         router_z_loss_ptx, soft_moe_dispatch_ptx, top_k_gate_ptx,
     };
+    pub use crate::routing::conditional::{
+        ConditionalConfig, ConditionalRouter, ConditionalRouting,
+    };
+    pub use crate::routing::diff_capacity::{DiffCapacityConfig, DifferentiableCapacity};
     pub use crate::routing::expert_choice::{
         ExpertChoiceConfig, ExpertChoiceResult, expert_choice_combine, expert_choice_route,
     };
@@ -56,6 +66,10 @@ pub mod prelude {
         GumbelConfig, GumbelRouteResult, GumbelRouter, gumbel_softmax,
     };
     pub use crate::routing::hash::{HashRouter, HashRoutingConfig};
+    pub use crate::routing::layer_conditional::{
+        LayerConditionalConfig, LayerConditionalRouter, LayerRouteResult, RouterSharing,
+    };
+    pub use crate::routing::mamba_route::{MambaRouteConfig, MambaRouteResult, MambaRouter};
     pub use crate::routing::multi_gate::{MultiGateConfig, MultiGateRouter};
     pub use crate::routing::noisy_top_k::{
         NoisyTopKConfig, NoisyTopKResult, NoisyTopKRouter, softplus,

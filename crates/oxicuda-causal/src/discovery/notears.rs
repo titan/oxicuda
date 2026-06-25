@@ -1,6 +1,6 @@
 use crate::error::{CausalError, CausalResult};
 
-fn mat_mul(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
+pub(crate) fn mat_mul(a: &[f32], b: &[f32], c: &mut [f32], n: usize) {
     for i in 0..n {
         for j in 0..n {
             c[i * n + j] = (0..n).map(|k| a[i * n + k] * b[k * n + j]).sum();
@@ -34,9 +34,11 @@ pub(crate) fn expm_scaling_exponent(a: &[f32], n: usize) -> u32 {
     if norm <= EXPM_PADE_THETA || !norm.is_finite() {
         return 0;
     }
-    // s = ceil(log2(norm / theta)).
+    // s = ceil(log2(norm / theta)), capped at 63 so the subsequent `1u64 << s`
+    // (and the `s` squaring steps) never overflow. Beyond 63 halvings the scaled
+    // matrix is already vanishingly small, so the cap does not affect accuracy.
     let ratio = norm / EXPM_PADE_THETA;
-    ratio.log2().ceil().max(0.0) as u32
+    (ratio.log2().ceil().max(0.0) as u32).min(63)
 }
 
 /// Padé(1,1) rational approximation `(I + A/2 + A²/12)(I - A/2 + A²/12)^{-1}`.
@@ -66,7 +68,7 @@ fn pade11(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
 /// `expm(A) = (expm(A / 2^s))^(2^s)` where `s` is chosen so `‖A/2^s‖∞` is
 /// small enough for the bare Padé(1,1) approximant to be accurate. The scaled
 /// exponential is then squared `s` times to recover `expm(A)`.
-fn expm_pade(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
+pub(crate) fn expm_pade(a: &[f32], n: usize) -> CausalResult<Vec<f32>> {
     let s = expm_scaling_exponent(a, n);
     let scale = 1.0_f32 / (1u64 << s) as f32;
     let scaled: Vec<f32> = a.iter().map(|&v| v * scale).collect();
@@ -178,19 +180,42 @@ impl NotearsSem {
 
     fn compute_gradient(&self, x: &[f32], n: usize) -> Vec<f32> {
         let d = self.d;
-        // grad_loss[i,j] = (1/n) * X^T(XW - X)[i,j]
-        // = (1/n) * sum_k X[k,i] * (sum_l X[k,l]*W[l,j] - X[k,j])
-        let mut grad = vec![0.0_f32; d * d];
-        for i in 0..d {
+        // grad_loss = (1/n) · Xᵀ(XW − X).
+        //
+        // Computed in two O(n·d²) passes (residual then Xᵀ·residual) rather than
+        // the naive O(n·d³) form that recomputes (XW)[k,j] inside the (i,j) loop.
+        let inv_n = 1.0 / n as f32;
+        // R = XW − X, row-major n × d.
+        let mut resid = vec![0.0_f32; n * d];
+        for k in 0..n {
+            let xrow = &x[k * d..(k + 1) * d];
+            let rrow = &mut resid[k * d..(k + 1) * d];
             for j in 0..d {
-                let mut val = 0.0_f32;
-                for k in 0..n {
-                    let xw_kj: f32 = (0..d).map(|l| x[k * d + l] * self.w[l * d + j]).sum();
-                    let resid = xw_kj - x[k * d + j];
-                    val += x[k * d + i] * resid;
+                let mut xw = 0.0_f32;
+                for (l, &xl) in xrow.iter().enumerate() {
+                    xw += xl * self.w[l * d + j];
                 }
-                grad[i * d + j] = val / n as f32;
+                rrow[j] = xw - xrow[j];
             }
+        }
+        // grad = (1/n) · Xᵀ · R.
+        let mut grad = vec![0.0_f32; d * d];
+        for k in 0..n {
+            let xrow = &x[k * d..(k + 1) * d];
+            let rrow = &resid[k * d..(k + 1) * d];
+            for i in 0..d {
+                let xi = xrow[i];
+                if xi == 0.0 {
+                    continue;
+                }
+                let grow = &mut grad[i * d..(i + 1) * d];
+                for j in 0..d {
+                    grow[j] += xi * rrow[j];
+                }
+            }
+        }
+        for g in grad.iter_mut() {
+            *g *= inv_n;
         }
         grad
     }
@@ -221,53 +246,73 @@ impl NotearsSem {
             });
         }
 
+        // Augmented-Lagrangian NOTEARS (Zheng et al. 2018).
+        //
+        // We solve a sequence of unconstrained sub-problems
+        //   min_W  L(W) + (rho/2)·h(W)² + alpha·h(W) + lambda·‖W‖₁
+        // by proximal gradient descent, then ascend the dual variable `alpha`
+        // and grow the penalty `rho` whenever the acyclicity residual `h(W)`
+        // fails to shrink by the required factor. The outer loop terminates once
+        // `h(W)` is below tolerance (the constraint is satisfied) — crucially we
+        // never short-circuit on the *initial* W = 0 iterate, which is trivially
+        // acyclic but fits nothing.
         let mut rho = 1.0_f32;
         let mut alpha = 0.0_f32;
-        let lr = 0.001_f32;
+        let base_lr = 0.01_f32;
+        let h_tol = 1e-6_f32;
+        // Cap the penalty modestly: with fixed-step proximal GD a runaway `rho`
+        // only destabilises the iteration (and inflates ‖W‖ until the matrix
+        // exponential overflows). 1e6 is ample to enforce acyclicity here.
+        let max_rho = 1e6_f32;
+        let outer_rounds = 20_usize;
+        let inner_iters = (max_iter / outer_rounds).max(20);
+        let mut h_prev = f32::INFINITY;
 
-        for iter in 0..max_iter {
-            let h = self.h_func()?;
-            if h.abs() < 1e-8 {
+        for _round in 0..outer_rounds {
+            // Inner proximal-gradient descent on the augmented objective.
+            for _inner in 0..inner_iters {
+                let h = self.h_func()?;
+                let grad_loss = self.compute_gradient(x, n);
+                let grad_h = self.h_gradient()?;
+                // Coefficient on the acyclicity gradient: d/dW[(rho/2)h² + alpha·h]
+                //                                        = (rho·h + alpha)·∂h/∂W.
+                let h_coef = rho * h + alpha;
+                // Adaptive step: shrink the learning rate as the penalty
+                // coefficient grows so the constraint term cannot blow the
+                // iterate up; keeps `eff_lr·|h_coef|` ≈ O(base_lr).
+                let eff_lr = base_lr / (1.0 + base_lr * h_coef.abs());
+                let thresh = eff_lr * lambda;
+                for (idx, w_val) in self.w.iter_mut().enumerate() {
+                    let i = idx / d;
+                    let j = idx % d;
+                    if i == j {
+                        *w_val = 0.0;
+                        continue;
+                    }
+                    let aug_grad = grad_loss[idx] + h_coef * grad_h[idx];
+                    // Gradient step on the smooth part.
+                    let stepped = *w_val - eff_lr * aug_grad;
+                    // Proximal operator of lambda·‖·‖₁ : soft-threshold toward 0,
+                    //   prox(z) = sign(z)·max(|z| − eff_lr·lambda, 0).
+                    *w_val = stepped.signum() * (stepped.abs() - thresh).max(0.0);
+                }
+            }
+
+            let h_now = self.h_func()?;
+            if h_now.abs() <= h_tol {
                 return Ok(());
             }
-
-            let grad_loss = self.compute_gradient(x, n);
-            let grad_h = self.h_gradient()?;
-
-            for (idx, w_val) in self.w.iter_mut().enumerate() {
-                let i = idx / d;
-                let j = idx % d;
-                if i == j {
-                    *w_val = 0.0;
-                    continue;
-                }
-                // Gradient of augmented Lagrangian
-                let gl = grad_loss[idx];
-                let gh = grad_h[idx];
-                let aug_grad = gl + (rho * h + alpha) * gh;
-
-                // Gradient step
-                *w_val -= lr * aug_grad;
-
-                // Proximal operator for L1 (soft threshold)
-                let sign = w_val.signum();
-                *w_val = sign * (*w_val).abs().max(0.0) - lr * lambda;
-                if w_val.abs() < lr * lambda {
-                    *w_val = 0.0;
-                }
+            // Dual ascent.
+            alpha += rho * h_now;
+            // Penalty growth when the constraint did not shrink fast enough.
+            if h_now.abs() > 0.25 * h_prev.abs() {
+                rho = (rho * 10.0).min(max_rho);
             }
-
-            // Update dual variable and penalty every few iterations
-            if (iter + 1).is_multiple_of(10) {
-                alpha += rho * h;
-                if h.abs() > 0.25 * h.abs().max(1e-6) {
-                    rho *= 2.0;
-                }
-            }
+            h_prev = h_now;
         }
 
         let h_final = self.h_func()?;
-        if h_final.abs() < 1e-4 {
+        if h_final.abs() < 1e-3 {
             Ok(())
         } else {
             Err(CausalError::NotearsDidNotConverge { iter: max_iter })

@@ -6,9 +6,9 @@ Mixture of Experts (MoE) primitives for OxiCUDA (Switch Transformer, GShard top-
 
 ## Implementation Status
 
-**Actual: 9,382 SLoC (37 source files + 1 benches file) -- Coverage: full router family + expert FFN + auxiliary losses + complete MoE layer**
+**Actual: ~13,363 SLoC (42 source files + 1 benches file) -- Coverage: full router family + expert FFN + auxiliary losses + complete MoE layer + sequence-aware / conditional / hierarchical / multi-task routing + inference-time compression + dense-checkpoint upcycling**
 
-Current implementation covers Switch Transformer top-1 routing with capacity buffers and overflow token dropping, GShard-style top-K gating (softmax over experts, partial-sort top-k, optional Gaussian noise jitter via Box-Muller), Expert Choice routing (experts select preferred tokens for guaranteed load balance), Soft MoE (differentiable slot routing `D = softmax(X * Phi / sqrt(d))`, slot-aggregated expert inputs), GELU / SiLU / ReLU expert FFNs with Xavier init, SwiGLU expert `(SiLU(W1*x) (cdot) (W3*x)) * W2`, `ExpertBank` and `SwiGluBank` dispatch utilities, Switch load-balance loss `L_aux = n_e * sum f_i * P_i`, router z-loss `log^2(logsumexp(logits))`, routing entropy, expert utilization metrics, and a full `MoeLayer` combining router + expert bank + auxiliary losses.
+Current implementation covers Switch Transformer top-1 routing with capacity buffers and overflow token dropping, GShard-style top-K gating (softmax over experts, partial-sort top-k, optional Gaussian noise jitter via Box-Muller), Expert Choice routing (experts select preferred tokens for guaranteed load balance), Soft MoE (differentiable slot routing `D = softmax(X * Phi / sqrt(d))`, slot-aggregated expert inputs), GELU / SiLU / ReLU expert FFNs with Xavier init, SwiGLU expert `(SiLU(W1*x) (cdot) (W3*x)) * W2`, `ExpertBank` and `SwiGluBank` dispatch utilities, Switch load-balance loss `L_aux = n_e * sum f_i * P_i`, router z-loss `log^2(logsumexp(logits))`, routing entropy, expert utilization metrics, and a full `MoeLayer` combining router + expert bank + auxiliary losses. Advanced routing/compression: MoE-Mamba selective-state-space routing (`mamba_route`), Mixture-of-Depths conditional computation skip (`conditional`), differentiable per-expert capacity (`diff_capacity`), layer-conditional shared/per-layer routers (`layer_conditional`), sparse upcycling from a dense FFN checkpoint (`moe/upcycle`), and inference-time expert pruning / merging (`expert/prune_merge`).
 
 ### Completed
 
@@ -64,22 +64,22 @@ Current implementation covers Switch Transformer top-1 routing with capacity buf
 #### P1 -- Important Features
 - [x] BASE (Lewis et al. 2021) -- balanced assignment via Sinkhorn iterations
 - [x] Stable MoE -- router stability tricks (auxiliary z-loss + sigmoid gating + load-balance loss combined)
-- [ ] Sparse upcycling -- initialize MoE FFN weights from dense FFN checkpoint
+- [x] Sparse upcycling -- initialize MoE FFN weights from dense FFN checkpoint (`src/moe/upcycle.rs`: `DenseFfnCheckpoint`, `UpcycleConfig`, `upcycle_expert_bank`, `upcycle_moe_layer`)
 - [x] Expert parallelism placement -- pinning experts to device groups
 - [x] Megablocks-style block-sparse dispatched GEMM (avoid padding to capacity)
 - [x] Multi-gate MoE (separate router per task) for multi-task learning
 
 #### P2 -- Advanced / Research
-- [ ] MoE-Mamba / MoE-State-Space routing
-- [ ] Conditional computation routing (skip computation entirely for some tokens)
-- [ ] Expert pruning / merging at inference (knowledge distillation)
-- [ ] Layer-conditional routing (router shared / not shared across layers)
-- [ ] Hierarchical routing (cluster experts into groups, route to group first then expert)
-- [ ] Differentiable expert capacity (learnable per-expert capacity scale)
-- [ ] `moe/mixtral.rs` — Mixtral-style sparse MoE (Jiang 2024): top-2 expert routing per token; expert-parallel sharding; gating network with aux-loss for load balance; `MixtralMoeLayer { n_experts, top_k: 2 }`
+- [x] MoE-Mamba / MoE-State-Space routing (`src/routing/mamba_route.rs`: `MambaRouter` — selective-scan SSM produces causal, context-mixed routing features fed to a top-k gate)
+- [x] Conditional computation routing (skip computation entirely for some tokens) (`src/routing/conditional.rs`: `ConditionalRouter` — Mixture-of-Depths capacity-based skip; processed tokens take residual `x + w·f(x)`, skipped tokens pass through)
+- [x] Expert pruning / merging at inference (knowledge distillation) (`src/expert/prune_merge.rs`: `prune_experts` drops least-used + remaps to nearest survivor; `merge_experts` fuses most-similar pair by usage-weighted averaging)
+- [x] Layer-conditional routing (router shared / not shared across layers) (`src/routing/layer_conditional.rs`: `LayerConditionalRouter` with `RouterSharing::{Shared, PerLayer}` + cross-layer agreement metric)
+- [x] Hierarchical routing (cluster experts into groups, route to group first then expert) (already present: `src/moe/hierarchical.rs` — `HierarchicalMoeLayer`, two-level group → expert top-k)
+- [x] Differentiable expert capacity (learnable per-expert capacity scale) (`src/routing/diff_capacity.rs`: `DifferentiableCapacity` — softplus-allocated per-expert capacity + smooth sigmoid capacity gate)
+- [x] `moe/mixtral.rs` — Mixtral-style sparse MoE (Jiang 2024): top-2 expert routing per token; expert-parallel sharding; gating network with aux-loss for load balance; `MixtralMoeLayer { n_experts, top_k: 2 }` (already present: `src/moe/mixtral.rs` — `MixtralConfig`, `MixtralMoeLayer`, `mixtral_load_balance_loss`)
 - [x] `moe/deepseek_moe.rs` — DeepSeekMoE (Dai 2024): fine-grained expert segmentation + shared experts; each token activates mₛ shared + mᵣ routed experts; `DeepSeekMoeConfig { n_shared, n_routed, top_k_routed }`
-- [ ] `routing/expert_choice.rs` — Expert Choice (Zhou 2022): experts choose top-k tokens rather than tokens choosing experts; guaranteed perfect load balance; `ExpertChoiceRouter { capacity_factor: f32 }`
-- [ ] `moe/lora_moe.rs` — LoRAMoE (Sheng 2024): mixture of LoRA adapters as experts; gating selects which LoRA module per token; continual learning via world knowledge preservation constraint
+- [x] `routing/expert_choice.rs` — Expert Choice (Zhou 2022): experts choose top-k tokens rather than tokens choosing experts; guaranteed perfect load balance; `ExpertChoiceRouter { capacity_factor: f32 }` (already present: `src/routing/expert_choice.rs` — `ExpertChoiceConfig { capacity_factor }`, `expert_choice_route`/`expert_choice_combine`)
+- [x] `moe/lora_moe.rs` — LoRAMoE (Sheng 2024): mixture of LoRA adapters as experts; gating selects which LoRA module per token; continual learning via world knowledge preservation constraint (already present: `src/moe/lora_moe.rs` — `LoraExpert`, `LoraMoe`, `LoraMoeConfig`)
 
 ## Dependencies
 
@@ -91,11 +91,11 @@ Current implementation covers Switch Transformer top-1 routing with capacity buf
 
 ## Quality Status
 
-- Tests: 303 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 344 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
-- Files: 37 source `.rs` files, all under 2000 lines
+- Files: 42 source `.rs` files, all under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS compiles but returns `UnsupportedPlatform` at runtime
 
@@ -119,9 +119,9 @@ Target: MoE layer forward latency comparable to PyTorch + Megablocks reference f
 
 | Metric | Description | Actual |
 |--------|-------------|--------|
-| Files | source `.rs` files under `src/` | 37 |
-| SLoC | code lines (tokei) | ~9,382 |
-| Tests | e2e + unit | 303 |
+| Files | source `.rs` files under `src/` | 42 |
+| SLoC | code lines (tokei) | ~13,363 |
+| Tests | e2e + unit | 344 |
 | Coverage | router algorithms | 4 (TopK, Switch, ExpertChoice, SoftMoE) |
 | Coverage | expert types | 4 (GELU, SiLU, ReLU, SwiGLU) |
 
@@ -133,18 +133,18 @@ The current implementation provides a compact reference covering all four canoni
 
 ### Turing (sm_75)
 - [x] PTX kernels generated for all 7 entry points on `sm_75`
-- [ ] Warp-level top-k reduction verified on Turing hardware
+- [ ] Warp-level top-k reduction verified on Turing hardware (requires GPU hardware)
 
 ### Ampere (sm_80) / Ada (sm_89)
 - [x] PTX kernels generated for `sm_80`, `sm_86`
-- [ ] `cp.async`-staged expert weights for very large expert banks
-- [ ] Tensor Core path for expert FFN GEMMs (16x16x16 / 16x8x16 tiles)
+- [ ] `cp.async`-staged expert weights for very large expert banks (requires GPU hardware)
+- [ ] Tensor Core path for expert FFN GEMMs (16x16x16 / 16x8x16 tiles) (requires GPU hardware)
 
 ### Hopper (sm_90) / Blackwell (sm_100, sm_120)
 - [x] PTX kernels generated for `sm_90`, `sm_100`, `sm_120`
-- [ ] TMA-based all-to-all dispatch primitive for distributed MoE
-- [ ] `wgmma`-based grouped GEMM per expert for block-sparse dispatch (Megablocks pattern)
-- [ ] Distributed shared-memory cluster reduction for load-balance loss across CTAs
+- [ ] TMA-based all-to-all dispatch primitive for distributed MoE (requires GPU hardware)
+- [ ] `wgmma`-based grouped GEMM per expert for block-sparse dispatch (Megablocks pattern) (requires GPU hardware)
+- [ ] Distributed shared-memory cluster reduction for load-balance loss across CTAs (requires GPU hardware)
 
 ---
 
@@ -159,19 +159,19 @@ The current implementation provides a compact reference covering all four canoni
 - [x] Switch overflow correctly counted when capacity < demand
 - [x] Soft MoE dispatch weights row-sum to 1.0 within `1e-4`
 - [x] PTX entry points validated for `.version`, `.visible .entry`, kernel name, and SM target across all 6 SM versions
-- [ ] End-to-end Switch Transformer perplexity reproduction (paper baselines)
-- [ ] Top-k GPU kernel correctness vs CPU simulation on `sm_80+`
-- [ ] Distributed all-to-all primitive correctness on multi-GPU NCCL-equivalent
+- [ ] End-to-end Switch Transformer perplexity reproduction (paper baselines) (requires GPU hardware + full training run)
+- [ ] Top-k GPU kernel correctness vs CPU simulation on `sm_80+` (requires GPU hardware)
+- [ ] Distributed all-to-all primitive correctness on multi-GPU NCCL-equivalent (requires multi-GPU hardware)
 
 ### Implementation Deepening
 - [x] ExpertFfn output preserves input shape (`d_model` -> `d_model`) for all activations
 - [x] SwiGLU output is finite for arbitrary input (no NaN propagation)
 - [x] Load-balance loss is non-negative and finite for any logits / assignment combination
 - [x] MoeLayer end-to-end forward produces shape-correct hidden states and finite auxiliary loss
-- [ ] Megablocks-style block-sparse grouped GEMM (avoid padding to capacity)
+- [x] Megablocks-style block-sparse grouped GEMM (avoid padding to capacity) (already present: `src/expert/block_sparse.rs` — `build_block_sparse_layout`, `gather_tokens`/`scatter_tokens`, `BlockSparseDispatcher`)
 - [x] BASE balanced assignment via Sinkhorn iterations
-- [ ] Sparse upcycling: initialise MoE FFN weights from dense FFN checkpoint
-- [ ] Multi-gate MoE for multi-task learning scenarios
+- [x] Sparse upcycling: initialise MoE FFN weights from dense FFN checkpoint (`src/moe/upcycle.rs`)
+- [x] Multi-gate MoE for multi-task learning scenarios (already present: `src/routing/multi_gate.rs` — `MultiGateRouter`, per-task gates over shared experts)
 
 ## Notes
 

@@ -24,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod builder;
 pub mod cardinality;
 pub mod error;
 pub mod frequency;
@@ -38,12 +39,15 @@ pub mod ptx_kernels;
 pub mod quantile;
 pub mod sampler;
 pub mod sampling;
+pub mod serde;
 pub mod similarity;
 pub mod stream;
 pub mod topk;
 
+pub use builder::{BloomBuilder, CmBuilder, HllBuilder};
 pub use error::{SketchError, SketchResult};
 pub use handle::{LcgRng, SketchHandle, SmVersion};
+pub use serde::{SketchKind, SketchSerialize};
 
 #[cfg(test)]
 mod e2e_tests;

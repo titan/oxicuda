@@ -9,10 +9,12 @@ landscapes). Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.49).
 
 ## Implementation Status
 
-**Actual: 3,675 lines / 12,009 SLoC (52 files)** — implements the standard ELZ-2002
-persistence reduction over Z_2, exact bottleneck and Wasserstein-1 distances,
-landscape distance, Mapper with single-linkage clustering, lazy-witness complex with
-maxmin landmark sampling, and 7 PTX kernels × 6 SM versions.
+**Actual: 53 source files** — implements the standard ELZ-2002 persistence reduction
+over Z_2 (plus a host-side chunk-parallel reducer that is bit-identical to it), exact
+bottleneck and Wasserstein-1 distances, landscape distance, Mapper with single-linkage
+clustering, lazy-witness complex with maxmin landmark sampling, two-parameter persistence
+(rank invariant / Hilbert function), Stable Mapper bootstrap, and 7 + 3 PTX kernels
+× 6 SM versions.
 
 ### Completed [x]
 
@@ -127,21 +129,45 @@ maxmin landmark sampling, and 7 PTX kernels × 6 SM versions.
 #### P2 — Advanced
 - [x] `homology/zigzag.rs` — Zigzag persistence (Carlsson & de Silva 2010) for
   diagrams that allow both insertion and deletion of simplices
-- [ ] `homology/multi_parameter.rs` — Multi-parameter persistence (RIVET interface,
+- [x] `homology/multi_parameter.rs` — Multi-parameter persistence (RIVET interface,
   Hilbert function, fibered barcodes)
+  (homology/multi_parameter.rs -- Carlsson-Zomorodian 2009 two-parameter persistence:
+  `BiFiltration`/`BigradedSimplex` with closure+bigraded-monotonicity validation,
+  `HilbertFunction` (bigraded Betti grid), `MultiParameterPersistence::rank_invariant`
+  via two-step ELZ reduction; function-Rips bi-filtration constructor; already present)
 - [x] `distance/kernel.rs` — Persistence-based kernels: scale-space kernel
   (Reininghaus 2015), sliced Wasserstein kernel (Carrière 2017)
-- [ ] `mapper/stable.rs` — Stable Mapper (Carrière & Oudot 2018) with statistical
+- [x] `mapper/stable.rs` — Stable Mapper (Carrière & Oudot 2018) with statistical
   bootstrap confidence intervals
-- [ ] `benches/algo_bench.rs` — Extended algorithm benches on standard datasets
-  (Stanford Dragon, MNIST point cloud, torus / sphere parametric surfaces)
+  (mapper/stable.rs -- bootstrap resampling of the point cloud, comparing each replicate's
+  (β₀, β₁) Mapper signature to the reference; reports stability/component/loop confidence
+  driven by the deterministic LcgRng; already present)
+- [x] `benches/algo_bench.rs` — Extended algorithm benches on standard datasets
+  (torus / sphere / circle parametric surfaces)
+  (benches/algo_bench.rs -- full host-side persistence pipeline (VR → boundary → reduce →
+  pairs) on S¹/T²/S² deterministic parametric clouds, sequential-vs-chunk-parallel reducer,
+  bottleneck/Wasserstein-1 diagram distances, plus gpu_reduction PTX codegen timing.
+  Stanford Dragon / MNIST left out: those need bundled external asset files, not CPU-derivable)
 - [x] `persistence/tropical.rs` — Tropical geometry encoding (Monod 2019): tropical coordinates of persistence diagrams as Γ-type statistics; vectorisation stable under reordering and permutation; `TropicalCoordinates`
-- [ ] `homology/gpu_reduction.rs` — GPU persistence reduction (Otter 2017 spectral): parallel column-reduction with chunk-based pivot lookups in shared memory; PTX kernel for batched boundary-matrix reduction; sm_80+ warp-level synchronisation
+- [x] `homology/gpu_reduction.rs` — GPU persistence reduction (Otter 2017 spectral): parallel column-reduction with chunk-based pivot lookups in shared memory; PTX kernel for batched boundary-matrix reduction; sm_80+ warp-level synchronisation
+  (homology/gpu_reduction.rs -- host-side `chunked_parallel_reduce` (bulk-synchronous
+  round-based reduction with a HashMap pivot-lookup chunk; output bit-identical to the
+  sequential ELZ reducer, cross-checked on random Rips) + `GpuReductionPlan` tiling +
+  `batched_column_reduce_ptx` with cp.async owner-chunk staging on sm_80+. Launching the
+  PTX on a real device still requires GPU hardware.)
 
 #### P2 — GPU / Architecture-Specific
-- [ ] PTX kernel for batched parallel column-reduction with chunk-based pivot lookups
-- [ ] PTX kernel for parallel Vietoris-Rips edge enumeration with distance thresholding
-- [ ] PTX kernel for Wasserstein matching via auction algorithm parallel rounds
+- [x] PTX kernel for batched parallel column-reduction with chunk-based pivot lookups
+  (homology/gpu_reduction.rs -- `batched_column_reduce_ptx`, one synchronous round; emits
+  cp.async owner-chunk prefetch on sm_80+; structurally validated across 7 SM versions)
+- [x] PTX kernel for parallel Vietoris-Rips edge enumeration with distance thresholding
+  (homology/gpu_reduction.rs -- `vietoris_rips_edges_ptx`, strict-upper-triangle thread map,
+  per-edge Euclidean length + threshold flag for host stream-compaction)
+- [x] PTX kernel for Wasserstein matching via auction algorithm parallel rounds
+  (homology/gpu_reduction.rs -- `wasserstein_auction_ptx`, Bertsekas best/second-best net-value
+  scan per unassigned person with ε-bid emission)
+- [ ] On-device validation of the above three kernels on a real GPU (requires GPU hardware:
+  needs PTX/SASS execution under an NVIDIA driver — codegen + host reference are done above)
 
 ## Dependencies
 
@@ -156,8 +182,9 @@ scratch.
 
 ## Quality Status
 
-- Warnings: 0 (clippy clean)
-- Tests: 19 e2e tests passing (host-side); PTX kernel strings validated per SM version
+- Warnings: 0 (clippy clean, `--all-features --all-targets -D warnings`)
+- Tests: 391 passing (host-side; incl. 2 worked-example reproductions — textbook two-circles
+  persistence and Mapper circular-topology recovery); PTX kernel strings validated per SM version
 - `unwrap()` calls in production code: 0
 - `unsafe` code: 0
 - macOS: compiles; GPU integration paths return `UnsupportedPlatform` at runtime
@@ -223,7 +250,9 @@ pass (chunk-based pivot lookup with shared-memory hashing).
   validated end-to-end
 - [ ] Persistence diagram cross-validation against Ripser / Gudhi reference outputs
   on the same point clouds
-- [ ] Mapper graph stability under bootstrap resampling (Carrière & Oudot 2018)
+- [x] Mapper graph stability under bootstrap resampling (Carrière & Oudot 2018)
+  (mapper/stable.rs -- `stable_mapper` bootstrap with (β₀, β₁) signature confidence scores;
+  tested on circle / two-blob / single-interval cases)
 
 ### Implementation Deepening
 - [x] `Filtration::vietoris_rips` correctly assigns simplex birth value as the maximum
@@ -231,12 +260,21 @@ pass (chunk-based pivot lookup with shared-memory hashing).
 - [x] `BoundaryMatrix::add_cols` is XOR over `Vec<usize>` row-index lists (sparse Z_2)
 - [x] `bottleneck_distance` uses binary search over candidate distances with bipartite
   matching at each candidate
-- [ ] Implement clearing + twist optimisations to bring reduction performance closer
-  to PHAT / Ripser
-- [ ] Implement cohomology reduction as the typically faster path for "thin"
-  filtrations
+- [x] Implement clearing + twist optimisations to bring reduction performance closer
+  to PHAT / Ripser (homology/twist.rs -- Chen-Kerber 2011 twist+clearing; homology/cohomology.rs
+  `use_clearing` flag)
+- [x] Implement cohomology reduction as the typically faster path for "thin"
+  filtrations (homology/cohomology.rs `persistent_cohomology` + homology/cohomology_z.rs
+  reverse-order duality reduction)
 
 ### Documentation Gaps
 - [x] Each public type carries a doc comment summarising its semantics
-- [ ] Worked example reproducing the textbook "two circles" persistence diagram
-- [ ] Worked example showing Mapper recovering a circular topology from noisy 2D points
+- [x] Worked example reproducing the textbook "two circles" persistence diagram
+  (worked_examples.rs/two_circles_persistence_recovers_two_loops -- two disjoint noisy
+  unit circles → Vietoris-Rips persistent homology recovers 2 persistent H0 components
+  and exactly 2 long-lived H1 loops, ≈1.0 persistence each, clearly above the < 0.7
+  H0 sampling-noise floor; no spurious H1 noise bars)
+- [x] Worked example showing Mapper recovering a circular topology from noisy 2D points
+  (worked_examples.rs/mapper_recovers_circle_topology -- 40 noisy circle points,
+  x-coordinate filter, Mapper nerve is a single cycle: 1 connected component, β₁ = 1,
+  |E| == |V|, every node degree 2)

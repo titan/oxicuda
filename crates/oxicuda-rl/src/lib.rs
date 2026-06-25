@@ -155,12 +155,14 @@ pub mod prelude {
     };
     pub use crate::handle::{LcgRng, RlHandle, SmVersion};
     pub use crate::loss::{
-        DdpgConfig, DdpgCriticLoss, DiscreteSacConfig, DiscreteSacLoss, DqnConfig, DqnLoss,
-        IqnConfig, IqnLoss, MunchausenConfig, MunchausenLoss, PpoConfig, PpoLoss, SacConfig,
-        SacLoss, Td3Config, Td3Loss, ddpg_actor_loss, ddpg_critic_loss, double_dqn_loss, dqn_loss,
-        iqn_cosine_embedding, iqn_loss, iqn_targets, munchausen_dqn_loss, munchausen_target,
-        polyak_update, ppo_loss, sac_actor_loss, sac_critic_loss, sac_temperature_loss,
-        sample_taus, td3_actor_loss, td3_critic_loss,
+        AwacConfig, BcqConfig, CqlConfig, CqlLoss, DdpgConfig, DdpgCriticLoss, DiscreteSacConfig,
+        DiscreteSacLoss, DqnConfig, DqnLoss, IqlConfig, IqnConfig, IqnLoss, MunchausenConfig,
+        MunchausenLoss, PpoConfig, PpoLoss, SacConfig, SacLoss, Td3Config, Td3Loss,
+        advantage_weighted_policy_loss, awac_actor_loss, bcq_critic_loss, bcq_target, bcq_vae_loss,
+        cql_loss, ddpg_actor_loss, ddpg_critic_loss, double_dqn_loss, dqn_loss, expectile_weight,
+        iql_critic_loss, iql_value_loss, iqn_cosine_embedding, iqn_loss, iqn_targets,
+        munchausen_dqn_loss, munchausen_target, polyak_update, ppo_loss, sac_actor_loss,
+        sac_critic_loss, sac_temperature_loss, sample_taus, td3_actor_loss, td3_critic_loss,
     };
     pub use crate::normalize::{ObservationNormalizer, RewardNormalizer, RunningStats};
     pub use crate::policy::{

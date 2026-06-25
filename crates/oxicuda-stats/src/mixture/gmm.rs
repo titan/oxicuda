@@ -129,7 +129,11 @@ fn kmeans_plusplus_init(
         for ni in 0..n {
             let xi = &x[ni * d..(ni + 1) * d];
             for c in &centers {
-                let d2: f64 = xi.iter().zip(c.iter()).map(|(&a, &b)| (a - b) * (a - b)).sum();
+                let d2: f64 = xi
+                    .iter()
+                    .zip(c.iter())
+                    .map(|(&a, &b)| (a - b) * (a - b))
+                    .sum();
                 if d2 < dist2[ni] {
                     dist2[ni] = d2;
                 }
@@ -137,8 +141,9 @@ fn kmeans_plusplus_init(
         }
         let total: f64 = dist2.iter().sum();
         if total < 1e-300 {
-            // All points coincide; pick random
-            centers.push(x[rng.next_usize(n) * d..rng.next_usize(n).min(n - 1) * d + d].to_vec());
+            // All points coincide; pick a single random point as the next center.
+            let idx = rng.next_usize(n);
+            centers.push(x[idx * d..(idx + 1) * d].to_vec());
             continue;
         }
         let mut target = rng.next_f64() * total;
@@ -160,13 +165,7 @@ fn kmeans_plusplus_init(
 // Log-likelihood of a single Gaussian component at one point
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn log_gaussian(
-    xn: &[f64],
-    mu: &[f64],
-    cov: &[f64],
-    d: usize,
-    reg_covar: f64,
-) -> Option<f64> {
+fn log_gaussian(xn: &[f64], mu: &[f64], cov: &[f64], d: usize, reg_covar: f64) -> Option<f64> {
     // Add reg_covar to diagonal before Cholesky
     let mut cov_reg = cov.to_vec();
     for j in 0..d {
@@ -176,10 +175,11 @@ fn log_gaussian(
     let log_det = log_det_from_chol(&l, d);
     let diff: Vec<f64> = xn.iter().zip(mu.iter()).map(|(&a, &b)| a - b).collect();
     let mah = mahalanobis_sq(&l, &diff, d);
-    let log_prob = -0.5 * (d as f64 * std::f64::consts::LN_2
-        + d as f64 * std::f64::consts::PI.ln()
-        + log_det
-        + mah);
+    let log_prob = -0.5
+        * (d as f64 * std::f64::consts::LN_2
+            + d as f64 * std::f64::consts::PI.ln()
+            + log_det
+            + mah);
     Some(log_prob)
 }
 
@@ -272,7 +272,10 @@ fn em_run(
             // Update means
             let new_mu: Vec<f64> = (0..d)
                 .map(|j| {
-                    (0..n).map(|ni| gamma[ni * k + ki] * x[ni * d + j]).sum::<f64>() / nk_safe
+                    (0..n)
+                        .map(|ni| gamma[ni * k + ki] * x[ni * d + j])
+                        .sum::<f64>()
+                        / nk_safe
                 })
                 .collect();
             means[ki * d..(ki + 1) * d].copy_from_slice(&new_mu);
@@ -383,7 +386,12 @@ fn em_run(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Fit a GMM with n_init random restarts, returning the best (highest log-likelihood) model.
-pub fn gmm_fit(x: &[f64], n: usize, n_features: usize, config: &GmmConfig) -> StatsResult<GmmModel> {
+pub fn gmm_fit(
+    x: &[f64],
+    n: usize,
+    n_features: usize,
+    config: &GmmConfig,
+) -> StatsResult<GmmModel> {
     if n == 0 {
         return Err(StatsError::EmptyInput);
     }
@@ -425,7 +433,9 @@ pub fn gmm_fit(x: &[f64], n: usize, n_features: usize, config: &GmmConfig) -> St
 
     for init_run in 0..n_init {
         // Deterministic seed per init to ensure reproducibility per (seed, init_run)
-        let seed = config.seed.wrapping_add(init_run as u64 * 6_364_136_223_846_793_005);
+        let seed = config
+            .seed
+            .wrapping_add(init_run as u64 * 6_364_136_223_846_793_005);
         let mut rng = LcgRng::new(seed);
         let init_means = kmeans_plusplus_init(x, n, d, k, &mut rng);
         let model = em_run(x, n, d, config, init_means)?;
@@ -439,7 +449,9 @@ pub fn gmm_fit(x: &[f64], n: usize, n_features: usize, config: &GmmConfig) -> St
         }
     }
 
-    best_model.ok_or(StatsError::NumericalInstability("all EM runs failed".to_string()))
+    best_model.ok_or(StatsError::NumericalInstability(
+        "all EM runs failed".to_string(),
+    ))
 }
 
 /// Compute per-sample log-likelihoods for n new points under the model.
@@ -449,7 +461,10 @@ pub fn gmm_score(model: &GmmModel, x: &[f64], n: usize) -> StatsResult<Vec<f64>>
     let d = model.n_features;
     let k = model.n_components;
     if x.len() != n * d {
-        return Err(StatsError::DimensionMismatch { a: x.len(), b: n * d });
+        return Err(StatsError::DimensionMismatch {
+            a: x.len(),
+            b: n * d,
+        });
     }
     let mut scores = Vec::with_capacity(n);
     for ni in 0..n {
@@ -475,7 +490,10 @@ pub fn gmm_predict_proba(model: &GmmModel, x: &[f64], n: usize) -> StatsResult<V
     let d = model.n_features;
     let k = model.n_components;
     if x.len() != n * d {
-        return Err(StatsError::DimensionMismatch { a: x.len(), b: n * d });
+        return Err(StatsError::DimensionMismatch {
+            a: x.len(),
+            b: n * d,
+        });
     }
     let mut proba = vec![0.0f64; n * k];
     for ni in 0..n {
@@ -579,7 +597,10 @@ mod tests {
     }
 
     fn default_cfg_k(k: usize) -> GmmConfig {
-        GmmConfig { n_components: k, ..Default::default() }
+        GmmConfig {
+            n_components: k,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -587,7 +608,12 @@ mod tests {
         let n_each = 100usize;
         let n = n_each * 2;
         let data = make_two_clusters(n_each, 42);
-        let cfg = GmmConfig { n_components: 2, seed: 42, max_iter: 300, ..Default::default() };
+        let cfg = GmmConfig {
+            n_components: 2,
+            seed: 42,
+            max_iter: 300,
+            ..Default::default()
+        };
         let model = gmm_fit(&data, n, 2, &cfg).expect("fit ok");
         let labels = gmm_predict(&model, &data, n).expect("predict ok");
         // Count agreement with true labels (first n_each = cluster 0 or 1)
@@ -624,7 +650,12 @@ mod tests {
     fn means_near_true_centers() {
         let n_each = 200usize;
         let data = make_two_clusters(n_each, 13);
-        let cfg = GmmConfig { n_components: 2, seed: 13, max_iter: 300, ..Default::default() };
+        let cfg = GmmConfig {
+            n_components: 2,
+            seed: 13,
+            max_iter: 300,
+            ..Default::default()
+        };
         let model = gmm_fit(&data, n_each * 2, 2, &cfg).expect("ok");
         // Check each fitted mean is near either -3 or +3 in x-dimension
         let x0 = model.means[0];
@@ -650,9 +681,17 @@ mod tests {
     #[test]
     fn converged_simple_problem() {
         let data = make_two_clusters(200, 55);
-        let cfg = GmmConfig { n_components: 2, seed: 55, max_iter: 500, ..Default::default() };
+        let cfg = GmmConfig {
+            n_components: 2,
+            seed: 55,
+            max_iter: 500,
+            ..Default::default()
+        };
         let model = gmm_fit(&data, 400, 2, &cfg).expect("ok");
-        assert!(model.converged, "should converge on well-separated clusters");
+        assert!(
+            model.converged,
+            "should converge on well-separated clusters"
+        );
     }
 
     #[test]
@@ -682,10 +721,7 @@ mod tests {
         let k = 2;
         for ni in 0..100 {
             let row_sum: f64 = proba[ni * k..(ni + 1) * k].iter().sum();
-            assert!(
-                (row_sum - 1.0).abs() < 1e-10,
-                "row {ni} sums to {row_sum}"
-            );
+            assert!((row_sum - 1.0).abs() < 1e-10, "row {ni} sums to {row_sum}");
         }
     }
 
@@ -717,31 +753,67 @@ mod tests {
     #[test]
     fn n_init_returns_best_ll() {
         let data = make_two_clusters(50, 77);
-        let cfg_single = GmmConfig { n_components: 2, seed: 77, n_init: 1, max_iter: 200, ..Default::default() };
-        let cfg_multi = GmmConfig { n_components: 2, seed: 77, n_init: 3, max_iter: 200, ..Default::default() };
+        let cfg_single = GmmConfig {
+            n_components: 2,
+            seed: 77,
+            n_init: 1,
+            max_iter: 200,
+            ..Default::default()
+        };
+        let cfg_multi = GmmConfig {
+            n_components: 2,
+            seed: 77,
+            n_init: 3,
+            max_iter: 200,
+            ..Default::default()
+        };
         let m1 = gmm_fit(&data, 100, 2, &cfg_single).expect("ok");
         let m3 = gmm_fit(&data, 100, 2, &cfg_multi).expect("ok");
         // With n_init=3 we should get ≥ the best of single run
-        assert!(m3.log_likelihood >= m1.log_likelihood - 1e-6, "n_init=3 should not be worse");
+        assert!(
+            m3.log_likelihood >= m1.log_likelihood - 1e-6,
+            "n_init=3 should not be worse"
+        );
     }
 
     #[test]
     fn single_component_mean_near_sample_mean() {
         let mut rng = LcgRng::new(88);
         let n = 200usize;
-        let data: Vec<f64> = (0..n * 2).map(|i| {
-            if i % 2 == 0 { 5.0 + rng.next_normal() } else { rng.next_normal() }
-        }).collect();
-        let cfg = GmmConfig { n_components: 1, seed: 0, max_iter: 100, ..Default::default() };
+        let data: Vec<f64> = (0..n * 2)
+            .map(|i| {
+                if i % 2 == 0 {
+                    5.0 + rng.next_normal()
+                } else {
+                    rng.next_normal()
+                }
+            })
+            .collect();
+        let cfg = GmmConfig {
+            n_components: 1,
+            seed: 0,
+            max_iter: 100,
+            ..Default::default()
+        };
         let model = gmm_fit(&data, n, 2, &cfg).expect("ok");
         let sample_mean_x = data.iter().step_by(2).sum::<f64>() / n as f64;
-        assert!((model.means[0] - sample_mean_x).abs() < 1.0, "mean[0]={} vs sample_mean={}", model.means[0], sample_mean_x);
+        assert!(
+            (model.means[0] - sample_mean_x).abs() < 1.0,
+            "mean[0]={} vs sample_mean={}",
+            model.means[0],
+            sample_mean_x
+        );
     }
 
     #[test]
     fn three_clusters_no_crash() {
         let data = make_three_clusters(50, 123);
-        let cfg = GmmConfig { n_components: 3, seed: 123, max_iter: 300, ..Default::default() };
+        let cfg = GmmConfig {
+            n_components: 3,
+            seed: 123,
+            max_iter: 300,
+            ..Default::default()
+        };
         let model = gmm_fit(&data, 150, 2, &cfg).expect("ok");
         for &w in &model.weights {
             assert!(w > 0.0, "weight {w} not positive");
@@ -781,7 +853,12 @@ mod tests {
         let mut rng = LcgRng::new(999);
         let n = 1000usize;
         let d = 3usize;
-        let centers = [(-5.0f64, 0.0, 0.0), (5.0, 0.0, 0.0), (0.0, 5.0, 0.0), (0.0, -5.0, 0.0)];
+        let centers = [
+            (-5.0f64, 0.0, 0.0),
+            (5.0, 0.0, 0.0),
+            (0.0, 5.0, 0.0),
+            (0.0, -5.0, 0.0),
+        ];
         let mut data = Vec::with_capacity(n * d);
         for ni in 0..n {
             let &(cx, cy, cz) = &centers[ni % 4];
@@ -789,7 +866,12 @@ mod tests {
             data.push(cy + rng.next_normal() * 0.5);
             data.push(cz + rng.next_normal() * 0.5);
         }
-        let cfg = GmmConfig { n_components: 4, seed: 999, max_iter: 300, ..Default::default() };
+        let cfg = GmmConfig {
+            n_components: 4,
+            seed: 999,
+            max_iter: 300,
+            ..Default::default()
+        };
         let model = gmm_fit(&data, n, d, &cfg).expect("large n ok");
         assert!(model.log_likelihood.is_finite());
     }
@@ -813,7 +895,10 @@ mod tests {
 
     #[test]
     fn zero_components_error() {
-        let cfg = GmmConfig { n_components: 0, ..Default::default() };
+        let cfg = GmmConfig {
+            n_components: 0,
+            ..Default::default()
+        };
         let result = gmm_fit(&[1.0, 2.0], 1, 2, &cfg);
         assert!(matches!(
             result,
@@ -825,12 +910,18 @@ mod tests {
     fn dimension_mismatch_error() {
         let cfg = default_cfg_k(2);
         let result = gmm_fit(&[1.0, 2.0, 3.0], 2, 2, &cfg);
-        assert!(matches!(result, Err(StatsError::DimensionMismatch { a: 3, b: 4 })));
+        assert!(matches!(
+            result,
+            Err(StatsError::DimensionMismatch { a: 3, b: 4 })
+        ));
     }
 
     #[test]
     fn insufficient_sample_size_error() {
-        let cfg = GmmConfig { n_components: 5, ..Default::default() };
+        let cfg = GmmConfig {
+            n_components: 5,
+            ..Default::default()
+        };
         let data = vec![1.0f64; 3 * 2];
         let result = gmm_fit(&data, 3, 2, &cfg);
         assert!(matches!(
@@ -842,7 +933,12 @@ mod tests {
     #[test]
     fn seed_reproducibility() {
         let data = make_two_clusters(50, 12);
-        let cfg = GmmConfig { n_components: 2, seed: 12, max_iter: 200, ..Default::default() };
+        let cfg = GmmConfig {
+            n_components: 2,
+            seed: 12,
+            max_iter: 200,
+            ..Default::default()
+        };
         let m1 = gmm_fit(&data, 100, 2, &cfg).expect("ok");
         let m2 = gmm_fit(&data, 100, 2, &cfg).expect("ok");
         for (a, b) in m1.means.iter().zip(m2.means.iter()) {

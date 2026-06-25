@@ -10,7 +10,10 @@ Part of the [OxiCUDA](https://github.com/cool-japan/oxicuda) ecosystem — Pure 
 
 - **Dynamic HIP loading** — `libamdhip64.so` is loaded at runtime; no HIP SDK needed at compile time
 - **hipRTC integration** — runtime compilation of HIP kernel source strings via `libhiprtc.so`; no ROCm toolchain required at compile time
-- **hipBLAS interop** — optional high-performance BLAS via `libhipblas.so` with automatic kernel fallback when not installed
+- **hipBLAS / hipBLASLt interop** — optional high-performance BLAS via `libhipblas.so` / `libhipblaslt.so` (fused-GEMM epilogues) with automatic kernel fallback when not installed
+- **HIP kernel codegen** — elementwise, GEMM (naive / LDS-tiled / wave-aware), reduction, softmax, LayerNorm, prefix-scan, transpose, attention, conv2d, plus MFMA/WMMA/FP8 matrix-core micro-kernels
+- **`gfx*` architecture model** — per-arch VGPR/SGPR/LDS limits, wavefront width, matrix-core capability tables (CDNA1/2/3, RDNA2/3)
+- **Host-side planners** — occupancy calculator, launch-config validation, stream/event ordering, hipGraph DAG, memory-pool suballocator, xGMI peer topology
 - **Device management** — Enumerate and select AMD GPU devices
 - **Memory operations** — Allocate, free, and transfer device memory
 - **Multi-GPU support** — `MultiDeviceDispatcher` distributes matrix work across all available AMD GPUs
@@ -30,7 +33,7 @@ Part of the [OxiCUDA](https://github.com/cool-japan/oxicuda) ecosystem — Pure 
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-oxicuda-rocm = "0.2.0"
+oxicuda-rocm = "0.3.0"
 ```
 
 ```rust
@@ -45,8 +48,8 @@ match backend.init() {
 
 ## Status
 
-- **Version**: 0.2.0 (2026-06-16)
-- **Tests**: 104 passing
+- **Version**: 0.3.0 (2026-06-25)
+- **Tests**: 213 passing (host-side / codegen; device-execution paths require AMD ROCm hardware)
 
 ## License
 

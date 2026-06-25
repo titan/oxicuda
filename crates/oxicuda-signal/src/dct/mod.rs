@@ -10,6 +10,7 @@ pub mod dct2;
 pub mod dct3;
 pub mod dct4;
 pub mod mdct;
+pub mod mp3_dct;
 
 pub use dct2::{Dct2Plan, dct2_ortho_scale, dct2_reference};
 pub use dct3::{
@@ -20,3 +21,7 @@ pub use dct4::{
     postscale_table, pretwiddle_table,
 };
 pub use mdct::{MdctPlan, imdct, kbd_window, mdct, sine_window};
+pub use mp3_dct::{
+    MP3_LONG_N, MP3_LONG_WINDOW_LEN, MP3_SHORT_N, MP3_SHORT_WINDOW_LEN, Mp3BlockType, Mp3MdctPlan,
+    mp3_imdct, mp3_mdct, mp3_short_window, mp3_window,
+};

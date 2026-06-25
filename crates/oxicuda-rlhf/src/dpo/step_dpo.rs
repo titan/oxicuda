@@ -300,6 +300,98 @@ pub fn step_dpo_loss_batch(pairs: &[StepPair], cfg: &StepDpoConfig) -> RlhfResul
     Ok(mean)
 }
 
+// ── Gradient ────────────────────────────────────────────────────────────────
+
+/// Numerically stable sigmoid `σ(x)`.
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let e = x.exp();
+        e / (1.0 + e)
+    }
+}
+
+/// Gradient of the aggregated Step-DPO loss w.r.t. every per-step log-probability.
+///
+/// Finite-difference verified against [`step_dpo_loss`]`(..).loss`. Each field is
+/// a `Vec<f32>` of length `n_steps`, aligned with the corresponding input vector.
+#[derive(Debug, Clone)]
+pub struct StepDpoGrad {
+    /// `∂L/∂(chosen step log-prob)` for each step.
+    pub d_chosen_step_logps: Vec<f32>,
+    /// `∂L/∂(rejected step log-prob)` for each step.
+    pub d_rejected_step_logps: Vec<f32>,
+    /// `∂L/∂(reference chosen step log-prob)` for each step.
+    pub d_ref_chosen_step_logps: Vec<f32>,
+    /// `∂L/∂(reference rejected step log-prob)` for each step.
+    pub d_ref_rejected_step_logps: Vec<f32>,
+}
+
+/// Analytic gradient of [`step_dpo_loss`].
+///
+/// Per step `loss_k = −log σ(r_k)` with `r_k = β·((c_k − rc_k) − (l_k − rr_k))`,
+/// so `dloss_k/dr_k = −σ(−r_k)` and the four chained partials follow the
+/// `+β, −β, −β, +β` pattern. The aggregation contributes a per-step coefficient
+/// `a_k`: for [`StepReduceMode::WeightedMean`] `a_k = w_k / Σw`, for
+/// [`StepReduceMode::WeightedSum`] `a_k = w_k`, and for
+/// [`StepReduceMode::LastStep`] `a_k = 1` on the last step and `0` elsewhere
+/// (the per-step weights themselves are constants of the position / scheme and
+/// carry no gradient). The forward's own computed `per_step_weights` are reused
+/// so the coefficients match exactly.
+///
+/// # Errors
+///
+/// Mirrors [`step_dpo_loss`]: validation of the pair / `beta` / explicit-weight
+/// length, plus [`RlhfError::NanEncountered`] on a non-finite gradient.
+pub fn step_dpo_grad(pair: &StepPair, cfg: &StepDpoConfig) -> RlhfResult<StepDpoGrad> {
+    // Reuse the forward for validation and the exact per-step weights.
+    let out = step_dpo_loss(pair, cfg)?;
+    let n = pair.n_steps();
+    let weights = &out.per_step_weights;
+
+    let coeffs: Vec<f32> = match cfg.reduce {
+        StepReduceMode::WeightedMean => {
+            let wsum: f32 = weights.iter().sum();
+            weights.iter().map(|&w| w / wsum).collect()
+        }
+        StepReduceMode::WeightedSum => weights.clone(),
+        StepReduceMode::LastStep => (0..n).map(|k| if k == n - 1 { 1.0 } else { 0.0 }).collect(),
+    };
+
+    let beta = cfg.beta;
+    let mut d_chosen_step_logps = Vec::with_capacity(n);
+    let mut d_rejected_step_logps = Vec::with_capacity(n);
+    let mut d_ref_chosen_step_logps = Vec::with_capacity(n);
+    let mut d_ref_rejected_step_logps = Vec::with_capacity(n);
+    for ((((&coeff, &c), &rc), &l), &rr) in coeffs
+        .iter()
+        .zip(pair.chosen_step_logps.iter())
+        .zip(pair.ref_chosen_step_logps.iter())
+        .zip(pair.rejected_step_logps.iter())
+        .zip(pair.ref_rejected_step_logps.iter())
+    {
+        let r_k = step_implicit_reward(c, rc, l, rr, beta);
+        // d = a_k · (dloss_k/dr_k) · (∂r_k/∂c_k) = a_k · (−σ(−r_k)) · β.
+        let d = coeff * (-sigmoid(-r_k)) * beta;
+        if !d.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        d_chosen_step_logps.push(d);
+        d_ref_chosen_step_logps.push(-d);
+        d_rejected_step_logps.push(-d);
+        d_ref_rejected_step_logps.push(d);
+    }
+
+    Ok(StepDpoGrad {
+        d_chosen_step_logps,
+        d_rejected_step_logps,
+        d_ref_chosen_step_logps,
+        d_ref_rejected_step_logps,
+    })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -707,5 +799,149 @@ mod tests {
     fn n_steps_returns_correct_count() {
         let pair = make_pair(5, -1.0, -2.0);
         assert_eq!(pair.n_steps(), 5);
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn mk() -> StepPair {
+        StepPair {
+            chosen_step_logps: vec![-0.5, -1.0, -1.4],
+            rejected_step_logps: vec![-2.0, -2.5, -3.1],
+            ref_chosen_step_logps: vec![-1.0, -1.1, -1.2],
+            ref_rejected_step_logps: vec![-1.0, -1.1, -1.2],
+        }
+    }
+
+    fn loss_of(pair: &StepPair, cfg: &StepDpoConfig) -> f32 {
+        step_dpo_loss(pair, cfg).expect("loss").loss
+    }
+
+    fn check_all(cfg: &StepDpoConfig) {
+        let pair = mk();
+        let g = step_dpo_grad(&pair, cfg).expect("grad");
+        let n = pair.n_steps();
+        let h = 1e-2;
+        for k in 0..n {
+            let fd_c = central_diff(
+                |v| {
+                    let mut p = mk();
+                    p.chosen_step_logps[k] = v;
+                    loss_of(&p, cfg)
+                },
+                pair.chosen_step_logps[k],
+                h,
+            );
+            let fd_l = central_diff(
+                |v| {
+                    let mut p = mk();
+                    p.rejected_step_logps[k] = v;
+                    loss_of(&p, cfg)
+                },
+                pair.rejected_step_logps[k],
+                h,
+            );
+            let fd_rc = central_diff(
+                |v| {
+                    let mut p = mk();
+                    p.ref_chosen_step_logps[k] = v;
+                    loss_of(&p, cfg)
+                },
+                pair.ref_chosen_step_logps[k],
+                h,
+            );
+            let fd_rr = central_diff(
+                |v| {
+                    let mut p = mk();
+                    p.ref_rejected_step_logps[k] = v;
+                    loss_of(&p, cfg)
+                },
+                pair.ref_rejected_step_logps[k],
+                h,
+            );
+            assert_close(g.d_chosen_step_logps[k], fd_c, "d_chosen");
+            assert_close(g.d_rejected_step_logps[k], fd_l, "d_rejected");
+            assert_close(g.d_ref_chosen_step_logps[k], fd_rc, "d_ref_chosen");
+            assert_close(g.d_ref_rejected_step_logps[k], fd_rr, "d_ref_rejected");
+        }
+    }
+
+    #[test]
+    fn step_dpo_grad_matches_fd_weighted_mean() {
+        check_all(&StepDpoConfig::default());
+    }
+
+    #[test]
+    fn step_dpo_grad_matches_fd_weighted_sum_explicit() {
+        check_all(&StepDpoConfig {
+            beta: 0.2,
+            weight_scheme: StepWeightScheme::Explicit {
+                weights: vec![2.0, 0.5, 1.5],
+            },
+            reduce: StepReduceMode::WeightedSum,
+        });
+    }
+
+    #[test]
+    fn step_dpo_grad_matches_fd_exponential_decay() {
+        check_all(&StepDpoConfig {
+            beta: 0.15,
+            weight_scheme: StepWeightScheme::ExponentialDecay { gamma: 0.8 },
+            reduce: StepReduceMode::WeightedMean,
+        });
+    }
+
+    #[test]
+    fn step_dpo_grad_last_step_zeroes_other_steps() {
+        let cfg = StepDpoConfig {
+            reduce: StepReduceMode::LastStep,
+            ..Default::default()
+        };
+        let g = step_dpo_grad(&mk(), &cfg).expect("grad");
+        // Only the last step carries gradient.
+        assert_eq!(g.d_chosen_step_logps[0], 0.0);
+        assert_eq!(g.d_chosen_step_logps[1], 0.0);
+        assert!(g.d_chosen_step_logps[2] < 0.0, "last step pushes chosen up");
+        check_all(&cfg);
+    }
+
+    #[test]
+    fn step_dpo_grad_chosen_sign_is_descent() {
+        let g = step_dpo_grad(&mk(), &StepDpoConfig::default()).expect("grad");
+        for (&dc, &dl) in g
+            .d_chosen_step_logps
+            .iter()
+            .zip(g.d_rejected_step_logps.iter())
+        {
+            assert!(dc < 0.0, "raising a chosen step lowers loss");
+            assert!(dl > 0.0, "raising a rejected step raises loss");
+        }
+    }
+
+    #[test]
+    fn step_dpo_grad_invalid_beta_errors() {
+        let cfg = StepDpoConfig {
+            beta: -0.1,
+            ..Default::default()
+        };
+        assert!(matches!(
+            step_dpo_grad(&mk(), &cfg),
+            Err(RlhfError::InvalidBeta { .. })
+        ));
     }
 }

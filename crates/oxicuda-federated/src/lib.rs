@@ -58,7 +58,9 @@ pub mod prelude {
         MoonConfig, moon_contrastive_grad, moon_contrastive_loss, moon_total_loss,
     };
     pub use crate::algorithm::scaffold::{
-        ScaffoldClientState, ScaffoldState, scaffold_client_update, scaffold_server_aggregate,
+        DriftDiagnostics, ScaffoldClientState, ScaffoldState, control_variate_drift,
+        gradient_norm_histogram, scaffold_client_update, scaffold_drift_diagnostics,
+        scaffold_server_aggregate,
     };
     pub use crate::compression::powersgd::{PowerSgdCompressor, frobenius_norm, residual};
     pub use crate::compression::quantize::{
@@ -79,17 +81,27 @@ pub mod prelude {
         LdpFlConfig, LdpMechanism, amplified_epsilon, ldp_fl_aggregate, privatize_update,
     };
     pub use crate::privacy::moments::MomentsAccountant;
-    pub use crate::privacy::pate::{PateConfig, data_dependent_epsilon, noisy_voting};
+    pub use crate::privacy::pate::{
+        ConfidentGnMaxConfig, PateConfig, confident_gnmax, data_dependent_epsilon, noisy_voting,
+    };
     pub use crate::privacy::randomized_response::{RandomizedResponse, RandomizedResponseConfig};
     pub use crate::privacy::rdp::{compose_rdp, optimal_epsilon, rdp_gaussian, rdp_to_dp};
+    pub use crate::privacy::zcdp::{
+        ZcdpAccountant, rdp_to_zcdp, zcdp_gaussian, zcdp_to_dp, zcdp_to_rdp,
+    };
     pub use crate::ptx_kernels::{
         aggregate_mean_ptx, dp_clip_gradient_ptx, fedavg_weighted_sum_ptx, gaussian_noise_ptx,
         pairwise_mask_ptx, qsgd_quantize_ptx, topk_mask_ptx,
     };
     pub use crate::secure_agg::aggregator::SecureAggregator;
+    pub use crate::secure_agg::key_exchange::{DhKeyPair, pairwise_seed_matrix};
     pub use crate::secure_agg::masking::{apply_mask, apply_pairwise_masks, generate_mask, unmask};
     pub use crate::secure_agg::shamir::{
         PRIME, ShamirConfig, reconstruct_gradient, reconstruct_scalar, share_gradient, share_scalar,
+    };
+    pub use crate::selection::fairness::{
+        CohortFairnessTracker, FairnessSummary, StratumMetrics, fairness_summary,
+        jains_fairness_index,
     };
     pub use crate::selection::power_of_choice::{
         PowerOfChoice, PowerOfChoiceConfig, SelectionStrategy,

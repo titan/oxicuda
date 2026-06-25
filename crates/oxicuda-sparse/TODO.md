@@ -50,9 +50,9 @@ Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), for
 - [x] IC(k) incomplete Cholesky (preconditioner/ick.rs) -- level-of-fill symbolic phase mirroring ILU(k) (symmetric graph, lower triangle), left-looking numeric Cholesky restricted to the pattern, fwd/back substitution apply; exact complete Cholesky for k >= n; SPD pivot guard (P2)
 - [x] LOBPCG eigensolver (eig/lobpcg.rs, eig/dense_sym.rs) -- smallest eigenpairs of sparse SPD A via locally-optimal block preconditioned CG; deterministic LCG init, modified Gram-Schmidt subspace orthonormalization with rank pruning, Rayleigh-Ritz with an inline cyclic-Jacobi dense symmetric eigensolver, optional diagonal/Jacobi preconditioner (P2)
 - [x] Algebraic multigrid (preconditioner/amg.rs) -- smoothed aggregation (Vanek-Mandel-Brezina): strength-of-connection, greedy 2-pass aggregation, tentative + Jacobi-smoothed prolongator with power-iteration spectral-radius estimate, Galerkin coarse operator P^T A P via host SpGEMM + CSR transpose; V-cycle (weighted-Jacobi smoothing + dense coarse solve) and standalone amg_solve; mesh-independent convergence on 1D/2D Poisson (P2)
-- [ ] cuSPARSE-compatible API shim (`compat/cusparse_compat.rs`) — compatibility layer mirroring cuSPARSE function signatures (cusparseSpMV, cusparseSpGEMM, cusparseSpSV) for drop-in replacement; `CusparseCompatHandle` (P1)
-- [ ] SpGEMM symbolic phase standalone (`ops/spgemm_symbolic.rs`) — Gustavson 1978 symbolic-only pass that computes the output sparsity pattern without numeric values; enables pre-allocation in iterative schemes; `SpgemmSymbolic` (P1)
-- [ ] Shift-invert eigensolver (`eig/shift_invert.rs`) — shift-invert power iteration: factor (A − σI) via sparse direct LU, apply inverse to concentrate iterations near target shift σ; `ShiftInvertEig` (P2)
+- [x] cuSPARSE-compatible API shim (`compat/cusparse_compat.rs`) — compatibility layer mirroring cuSPARSE function signatures (`cusparse_spmv`, `cusparse_spgemm`, `cusparse_spsv`) for drop-in replacement; `CusparseCompatHandle` with create/destroy lifecycle, `CusparsePointerMode`, and triangular descriptors (FillMode/DiagType); 13 correctness tests vs dense reference (P1)
+- [x] SpGEMM symbolic phase standalone (`ops/spgemm_symbolic.rs`) — Gustavson 1978 symbolic-only pass that computes the output sparsity pattern (`SymbolicPattern` + `spgemm_symbolic_pattern`) without numeric values via O(1) generation-mask membership; enables pre-allocation in iterative schemes; 7 tests asserting the structural pattern equals the numeric `A*B` pattern for sign-positive operands (P1)
+- [x] Shift-invert eigensolver (`eig/shift_invert.rs`) — shift-invert power iteration (`shift_invert` + `ShiftInvertResult`): assemble & dense-LU-factor (A − σI) once with partial pivoting, reuse the factors to apply the inverse and concentrate iterations near target shift σ, recover λ = σ + 1/μ from the Rayleigh quotient; 10 tests vs analytic 1D-Laplacian eigenvalues (interior + smallest, distinct shifts, singular-shift guard) (P2)
 
 ## Dependencies
 
@@ -68,7 +68,7 @@ Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), for
 
 ## Quality Status
 
-- Tests: 406 passing
+- Tests: 406 passing (+ 3 doctests); `cargo clippy --all-features --all-targets -- -D warnings` clean
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`

@@ -34,6 +34,7 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 - [x] `primitives.rs` (472 LoC) -- `OpKind` (8 standard DARTS primitives: Skip, SepConv3x3, SepConv5x5, DilConv3x3, DilConv5x5, MaxPool3x3, AvgPool3x3, None), `OpWeights` per-edge architecture vector
 - [x] `mixed_op.rs` (177 LoC) -- `MixedOp` differentiable mixture-of-ops with forward / backward and Gumbel-Softmax temperature gating
 - [x] `search_space.rs` (165 LoC) -- `SearchSpace`, `CellSpace`, `NetworkSpace` DARTS-style cell + network spaces
+- [x] `transformer_nas.rs` -- `BlockSpec` / `TransformerArch` / `TransformerSearchSpace` elastic transformer (AutoFormer / V-MoE) axes with exact attention + FFN + MoE MAC / parameter accounting
 
 #### DARTS (darts/)
 - [x] `cell.rs` (176 LoC) -- `DartsCell` multi-step cell with K candidate ops on each edge
@@ -56,6 +57,8 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 - [x] `flops.rs` (222 LoC) -- `OpCost`, `op_cost`, `total_cost` analytic FLOP + parameter accountant (sep / dilated conv `2*K^2*C_in*HW + 2*C_in*C_out*HW`, pooling `9*C_out*HW`)
 - [x] `latency.rs` (350 LoC) -- `LatencyLut` hardware-calibrated `(op, c_in, c_out, h, w)` lookup with default fallback; `LatencyMlp` two-layer ReLU MLP latency surrogate trained via per-sample MSE gradient descent
 - [x] `accuracy.rs` (356 LoC) -- `KnnAccuracyPredictor` inverse-distance-weighted k-NN regression; `RbfAccuracyPredictor` Gaussian-kernel ridge regressor with closed-form Gauss-Jordan solve
+- [x] `bayesian_gp.rs` (`GaussianProcess`) -- exact Gaussian-Process accuracy regressor: RBF / Matérn-5/2 kernel, closed-form posterior mean + variance via Cholesky solve of `K + σ_n² I`; `Acquisition::{Ucb, ExpectedImprovement}` for sample-efficient proposal
+- [x] `gnn_predictor.rs` (`GnnPredictor`, `PathEncodedPredictor`) -- NPENAS message-passing GNN over the cell DAG + BANANAS path-encoded MLP accuracy predictors
 
 #### Integration Tests (lib.rs)
 - [x] 5 E2E tests: FLOP accountant finite cost on `sample_arch`, LUT calibrated predict, MLP train + predict, k-NN constant-target round-trip, RBF constant-target
@@ -72,17 +75,17 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 - [x] MobileNet-V2 / V3 search space -- inverted-residual blocks with SE modules as an alternative to the DARTS primitives
 - [x] `darts/darts_ops.rs` / `DartsMixedOp` — extended DARTS operation set with `DartsMixedOp` supporting runtime op-weight blending, Gumbel-softmax temperature annealing, and gradient-free hard-gate derivation; `darts_ops` registry for custom primitive registration
 - [x] `predictor/latency_predictor.rs` / `LatencyPredictor` — unified `LatencyPredictor` trait abstracting `LatencyLut` and `LatencyMlp`; auto-calibration from hardware measurements; per-device profile serialisation; `LatencyPredictor::predict_arch()` over `ArchFeatures`
-- [ ] Transformer NAS primitives (AutoFormer / V-MoE) -- multi-head attention / FFN-width / num-layers as searchable axes
-- [ ] Once-for-All supernet (Cai 2020) -- elastic depth + width + kernel size in one supernet
+- [x] Transformer NAS primitives (AutoFormer / V-MoE) -- multi-head attention / FFN-width / num-layers as searchable axes (ops/transformer_nas.rs -- `BlockSpec` / `TransformerArch` / `TransformerSearchSpace`: elastic embed-dim, head-count, FFN-width (mlp_ratio), depth and MoE expert layout as searchable axes; exact attention + FFN + MoE MAC / parameter accounting; deterministic sampling; max/min subnet; now declared in ops/mod.rs + prelude, 14 tests)
+- [x] Once-for-All supernet (Cai 2020) -- elastic depth + width + kernel size in one supernet (supernet/once_for_all.rs -- Cai 2020 ICLR; `OfaSpace` (per-unit stage layout + kernel/width/depth choice sets), `OfaSubnet` weight-sliced subnet with MBConv MAC/param accounting via `ops::mbconv_ops`, `ShrinkSchedule` / `ShrinkPhase` progressive-shrinking (FullNetwork -> ElasticKernel -> ElasticDepth -> ElasticWidth) with per-axis `admissible()` axis-collapse, deterministic `sample()` + max/min subnet; was an ORPHANED module (file present, never declared) -- now declared in supernet/mod.rs + prelude; latent bug fixed: added `PartialEq, Eq` derives to `ShrinkSchedule` + `OfaSpace` so the orphan's `assert_eq!(Result<..>, Err(..))` tests compile; 10 tests now run + pass)
 - [x] BigNAS uniform sampling + sandwich rule -- improves supernet ranking correlation (supernet/bignas.rs -- Yu 2020 ECCV; uniform sub-net sampling + sandwich rule (max + min + sandwich_samples random subnets) per training step for supernet ranking correlation; flops_proxy ordering)
 - [x] Regularized Evolution (Real 2019) -- aging-based EA as an alternative to NSGA-II for single-objective search (evolution/regularized_evolution.rs -- aging-based EA: tournament select + mutate best + add child + remove oldest; reuses ArchEncoding)
-- [ ] Multi-trial NAS-Bench-style reproducibility hooks -- deterministic search seeds and per-arch result caches
+- [x] Multi-trial NAS-Bench-style reproducibility hooks -- deterministic search seeds and per-arch result caches (evolution/nas_bench.rs -- NAS-Bench-101/201; `derive_arch_seed` / `arch_rng` SplitMix64-finalised pure `(arch, trial, base_seed) -> seed`, `arch_key` canonical little-endian genome bytes, `NasBenchCache` per-`(arch, trial)` `TrialResult` cache with lazy evaluate-once `query()` + `unique_queries` / `cache_hits` accounting + `mean_val_accuracy`; was an ORPHANED module (file present, never declared) -- now declared in evolution/mod.rs + prelude; fixed `clippy::manual_inspect` in a test oracle closure (`.map(|r| { let _ = a; r })` -> unused `_` param); 11 tests now run + pass)
 
 #### P2 -- Nice-to-Have (Predictor & Evaluation Extensions)
-- [ ] HAT hardware-aware transformer NAS (`search/hat.rs`) — Wang 2020 ACL: multi-objective search in a weight-shared transformer supernet using Pareto-front evolution with latency LUT for each target device; `HatSearcher`
+- [x] HAT hardware-aware transformer NAS (`search/hat.rs`) — Wang 2020 ACL: multi-objective search in a weight-shared transformer supernet using Pareto-front evolution with latency LUT for each target device; `HatSearcher` (search/hat.rs -- `HatSearcher` Pareto-front evolution over `TransformerSearchSpace`; per-device `BlockLatencyLut` (recorded measurements, never fabricated); crossover + per-axis mutation + environmental selection; caller-supplied accuracy `loss_proxy` closure; now declared in search/mod.rs + prelude, 9 tests)
 - [ ] Local search NAS (`search/local_search.rs`) — White 2021 ICLR: hill-climbing on architecture space with single-op perturbations + zero-cost proxy ranking to avoid supernet training; `LocalSearchNas`
-- [ ] Graph Neural Network architecture predictor -- replace MLP / RBF / k-NN predictors with a GNN over the DAG (`NPENAS`, `BANANAS`)
-- [ ] Bayesian-optimisation accuracy predictor -- Gaussian Process with uncertainty for sample-efficient search
+- [x] Graph Neural Network architecture predictor -- replace MLP / RBF / k-NN predictors with a GNN over the DAG (`NPENAS`, `BANANAS`) (predictor/gnn_predictor.rs -- `GnnPredictor` message-passing GNN over the cell DAG (op-gated neighbour aggregation + per-layer linear update/ReLU + mean-pool readout, end-to-end reverse-mode SGD) and `PathEncodedPredictor` BANANAS truncated-path-encoding MLP; `CellTopology` + `PathEncoder`; now declared in predictor/mod.rs + prelude, 12 tests)
+- [x] Bayesian-optimisation accuracy predictor -- Gaussian Process with uncertainty for sample-efficient search (predictor/bayesian_gp.rs -- `GaussianProcess` exact GP regressor: RBF / Matérn-5/2 kernel, closed-form posterior mean + variance via Cholesky `L Lᵀ = K + σ_n² I` + forward/back triangular solves (no explicit inverse), target centring; `Acquisition::{Ucb, ExpectedImprovement}` with erf-based normal CDF; `propose()` acquisition argmax; 18 tests proving interpolation, ~0 variance at observed points / growth in gaps, EI/UCB peaking in the uncertain promising gap)
 - [ ] Multi-fidelity NAS -- early-stopping based on partial training (`Hyperband`, `BOHB`-style)
 - [x] Zero-cost proxies (NASWOT, SNIP, GraSP) -- predictor-free architecture ranking via untrained-network signals (proxy/zero_cost.rs -- NASWOT logdet kernel + SNIP/GraSP/SynFlow saliencies)
 - [ ] Hardware-aware predictor calibration -- per-device LUT serialisation / deserialisation helpers
@@ -104,8 +107,8 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 
 ## Quality Status
 
-- Warnings: 0 (clippy clean)
-- Tests: 5 E2E in `lib.rs` + module unit tests (see root TODO.md Vol.25 reference for the workspace-wide count)
+- Warnings: 0 (clippy clean, `--all-features --all-targets -- -D warnings`)
+- Tests: 375 passing (`cargo nextest run -p oxicuda-nas --all-features`) -- 5 E2E in `lib.rs` + module unit tests, incl. 18 (bayesian_gp) + 14 (transformer_nas) + 12 (gnn_predictor) + 11 (nas_bench) + 10 (once_for_all) + 9 (hat)
 - `unwrap()` calls: 0 in library code
 - macOS: compiles, returns `UnsupportedPlatform` from any actual GPU launch
 - PTX targets covered: sm_75 / sm_80 / sm_86 / sm_90 / sm_100 / sm_120

@@ -8,10 +8,13 @@
 //! * [`lora_moe`] — LoRAMoE: a mixture of low-rank LoRA adapters (Sheng et al. 2024).
 //! * [`hierarchical`] — Hierarchical MoE: two-level group → expert routing
 //!   (Jordan & Jacobs 1994; hierarchical sparse routing).
+//! * [`upcycle`] — Sparse upcycling: warm-start an MoE from a dense FFN
+//!   checkpoint (Komatsuzaki et al. 2023).
 
 pub mod hierarchical;
 pub mod lora_moe;
 pub mod mixtral;
+pub mod upcycle;
 
 use crate::error::{MoeError, MoeResult};
 use crate::routing::top_k::stable_softmax;

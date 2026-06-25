@@ -152,6 +152,134 @@ pub fn data_dependent_epsilon(vote_counts: &[u32], _delta: f32, epsilon_vote: f3
     epsilon_vote / reduction
 }
 
+/// Configuration for the Confident-GNMax aggregator.
+///
+/// Papernot et al., "Scalable Private Learning with PATE", ICLR 2018, §4.1.
+#[derive(Debug, Clone)]
+pub struct ConfidentGnMaxConfig {
+    /// Number of output classes.
+    pub n_classes: usize,
+    /// Confidence threshold `T`: queries whose (noisy) plurality vote count
+    /// falls below `T` are *not answered*, saving privacy budget.
+    pub threshold: f32,
+    /// Standard deviation `σ₁` of the Gaussian noise on the threshold check.
+    pub sigma_threshold: f32,
+    /// Standard deviation `σ₂` of the Gaussian noise on the answering GNMax.
+    /// Typically `σ₂ < σ₁` so confident queries are answered accurately.
+    pub sigma_answer: f32,
+}
+
+impl ConfidentGnMaxConfig {
+    /// Create a validated Confident-GNMax configuration.
+    ///
+    /// # Errors
+    /// Returns `DimensionMismatch` if `n_classes == 0`,
+    /// `InvalidNoiseMultiplier` if either σ is non-positive, or `Internal` if
+    /// `threshold` is non-finite.
+    pub fn new(
+        n_classes: usize,
+        threshold: f32,
+        sigma_threshold: f32,
+        sigma_answer: f32,
+    ) -> FedResult<Self> {
+        if n_classes == 0 {
+            return Err(FedError::DimensionMismatch {
+                expected: 1,
+                got: 0,
+            });
+        }
+        if !(sigma_threshold > 0.0 && sigma_threshold.is_finite()) {
+            return Err(FedError::InvalidNoiseMultiplier);
+        }
+        if !(sigma_answer > 0.0 && sigma_answer.is_finite()) {
+            return Err(FedError::InvalidNoiseMultiplier);
+        }
+        if !threshold.is_finite() {
+            return Err(FedError::Internal(
+                "Confident-GNMax threshold must be finite".into(),
+            ));
+        }
+        Ok(Self {
+            n_classes,
+            threshold,
+            sigma_threshold,
+            sigma_answer,
+        })
+    }
+}
+
+/// Confident-GNMax: privately answer a query only when the teacher ensemble is
+/// confident, abstaining otherwise to conserve the privacy budget.
+///
+/// Algorithm (Papernot 2018):
+/// 1. Build the vote histogram `n_j` over teacher predictions.
+/// 2. **Confidence check** — if `max_j n_j + N(0, σ₁²) < T`, return `None`
+///    (the query is *not answered*; the noisy-max is too low to be trusted and
+///    answering would spend budget on an uncertain label).
+/// 3. **GNMax answer** — otherwise add fresh `N(0, σ₂²)` Gaussian noise to
+///    *every* bin and return `Some(argmax)` over the noisy histogram.
+///
+/// The two noise draws use independent samples from `rng`; Gaussian noise is
+/// drawn via the handle's Box-Muller sampler.
+///
+/// # Arguments
+/// - `votes` — teacher predictions, each in `[0, n_classes)` (length = n_teachers)
+/// - `cfg` — Confident-GNMax configuration
+/// - `rng` — deterministic RNG
+///
+/// # Returns
+/// - `Some(class)` when the query clears the confidence threshold.
+/// - `None` when the query is abstained (below threshold).
+///
+/// # Errors
+/// Returns `InsufficientClients` if `votes` is empty.
+pub fn confident_gnmax(
+    votes: &[usize],
+    cfg: &ConfidentGnMaxConfig,
+    rng: &mut LcgRng,
+) -> FedResult<Option<usize>> {
+    if votes.is_empty() {
+        return Err(FedError::InsufficientClients { min: 1, got: 0 });
+    }
+
+    // Vote histogram.
+    let mut histogram = vec![0_i64; cfg.n_classes];
+    for &v in votes {
+        histogram[v % cfg.n_classes] += 1;
+    }
+
+    // Noisy confidence check on the plurality count.
+    let max_count = histogram.iter().copied().max().unwrap_or(0) as f32;
+    let (noise1, noise2) = rng.next_normal_pair();
+    let noisy_max = max_count + cfg.sigma_threshold * noise1;
+    if noisy_max < cfg.threshold {
+        // Stability/confidence not met → abstain, spend no answering budget.
+        return Ok(None);
+    }
+
+    // GNMax: add independent Gaussian noise to every bin, return argmax.
+    // Reuse the second Box-Muller draw, then continue sampling as needed.
+    let mut best_class = 0usize;
+    let mut best_val = f32::NEG_INFINITY;
+    let mut pending = Some(noise2);
+    for (class, &count) in histogram.iter().enumerate() {
+        let z = match pending.take() {
+            Some(z) => z,
+            None => {
+                let (a, b) = rng.next_normal_pair();
+                pending = Some(b);
+                a
+            }
+        };
+        let noisy = count as f32 + cfg.sigma_answer * z;
+        if noisy > best_val {
+            best_val = noisy;
+            best_class = class;
+        }
+    }
+    Ok(Some(best_class))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +357,81 @@ mod tests {
     fn data_dependent_epsilon_empty() {
         let eps = data_dependent_epsilon(&[], 1e-5, 1.0);
         assert!(eps.is_infinite());
+    }
+
+    #[test]
+    fn confident_gnmax_config_validates() {
+        assert!(ConfidentGnMaxConfig::new(3, 50.0, 10.0, 5.0).is_ok());
+        assert!(matches!(
+            ConfidentGnMaxConfig::new(0, 50.0, 10.0, 5.0),
+            Err(FedError::DimensionMismatch { .. })
+        ));
+        assert!(matches!(
+            ConfidentGnMaxConfig::new(3, 50.0, 0.0, 5.0),
+            Err(FedError::InvalidNoiseMultiplier)
+        ));
+        assert!(matches!(
+            ConfidentGnMaxConfig::new(3, f32::NAN, 10.0, 5.0),
+            Err(FedError::Internal(_))
+        ));
+    }
+
+    #[test]
+    fn confident_gnmax_answers_confident_query() {
+        // 95/100 votes for class 1, threshold 50 → easily answered, label = 1.
+        let votes: Vec<usize> = std::iter::repeat_n(1, 95)
+            .chain(std::iter::repeat_n(0, 3))
+            .chain(std::iter::repeat_n(2, 2))
+            .collect();
+        let cfg = ConfidentGnMaxConfig::new(3, 50.0, 5.0, 1.0).expect("cfg");
+        let mut rng = LcgRng::new(7);
+        let ans = confident_gnmax(&votes, &cfg, &mut rng).expect("answer");
+        assert_eq!(ans, Some(1), "confident plurality should be answered as 1");
+    }
+
+    #[test]
+    fn confident_gnmax_abstains_on_unconfident_query() {
+        // Near-uniform split, max count ≈ 4 with tiny noise, threshold 50 →
+        // abstain (None) almost surely.
+        let votes: Vec<usize> = (0..12).map(|i| i % 3).collect(); // 4 votes each
+        let cfg = ConfidentGnMaxConfig::new(3, 50.0, 1.0, 1.0).expect("cfg");
+        let mut rng = LcgRng::new(13);
+        let mut abstained = 0;
+        for _ in 0..50 {
+            if confident_gnmax(&votes, &cfg, &mut rng)
+                .expect("answer")
+                .is_none()
+            {
+                abstained += 1;
+            }
+        }
+        assert!(
+            abstained > 45,
+            "low-confidence queries should mostly abstain (got {abstained}/50)"
+        );
+    }
+
+    #[test]
+    fn confident_gnmax_empty_votes_errors() {
+        let cfg = ConfidentGnMaxConfig::new(3, 1.0, 1.0, 1.0).expect("cfg");
+        let mut rng = LcgRng::new(1);
+        assert!(matches!(
+            confident_gnmax(&[], &cfg, &mut rng),
+            Err(FedError::InsufficientClients { .. })
+        ));
+    }
+
+    #[test]
+    fn confident_gnmax_low_threshold_always_answers() {
+        // threshold = 0 → confidence check always passes; answer is well-defined.
+        let votes: Vec<usize> = std::iter::repeat_n(2, 30)
+            .chain(std::iter::repeat_n(0, 10))
+            .collect();
+        let cfg = ConfidentGnMaxConfig::new(3, 0.0, 2.0, 0.5).expect("cfg");
+        let mut rng = LcgRng::new(99);
+        for _ in 0..20 {
+            let ans = confident_gnmax(&votes, &cfg, &mut rng).expect("answer");
+            assert!(ans.is_some(), "threshold 0 must always answer");
+        }
     }
 }

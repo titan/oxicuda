@@ -11,9 +11,11 @@
 //! ├── learning/     — Adaptive (iteratively retrained) HD classifier, HD ridge regression
 //! ├── encoding/     — Record, n-gram, spatial pattern, level/thermometer, graph encoding
 //! ├── distance/     — Hamming, cosine, Jaccard similarity metrics
-//! └── metrics/      — Capacity bounds, dimensionality analysis, accuracy
+//! ├── metrics/      — Capacity bounds, dimensionality analysis, accuracy
+//! └── analysis/     — Empirical scaling-law characterisation (capacity vs D, bundle SNR vs k)
 //! ```
 
+pub mod analysis;
 pub mod classifier;
 pub mod distance;
 pub mod encoding;

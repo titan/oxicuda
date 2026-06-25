@@ -173,7 +173,7 @@ The following 6 conditions define v1.0 readiness:
 
 **Default-features dep tree (top 30 lines):**
 ```
-oxicuda v0.2.0 (crates/oxicuda)
+oxicuda v0.3.0 (crates/oxicuda)
 ├── half v2.7.1
 │   ├── bytemuck v1.25.0
 │   │   └── bytemuck_derive v1.10.2 (proc-macro)
@@ -195,8 +195,8 @@ oxicuda v0.2.0 (crates/oxicuda)
 │           ├── proc-macro2 v1.0.106 (*)
 │           ├── quote v1.0.45 (*)
 │           └── syn v2.0.117 (*)
-├── oxicuda-backend v0.2.0 (crates/oxicuda-backend)
-├── oxicuda-driver v0.2.0 (crates/oxicuda-driver)
+├── oxicuda-backend v0.3.0 (crates/oxicuda-backend)
+├── oxicuda-driver v0.3.0 (crates/oxicuda-driver)
 │   ├── libloading v0.9.0
 │   │   └── cfg-if v1.0.4
 │   ├── thiserror v2.0.18
@@ -207,7 +207,7 @@ oxicuda v0.2.0 (crates/oxicuda)
 
 **All-features dep tree (top 30 lines):**
 ```
-oxicuda v0.2.0 (crates/oxicuda)
+oxicuda v0.3.0 (crates/oxicuda)
 ├── half v2.7.1
 │   ├── bytemuck v1.25.0
 │   │   └── bytemuck_derive v1.10.2 (proc-macro)

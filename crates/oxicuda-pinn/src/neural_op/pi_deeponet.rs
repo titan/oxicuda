@@ -20,7 +20,11 @@
 //! convex quadratic in `c` with a closed-form ridge solution (a physics-informed
 //! "extreme-learning-machine" readout on DeepONet features) and an exact analytic
 //! gradient for first-order descent. Derivatives of `G` with respect to the query
-//! coordinate are taken by central finite differences of the (fixed) trunk net.
+//! coordinate are available two ways: by central finite differences of the (fixed)
+//! trunk net (cheap, used by the closed-form feature assembly), and by **exact
+//! forward-mode automatic differentiation** ([`Dual`]) propagated through the trunk
+//! MLP ([`PiDeepONet::value_dy_ad`] / [`PiDeepONet::antiderivative_residual_ad`]),
+//! which differentiates `t_k(y)` analytically — no truncation error.
 //!
 //! ## Canonical benchmark: the antiderivative operator
 //! For the 1-D ODE `ds/dy = u(y)`, `s(0) = 0`, the operator `G` is the
@@ -28,6 +32,7 @@
 //! `r(y) = dG/dy − u(y)`, the initial-condition residual is `G(u)(0)`, and the
 //! data residual (where labels exist) is `G(u)(y) − s(y)`.
 
+use crate::autodiff::dual::Dual;
 use crate::error::{PinnError, PinnResult};
 use crate::handle::LcgRng;
 use crate::neural_op::deeponet::{DeepONet, DeepONetConfig};
@@ -190,6 +195,157 @@ impl PiDeepONet {
         let gp = self.combine(&b, &tp);
         let gm = self.combine(&b, &tm);
         Ok((gp - gm) / (2.0 * h))
+    }
+
+    /// Forward-mode AD trunk evaluation along query coordinate `wrt`.
+    ///
+    /// Re-runs the trunk MLP `t(y) = (tanh ∘ affine)* ∘ affine` over [`Dual`]
+    /// numbers, seeding the tangent (`dvalue = 1`) on input coordinate `wrt` and
+    /// `0` on the others. Returns `(t_k, ∂t_k/∂y_wrt)` for every basis index `k`,
+    /// computed exactly (no finite-difference truncation). Mirrors the DeepONet
+    /// trunk's "tanh on every layer except the last" convention.
+    ///
+    /// # Errors
+    /// - [`PinnError::DimensionMismatch`] if `query.len() != d_query`, if `wrt`
+    ///   is out of range, or if a stored trunk weight matrix has the wrong size.
+    fn trunk_forward_dual(&self, query: &[f32], wrt: usize) -> PinnResult<(Vec<f32>, Vec<f32>)> {
+        if query.len() != self.d_query {
+            return Err(PinnError::DimensionMismatch {
+                expected: self.d_query,
+                got: query.len(),
+            });
+        }
+        if wrt >= self.d_query {
+            return Err(PinnError::DimensionMismatch {
+                expected: self.d_query,
+                got: wrt,
+            });
+        }
+        let weights = self.backbone.trunk_weights();
+        let biases = self.backbone.trunk_biases();
+        let n_layers = weights.len();
+
+        // Seed inputs as dual numbers with a unit tangent on coordinate `wrt`.
+        let mut x: Vec<Dual> = query
+            .iter()
+            .enumerate()
+            .map(|(j, &v)| {
+                if j == wrt {
+                    Dual::variable(v)
+                } else {
+                    Dual::constant(v)
+                }
+            })
+            .collect();
+
+        for (layer, (w, b)) in weights.iter().zip(biases.iter()).enumerate() {
+            let d_in = x.len();
+            let d_out = b.len();
+            if w.len() != d_out * d_in {
+                return Err(PinnError::DimensionMismatch {
+                    expected: d_out * d_in,
+                    got: w.len(),
+                });
+            }
+            let mut out: Vec<Dual> = Vec::with_capacity(d_out);
+            for i in 0..d_out {
+                // dot = Σ_j w[i,j] · x[j]  (weights are constants → scale duals).
+                let mut acc = Dual::constant(b[i]);
+                for (j, &xj) in x.iter().enumerate() {
+                    acc = acc + xj * w[i * d_in + j];
+                }
+                out.push(acc);
+            }
+            // tanh on all layers except the last (matches DeepONet::trunk_forward).
+            if layer < n_layers - 1 {
+                for o in out.iter_mut() {
+                    *o = o.tanh();
+                }
+            }
+            x = out;
+        }
+
+        let val: Vec<f32> = x.iter().map(|d| d.value).collect();
+        let der: Vec<f32> = x.iter().map(|d| d.dvalue).collect();
+        Ok((val, der))
+    }
+
+    /// First derivative `dG/dy` along query coordinate `0` via **exact
+    /// forward-mode AD** through the trunk net (no finite-difference truncation).
+    ///
+    /// Because `G(u)(y) = Σ_k c_k · b_k(u) · t_k(y)` is linear in the trunk
+    /// outputs and `b_k(u)` does not depend on `y`, the chain rule gives
+    /// `dG/dy = Σ_k c_k · b_k(u) · (∂t_k/∂y)`, where `∂t_k/∂y` is read directly
+    /// from the dual tangents.
+    ///
+    /// # Errors
+    /// Propagates dimension errors from the DeepONet branch net and the dual
+    /// trunk evaluation.
+    pub fn value_dy_ad(&self, func_samples: &[f32], query: &[f32]) -> PinnResult<f32> {
+        let b = self.backbone.branch_forward(func_samples)?;
+        let (_, dt) = self.trunk_forward_dual(query, 0)?;
+        let g_y: f32 = self
+            .coeffs
+            .iter()
+            .zip(b.iter())
+            .zip(dt.iter())
+            .map(|((&c, &bk), &dtk)| c * bk * dtk)
+            .sum();
+        if !g_y.is_finite() {
+            return Err(PinnError::NanEncountered {
+                location: "pi_deeponet_value_dy_ad",
+            });
+        }
+        Ok(g_y)
+    }
+
+    /// Antiderivative physics residual `r(y) = dG/dy − u(y)` using the **exact AD**
+    /// derivative [`PiDeepONet::value_dy_ad`] (no finite-difference truncation).
+    ///
+    /// # Errors
+    /// Propagates from [`PiDeepONet::value_dy_ad`].
+    pub fn antiderivative_residual_ad(
+        &self,
+        func_samples: &[f32],
+        query: &[f32],
+        u_at_query: f32,
+    ) -> PinnResult<f32> {
+        Ok(self.value_dy_ad(func_samples, query)? - u_at_query)
+    }
+
+    /// Mean-squared antiderivative-residual loss evaluated with the **exact AD**
+    /// derivative at the given collocation queries.
+    ///
+    /// # Errors
+    /// - [`PinnError::DimensionMismatch`] if the query / `u` lengths disagree.
+    /// - Propagates from [`PiDeepONet::value_dy_ad`] / [`pde_residual_loss`].
+    pub fn physics_loss_ad(
+        &self,
+        func_samples: &[f32],
+        queries: &[f32],
+        u_at_queries: &[f32],
+        n_queries: usize,
+    ) -> PinnResult<f32> {
+        let dq = self.d_query;
+        if queries.len() != n_queries * dq {
+            return Err(PinnError::DimensionMismatch {
+                expected: n_queries * dq,
+                got: queries.len(),
+            });
+        }
+        if u_at_queries.len() != n_queries {
+            return Err(PinnError::DimensionMismatch {
+                expected: n_queries,
+                got: u_at_queries.len(),
+            });
+        }
+        let res: PinnResult<Vec<f32>> = (0..n_queries)
+            .map(|i| {
+                let y = &queries[i * dq..(i + 1) * dq];
+                self.antiderivative_residual_ad(func_samples, y, u_at_queries[i])
+            })
+            .collect();
+        pde_residual_loss(&res?)
     }
 
     /// Second derivative `d²G/dy²` along query coordinate 0 (central difference).
@@ -720,6 +876,148 @@ mod tests {
             .value_dy(&u, &y)
             .expect("first derivative value should be finite");
         assert!((manual - method).abs() < 1e-4, "{manual} vs {method}");
+    }
+
+    #[test]
+    fn pideeponet_value_dy_ad_matches_finite_difference() {
+        // The exact forward-mode AD derivative must agree with a tight central
+        // finite difference of value() (the two compute the same quantity, AD
+        // exactly and FD up to O(h²) truncation).
+        let model = make_pideeponet(4);
+        let u = vec![0.3_f32; 8];
+        let y = [0.4_f32];
+        let h = 1e-3_f32;
+        let gp = model
+            .value(&u, &[y[0] + h])
+            .expect("operator value at y+h should succeed");
+        let gm = model
+            .value(&u, &[y[0] - h])
+            .expect("operator value at y-h should succeed");
+        let fd = (gp - gm) / (2.0 * h);
+        let ad = model
+            .value_dy_ad(&u, &y)
+            .expect("AD first derivative should be finite");
+        assert!(
+            (fd - ad).abs() < 5e-3,
+            "AD derivative {ad} should match central FD {fd}"
+        );
+    }
+
+    #[test]
+    fn pideeponet_value_dy_ad_exact_structure() {
+        // dG/dy = Σ_k c_k · b_k(u) · (∂t_k/∂y). Recompute the trunk-coordinate
+        // derivative independently (analytic tanh-MLP backprop) and confirm the
+        // AD path reproduces it to single-precision tolerance — this proves the
+        // derivative is genuine, not a constant or a stale FD value.
+        let model = make_pideeponet(13);
+        let u = vec![0.45_f32; 8];
+        let y = [0.37_f32];
+
+        // Independent forward pass over the trunk recording the derivative wrt y.
+        let weights = model.backbone.trunk_weights();
+        let biases = model.backbone.trunk_biases();
+        let n_layers = weights.len();
+        // Layer activations `a` and their derivatives `da/dy`.
+        let mut a = vec![y[0]];
+        let mut da = vec![1.0_f32];
+        for (layer, (w, b)) in weights.iter().zip(biases.iter()).enumerate() {
+            let d_in = a.len();
+            let d_out = b.len();
+            let mut z = vec![0.0_f32; d_out];
+            let mut dz = vec![0.0_f32; d_out];
+            for i in 0..d_out {
+                let mut acc = b[i];
+                let mut dacc = 0.0_f32;
+                for j in 0..d_in {
+                    acc += w[i * d_in + j] * a[j];
+                    dacc += w[i * d_in + j] * da[j];
+                }
+                z[i] = acc;
+                dz[i] = dacc;
+            }
+            if layer < n_layers - 1 {
+                for i in 0..d_out {
+                    let t = z[i].tanh();
+                    dz[i] *= 1.0 - t * t;
+                    z[i] = t;
+                }
+            }
+            a = z;
+            da = dz;
+        }
+        let bvec = model
+            .backbone
+            .branch_forward(&u)
+            .expect("branch forward should succeed");
+        let expected: f32 = model
+            .coeffs()
+            .iter()
+            .zip(bvec.iter())
+            .zip(da.iter())
+            .map(|((&c, &bk), &dtk)| c * bk * dtk)
+            .sum();
+
+        let ad = model
+            .value_dy_ad(&u, &y)
+            .expect("AD first derivative should be finite");
+        assert!(
+            (ad - expected).abs() < 1e-4 + 1e-4 * expected.abs(),
+            "AD derivative {ad} should match analytic tanh-MLP backprop {expected}"
+        );
+    }
+
+    #[test]
+    fn pideeponet_physics_loss_ad_finite_and_decreases() {
+        // Toy ODE operator d/ds G(u)(s) = u(s) with u ≡ 1 (so the antiderivative
+        // is s(y) = y). The AD-based PDE-residual loss must be computable and
+        // finite, and fitting the (finite-difference) features drives it down,
+        // proving the AD residual measures the same physics.
+        let mut rng = LcgRng::new(31);
+        let don_cfg = DeepONetConfig {
+            d_input_func: 1,
+            n_sensors: 8,
+            d_query: 1,
+            p: 16,
+            branch_hidden: vec![24],
+            trunk_hidden: vec![24],
+        };
+        let mut cfg = PiDeepONetConfig::new();
+        cfg.data_weight = 0.0;
+        cfg.ic_weight = 0.0;
+        cfg.fd_step = 1e-3;
+        let mut model = PiDeepONet::new(don_cfg, cfg, &mut rng)
+            .expect("PiDeepONet construction for AD physics benchmark should succeed");
+
+        let u = vec![1.0_f32; 8];
+        let ys: Vec<f32> = (0..12).map(|i| i as f32 / 11.0).collect();
+        let u_at = vec![1.0_f32; 12];
+
+        let before = model
+            .physics_loss_ad(&u, &ys, &u_at, 12)
+            .expect("AD physics loss should be finite before fit");
+        assert!(before.is_finite() && before >= 0.0);
+
+        model
+            .fit_least_squares(&u, &ys, &u_at, None, 12)
+            .expect("physics-only LS fit should succeed");
+        let after = model
+            .physics_loss_ad(&u, &ys, &u_at, 12)
+            .expect("AD physics loss should be finite after fit");
+        assert!(after.is_finite());
+        assert!(
+            after < before,
+            "AD physics residual should drop after LS fit: {after} !< {before}"
+        );
+    }
+
+    #[test]
+    fn pideeponet_antiderivative_residual_ad_finite() {
+        let model = make_pideeponet(14);
+        let u = vec![0.5_f32; 8];
+        let r = model
+            .antiderivative_residual_ad(&u, &[0.3], 0.5)
+            .expect("AD antiderivative residual should be finite");
+        assert!(r.is_finite());
     }
 
     #[test]

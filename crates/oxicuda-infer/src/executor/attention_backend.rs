@@ -326,6 +326,103 @@ mod tests {
         }
     }
 
+    /// GQA must be *exactly* equivalent to an ungrouped MHA in which every KV
+    /// head is replicated `gqa_ratio` times. This is the defining correctness
+    /// property of grouped-query attention (TODO: kv_heads != n_heads path).
+    #[test]
+    fn gqa_equivalent_to_replicated_mha() {
+        let n_heads = 4;
+        let n_kv_heads = 2; // gqa_ratio = 2
+        let head_dim = 3;
+        let block_size = 4;
+        let seq_len = 3;
+        let gqa_ratio = n_heads / n_kv_heads;
+
+        // Deterministic K/V per (token, kv_head, dim) via a small LCG so the test
+        // is reproducible without external RNG crates.
+        let mut state = 0x1234_5678_u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            // Full-range division by 2^32 → uniform in [0, 1).
+            ((state >> 32) as u32 as f32) / (u32::MAX as f32) - 0.5
+        };
+
+        // ── GQA cache: n_kv_heads KV heads ──────────────────────────────────
+        let mut gqa_cache = PagedKvCache::new(1, n_kv_heads, head_dim, block_size, 4);
+        let gqa_id = gqa_cache.alloc_block().expect("gqa cache free block");
+
+        // ── MHA cache: n_heads KV heads (each GQA kv head replicated) ────────
+        let mut mha_cache = PagedKvCache::new(1, n_heads, head_dim, block_size, 4);
+        let mha_id = mha_cache.alloc_block().expect("mha cache free block");
+
+        for _tok in 0..seq_len {
+            // Build this token's KV for the GQA layout: [n_kv_heads, head_dim].
+            let mut k_gqa = vec![0.0_f32; n_kv_heads * head_dim];
+            let mut v_gqa = vec![0.0_f32; n_kv_heads * head_dim];
+            for kvh in 0..n_kv_heads {
+                for d in 0..head_dim {
+                    k_gqa[kvh * head_dim + d] = next();
+                    v_gqa[kvh * head_dim + d] = next();
+                }
+            }
+            // MHA layout replicates each KV head gqa_ratio times so head h reads
+            // the same KV as GQA head h (kv_h = h / gqa_ratio).
+            let mut k_mha = vec![0.0_f32; n_heads * head_dim];
+            let mut v_mha = vec![0.0_f32; n_heads * head_dim];
+            for h in 0..n_heads {
+                let kvh = h / gqa_ratio;
+                for d in 0..head_dim {
+                    k_mha[h * head_dim + d] = k_gqa[kvh * head_dim + d];
+                    v_mha[h * head_dim + d] = v_gqa[kvh * head_dim + d];
+                }
+            }
+            gqa_cache
+                .append_token(gqa_id, 0, &k_gqa, &v_gqa)
+                .expect("gqa append");
+            mha_cache
+                .append_token(mha_id, 0, &k_mha, &v_mha)
+                .expect("mha append");
+        }
+
+        // Random query over all n_heads.
+        let q: Vec<f32> = (0..n_heads * head_dim).map(|_| next()).collect();
+        let scale = 1.0 / (head_dim as f32).sqrt();
+
+        let out_gqa = paged_attention_cpu(
+            &q,
+            &gqa_cache,
+            &[gqa_id],
+            seq_len,
+            0,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+            block_size,
+            scale,
+        )
+        .expect("gqa attention");
+        let out_mha = paged_attention_cpu(
+            &q,
+            &mha_cache,
+            &[mha_id],
+            seq_len,
+            0,
+            n_heads,
+            n_heads,
+            head_dim,
+            block_size,
+            scale,
+        )
+        .expect("mha attention");
+
+        assert_eq!(out_gqa.len(), out_mha.len());
+        for (g, m) in out_gqa.iter().zip(out_mha.iter()) {
+            assert_abs_diff_eq!(g, m, epsilon = 1e-5);
+        }
+    }
+
     #[test]
     fn scale_factor_applied() {
         // With scale=0 (zero out all scores), output should be uniform over V

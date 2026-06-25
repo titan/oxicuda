@@ -15,8 +15,10 @@
 //! ├── sequential/     — SASRec self-attention sequential model
 //! ├── graph_recsys/   — LightGCN graph-based recommendation
 //! ├── multitask/      — MMoE / PLE multi-task learning
-//! ├── sampling/       — Uniform negative sampling
-//! ├── metrics/        — NDCG@k, Precision@k ranking metrics
+//! ├── sampling/       — Uniform / popularity / hard / adaptive negative sampling
+//! ├── metrics/        — NDCG@k, Precision@k, calibration, off-policy metrics
+//! ├── optim/          — Sparse-gradient row-wise AdamW embedding optimizer
+//! ├── cold_start      — Content-based cold-start fallback + switching hybrid
 //! ├── handle          — LcgRng (deterministic PRNG)
 //! ├── error           — RecSysError / RecSysResult
 //! └── ptx_kernels     — GPU PTX kernel strings (7 kernels × 6 SM versions)
@@ -26,6 +28,7 @@ pub mod error;
 pub mod handle;
 pub mod ptx_kernels;
 
+pub mod cold_start;
 pub mod deepfm;
 pub mod dlrm;
 pub mod factorization;
@@ -34,11 +37,13 @@ pub mod graph_recsys;
 pub mod metrics;
 pub mod multitask;
 pub mod ncf;
+pub mod optim;
 pub mod ranking;
 pub mod sampling;
 pub mod sequential;
 pub mod two_tower;
 
+pub use crate::cold_start::{ColdStartConfig, ColdStartHybrid, ContentRecommender};
 pub use crate::deepfm::dcn::{CrossKind, Dcn, DcnConfig};
 pub use crate::dlrm::{Dlrm, DlrmConfig};
 pub use crate::factorization::ffm::{Ffm, FfmConfig, FfmEntry};
@@ -46,8 +51,10 @@ pub use crate::factorization::fism::{Fism, FismConfig};
 pub use crate::factorization::ials::{Ials, IalsConfig};
 pub use crate::fibinet::{BilinearType, Fibinet, FibinetConfig};
 pub use crate::graph_recsys::graphrec::GraphRec;
+pub use crate::optim::{RowGrad, SparseAdamW, SparseAdamWConfig};
 pub use crate::ranking::fairness_ranking::{FairnessRanker, FairnessRankerConfig};
 pub use crate::sequential::cl4srec::{Cl4sRec, Cl4sRecConfig};
+pub use crate::sequential::duorec::{DuoRec, DuoRecConfig};
 
 #[cfg(test)]
 mod e2e_tests {

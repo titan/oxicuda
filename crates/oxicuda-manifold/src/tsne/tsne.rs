@@ -58,6 +58,164 @@ pub struct TsneResult {
     pub final_kl_divergence: f64,
 }
 
+/// Ergonomic builder for [`TsneConfig`] with validation on [`build`](TsneConfigBuilder::build).
+///
+/// Every setter returns `self` so calls can be chained:
+/// ```
+/// use oxicuda_manifold::tsne::tsne::TsneConfigBuilder;
+/// let cfg = TsneConfigBuilder::new()
+///     .n_components(2)
+///     .perplexity(30.0)
+///     .learning_rate(200.0)
+///     .early_exaggeration(12.0, 250)
+///     .momentum_schedule(0.5, 0.8, 250)
+///     .n_iter(1000)
+///     .build()
+///     .expect("valid config");
+/// assert_eq!(cfg.perplexity, 30.0);
+/// ```
+#[derive(Debug, Clone)]
+pub struct TsneConfigBuilder {
+    cfg: TsneConfig,
+}
+
+impl Default for TsneConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TsneConfigBuilder {
+    /// Start from the [`TsneConfig`] defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            cfg: TsneConfig::default(),
+        }
+    }
+
+    /// Embedding dimensionality (must be in `1..=8`).
+    #[must_use]
+    pub fn n_components(mut self, n_components: usize) -> Self {
+        self.cfg.n_components = n_components;
+        self
+    }
+
+    /// Target perplexity (must be `> 0`).
+    #[must_use]
+    pub fn perplexity(mut self, perplexity: f64) -> Self {
+        self.cfg.perplexity = perplexity;
+        self
+    }
+
+    /// Total number of gradient-descent iterations (must be `>= 1`).
+    #[must_use]
+    pub fn n_iter(mut self, n_iter: usize) -> Self {
+        self.cfg.n_iter = n_iter;
+        self
+    }
+
+    /// Learning rate (must be `> 0`).
+    #[must_use]
+    pub fn learning_rate(mut self, learning_rate: f64) -> Self {
+        self.cfg.learning_rate = learning_rate;
+        self
+    }
+
+    /// Minimum adaptive gain (must be `> 0`).
+    #[must_use]
+    pub fn min_gain(mut self, min_gain: f64) -> Self {
+        self.cfg.min_gain = min_gain;
+        self
+    }
+
+    /// Early-exaggeration `factor` applied for the first `iters` iterations.
+    #[must_use]
+    pub fn early_exaggeration(mut self, factor: f64, iters: usize) -> Self {
+        self.cfg.early_exaggeration = factor;
+        self.cfg.early_exaggeration_iters = iters;
+        self
+    }
+
+    /// Momentum schedule: `initial` until `switch_iter`, then `final_momentum`.
+    #[must_use]
+    pub fn momentum_schedule(
+        mut self,
+        initial: f64,
+        final_momentum: f64,
+        switch_iter: usize,
+    ) -> Self {
+        self.cfg.momentum = initial;
+        self.cfg.final_momentum = final_momentum;
+        self.cfg.momentum_switch_iter = switch_iter;
+        self
+    }
+
+    /// Validate the accumulated parameters and produce a [`TsneConfig`].
+    ///
+    /// # Errors
+    /// Returns [`ManifoldError::InvalidParameter`] when any knob is outside its valid range,
+    /// e.g. zero iterations, non-positive perplexity / learning rate, or out-of-range momentum.
+    pub fn build(self) -> ManifoldResult<TsneConfig> {
+        let c = &self.cfg;
+        if c.n_components == 0 || c.n_components > 8 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "n_components".into(),
+                reason: "must be in 1..=8".into(),
+            });
+        }
+        if !c.perplexity.is_finite() || c.perplexity <= 0.0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "perplexity".into(),
+                reason: "must be finite and strictly positive".into(),
+            });
+        }
+        if c.n_iter == 0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "n_iter".into(),
+                reason: "must be >= 1".into(),
+            });
+        }
+        if c.early_exaggeration_iters > c.n_iter {
+            return Err(ManifoldError::InvalidParameter {
+                name: "early_exaggeration_iters".into(),
+                reason: "must not exceed n_iter".into(),
+            });
+        }
+        if !c.early_exaggeration.is_finite() || c.early_exaggeration <= 0.0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "early_exaggeration".into(),
+                reason: "must be strictly positive".into(),
+            });
+        }
+        if !c.learning_rate.is_finite() || c.learning_rate <= 0.0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "learning_rate".into(),
+                reason: "must be finite and strictly positive".into(),
+            });
+        }
+        if !c.min_gain.is_finite() || c.min_gain <= 0.0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "min_gain".into(),
+                reason: "must be strictly positive".into(),
+            });
+        }
+        if !(0.0..1.0).contains(&c.momentum) || !(0.0..1.0).contains(&c.final_momentum) {
+            return Err(ManifoldError::InvalidParameter {
+                name: "momentum".into(),
+                reason: "initial and final momentum must be in [0, 1)".into(),
+            });
+        }
+        if c.momentum_switch_iter > c.n_iter {
+            return Err(ManifoldError::InvalidParameter {
+                name: "momentum_switch_iter".into(),
+                reason: "must not exceed n_iter".into(),
+            });
+        }
+        Ok(self.cfg)
+    }
+}
+
 /// Fit t-SNE on row-major data of shape `(n_samples, dim)`.
 pub fn tsne_fit(
     x: &[f64],
@@ -226,6 +384,74 @@ fn compute_q_matrix(y: &[f64], n: usize, dim: usize) -> (Vec<f64>, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builder_chains_and_validates() {
+        let cfg = TsneConfigBuilder::new()
+            .n_components(3)
+            .perplexity(20.0)
+            .learning_rate(150.0)
+            .min_gain(0.05)
+            .early_exaggeration(8.0, 40)
+            .momentum_schedule(0.4, 0.85, 60)
+            .n_iter(120)
+            .build()
+            .expect("valid config");
+        assert_eq!(cfg.n_components, 3);
+        assert_eq!(cfg.perplexity, 20.0);
+        assert_eq!(cfg.learning_rate, 150.0);
+        assert_eq!(cfg.min_gain, 0.05);
+        assert_eq!(cfg.early_exaggeration, 8.0);
+        assert_eq!(cfg.early_exaggeration_iters, 40);
+        assert_eq!(cfg.momentum, 0.4);
+        assert_eq!(cfg.final_momentum, 0.85);
+        assert_eq!(cfg.momentum_switch_iter, 60);
+        assert_eq!(cfg.n_iter, 120);
+    }
+
+    #[test]
+    fn builder_default_is_valid_and_runs() {
+        let cfg = TsneConfigBuilder::default()
+            .perplexity(3.0)
+            .n_iter(40)
+            .early_exaggeration(12.0, 15)
+            .momentum_schedule(0.5, 0.8, 30)
+            .build()
+            .expect("valid");
+        let mut rng = LcgRng::new(3);
+        let n = 8;
+        let dim = 2;
+        let mut x = vec![0.0; n * dim];
+        for v in &mut x {
+            *v = rng.next_normal();
+        }
+        let r = tsne_fit(&x, n, dim, &cfg, &mut rng).expect("fit ok");
+        assert_eq!(r.embedding.len(), n * 2);
+    }
+
+    #[test]
+    fn builder_rejects_bad_parameters() {
+        assert!(TsneConfigBuilder::new().n_components(0).build().is_err());
+        assert!(TsneConfigBuilder::new().n_components(9).build().is_err());
+        assert!(TsneConfigBuilder::new().perplexity(0.0).build().is_err());
+        assert!(TsneConfigBuilder::new().perplexity(-1.0).build().is_err());
+        assert!(TsneConfigBuilder::new().n_iter(0).build().is_err());
+        assert!(TsneConfigBuilder::new().learning_rate(0.0).build().is_err());
+        assert!(TsneConfigBuilder::new().min_gain(0.0).build().is_err());
+        assert!(
+            TsneConfigBuilder::new()
+                .momentum_schedule(1.0, 0.8, 10)
+                .build()
+                .is_err()
+        );
+        assert!(
+            TsneConfigBuilder::new()
+                .n_iter(50)
+                .early_exaggeration(12.0, 100)
+                .build()
+                .is_err()
+        );
+    }
 
     #[test]
     fn tsne_runs_small() {

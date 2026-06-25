@@ -7,5 +7,7 @@
 
 /// ANN→SNN rate-coded conversion via threshold balancing.
 pub mod ann2snn;
+/// BatchNorm folding and bias absorption for ANN→SNN conversion.
+pub mod bn_fold;
 /// Layer-wise threshold balancing (99-percentile activation method).
 pub mod threshold_balance;

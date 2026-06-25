@@ -10,7 +10,7 @@ for QUADPACK / GSL / SciPy-style scientific computing utilities. Part of
 
 - **Actual SLoC:** 13,644 (99 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 6,787
-- **Tests:** 466 passing
+- **Tests:** 530 passing
 - **Vol.60 scope:** Root finding, numerical quadrature, special functions, ODE
   solvers, polynomial roots, numerical differentiation, interpolation, and
   multidimensional cubature. Complements oxicuda-blas / oxicuda-solver / oxicuda-fft
@@ -130,30 +130,53 @@ for QUADPACK / GSL / SciPy-style scientific computing utilities. Part of
 
 #### P0 -- Verification Gaps
 - [ ] GPU hardware verification on Linux + NVIDIA driver 525+ for all 7 PTX kernels
-  across SM 75 / 80 / 86 / 89 / 90 / 100
+  across SM 75 / 80 / 86 / 89 / 90 / 100 (requires GPU hardware)
 - [ ] Reference cross-validation against SciPy / GSL / Boost.Math for special functions
   (Bessel, Airy, Lambert W, hypergeometric, elliptic, zeta) at edge cases
+  (requires external SciPy / GSL / Boost.Math toolchains)
 
 #### P1 -- Performance Tuning
 - [ ] Per-SM tuned thread-block sizes for `gauss_quad_accumulate` and `rk4_stage`
-  (currently fixed at portable defaults)
+  (currently fixed at portable defaults) (requires GPU hardware for on-device tuning)
 - [ ] Batched ODE integration kernel: many independent IVP systems integrated in
-  parallel via one DOPRI5 launch
+  parallel via one DOPRI5 launch (requires GPU hardware)
 - [ ] Vectorised special-function dispatch (`bessel_recurrence`) with FP16 / BF16
-  storage and FP32 accumulation
+  storage and FP32 accumulation (requires GPU hardware)
 
 #### P2 -- Algorithmic Extensions
 - [x] Tanh-sinh (double-exponential) quadrature for endpoint singularities
-- [ ] Implicit Runge-Kutta (Radau IIA, SDIRK) for stiff problems beyond BDF1/BDF2
+- [x] Implicit Runge-Kutta (Radau IIA, SDIRK) for stiff problems beyond BDF1/BDF2
+  — implemented in `ode/radau_iia.rs` (`RadauIia`, 3-stage order-5, L-stable,
+  simplified Newton on the Kronecker-coupled stage system) and `ode/sdirk.rs`
+  (`Sdirk`, 3-stage order-3, A-/L-stable, sequential per-stage Newton with shared
+  iteration matrix). Both exported from `lib.rs`.
 - [ ] GPU-resident sparse polynomial root finder for very high-degree polynomials
-- [ ] Multi-precision residual refinement for ill-conditioned root finding
+  (requires GPU hardware — on-device sparse Aberth/Durand-Kerner execution)
+- [x] Multi-precision residual refinement for ill-conditioned root finding
+  — implemented in `root/residual_refine.rs`: double-double (`Double`) compensated
+  arithmetic (error-free `two_sum` / `two_prod`, Dekker/Knuth), a compensated Horner
+  scheme (Graillat-Langlois-Louvet 2005, ~2u accuracy) and the Newton polishers
+  `refine_polynomial_root` / `refine_root_extended` that push multiple / clustered
+  roots past the f64 residual floor
 - [x] `quadrature/gauss_patterson.rs` — Gauss-Patterson sparse-grid quadrature: 1D nested Gauss-Kronrod rules (1,3,7,15,31,63 pts); multi-dimensional Smolyak sparse grid with Clenshaw-Curtis + Gauss-Legendre nodes; `SmolyakQuadrature { level: usize, dim: usize }`
 - [x] `ode/sdirk.rs` — SDIRK integrators (Alexander 1977): SDIRK3 (3-stage order-3) + SDIRK4 (5-stage order-4); stage-value Newton iterations with frozen Jacobian; error control via embedded pair; A-stable for stiff systems
 - [x] `diff/dual_number.rs` — Dual-number forward-mode AD: `Dual { val: f64, eps: f64 }` with overloaded arithmetic + transcendentals; Jacobian-vector products; exact to machine precision; composition through any `Fn(Dual)->Dual`
-- [ ] `roots/complex_newton.rs` — Complex Newton + Halley root-finding: complex arithmetic over `num-complex::Complex<f64>`; Halley's method cubic convergence; used in Aberth-Ehrlich simultaneous poly-root refinement
+- [x] `roots/complex_newton.rs` — Complex Newton + Halley root-finding: complex arithmetic over `num-complex::Complex<f64>`; Halley's method cubic convergence; used in Aberth-Ehrlich simultaneous poly-root refinement
 - [x] `interp/rbf_interp.rs` — Radial Basis Function interpolation (Hardy 1971): scattered data in ℝⁿ; thin-plate spline / multiquadric / Gaussian kernels; solve linear system via Cholesky + condition estimate; `RbfInterpolator { kernel: RbfKernel }`
-- [ ] `integral/cubature_adaptive.rs` — Adaptive multi-dimensional cubature (Genz-Malik 1980, Berntsen-Espelid-Genz 1991): 7th-order rule with error estimate; recursive bisection of error-dominant hyperrectangles; `AdaptiveCubature { abs_tol, rel_tol, max_eval }`
-- [ ] `special/wright_omega.rs` — Wright ω function (Corless-Jeffrey 2002): solution to ω+log(ω)=z; extends Lambert W to complex arguments; Halley iterations from initial approximation; `wright_omega(z: Complex<f64>) -> Complex<f64>`
+- [x] `integral/cubature_adaptive.rs` — Adaptive multi-dimensional cubature (Genz-Malik 1980, Berntsen-Espelid-Genz 1991): 7th-order rule with error estimate; recursive bisection of error-dominant hyperrectangles; `AdaptiveCubature { abs_tol, rel_tol, max_eval }`
+  — implemented in `cubature/adaptive_cubature.rs`: the Genz-Malik degree-7
+  fully-symmetric basic rule wrapped with the Berntsen-Espelid-Genz (1991) three
+  null-rule local error estimator (asymptotic/non-asymptotic smoothness-ratio
+  switch), a globally-adaptive heap of regions bisected along the max fourth-difference
+  axis, and the requested `AdaptiveCubature { abs_tol, rel_tol, max_eval }` struct.
+  (Basic non-struct Genz-Malik already existed in `cubature/genz_malik.rs`.)
+- [x] `special/wright_omega.rs` — Wright ω function (Corless-Jeffrey 2002): solution to ω+log(ω)=z; Halley iterations from initial approximation
+  — implemented in `special/wright_omega.rs` as `wright_omega(z: f64) -> NumericResult<f64>`
+  (real-axis branch `ω(z)=W₀(eᶻ)`, asymptotic / exponential seed + Halley on
+  `w+ln w-z`). NOTE: scoped to the real axis `f64` rather than the complex signature
+  in the original checkbox text — the real branch is what the rest of the crate (all
+  `f64`) needs and is validated against `lambert_w0(eᶻ)`. A complex-argument extension
+  would require a `Complex` Wright ω (left for a future complex-analysis pass).
 
 ## Dependencies
 
@@ -171,7 +194,7 @@ routines are implemented privately under `linalg/`.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 466 passing (unit + 38 e2e cross-module)
+- Tests: 530 passing (unit + 38 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns
@@ -219,13 +242,16 @@ tuning is currently uniform; targeted tuning is tracked under Future Enhancement
 | sm_100 (Blackwell) | 512 x 1 | 3 stages | -- |
 
 ### Deepening Opportunities
+(All four require GPU hardware: on-device TMA / `cp.async` pipelines, warp-shuffle
+reductions and FP8 storage must be measured on real SASS, not just emitted as PTX.)
 - [ ] Hopper: TMA bulk loads of quadrature node / weight tables in
-  `gauss_quad_accumulate`
+  `gauss_quad_accumulate` (requires GPU hardware)
 - [ ] Ampere: 3-stage `cp.async` pipeline for `spline_eval` on large knot tables
+  (requires GPU hardware)
 - [ ] All SMs: warp-shuffle Horner accumulation for `horner_eval` on
-  short-degree polynomials
+  short-degree polynomials (requires GPU hardware)
 - [ ] Ada / Hopper: FP8 (e4m3) storage of spline coefficients with FP32 accumulation
-  for memory-bound `spline_eval`
+  for memory-bound `spline_eval` (requires GPU hardware)
 
 ## Estimation vs Actual
 

@@ -34,11 +34,31 @@ pub struct EsHyperNeatConfig {
     /// (same role as `expression_threshold` in HyperNEAT).
     pub expression_threshold: f64,
     /// Number of probe points per axis in the discovery grid (default 11).
+    ///
+    /// Retained for backward compatibility and as the grid resolution used by
+    /// the legacy grid-probe discovery path; the quadtree discovery instead
+    /// uses `initial_depth` / `max_depth`.
     pub resolution: usize,
     /// Minimum CPPN response to place a hidden node at a probed location (default 0.1).
     pub placement_threshold: f64,
     /// Minimum |weight| to keep a connection after substrate query (default 0.05).
     pub prune_threshold: f64,
+    /// ES-HyperNEAT quadtree: minimum subdivision depth before the variance
+    /// criterion is consulted. The quadtree is always subdivided to at least
+    /// this depth, giving an initial resolution of `2^initial_depth` cells per
+    /// axis (default 2 → 4×4).
+    pub initial_depth: usize,
+    /// ES-HyperNEAT quadtree: maximum subdivision depth. Subdivision stops once
+    /// this depth is reached regardless of variance (default 4 → up to 16×16).
+    pub max_depth: usize,
+    /// ES-HyperNEAT quadtree: division variance threshold. A quad keeps
+    /// subdividing while the variance of its four children's CPPN weights
+    /// exceeds this value (default 0.03).
+    pub division_threshold: f64,
+    /// ES-HyperNEAT quadtree: band-pruning threshold. A child quad is expressed
+    /// as a hidden node when its local band value (the directional weight
+    /// variance against its cardinal neighbours) exceeds this value (default 0.3).
+    pub band_threshold: f64,
     /// Number of (μ+λ)-ES generations.
     pub n_evol_iters: usize,
     /// Initial perturbation standard deviation.
@@ -85,6 +105,26 @@ impl EsHyperNeatConfig {
                 "prune_threshold must be >= 0".into(),
             ));
         }
+        if self.max_depth == 0 {
+            return Err(EvolError::InvalidParameter(
+                "EsHyperNeatConfig: max_depth must be >= 1".into(),
+            ));
+        }
+        if self.initial_depth > self.max_depth {
+            return Err(EvolError::InvalidParameter(
+                "EsHyperNeatConfig: initial_depth must be <= max_depth".into(),
+            ));
+        }
+        if self.division_threshold < 0.0 {
+            return Err(EvolError::InvalidParameter(
+                "division_threshold must be >= 0".into(),
+            ));
+        }
+        if self.band_threshold < 0.0 {
+            return Err(EvolError::InvalidParameter(
+                "band_threshold must be >= 0".into(),
+            ));
+        }
         if self.n_evol_iters == 0 {
             return Err(EvolError::InvalidParameter(
                 "n_evol_iters must be >= 1".into(),
@@ -121,6 +161,10 @@ impl EsHyperNeatConfig {
             resolution: 7,
             placement_threshold: 0.1,
             prune_threshold: 0.05,
+            initial_depth: 2,
+            max_depth: 4,
+            division_threshold: 0.03,
+            band_threshold: 0.3,
             n_evol_iters: 10,
             sigma_init: 0.5,
             sigma_decay: 0.95,
@@ -193,9 +237,390 @@ pub struct EsHyperNeatState {
     pub generation: usize,
 }
 
-// ─── Hidden-node discovery ────────────────────────────────────────────────────
+// ─── ES-HyperNEAT quadtree (Risi & Stanley 2012) ─────────────────────────────
 
-/// Discover hidden-node positions from the CPPN's output geometry.
+/// A node of the ES-HyperNEAT division quadtree.
+///
+/// Each `QuadPoint` covers a square region of the 2-D substrate centred on
+/// `(x, y)` with half-side `width` (so the region spans `[x-width, x+width] ×
+/// [y-width, y+width]`).  `weight` is the CPPN response sampled at the centre,
+/// `level` is the subdivision depth (root = 0), and `children` (when present)
+/// are the four sub-quadrants in NW, NE, SW, SE order.
+#[derive(Debug, Clone)]
+struct QuadPoint {
+    x: f64,
+    y: f64,
+    width: f64,
+    weight: f64,
+    level: usize,
+    children: Vec<QuadPoint>,
+}
+
+impl QuadPoint {
+    fn new(x: f64, y: f64, width: f64, weight: f64, level: usize) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            weight,
+            level,
+            children: Vec::new(),
+        }
+    }
+}
+
+/// Direction in which the CPPN weight is queried while building the quadtree.
+///
+/// In ES-HyperNEAT the hidden layer is discovered twice: once treating an input
+/// neuron as the fixed source and the candidate as the moving target
+/// (`OutgoingFromAnchor`), and once treating an output neuron as the fixed
+/// target and the candidate as the moving source (`IncomingToAnchor`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueryDirection {
+    /// Anchor is the source; the candidate `(x, y)` is the target.
+    OutgoingFromAnchor,
+    /// Anchor is the target; the candidate `(x, y)` is the source.
+    IncomingToAnchor,
+}
+
+/// Sample the CPPN weight for a candidate point relative to a fixed anchor.
+///
+/// `anchor` is the fixed input (or output) neuron; `(x, y)` is the variable
+/// substrate location the quadtree is probing.
+#[inline]
+fn query_point(
+    cppn: &CppnWeights,
+    cppn_cfg: &CppnConfig,
+    anchor: (f64, f64),
+    x: f64,
+    y: f64,
+    dir: QueryDirection,
+) -> f64 {
+    match dir {
+        QueryDirection::OutgoingFromAnchor => {
+            cppn_forward(cppn, cppn_cfg, anchor.0, anchor.1, x, y)
+        }
+        QueryDirection::IncomingToAnchor => cppn_forward(cppn, cppn_cfg, x, y, anchor.0, anchor.1),
+    }
+}
+
+/// Population variance of a slice of CPPN weights.
+///
+/// Returns `0.0` for an empty slice. Used both as the division criterion
+/// (variance among a quad's four children) and inside band-pruning.
+fn weight_variance(weights: &[f64]) -> f64 {
+    let n = weights.len();
+    if n == 0 {
+        return 0.0;
+    }
+    let mean = weights.iter().sum::<f64>() / n as f64;
+    weights
+        .iter()
+        .map(|&w| (w - mean) * (w - mean))
+        .sum::<f64>()
+        / n as f64
+}
+
+/// ES-HyperNEAT **Division & Initialisation**.
+///
+/// Recursively subdivides the square substrate region rooted at the centre into
+/// a quadtree.  At every quad the CPPN is queried at the centre; a quad's four
+/// children are created (NW, NE, SW, SE) and the quad keeps subdividing while
+///
+/// * its `level` is below `initial_depth` (unconditional subdivision down to the
+///   initial resolution of `2^initial_depth` cells per axis), **or**
+/// * its `level` is below `max_depth` **and** the variance of its four
+///   children's CPPN weights exceeds `division_threshold`.
+///
+/// The returned root owns the whole tree.
+fn division_and_initialisation(
+    cppn: &CppnWeights,
+    cppn_cfg: &CppnConfig,
+    anchor: (f64, f64),
+    dir: QueryDirection,
+    center_x: f64,
+    center_y: f64,
+    half_extent: f64,
+    initial_depth: usize,
+    max_depth: usize,
+    division_threshold: f64,
+) -> QuadPoint {
+    let root_w = query_point(cppn, cppn_cfg, anchor, center_x, center_y, dir);
+    let mut root = QuadPoint::new(center_x, center_y, half_extent, root_w, 0);
+
+    // Iterative breadth-first construction over indices into a flat arena would
+    // require post-hoc tree assembly; instead we build recursively via an inner
+    // helper that returns fully-populated subtrees.
+    fn build(
+        cppn: &CppnWeights,
+        cppn_cfg: &CppnConfig,
+        anchor: (f64, f64),
+        dir: QueryDirection,
+        node: &mut QuadPoint,
+        initial_depth: usize,
+        max_depth: usize,
+        division_threshold: f64,
+    ) {
+        // Never subdivide beyond the maximum depth.
+        if node.level >= max_depth {
+            return;
+        }
+        let child_width = node.width / 2.0;
+        let child_level = node.level + 1;
+        // Child centre offsets: NW, NE, SW, SE.
+        let offsets = [
+            (-child_width, child_width),  // NW
+            (child_width, child_width),   // NE
+            (-child_width, -child_width), // SW
+            (child_width, -child_width),  // SE
+        ];
+        let mut children: Vec<QuadPoint> = offsets
+            .iter()
+            .map(|&(dx, dy)| {
+                let cx = node.x + dx;
+                let cy = node.y + dy;
+                let w = query_point(cppn, cppn_cfg, anchor, cx, cy, dir);
+                QuadPoint::new(cx, cy, child_width, w, child_level)
+            })
+            .collect();
+
+        let child_weights: Vec<f64> = children.iter().map(|c| c.weight).collect();
+        let var = weight_variance(&child_weights);
+
+        // Decide whether to recurse: always while below the initial resolution,
+        // then only where the CPPN output is "interesting" (high variance).
+        let keep_dividing =
+            node.level < initial_depth || (node.level < max_depth && var > division_threshold);
+
+        if keep_dividing {
+            for child in children.iter_mut() {
+                build(
+                    cppn,
+                    cppn_cfg,
+                    anchor,
+                    dir,
+                    child,
+                    initial_depth,
+                    max_depth,
+                    division_threshold,
+                );
+            }
+        }
+        node.children = children;
+    }
+
+    build(
+        cppn,
+        cppn_cfg,
+        anchor,
+        dir,
+        &mut root,
+        initial_depth,
+        max_depth,
+        division_threshold,
+    );
+    root
+}
+
+/// ES-HyperNEAT **Pruning & Extraction** band value for a quad.
+///
+/// Measures how much the CPPN weight at the quad centre differs from the weight
+/// at the centres of its four cardinal neighbours (one quad-width away, sampled
+/// directly from the CPPN).  Following Risi & Stanley, the band value is
+///
+/// ```text
+/// band = max( min(d_left, d_right), min(d_top, d_bottom) )
+/// ```
+///
+/// where each `d_*` is the absolute weight difference to that neighbour.  A high
+/// band value marks a point on an information "band" — a sharp transition in the
+/// connectivity pattern — which is exactly where a hidden node should sit.
+fn band_value(
+    cppn: &CppnWeights,
+    cppn_cfg: &CppnConfig,
+    anchor: (f64, f64),
+    dir: QueryDirection,
+    node: &QuadPoint,
+) -> f64 {
+    let step = node.width * 2.0;
+    let w = node.weight;
+    let sample = |dx: f64, dy: f64| -> f64 {
+        query_point(cppn, cppn_cfg, anchor, node.x + dx, node.y + dy, dir)
+    };
+    let d_left = (w - sample(-step, 0.0)).abs();
+    let d_right = (w - sample(step, 0.0)).abs();
+    let d_top = (w - sample(0.0, step)).abs();
+    let d_bottom = (w - sample(0.0, -step)).abs();
+    d_left.min(d_right).max(d_top.min(d_bottom))
+}
+
+/// ES-HyperNEAT **Pruning & Extraction**.
+///
+/// Depth-first traversal of the quadtree.  A child quad is expressed as a hidden
+/// node when:
+///
+/// * the parent's children show enough variance (the region carries
+///   information — variance `> division_threshold`), and
+/// * the child's local band value exceeds `band_threshold` (the child sits on a
+///   high-variance transition rather than in a flat region).
+///
+/// Leaf quads (no further subdivision) are also candidates: their band value is
+/// evaluated directly.  Expressed coordinates are appended to `out`.
+fn prune_and_extract(
+    cppn: &CppnWeights,
+    cppn_cfg: &CppnConfig,
+    anchor: (f64, f64),
+    dir: QueryDirection,
+    node: &QuadPoint,
+    division_threshold: f64,
+    band_threshold: f64,
+    out: &mut Vec<(f64, f64)>,
+) {
+    if node.children.is_empty() {
+        // Leaf quad: express directly if it lies on an information band.
+        if band_value(cppn, cppn_cfg, anchor, dir, node) > band_threshold {
+            out.push((node.x, node.y));
+        }
+        return;
+    }
+
+    let child_weights: Vec<f64> = node.children.iter().map(|c| c.weight).collect();
+    let var = weight_variance(&child_weights);
+
+    for child in &node.children {
+        if child.children.is_empty() {
+            // The child is a leaf of the tree: express it where the local
+            // variance is high (information region) and it sits on a band.
+            if var > division_threshold
+                && band_value(cppn, cppn_cfg, anchor, dir, child) > band_threshold
+            {
+                out.push((child.x, child.y));
+            }
+        } else {
+            // Internal child: keep descending.
+            prune_and_extract(
+                cppn,
+                cppn_cfg,
+                anchor,
+                dir,
+                child,
+                division_threshold,
+                band_threshold,
+                out,
+            );
+        }
+    }
+}
+
+/// Run the full ES-HyperNEAT quadtree (division + pruning) for one anchor and
+/// one query direction, returning the expressed hidden-node coordinates.
+#[allow(clippy::too_many_arguments)]
+fn quadtree_discover_for_anchor(
+    cppn: &CppnWeights,
+    cppn_cfg: &CppnConfig,
+    anchor: (f64, f64),
+    dir: QueryDirection,
+    half_extent: f64,
+    initial_depth: usize,
+    max_depth: usize,
+    division_threshold: f64,
+    band_threshold: f64,
+    out: &mut Vec<(f64, f64)>,
+) {
+    let root = division_and_initialisation(
+        cppn,
+        cppn_cfg,
+        anchor,
+        dir,
+        0.0,
+        0.0,
+        half_extent,
+        initial_depth,
+        max_depth,
+        division_threshold,
+    );
+    prune_and_extract(
+        cppn,
+        cppn_cfg,
+        anchor,
+        dir,
+        &root,
+        division_threshold,
+        band_threshold,
+        out,
+    );
+}
+
+/// Discover hidden-node positions via the ES-HyperNEAT quadtree algorithm.
+///
+/// This is the real Risi & Stanley (2012) **Evolvable-Substrate** discovery: for
+/// each input neuron a quadtree is grown over `[-1, 1]²` (the candidate as the
+/// connection *target*), and for each output neuron a quadtree is grown (the
+/// candidate as the connection *source*).  Each quadtree is built by
+/// *Division & Initialisation* (subdivide where the CPPN output varies) and then
+/// *Pruning & Extraction* (keep the high-band "information" points).  The union
+/// of expressed points from every quadtree — deduplicated within a tolerance —
+/// becomes the hidden layer.
+///
+/// `half_extent` is the half-side of the substrate square (1.0 → `[-1, 1]²`).
+///
+/// Returns the discovered hidden-node coordinates (possibly empty for a
+/// constant/uniform CPPN, since a flat field has no information bands).
+#[allow(clippy::too_many_arguments)]
+pub fn discover_hidden_nodes_quadtree(
+    cppn: &CppnWeights,
+    cppn_cfg: &CppnConfig,
+    input_coords: &[(f64, f64)],
+    output_coords: &[(f64, f64)],
+    half_extent: f64,
+    initial_depth: usize,
+    max_depth: usize,
+    division_threshold: f64,
+    band_threshold: f64,
+) -> Vec<(f64, f64)> {
+    let mut candidates: Vec<(f64, f64)> = Vec::new();
+
+    // Pass 1: input anchors → candidate targets (input → hidden geometry).
+    for &anchor in input_coords {
+        quadtree_discover_for_anchor(
+            cppn,
+            cppn_cfg,
+            anchor,
+            QueryDirection::OutgoingFromAnchor,
+            half_extent,
+            initial_depth,
+            max_depth,
+            division_threshold,
+            band_threshold,
+            &mut candidates,
+        );
+    }
+
+    // Pass 2: candidate sources → output anchors (hidden → output geometry).
+    for &anchor in output_coords {
+        quadtree_discover_for_anchor(
+            cppn,
+            cppn_cfg,
+            anchor,
+            QueryDirection::IncomingToAnchor,
+            half_extent,
+            initial_depth,
+            max_depth,
+            division_threshold,
+            band_threshold,
+            &mut candidates,
+        );
+    }
+
+    // Merge near-duplicate expressions. Use the finest quad width as the merge
+    // tolerance so two points from neighbouring leaf quads collapse to one node.
+    let merge_radius = half_extent / 2f64.powi(max_depth as i32);
+    deduplicate_candidates(candidates, merge_radius)
+}
+
+// ─── Hidden-node discovery (legacy grid probe) ──────────────────────────────────
+
+/// Discover hidden-node positions from the CPPN's output geometry (legacy grid).
 ///
 /// The algorithm probes a `resolution × resolution` grid in `[-1, 1]²` and
 /// considers two passes:
@@ -208,6 +633,9 @@ pub struct EsHyperNeatState {
 /// any pair of candidates within `2/resolution` Euclidean distance.
 ///
 /// Returns the discovered hidden-node coordinates.
+///
+/// Prefer [`discover_hidden_nodes_quadtree`] for the real ES-HyperNEAT
+/// discovery; this grid variant is retained for comparison and compatibility.
 pub fn discover_hidden_nodes(
     cppn: &CppnWeights,
     cppn_cfg: &CppnConfig,
@@ -290,10 +718,34 @@ fn deduplicate_candidates(candidates: Vec<(f64, f64)>, radius: f64) -> Vec<(f64,
 
 // ─── Substrate discovery (public API) ────────────────────────────────────────
 
+/// Half-side of the substrate square; all coordinates live in `[-1, 1]²`.
+const SUBSTRATE_HALF_EXTENT: f64 = 1.0;
+
+/// Map a probe `resolution` to a quadtree depth: the smallest `d` with
+/// `2^d >= resolution - 1`, clamped to `[1, 8]`.
+///
+/// Used so the legacy `resolution` knob still drives the quadtree path with a
+/// comparable cell count when only `resolution` is supplied.
+fn resolution_to_depth(resolution: usize) -> usize {
+    let target = resolution.saturating_sub(1).max(1);
+    let mut depth = 1usize;
+    while (1usize << depth) < target && depth < 8 {
+        depth += 1;
+    }
+    depth
+}
+
 /// Discover the adaptive substrate from the CPPN and a base (input/output) substrate.
 ///
 /// The hidden layer in `base_substrate` is **ignored** — it is replaced by the
-/// set of nodes discovered by probing the CPPN on the `resolution × resolution` grid.
+/// set of nodes discovered by the ES-HyperNEAT quadtree (Risi & Stanley 2012)
+/// grown from the CPPN's connectivity geometry.
+///
+/// This convenience entry point derives the quadtree depths from `resolution`
+/// (`max_depth = resolution_to_depth(resolution)`, `initial_depth =
+/// max_depth - 1`) and uses `placement_threshold` as the band-pruning
+/// threshold with a small fixed division threshold.  For full control over the
+/// quadtree parameters use [`es_hyperneat_discover_substrate_cfg`].
 ///
 /// # Returns
 /// A new `EsSubstrate` with the discovered hidden layer.
@@ -304,13 +756,53 @@ pub fn es_hyperneat_discover_substrate(
     resolution: usize,
     placement_threshold: f64,
 ) -> EsSubstrate {
-    let hidden_coords = discover_hidden_nodes(
+    let max_depth = resolution_to_depth(resolution);
+    let initial_depth = max_depth.saturating_sub(1).max(1).min(max_depth);
+    let hidden_coords = discover_hidden_nodes_quadtree(
         cppn,
         cppn_cfg,
         &base_substrate.input_coords,
         &base_substrate.output_coords,
-        resolution,
+        SUBSTRATE_HALF_EXTENT,
+        initial_depth,
+        max_depth,
+        // A modest division threshold keeps subdivision where the field bends;
+        // `placement_threshold` doubles as the band-extraction threshold so the
+        // existing knob still gates how aggressively nodes are expressed.
+        placement_threshold.max(1e-6) * 0.5,
         placement_threshold,
+    );
+    EsSubstrate {
+        input_coords: base_substrate.input_coords.clone(),
+        hidden_coords,
+        output_coords: base_substrate.output_coords.clone(),
+    }
+}
+
+/// Discover the adaptive substrate using the full ES-HyperNEAT quadtree
+/// configuration (`initial_depth`, `max_depth`, `division_threshold`,
+/// `band_threshold`) carried by `cfg`.
+///
+/// The hidden layer in `base_substrate` is ignored and replaced by the quadtree
+/// discovery.  This is the entry point used internally by [`es_hyperneat_run`].
+///
+/// # Returns
+/// A new `EsSubstrate` with the discovered hidden layer.
+pub fn es_hyperneat_discover_substrate_cfg(
+    cppn: &CppnWeights,
+    cfg: &EsHyperNeatConfig,
+    base_substrate: &Substrate,
+) -> EsSubstrate {
+    let hidden_coords = discover_hidden_nodes_quadtree(
+        cppn,
+        &cfg.cppn,
+        &base_substrate.input_coords,
+        &base_substrate.output_coords,
+        SUBSTRATE_HALF_EXTENT,
+        cfg.initial_depth,
+        cfg.max_depth,
+        cfg.division_threshold,
+        cfg.band_threshold,
     );
     EsSubstrate {
         input_coords: base_substrate.input_coords.clone(),
@@ -422,21 +914,17 @@ fn evaluate_es_params(
 ) -> EvolResult<(f64, EsSubstrate, Vec<f64>)> {
     let cppn = CppnWeights::from_flat(flat, cfg.cppn.n_hidden)?;
 
-    // Build a base substrate (hidden layer will be overwritten by discovery)
+    // Build a base substrate carrying only the fixed input/output geometry; the
+    // hidden layer is discovered by the ES-HyperNEAT quadtree and replaces any
+    // hidden coordinates supplied here.
     let base = Substrate {
         input_coords: cfg.input_coords.clone(),
-        hidden_coords: vec![(0.0, 0.0)], // placeholder
+        hidden_coords: Vec::new(),
         output_coords: cfg.output_coords.clone(),
     };
 
-    // Discover the hidden substrate
-    let es_sub = es_hyperneat_discover_substrate(
-        &cppn,
-        &cfg.cppn,
-        &base,
-        cfg.resolution,
-        cfg.placement_threshold,
-    );
+    // Discover the hidden substrate via the quadtree (division + pruning).
+    let es_sub = es_hyperneat_discover_substrate_cfg(&cppn, cfg, &base);
 
     // Query weights with pruning
     let sw = es_query_and_prune(
@@ -560,16 +1048,10 @@ pub fn es_hyperneat_run(
     let best_cppn = CppnWeights::from_flat(&best_flat, cfg.cppn.n_hidden)?;
     let base = Substrate {
         input_coords: cfg.input_coords.clone(),
-        hidden_coords: vec![(0.0, 0.0)],
+        hidden_coords: Vec::new(),
         output_coords: cfg.output_coords.clone(),
     };
-    let discovered_substrate = es_hyperneat_discover_substrate(
-        &best_cppn,
-        &cfg.cppn,
-        &base,
-        cfg.resolution,
-        cfg.placement_threshold,
-    );
+    let discovered_substrate = es_hyperneat_discover_substrate_cfg(&best_cppn, cfg, &base);
     let substrate_weights = es_query_and_prune(
         &best_cppn,
         &cfg.cppn,
@@ -880,5 +1362,374 @@ mod tests {
         // Set prune_threshold very high to zero everything
         let sw = es_query_and_prune(&cppn, &cppn_cfg, &es_sub, 0.0, 1e9);
         assert!(sw.iter().all(|&w| w == 0.0), "all weights should be pruned");
+    }
+
+    // ── Quadtree discovery helpers ────────────────────────────────────────────
+
+    /// CPPN config whose first hidden neuron uses `Sine` — lets us build a
+    /// spatially-oscillating weight field for the quadtree to find bands in.
+    fn sine_cppn_cfg() -> CppnConfig {
+        CppnConfig::new(2, vec![CppnActivation::Sine, CppnActivation::Tanh])
+            .expect("cppn cfg should build")
+    }
+
+    /// Build a CPPN whose output is `sin(freq * x_tgt)` (a high-frequency
+    /// spatial wave in the target x-coordinate). Pass 1 of discovery anchors on
+    /// the source and moves the target, so this yields many information bands.
+    fn varying_cppn(freq: f64) -> CppnWeights {
+        // 2 hidden neurons; only neuron 0 (Sine) is active, weighted on input
+        // index 2 = x_tgt. All other weights/biases are zero.
+        let mut w = CppnWeights::zeros(2);
+        w.hidden_weights[2] = freq; // neuron 0 ← x_tgt (row 0, col 2)
+        w.output_weights[0] = 1.0; // read neuron 0 (Sine) directly
+        w
+    }
+
+    /// Build a CPPN with a constant output of `value` everywhere (no spatial
+    /// structure → zero variance → no information bands).
+    fn constant_cppn(value: f64) -> CppnWeights {
+        let mut w = CppnWeights::zeros(2);
+        w.output_bias = value;
+        w
+    }
+
+    // ── 18: varying CPPN yields MORE than one discovered node ──────────────────
+
+    #[test]
+    fn quadtree_varying_cppn_multiple_nodes() {
+        let cfg = sine_cppn_cfg();
+        let cppn = varying_cppn(6.0);
+        let (input_coords, output_coords) = make_input_output_coords(3, 2);
+        let hidden = discover_hidden_nodes_quadtree(
+            &cppn,
+            &cfg,
+            &input_coords,
+            &output_coords,
+            1.0,  // half_extent
+            2,    // initial_depth
+            5,    // max_depth
+            0.02, // division_threshold
+            0.2,  // band_threshold
+        );
+        // A spatial wave must produce many bands → well more than the old
+        // placeholder singleton.
+        assert!(
+            hidden.len() > 1,
+            "varying CPPN should discover more than one hidden node, got {}",
+            hidden.len()
+        );
+        // It is not the degenerate placeholder `[(0.0, 0.0)]`.
+        assert_ne!(hidden, vec![(0.0, 0.0)]);
+    }
+
+    // ── 19: constant CPPN yields few/no extra nodes ───────────────────────────
+
+    #[test]
+    fn quadtree_constant_cppn_no_nodes() {
+        let cfg = sine_cppn_cfg();
+        let cppn = constant_cppn(0.5);
+        let (input_coords, output_coords) = make_input_output_coords(3, 2);
+        let hidden = discover_hidden_nodes_quadtree(
+            &cppn,
+            &cfg,
+            &input_coords,
+            &output_coords,
+            1.0,
+            2,
+            5,
+            0.02,
+            0.2,
+        );
+        // A flat field has no information bands → nothing expressed.
+        assert!(
+            hidden.is_empty(),
+            "constant CPPN should discover no hidden nodes, got {}",
+            hidden.len()
+        );
+    }
+
+    // ── 20: varying CPPN discovers strictly more nodes than constant ──────────
+
+    #[test]
+    fn quadtree_varying_beats_constant() {
+        let cfg = sine_cppn_cfg();
+        let (input_coords, output_coords) = make_input_output_coords(3, 2);
+        let varying = discover_hidden_nodes_quadtree(
+            &varying_cppn(6.0),
+            &cfg,
+            &input_coords,
+            &output_coords,
+            1.0,
+            2,
+            5,
+            0.02,
+            0.2,
+        );
+        let constant = discover_hidden_nodes_quadtree(
+            &constant_cppn(0.5),
+            &cfg,
+            &input_coords,
+            &output_coords,
+            1.0,
+            2,
+            5,
+            0.02,
+            0.2,
+        );
+        assert!(
+            varying.len() > constant.len(),
+            "varying ({}) must discover more nodes than constant ({})",
+            varying.len(),
+            constant.len()
+        );
+    }
+
+    // ── 21: discovered coordinates are within bounds and finite ───────────────
+
+    #[test]
+    fn quadtree_nodes_within_bounds_and_finite() {
+        let cfg = sine_cppn_cfg();
+        let cppn = varying_cppn(8.0);
+        let (input_coords, output_coords) = make_input_output_coords(3, 2);
+        let hidden = discover_hidden_nodes_quadtree(
+            &cppn,
+            &cfg,
+            &input_coords,
+            &output_coords,
+            1.0,
+            2,
+            5,
+            0.02,
+            0.2,
+        );
+        assert!(!hidden.is_empty(), "expected discovered nodes");
+        for (x, y) in &hidden {
+            assert!(x.is_finite() && y.is_finite(), "coords must be finite");
+            assert!(
+                (-1.0 - 1e-9..=1.0 + 1e-9).contains(x),
+                "x = {x} out of substrate bounds"
+            );
+            assert!(
+                (-1.0 - 1e-9..=1.0 + 1e-9).contains(y),
+                "y = {y} out of substrate bounds"
+            );
+        }
+    }
+
+    // ── 22: discovered nodes lie in high-variance (nonzero-band) regions ──────
+
+    #[test]
+    fn quadtree_nodes_in_high_variance_regions() {
+        let cfg = sine_cppn_cfg();
+        let freq = 6.0;
+        let cppn = varying_cppn(freq);
+        let (input_coords, output_coords) = make_input_output_coords(3, 2);
+        let max_depth = 5usize;
+        let band_threshold = 0.1;
+        let hidden = discover_hidden_nodes_quadtree(
+            &cppn,
+            &cfg,
+            &input_coords,
+            &output_coords,
+            1.0,
+            2,
+            max_depth,
+            0.01,
+            band_threshold,
+        );
+        assert!(!hidden.is_empty(), "expected discovered nodes");
+        // Every discovered node must sit where the local band value (the
+        // directional variance of the CPPN field) is genuinely high — i.e. on a
+        // steep slope of the wave, not on a flat crest. Re-derive the band at the
+        // node using the leaf-level quad width and require it to clear the same
+        // band threshold the discovery used (allowing a small slack for nodes
+        // expressed from a shallower leaf with a slightly larger step).
+        let leaf_width = 1.0 / 2f64.powi(max_depth as i32);
+        let anchor = input_coords[0];
+        for &(x, y) in &hidden {
+            let weight = query_point(
+                &cppn,
+                &cfg,
+                anchor,
+                x,
+                y,
+                QueryDirection::OutgoingFromAnchor,
+            );
+            let probe = QuadPoint::new(x, y, leaf_width, weight, max_depth);
+            let band = band_value(
+                &cppn,
+                &cfg,
+                anchor,
+                QueryDirection::OutgoingFromAnchor,
+                &probe,
+            );
+            assert!(
+                band > band_threshold * 0.5,
+                "node ({x},{y}) should sit in a high-band region, got band {band}"
+            );
+        }
+    }
+
+    // ── 23: discovery is deterministic for a fixed CPPN ───────────────────────
+
+    #[test]
+    fn quadtree_discovery_deterministic() {
+        let cfg = sine_cppn_cfg();
+        let cppn = varying_cppn(7.0);
+        let (input_coords, output_coords) = make_input_output_coords(3, 2);
+        let run = || {
+            discover_hidden_nodes_quadtree(
+                &cppn,
+                &cfg,
+                &input_coords,
+                &output_coords,
+                1.0,
+                2,
+                5,
+                0.02,
+                0.2,
+            )
+        };
+        let a = run();
+        let b = run();
+        assert_eq!(a, b, "quadtree discovery must be deterministic");
+    }
+
+    // ── 24: division subdivides deeper where the field varies (variance gate) ─
+
+    #[test]
+    fn quadtree_division_respects_variance() {
+        let cfg = sine_cppn_cfg();
+        let anchor = (-1.0, -0.5);
+        // High-frequency field → high child variance → deep subdivision.
+        let varying_root = division_and_initialisation(
+            &varying_cppn(8.0),
+            &cfg,
+            anchor,
+            QueryDirection::OutgoingFromAnchor,
+            0.0,
+            0.0,
+            1.0,
+            1,    // initial_depth (shallow forced floor)
+            6,    // max_depth
+            0.05, // division_threshold
+        );
+        // Constant field → zero variance → no subdivision past the floor.
+        let constant_root = division_and_initialisation(
+            &constant_cppn(0.5),
+            &cfg,
+            anchor,
+            QueryDirection::OutgoingFromAnchor,
+            0.0,
+            0.0,
+            1.0,
+            1,
+            6,
+            0.05,
+        );
+
+        fn max_depth_of(node: &QuadPoint) -> usize {
+            node.children
+                .iter()
+                .map(max_depth_of)
+                .max()
+                .unwrap_or(node.level)
+        }
+        let varying_depth = max_depth_of(&varying_root);
+        let constant_depth = max_depth_of(&constant_root);
+        assert!(
+            varying_depth > constant_depth,
+            "varying field (depth {varying_depth}) must subdivide deeper than constant (depth {constant_depth})"
+        );
+    }
+
+    // ── 25: es_hyperneat_run discovers a consistent (non-placeholder) substrate
+
+    #[test]
+    fn es_run_discovers_consistent_substrate() {
+        // Reward CPPNs that produce many active substrate weights so evolution
+        // is pushed toward structured (band-rich) connectivity patterns.
+        let cfg = EsHyperNeatConfig {
+            cppn: sine_cppn_cfg(),
+            initial_depth: 2,
+            max_depth: 5,
+            division_threshold: 0.02,
+            band_threshold: 0.2,
+            n_evol_iters: 6,
+            sigma_init: 1.0,
+            sigma_decay: 0.9,
+            seed: 3,
+            ..EsHyperNeatConfig::default_small(sine_cppn_cfg())
+        };
+        let state = es_hyperneat_run(
+            |sw, _sub| sw.iter().filter(|&&w| w != 0.0).count() as f64,
+            &cfg,
+        )
+        .expect("es_hyperneat_run should succeed");
+        assert!(state.best_fitness.is_finite());
+        // The substrate weight vector must stay consistent with whatever the
+        // quadtree discovered as the hidden layer.
+        assert_eq!(
+            state.substrate_weights.len(),
+            state.discovered_substrate.n_weights()
+        );
+    }
+
+    // ── 26: cfg-driven discovery matches the standalone quadtree call ─────────
+
+    #[test]
+    fn discover_substrate_cfg_matches_quadtree() {
+        let cfg = EsHyperNeatConfig {
+            cppn: sine_cppn_cfg(),
+            initial_depth: 2,
+            max_depth: 5,
+            division_threshold: 0.02,
+            band_threshold: 0.2,
+            ..EsHyperNeatConfig::default_small(sine_cppn_cfg())
+        };
+        let cppn = varying_cppn(6.0);
+        let base = Substrate {
+            input_coords: cfg.input_coords.clone(),
+            hidden_coords: Vec::new(),
+            output_coords: cfg.output_coords.clone(),
+        };
+        let via_cfg = es_hyperneat_discover_substrate_cfg(&cppn, &cfg, &base);
+        let direct = discover_hidden_nodes_quadtree(
+            &cppn,
+            &cfg.cppn,
+            &cfg.input_coords,
+            &cfg.output_coords,
+            1.0,
+            cfg.initial_depth,
+            cfg.max_depth,
+            cfg.division_threshold,
+            cfg.band_threshold,
+        );
+        assert_eq!(via_cfg.hidden_coords, direct);
+        assert!(
+            !via_cfg.hidden_coords.is_empty(),
+            "varying CPPN should yield a non-empty discovered hidden layer"
+        );
+    }
+
+    // ── 27: validate catches bad quadtree params ──────────────────────────────
+
+    #[test]
+    fn validate_bad_quadtree_params() {
+        let mut cfg = default_es_cfg();
+        cfg.max_depth = 0;
+        assert!(cfg.validate().is_err());
+
+        let mut cfg = default_es_cfg();
+        cfg.initial_depth = cfg.max_depth + 1;
+        assert!(cfg.validate().is_err());
+
+        let mut cfg = default_es_cfg();
+        cfg.division_threshold = -1.0;
+        assert!(cfg.validate().is_err());
+
+        let mut cfg = default_es_cfg();
+        cfg.band_threshold = -0.5;
+        assert!(cfg.validate().is_err());
     }
 }

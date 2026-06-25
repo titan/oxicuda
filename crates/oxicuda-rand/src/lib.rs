@@ -32,6 +32,7 @@ pub mod engines;
 pub mod error;
 pub mod generator;
 pub mod graph_gen;
+pub mod host_api;
 pub mod matrix_gen;
 pub mod monte_carlo;
 pub mod quasi;
@@ -44,6 +45,7 @@ pub use graph_gen::{
     AdjacencyList, BarabasiAlbertGenerator, ErdosRenyiGenerator, GraphStats, GraphType,
     RandomRegularGenerator, StochasticBlockModelGenerator, WattsStrogatzGenerator,
 };
+pub use host_api::{CurandDirection, CurandGenerator, CurandOrdering, CurandRngType, CurandStatus};
 pub use matrix_gen::{
     CorrelationMatrixGenerator, GaussianMatrixGenerator, MatrixLayout, OrthogonalMatrixGenerator,
     RandomMatrix, SymmetricPositiveDefiniteGenerator, WishartGenerator,
@@ -52,7 +54,10 @@ pub use monte_carlo::{
     BlackScholesParams, HamiltonianMC, McmcResult, MetropolisHastings, MonteCarloConfig,
     MonteCarloResult, SamplerState,
 };
-pub use quasi::{HaltonGenerator, LatinHypercubeSampler, ScrambledSobolGenerator, SobolGenerator};
+pub use quasi::{
+    HaltonGenerator, LatinHypercubeSampler, MAX_NIEDERREITER_DIMENSION, Niederreiter,
+    ScrambledSobolGenerator, SobolGenerator,
+};
 
 pub use sde::{
     BrownianMotion, BrownianPathResult, EulerMaruyama, EulerMaruyamaResult,
@@ -68,6 +73,9 @@ pub mod prelude {
         AdjacencyList, BarabasiAlbertGenerator, ErdosRenyiGenerator, GraphStats, GraphType,
         RandomRegularGenerator, StochasticBlockModelGenerator, WattsStrogatzGenerator,
     };
+    pub use crate::host_api::{
+        CurandDirection, CurandGenerator, CurandOrdering, CurandRngType, CurandStatus,
+    };
     pub use crate::matrix_gen::{
         CorrelationMatrixGenerator, GaussianMatrixGenerator, MatrixLayout,
         OrthogonalMatrixGenerator, RandomMatrix, SymmetricPositiveDefiniteGenerator,
@@ -78,7 +86,8 @@ pub mod prelude {
         MonteCarloResult, SamplerState,
     };
     pub use crate::quasi::{
-        HaltonGenerator, LatinHypercubeSampler, ScrambledSobolGenerator, SobolGenerator,
+        HaltonGenerator, LatinHypercubeSampler, MAX_NIEDERREITER_DIMENSION, Niederreiter,
+        ScrambledSobolGenerator, SobolGenerator,
     };
     pub use crate::sde::{
         BrownianMotion, EulerMaruyama, GeometricBrownianMotion, Milstein, OrnsteinUhlenbeck,

@@ -122,6 +122,33 @@ impl LengthDpoBatch {
 
 // ── Core algorithm ────────────────────────────────────────────────────────────
 
+/// Numerically stable sigmoid `σ(x)`.
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let e = x.exp();
+        e / (1.0 + e)
+    }
+}
+
+/// Gradient of the per-pair length-controlled DPO loss w.r.t. the four log-probs.
+///
+/// Finite-difference verified against [`LengthDpo::loss_per_pair`]. The explicit
+/// length penalty is constant w.r.t. the log-probs, so it does not appear here.
+#[derive(Debug, Clone, Copy)]
+pub struct LengthDpoGrad {
+    /// `∂L/∂(policy chosen log-prob)`.
+    pub d_chosen_logp: f32,
+    /// `∂L/∂(policy rejected log-prob)`.
+    pub d_rejected_logp: f32,
+    /// `∂L/∂(reference chosen log-prob)`.
+    pub d_ref_chosen_logp: f32,
+    /// `∂L/∂(reference rejected log-prob)`.
+    pub d_ref_rejected_logp: f32,
+}
+
 /// Length-controlled DPO loss computation.
 ///
 /// Provides length normalisation, length penalty, and SimPO margin support
@@ -287,6 +314,88 @@ impl LengthDpo {
             cfg.normalize_by_length,
         )?;
         Ok(cfg.beta * (norm_chosen - norm_rejected) - cfg.target_reward_margin)
+    }
+
+    /// Analytic gradient of [`LengthDpo::loss_per_pair`] w.r.t. the four log-probs.
+    ///
+    /// With `loss = −log σ(logit) + λ·|len diff|` and
+    /// `logit = β·((n_c − n_rc) − (n_r − n_rr)) − γ` (where `n_x = logp_x/len` if
+    /// normalising, else `logp_x`), `dL/dlogit = −σ(−logit)` and each partial is
+    /// scaled by the per-side normalisation factor `f_c = 1/len_c` (or `1`) and
+    /// `f_r = 1/len_r` (or `1`). The length penalty is constant in the log-probs.
+    ///
+    /// # Errors
+    ///
+    /// - [`RlhfError::InvalidBeta`] / [`RlhfError::InvalidLambda`] for a bad config.
+    /// - [`RlhfError::NanEncountered`] if any log-prob is NaN.
+    /// - Propagates the zero-length error from [`LengthDpo::normalize_logp`].
+    pub fn loss_grad_per_pair(
+        pair: &LengthPair,
+        cfg: &LengthDpoConfig,
+    ) -> RlhfResult<LengthDpoGrad> {
+        Self::validate_config(cfg)?;
+        if pair.chosen_logp.is_nan()
+            || pair.ref_chosen_logp.is_nan()
+            || pair.rejected_logp.is_nan()
+            || pair.ref_rejected_logp.is_nan()
+        {
+            return Err(RlhfError::NanEncountered);
+        }
+        // length_log_ratio applies the same normalisation and zero-length guard.
+        let logit = Self::length_log_ratio(pair, cfg)?;
+        let factor_c = if cfg.normalize_by_length {
+            1.0 / pair.chosen_len as f32
+        } else {
+            1.0
+        };
+        let factor_r = if cfg.normalize_by_length {
+            1.0 / pair.rejected_len as f32
+        } else {
+            1.0
+        };
+        let d_logit = -sigmoid(-logit);
+        let d_chosen = d_logit * cfg.beta * factor_c;
+        let d_rejected = d_logit * (-cfg.beta) * factor_r;
+        let grad = LengthDpoGrad {
+            d_chosen_logp: d_chosen,
+            d_rejected_logp: d_rejected,
+            d_ref_chosen_logp: -d_chosen,
+            d_ref_rejected_logp: -d_rejected,
+        };
+        if !grad.d_chosen_logp.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        Ok(grad)
+    }
+
+    /// Analytic gradient of the mean-reduced [`LengthDpo::loss`].
+    ///
+    /// Returns one [`LengthDpoGrad`] per pair, each scaled by `1 / batch.len()`.
+    ///
+    /// # Errors
+    ///
+    /// - [`RlhfError::EmptyInput`] for an empty batch.
+    /// - Propagates errors from [`LengthDpo::loss_grad_per_pair`].
+    pub fn loss_grad(
+        batch: &LengthDpoBatch,
+        cfg: &LengthDpoConfig,
+    ) -> RlhfResult<Vec<LengthDpoGrad>> {
+        if batch.is_empty() {
+            return Err(RlhfError::EmptyInput);
+        }
+        Self::validate_config(cfg)?;
+        let inv_n = 1.0 / batch.len() as f32;
+        let mut grads = Vec::with_capacity(batch.len());
+        for pair in &batch.pairs {
+            let g = Self::loss_grad_per_pair(pair, cfg)?;
+            grads.push(LengthDpoGrad {
+                d_chosen_logp: g.d_chosen_logp * inv_n,
+                d_rejected_logp: g.d_rejected_logp * inv_n,
+                d_ref_chosen_logp: g.d_ref_chosen_logp * inv_n,
+                d_ref_rejected_logp: g.d_ref_rejected_logp * inv_n,
+            });
+        }
+        Ok(grads)
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -655,5 +764,154 @@ mod tests {
         );
         assert!(cfg.normalize_by_length, "default normalize_by_length=true");
         assert!(cfg.target_reward_margin.abs() < 1e-6, "default margin=0.0");
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn mk(c: f32, rc: f32, r: f32, rr: f32, cl: usize, rl: usize) -> LengthPair {
+        LengthPair {
+            chosen_logp: c,
+            ref_chosen_logp: rc,
+            rejected_logp: r,
+            ref_rejected_logp: rr,
+            chosen_len: cl,
+            rejected_len: rl,
+        }
+    }
+
+    fn check_fd(pair: &LengthPair, cfg: &LengthDpoConfig) {
+        let g = LengthDpo::loss_grad_per_pair(pair, cfg).expect("grad");
+        let h = 1e-2;
+        let fd_c = central_diff(
+            |v| {
+                let mut p = pair.clone();
+                p.chosen_logp = v;
+                LengthDpo::loss_per_pair(&p, cfg).expect("l")
+            },
+            pair.chosen_logp,
+            h,
+        );
+        let fd_rc = central_diff(
+            |v| {
+                let mut p = pair.clone();
+                p.ref_chosen_logp = v;
+                LengthDpo::loss_per_pair(&p, cfg).expect("l")
+            },
+            pair.ref_chosen_logp,
+            h,
+        );
+        let fd_r = central_diff(
+            |v| {
+                let mut p = pair.clone();
+                p.rejected_logp = v;
+                LengthDpo::loss_per_pair(&p, cfg).expect("l")
+            },
+            pair.rejected_logp,
+            h,
+        );
+        let fd_rr = central_diff(
+            |v| {
+                let mut p = pair.clone();
+                p.ref_rejected_logp = v;
+                LengthDpo::loss_per_pair(&p, cfg).expect("l")
+            },
+            pair.ref_rejected_logp,
+            h,
+        );
+        assert_close(g.d_chosen_logp, fd_c, "d_chosen");
+        assert_close(g.d_ref_chosen_logp, fd_rc, "d_ref_chosen");
+        assert_close(g.d_rejected_logp, fd_r, "d_rejected");
+        assert_close(g.d_ref_rejected_logp, fd_rr, "d_ref_rejected");
+    }
+
+    #[test]
+    fn length_dpo_grad_matches_fd_no_normalize() {
+        // Length penalty present (cl != rl) to confirm it does not affect the grad.
+        let cfg = LengthDpoConfig {
+            beta: 0.3,
+            length_lambda: 0.05,
+            normalize_by_length: false,
+            target_reward_margin: 0.2,
+        };
+        check_fd(&mk(-1.0, -1.2, -2.0, -1.8, 12, 7), &cfg);
+    }
+
+    #[test]
+    fn length_dpo_grad_matches_fd_normalize() {
+        let cfg = LengthDpoConfig {
+            beta: 0.5,
+            length_lambda: 0.01,
+            normalize_by_length: true,
+            target_reward_margin: 0.0,
+        };
+        check_fd(&mk(-10.0, -11.0, -5.0, -4.5, 10, 5), &cfg);
+    }
+
+    #[test]
+    fn length_dpo_grad_batch_matches_fd() {
+        let cfg = LengthDpoConfig {
+            beta: 0.3,
+            length_lambda: 0.0,
+            normalize_by_length: true,
+            target_reward_margin: 0.0,
+        };
+        let pairs = vec![
+            mk(-8.0, -8.2, -6.0, -5.8, 8, 6),
+            mk(-4.0, -4.1, -3.0, -2.9, 4, 3),
+        ];
+        let batch = LengthDpoBatch::new(pairs.clone());
+        let grads = LengthDpo::loss_grad(&batch, &cfg).expect("grads");
+        let h = 1e-2;
+        let fd = central_diff(
+            |v| {
+                let mut ps = pairs.clone();
+                ps[0].chosen_logp = v;
+                LengthDpo::loss(&LengthDpoBatch::new(ps), &cfg).expect("loss")
+            },
+            pairs[0].chosen_logp,
+            h,
+        );
+        assert_close(grads[0].d_chosen_logp, fd, "batch d_chosen[0]");
+    }
+
+    #[test]
+    fn length_dpo_grad_signs() {
+        let cfg = LengthDpoConfig {
+            beta: 0.5,
+            length_lambda: 0.0,
+            normalize_by_length: false,
+            target_reward_margin: 0.0,
+        };
+        let g = LengthDpo::loss_grad_per_pair(&mk(-1.0, -1.0, -1.0, -1.0, 5, 5), &cfg).expect("g");
+        assert!(g.d_chosen_logp < 0.0);
+        assert!(g.d_rejected_logp > 0.0);
+    }
+
+    #[test]
+    fn length_dpo_grad_invalid_beta_errors() {
+        let cfg = LengthDpoConfig {
+            beta: -0.1,
+            ..Default::default()
+        };
+        assert!(matches!(
+            LengthDpo::loss_grad_per_pair(&mk(-1.0, -1.0, -1.0, -1.0, 5, 5), &cfg),
+            Err(RlhfError::InvalidBeta { .. })
+        ));
     }
 }

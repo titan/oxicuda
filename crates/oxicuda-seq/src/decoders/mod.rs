@@ -20,10 +20,12 @@
 
 pub mod contrastive;
 pub mod nucleus;
+pub mod pointer_network;
 pub mod top_k;
 pub mod typical;
 
 pub use contrastive::{ContrastiveConfig, ContrastiveSearcher};
 pub use nucleus::*;
+pub use pointer_network::{PointerGrad, PointerNetwork};
 pub use top_k::*;
 pub use typical::*;

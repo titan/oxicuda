@@ -9,6 +9,8 @@
 pub mod atan;
 /// Fast-sigmoid surrogate `α / (1 + |α(v−v_th)|)²`.
 pub mod fast_sigmoid;
+/// Learnable (parametric) surrogate gradient with a trainable slope `α`.
+pub mod learnable;
 /// Logistic-sigmoid surrogate `α · σ · (1−σ)`.
 pub mod sigmoid;
 /// Zenke-Ganguli "SuperSpike" surrogate.

@@ -33,7 +33,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxicuda-levelzero = "0.2.0"
+oxicuda-levelzero = "0.3.0"
 ```
 
 ```rust
@@ -50,8 +50,8 @@ backend.free(ptr)?;
 
 ## Status
 
-- **Version**: 0.2.0 (2026-06-16)
-- **Tests**: 103 passing
+- **Version**: 0.3.0 (2026-06-25)
+- **Tests**: 153 passing
 
 ## License
 

@@ -5,6 +5,7 @@ pub mod cmvn;
 pub mod companding;
 pub mod delta;
 pub mod log_mel_adapter;
+pub mod log_mel_extractor;
 pub mod lpc;
 pub mod mel_filterbank;
 pub mod mfcc;
@@ -20,6 +21,7 @@ pub use companding::{
 };
 pub use delta::{compute_delta, compute_delta_delta, stack_delta_features};
 pub use log_mel_adapter::LogMelInput;
+pub use log_mel_extractor::{LogMelExtractor, LogMelExtractorConfig};
 pub use lpc::{
     Formant, LpcResult, autocorrelation, formants, formants_from_lpc, levinson_durbin, lpc,
 };

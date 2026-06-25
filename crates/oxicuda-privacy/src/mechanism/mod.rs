@@ -9,9 +9,11 @@ pub mod pate;
 pub mod permute_and_flip;
 pub mod private_quantile;
 pub mod propose_release;
+pub mod ptr_multiround;
 pub mod report_noisy_max;
 pub mod sampled_gaussian;
 pub mod skellam;
+pub mod synthetic_data;
 
 pub use discrete_gaussian::DiscreteGaussianMechanism;
 pub use discrete_laplace::DiscreteLaplaceMechanism;
@@ -27,5 +29,12 @@ pub use pate::{
 };
 pub use permute_and_flip::{PermuteFlipConfig, permute_and_flip, permute_flip_empirical_probs};
 pub use private_quantile::{QuantileConfig, private_median, private_quantile};
+pub use ptr_multiround::{
+    MultiRoundPtrConfig, MultiRoundPtrOutput, SensitivityRung, geometric_ladder, multi_round_ptr,
+};
 pub use sampled_gaussian::{SampledGaussianConfig, SampledGaussianMechanism};
 pub use skellam::{SkellamConfig, SkellamMechanism};
+pub use synthetic_data::{
+    DpGanConfig, DpGanReport, PateGanConfig, PateGanReport, SyntheticGenerator, dp_gan_train,
+    dp_label_from_votes, pate_gan_train,
+};

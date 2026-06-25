@@ -1,3 +1,5 @@
+/// Aggregated compression-ratio / effective-rank dashboard across many adapters.
+pub mod dashboard;
 /// Parameter efficiency metrics: efficiency ratio, effective rank, compression ratio.
 pub mod efficiency;
 /// Merge quality metrics: MSE, consistency, max absolute difference.

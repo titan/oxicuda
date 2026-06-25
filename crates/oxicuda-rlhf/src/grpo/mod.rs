@@ -194,6 +194,77 @@ pub fn grpo_loss(group: &[GrpoOutput], cfg: &GrpoConfig) -> RlhfResult<f32> {
     Ok(loss)
 }
 
+/// Analytic gradient of [`output_surrogate`] w.r.t. the current per-token log-probs.
+///
+/// The group-relative `advantage` is held as an input (it is computed from the
+/// rewards, not the policy log-probs — exactly the stop-gradient treatment of
+/// the advantage in PPO/GRPO), so the per-output surrogate reduces to a
+/// deterministic, finite-difference-checkable scalar gradient.
+///
+/// Writing the loss as `−(1/T)·Σ_t [ s_t − β·KL_t ]` with `ρ_t = exp(lp_t − old_t)`:
+///
+/// * the clipped surrogate `s_t = min(ρ_t·A, clip(ρ_t)·A)` has
+///   `∂s_t/∂lp_t = A·ρ_t` where the unclipped branch is selected (or in the clamp
+///   interior) and `0` where the clip binds in a saturated region — i.e. zero
+///   gradient exactly where the clip is active and binding;
+/// * the k3 KL `KL_t = exp(Δ) − Δ − 1` with `Δ = ref_t − lp_t` has
+///   `∂KL_t/∂lp_t = 1 − exp(ref_t − lp_t)`.
+///
+/// Hence `∂L/∂lp_t = −(1/T)·[ ∂s_t/∂lp_t − β·∂KL_t/∂lp_t ]`. Finite-difference
+/// verified against [`output_surrogate`].
+///
+/// # Errors
+///
+/// Mirrors [`output_surrogate`]: config validation, [`RlhfError::EmptyInput`],
+/// [`RlhfError::DimensionMismatch`], and [`RlhfError::NanEncountered`].
+pub fn output_surrogate_grad(
+    token_logps: &[f32],
+    token_old_logps: &[f32],
+    token_ref_logps: &[f32],
+    advantage: f32,
+    cfg: &GrpoConfig,
+) -> RlhfResult<Vec<f32>> {
+    cfg.validate()?;
+    let t = token_logps.len();
+    if t == 0 {
+        return Err(RlhfError::EmptyInput);
+    }
+    if token_old_logps.len() != t || token_ref_logps.len() != t {
+        return Err(RlhfError::DimensionMismatch {
+            expected: t,
+            got: token_old_logps.len().min(token_ref_logps.len()),
+        });
+    }
+    let lo = 1.0 - cfg.clip_eps;
+    let hi = 1.0 + cfg.clip_eps;
+    let inv_t = 1.0 / t as f32;
+    let mut grads = Vec::with_capacity(t);
+    for ((&lp, &old), &rlp) in token_logps
+        .iter()
+        .zip(token_old_logps.iter())
+        .zip(token_ref_logps.iter())
+    {
+        let ratio = (lp - old).exp();
+        let unclipped = ratio * advantage;
+        let clipped = ratio.clamp(lo, hi) * advantage;
+        // ∂s/∂lp = (∂s/∂ρ)·(∂ρ/∂lp); ∂s/∂ρ = A on the unclipped branch / interior,
+        // 0 where the clip binds; ∂ρ/∂lp = ρ.
+        let d_surrogate = if unclipped <= clipped {
+            advantage * ratio
+        } else {
+            0.0
+        };
+        // ∂KL/∂lp = 1 − exp(ref − lp).
+        let d_kl = 1.0 - (rlp - lp).exp();
+        let g = -inv_t * (d_surrogate - cfg.kl_coeff * d_kl);
+        if !g.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        grads.push(g);
+    }
+    Ok(grads)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,6 +421,106 @@ mod tests {
         assert!(matches!(
             output_surrogate(&[0.0], &[0.0], &[0.0], 1.0, &c2),
             Err(RlhfError::InvalidBeta { .. })
+        ));
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn cfg() -> GrpoConfig {
+        GrpoConfig {
+            clip_eps: 0.2,
+            kl_coeff: 0.04,
+            adv_eps: 1e-4,
+        }
+    }
+
+    #[test]
+    fn output_surrogate_grad_matches_fd_interior() {
+        // ratios near 1 (interior) so the surrogate is unclipped, plus a KL term.
+        let lp = [-1.0_f32, -0.9, -1.1];
+        let old = [-1.05_f32, -0.95, -1.0];
+        let rlp = [-1.2_f32, -0.8, -1.3];
+        let adv = 0.5_f32;
+        let c = cfg();
+        let g = output_surrogate_grad(&lp, &old, &rlp, adv, &c).expect("grad");
+        let h = 1e-3;
+        for i in 0..lp.len() {
+            let fd = central_diff(
+                |v| {
+                    let mut l = lp;
+                    l[i] = v;
+                    output_surrogate(&l, &old, &rlp, adv, &c).expect("loss")
+                },
+                lp[i],
+                h,
+            );
+            assert_close(g[i], fd, "interior d_lp");
+        }
+    }
+
+    #[test]
+    fn output_surrogate_grad_zero_in_clipped_binding_region() {
+        // ratio = exp(2) ≈ 7.39 ≫ hi, A > 0 → surrogate clipped & binding → 0.
+        // kl_coeff = 0 isolates the surrogate component.
+        let c = GrpoConfig {
+            clip_eps: 0.2,
+            kl_coeff: 0.0,
+            adv_eps: 1e-4,
+        };
+        let lp = [0.0_f32];
+        let old = [-2.0_f32];
+        let rlp = [0.0_f32];
+        let g = output_surrogate_grad(&lp, &old, &rlp, 1.0, &c).expect("grad");
+        assert_eq!(g[0], 0.0, "binding clip → zero surrogate gradient");
+        // Finite difference is also flat in the clipped region.
+        let h = 1e-3;
+        let fd = central_diff(
+            |v| output_surrogate(&[v], &old, &rlp, 1.0, &c).expect("loss"),
+            lp[0],
+            h,
+        );
+        assert!(fd.abs() < 1e-6, "fd in clipped region = {fd}");
+    }
+
+    #[test]
+    fn output_surrogate_grad_kl_only_when_surrogate_binds() {
+        // Binding surrogate but kl_coeff > 0 → gradient is purely the KL term.
+        let c = cfg();
+        let lp = [0.0_f32];
+        let old = [-2.0_f32];
+        let rlp = [-0.5_f32];
+        let g = output_surrogate_grad(&lp, &old, &rlp, 1.0, &c).expect("grad");
+        let h = 1e-3;
+        let fd = central_diff(
+            |v| output_surrogate(&[v], &old, &rlp, 1.0, &c).expect("loss"),
+            lp[0],
+            h,
+        );
+        assert_close(g[0], fd, "kl-only d_lp");
+    }
+
+    #[test]
+    fn output_surrogate_grad_dim_mismatch_errors() {
+        let c = cfg();
+        assert!(matches!(
+            output_surrogate_grad(&[0.0, 0.0], &[0.0], &[0.0, 0.0], 1.0, &c),
+            Err(RlhfError::DimensionMismatch { .. })
         ));
     }
 }

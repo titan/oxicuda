@@ -454,4 +454,62 @@ mod tests {
             "channel range imbalance should decrease after smoothing"
         );
     }
+
+    #[test]
+    fn alpha_sweep_preserves_output_identity() {
+        // The SmoothQuant migration is mathematically output-preserving for
+        // *every* alpha in [0, 1]: Y = X Wᵀ = (X / s)(W · s)ᵀ. Sweep the full
+        // range and confirm the smoothed layer reproduces the original output.
+        let n_tok = 4;
+        let n_ch = 5;
+        let n_out = 3;
+        let acts0: Vec<f32> = (0..(n_tok * n_ch))
+            .map(|i| ((i * 37 % 19) as f32) * 0.25 - 2.0)
+            .collect();
+        let weights0: Vec<f32> = (0..(n_out * n_ch))
+            .map(|i| ((i * 53 % 23) as f32) * 0.1 - 1.0)
+            .collect();
+        let y_orig = matmul_nt(&acts0, &weights0, n_tok, n_ch, n_out);
+
+        // 21 alphas: 0.00, 0.05, …, 1.00.
+        for step in 0..=20 {
+            let alpha = step as f32 / 20.0;
+            let m = SmoothQuantMigrator::new(alpha);
+            let mut acts = acts0.clone();
+            let mut weights = weights0.clone();
+            m.smooth_layer(&mut acts, &mut weights, n_tok, n_ch, n_out)
+                .expect("smooth_layer should succeed");
+            let y_smooth = matmul_nt(&acts, &weights, n_tok, n_ch, n_out);
+            for (a, b) in y_orig.iter().zip(y_smooth.iter()) {
+                assert_abs_diff_eq!(a, b, epsilon = 1e-3);
+            }
+        }
+    }
+
+    #[test]
+    fn alpha_endpoints_preserve_output_with_outliers() {
+        // Even at the extreme alphas (0 and 1) and with strong activation
+        // outliers, the identity must hold exactly (numerically).
+        let n_tok = 3;
+        let n_ch = 4;
+        let n_out = 2;
+        let acts0 = vec![
+            200.0_f32, 0.5, -1.0, 0.2, -200.0, -0.5, 1.0, -0.2, 150.0, 0.3, -0.7, 0.1,
+        ];
+        let weights0 = vec![0.4_f32, -0.6, 0.8, -0.2, -0.3, 0.5, -0.7, 0.1];
+        let y_orig = matmul_nt(&acts0, &weights0, n_tok, n_ch, n_out);
+        for &alpha in &[0.0_f32, 1.0] {
+            let m = SmoothQuantMigrator::new(alpha);
+            let mut acts = acts0.clone();
+            let mut weights = weights0.clone();
+            m.smooth_layer(&mut acts, &mut weights, n_tok, n_ch, n_out)
+                .expect("smooth_layer should succeed");
+            let y_smooth = matmul_nt(&acts, &weights, n_tok, n_ch, n_out);
+            for (a, b) in y_orig.iter().zip(y_smooth.iter()) {
+                // Relative tolerance scaled by the output magnitude.
+                let tol = 1e-3 * a.abs().max(1.0);
+                assert!((a - b).abs() < tol, "alpha {alpha}: {a} vs {b}");
+            }
+        }
+    }
 }

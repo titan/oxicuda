@@ -165,6 +165,41 @@ pub fn rloo_loss_with_kl(
     rloo_loss(&augmented, logps)
 }
 
+/// Analytic gradient of [`rloo_loss`] w.r.t. the per-sample sequence log-probs.
+///
+/// The leave-one-out advantages `Âᵢ` depend only on the rewards (held as inputs,
+/// not on the policy log-probs), so the REINFORCE objective `−(1/k) Σᵢ Âᵢ·logp_i`
+/// has the deterministic gradient `∂L/∂logp_i = −Âᵢ / k`. Identical rewards give
+/// zero advantages and therefore zero gradient. Finite-difference verified
+/// against [`rloo_loss`].
+///
+/// # Errors
+/// - [`RlhfError::DimensionMismatch`] if `rewards` and `logps` differ in length.
+/// - Propagates errors from [`rloo_advantages`].
+/// - [`RlhfError::NanEncountered`] if any log-prob or gradient is non-finite.
+pub fn rloo_grad(rewards: &[f32], logps: &[f32]) -> RlhfResult<Vec<f32>> {
+    if rewards.len() != logps.len() {
+        return Err(RlhfError::DimensionMismatch {
+            expected: rewards.len(),
+            got: logps.len(),
+        });
+    }
+    let advantages = rloo_advantages(rewards)?;
+    let k = rewards.len() as f32;
+    let mut grads = Vec::with_capacity(advantages.len());
+    for (&adv, &lp) in advantages.iter().zip(logps.iter()) {
+        if !lp.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        let g = -adv / k;
+        if !g.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        grads.push(g);
+    }
+    Ok(grads)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,6 +357,77 @@ mod tests {
         let cfg = RlooConfig::default();
         assert!(matches!(
             rloo_loss_with_kl(&[1.0, 2.0], &[-1.0, -1.0], &[-1.0], &cfg),
+            Err(RlhfError::DimensionMismatch { .. })
+        ));
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    #[test]
+    fn rloo_grad_matches_fd() {
+        let rewards = [1.0_f32, 5.0, 2.0, 0.5];
+        let logps = [-1.0_f32, -0.8, -1.2, -1.5];
+        let g = rloo_grad(&rewards, &logps).expect("grad");
+        let h = 1e-2;
+        for i in 0..logps.len() {
+            let fd = central_diff(
+                |v| {
+                    let mut l = logps;
+                    l[i] = v;
+                    rloo_loss(&rewards, &l).expect("loss")
+                },
+                logps[i],
+                h,
+            );
+            assert_close(g[i], fd, "rloo_grad");
+            // Closed form: −Aᵢ/k.
+            let adv = rloo_advantages(&rewards).expect("adv");
+            assert_close(g[i], -adv[i] / rewards.len() as f32, "closed form");
+        }
+    }
+
+    #[test]
+    fn rloo_grad_best_sample_negative() {
+        // The max-advantage sample has Aᵢ > 0, so its gradient is negative
+        // (descent raises its log-prob).
+        let rewards = [1.0_f32, 5.0, 2.0];
+        let logps = [-1.0_f32, -1.0, -1.0];
+        let g = rloo_grad(&rewards, &logps).expect("grad");
+        assert!(
+            g[1] < 0.0,
+            "best sample gradient should be negative: {}",
+            g[1]
+        );
+    }
+
+    #[test]
+    fn rloo_grad_zero_for_equal_rewards() {
+        let g = rloo_grad(&[2.0, 2.0, 2.0], &[-1.0, -0.5, -2.0]).expect("grad");
+        for &gi in &g {
+            assert!(gi.abs() < 1e-6, "equal rewards → zero gradient, got {gi}");
+        }
+    }
+
+    #[test]
+    fn rloo_grad_dimension_mismatch_errors() {
+        assert!(matches!(
+            rloo_grad(&[1.0, 2.0, 3.0], &[-1.0, -2.0]),
             Err(RlhfError::DimensionMismatch { .. })
         ));
     }

@@ -19,6 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 workspace = true
 
 [dependencies]
+oxicuda-sparse = { workspace = true }
 thiserror.workspace = true
 
 [dev-dependencies]

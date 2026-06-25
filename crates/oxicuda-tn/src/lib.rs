@@ -33,6 +33,7 @@ pub mod mera;
 pub mod metrics;
 pub mod mpo;
 pub mod mps;
+pub mod optim;
 pub mod peps;
 pub mod ptx_kernels;
 pub mod svd;
@@ -58,9 +59,18 @@ pub use metrics::{
     mps_inner_product as loschmidt_mps_inner_product, operator_matrix, return_probability,
     static_structure_factor,
 };
+pub use mps::isometry_tn::{
+    FatMpsColumn, FatTensor, IsoTnsTensor, IsometryTn, MosesMoveResult, TripartiteSplit,
+    moses_move_column, tripartite_split,
+};
 pub use mps::symmetric::{
     Qn, QnBlock, SymMps, SymMpsConfig, SymMpsTensor, block_svd, sym_mps_left_canonicalize,
     sym_mps_local_expectation, sym_mps_norm, sym_mps_random, sym_mps_to_dense,
+};
+pub use optim::{
+    FixedRankManifold, RiemannianTn, RiemannianTnConfig, RiemannianTnMethod, TnPoint, TnResultData,
+    eckart_young_objective, low_rank_completion_egrad, low_rank_completion_objective,
+    low_rank_egrad, low_rank_objective,
 };
 pub use peps::ctmrg::{
     CtmrgConfig, CtmrgEnv, CtmrgResult, ctmrg_expectation, ctmrg_init, ctmrg_norm_per_site,

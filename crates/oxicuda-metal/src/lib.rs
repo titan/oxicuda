@@ -48,15 +48,32 @@
 //! kernel compilation.
 
 pub mod ane;
+pub mod argbuffer;
 pub mod backend;
+pub mod command;
 pub mod device;
+pub mod device_family;
+pub mod dispatch;
 pub mod error;
+pub mod event;
 pub mod fft;
+pub mod heap;
 pub mod memory;
 pub mod mps;
 pub mod msl;
+pub mod msl_nn;
+pub mod numeric;
 pub mod pipeline;
+pub mod storage;
 
+pub use argbuffer::{ArgumentBufferLayout, ArgumentKind, ArgumentSlot};
 pub use backend::MetalBackend;
+pub use command::{BlitCommandList, BlitOp, ICBComputeCommand, IndirectCommandBuffer};
+pub use device_family::{MetalDeviceCapabilities, MetalGpuFamily};
+pub use dispatch::{DispatchPlan, DispatchPlanner};
 pub use error::{MetalError, MetalResult};
+pub use event::{EventTimeline, MetalEvent, MetalFence, SyncOp};
 pub use fft::{MetalFftBuffer, MetalFftDirection, MetalFftPlan};
+pub use heap::{HeapBlock, MemoryBudget, MetalHeapAllocator};
+pub use numeric::{DoubleSingle, Int8Quantizer, QuantizedTensor};
+pub use storage::{BufferAccess, MetalBufferDescriptor, MetalStorageMode, StoragePlanner};

@@ -7,9 +7,9 @@ SPIR-V compute shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/
 
 ## Implementation Status
 
-- **Actual SLoC:** ~5,116 across 22 files
-- **Tests:** 86 passing
-- **Status:** Full memory + compute backend via in-house SPIR-V builder, multi-queue async, pipeline cache
+- **Actual SLoC:** ~9,664 across 30 files
+- **Tests:** 150 passing (+ 1 doctest)
+- **Status:** Full memory + compute backend via in-house SPIR-V builder, multi-queue async, pipeline cache. Host-side planners (VMA-style sub-allocator, descriptor-buffer layout, push-descriptor/push-constant builders, performance-query pool) and advanced SPIR-V generators (cooperative-matrix MMA, atomic-float reduction, Vulkan-memory-model copy, subgroup-size-control spec-constant) are CPU-testable and complete; their on-device dispatch remains GPU-gated.
 - **Targets:** Vendor-agnostic (NVIDIA / AMD / Intel / Mesa lavapipe), Vulkan 1.2+
 
 ### Completed
@@ -56,28 +56,28 @@ SPIR-V compute shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/
 ### Future Enhancements
 
 #### P0 -- Critical
-- [ ] `VK_KHR_cooperative_matrix` Tensor-Core-equivalent GEMM -- emit cooperative-matrix SPIR-V (FP16/BF16/FP8) for NVIDIA RTX 30/40, AMD RDNA3, Intel Arc
-- [ ] Subgroup-size-control (`VK_EXT_subgroup_size_control`) -- pick 32 (NVIDIA/Intel) vs 64 (AMD GCN/CDNA) vs 32/64 (RDNA) at pipeline creation
-- [ ] Push descriptors (`VK_KHR_push_descriptor`) -- bind buffers directly into command buffer without descriptor-set allocation for low-overhead dispatch
+- [x] `VK_KHR_cooperative_matrix` Tensor-Core-equivalent GEMM -- emit cooperative-matrix SPIR-V (FP16/BF16/FP8) for NVIDIA RTX 30/40, AMD RDNA3, Intel Arc — **SPIR-V emission done** in `spirv/cooperative_matrix.rs` (`cooperative_matrix_gemm_spirv`, `CoopMatType {F16,Bf16,F32}`, `CoopMatTile`); emits `OpTypeCooperativeMatrixKHR` (A/B/accumulator) + `OpCooperativeMatrixMulAddKHR` under SPIR-V 1.6 + Vulkan memory model. Structurally unit-tested. *On-device dispatch and vs-scalar cross-validation require a GPU advertising `VK_KHR_cooperative_matrix` (requires GPU/driver hardware).*
+- [x] Subgroup-size-control (`VK_EXT_subgroup_size_control`) -- pick 32 (NVIDIA/Intel) vs 64 (AMD GCN/CDNA) vs 32/64 (RDNA) at pipeline creation — **host negotiator + SPIR-V emission done** in `spirv/subgroup_size_control.rs` (`SubgroupSizeController`, `SubgroupVendor`, `subgroup_size_aware_reduce_spirv` with `SpecId`-decorated `OpSpecConstant`). *Pinning the required size at pipeline creation requires device + the extension (requires GPU/driver hardware).*
+- [x] Push descriptors (`VK_KHR_push_descriptor`) -- bind buffers directly into command buffer without descriptor-set allocation for low-overhead dispatch — **host write-list builder done** in `push_descriptor.rs` (`PushDescriptorSet`, `PushDescriptorWrite`, + `PushConstantLayout`). *`vkCmdPushDescriptorSetKHR` recording requires a device (requires GPU/driver hardware).*
 
 #### P1 -- Important
-- [ ] Vulkan Memory Allocator equivalent -- sub-allocation from large device-memory blocks (`vk_mem_alloc`-style API in pure Rust)
-- [ ] `VK_KHR_dynamic_rendering` integration NOT needed (compute-only), but `VK_KHR_synchronization2` for finer barrier control IS needed
-- [ ] Timeline semaphore chains across queues -- multi-queue dependency graphs (currently fence-only per queue)
-- [ ] `VK_EXT_shader_atomic_float` for FP32 atomic reductions (replaces two-pass reduction on supporting hardware)
-- [ ] Validation layer integration toggle (`VK_LAYER_KHRONOS_validation`) gated behind `validation` feature
+- [x] Vulkan Memory Allocator equivalent -- sub-allocation from large device-memory blocks (`vk_mem_alloc`-style API in pure Rust) — **done** in `suballocator.rs`: `FreeListSuballocator` (first-fit + boundary-coalesce, arbitrary pow2 alignment) and `BuddySuballocator` (O(log n), buddy recombination). Pure host arithmetic, fully unit-tested. *Binding a `VkBuffer` to `(block, offset)` via `vkBindBufferMemory` stays in `memory.rs` (device-gated).*
+- [~] `VK_KHR_dynamic_rendering` integration NOT needed (compute-only), but `VK_KHR_synchronization2` for finer barrier control IS needed — explicit memory-model acquire/release operands now emitted (see `spirv/vulkan_memory_model.rs`); `synchronization2` barrier *recording* into a command buffer requires a device (requires GPU/driver hardware).
+- [ ] Timeline semaphore chains across queues -- multi-queue dependency graphs (currently fence-only per queue) — *requires GPU/driver hardware (queue submission + timeline semaphores)*
+- [x] `VK_EXT_shader_atomic_float` for FP32 atomic reductions (replaces two-pass reduction on supporting hardware) — **SPIR-V emission done** in `spirv/atomic_float.rs` (`atomic_float_reduce_spirv`, `AtomicFloatOp {Add,Min,Max}`; emits `OpAtomicFAddEXT`/`FMinEXT`/`FMaxEXT` with the matching capability). Structurally unit-tested. *Single-pass execution requires hardware advertising `shaderBufferFloat32Atomic*` (requires GPU/driver hardware).*
+- [ ] Validation layer integration toggle (`VK_LAYER_KHRONOS_validation`) gated behind `validation` feature — *requires a Vulkan instance/loader to inject the layer (requires GPU/driver hardware)*
 
 #### P2 -- Nice-to-Have
-- [ ] `pipeline/vulkan_memory_model.rs` — Vulkan Memory Model explicit acquire-release barriers (Vulkan 1.2 core): emit `OpLoad` / `OpStore` with `MakeAvailable` / `MakeVisible` semantics replacing current global `vkCmdPipelineBarrier`; `VulkanMemModel`
-- [ ] `spirv/subgroup_size_control.rs` — `VK_EXT_subgroup_size_control` subgroup-size negotiation (2020): declare fixed `SubgroupSize` at pipeline creation (32 NVIDIA/Intel, 32/64 AMD) for vendor-optimal warp reductions; `SubgroupSizeController`
-- [ ] `spirv/performance_query.rs` — `VK_KHR_performance_query` kernel-level GPU timestamps (2020): query pool with `VK_QUERY_TYPE_PERFORMANCE_QUERY_KHR` for per-dispatch GPU cycle counts; `PerformanceQueryPool`
-- [ ] `memory/descriptor_buffer.rs` — `VK_EXT_descriptor_buffer` bindless descriptor sets (Vulkan 2023): embed descriptor data directly in device memory for ultra-low-overhead large-model weight binding; `DescriptorBuffer`
+- [x] `pipeline/vulkan_memory_model.rs` — Vulkan Memory Model explicit acquire-release barriers (Vulkan 1.2 core): emit `OpLoad` / `OpStore` with `MakeAvailable` / `MakeVisible` semantics replacing current global `vkCmdPipelineBarrier`; `VulkanMemModel` — **done as** `spirv/vulkan_memory_model.rs` (`VulkanMemModel`, `MemScope`, `vulkan_memory_model_copy_spirv`): emits `OpLoad` with `MakePointerVisible|NonPrivate` + `OpStore` with `MakePointerAvailable|NonPrivate` and a synchronisation scope, under the Vulkan memory model (capability + model id 3). Structurally unit-tested.
+- [x] `spirv/subgroup_size_control.rs` — `VK_EXT_subgroup_size_control` subgroup-size negotiation (2020): declare fixed `SubgroupSize` at pipeline creation (32 NVIDIA/Intel, 32/64 AMD) for vendor-optimal warp reductions; `SubgroupSizeController` — **done** (see P0 entry above; real file `spirv/subgroup_size_control.rs`).
+- [x] `spirv/performance_query.rs` — `VK_KHR_performance_query` kernel-level GPU timestamps (2020): query pool with `VK_QUERY_TYPE_PERFORMANCE_QUERY_KHR` for per-dispatch GPU cycle counts; `PerformanceQueryPool` — **host pool/result planner done** in `spirv/performance_query.rs` (`PerformanceQueryPool`, `CounterDesc`, `CounterResult`, scope/storage/unit enums; computes the result-buffer stride and parses raw counter readback). *Counter enumeration, profiling-lock acquisition, and begin/end-query recording require a device (requires GPU/driver hardware).*
+- [x] `memory/descriptor_buffer.rs` — `VK_EXT_descriptor_buffer` bindless descriptor sets (Vulkan 2023): embed descriptor data directly in device memory for ultra-low-overhead large-model weight binding; `DescriptorBuffer` — **host layout planner done as** `descriptor_buffer.rs` (`DescriptorBuffer`, `DescriptorBufferProps`, `LayoutBinding`, `BindingOffset`): reproduces `vkGetDescriptorSetLayoutSizeEXT` / `…BindingOffsetEXT` placement math (per-type sizes, descriptor arrays, set alignment). Fully unit-tested. *Writing descriptors into device memory requires a device (requires GPU/driver hardware).*
 - [ ] `VK_EXT_mesh_shader` compute-mesh interop (graphics+compute pipelines) -- not used for ML workloads
 - [ ] Ray-query (`VK_KHR_ray_query`) for compute shaders -- enables BVH-based sparse op layouts (research)
 - [ ] `VK_KHR_video_*` integration as out-of-scope: explicitly excluded
 - [ ] DLSS/FSR scaler shader generation -- left to graphics pipelines
 - [ ] `VK_KHR_acceleration_structure` for sparse tensor compaction (research)
-- [ ] SPIR-V 1.6 capability path (currently 1.3) -- conditional emit when device supports it
+- [x] SPIR-V 1.6 capability path (currently 1.3) -- conditional emit when device supports it — version constants `SPIRV_VERSION_1_4/1_5/1_6` now exported and emitted (memory-model copy uses 1.5; cooperative-matrix uses 1.6). Device-feature-gated *selection* of which version to emit at pipeline creation stays a runtime/device concern.
 
 ## Dependencies
 
@@ -90,9 +90,9 @@ SPIR-V compute shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/
 ## Quality Status
 
 - Warnings: 0
-- Tests: 86 passing
-- unwrap() calls: 0
-- Clippy: clean (pedantic + nursery)
+- Tests: 150 passing (+ 1 doctest)
+- unwrap() calls: 0 (production code)
+- Clippy: clean (pedantic + nursery, `-D warnings`)
 
 ## Performance Targets
 
@@ -125,17 +125,17 @@ Vulkan compute performance varies dramatically by vendor, driver, and feature su
 - [ ] `VK_NV_cooperative_matrix` (vendor extension, pre-KHR) for older drivers
 - [ ] `VK_NVX_binary_import` for CUDA-compiled PTX/SASS reuse via Vulkan path
 - [ ] Subgroup size 32 explicit declaration
-- [ ] FP16/BF16 MMA shapes: 16x16x16 (Turing+), 16x8x16 (Ampere+)
+- [x] FP16/BF16 MMA shapes: 16x16x16 (Turing+), 16x8x16 (Ampere+) — emittable via `CoopMatTile { m, n, k }` in `spirv/cooperative_matrix.rs` (default 16x16x16; any shape parameterised). *Which shapes a device actually supports is queried at runtime (requires GPU/driver hardware).*
 
 ### AMD Vulkan (GCN5/RDNA1/2/3, CDNA via radeonsi)
 - [ ] `VK_AMD_shader_explicit_vertex_parameter` (not needed for compute, marker)
-- [ ] Wave32 vs Wave64 dispatch via `VK_EXT_subgroup_size_control`
-- [ ] RDNA3 WMMA via `VK_KHR_cooperative_matrix`
+- [x] Wave32 vs Wave64 dispatch via `VK_EXT_subgroup_size_control` — host negotiation done: `SubgroupSizeController::choose(SubgroupVendor::AmdWave64 | AmdRdna)` in `spirv/subgroup_size_control.rs`. *Pinning the size at pipeline creation requires the device + extension (requires GPU/driver hardware).*
+- [x] RDNA3 WMMA via `VK_KHR_cooperative_matrix` — SPIR-V emitted by `cooperative_matrix_gemm_spirv` (`spirv/cooperative_matrix.rs`); *dispatch requires RDNA3 hardware with the extension (requires GPU/driver hardware).*
 - [ ] Bank-conflict-free LDS tile layouts (32 banks of 4 bytes each)
 
 ### Intel Vulkan (Xe-LP/Xe-HPG/Xe-HPC via Anv)
-- [ ] XMX cooperative-matrix path on Arc A-series (mirrors `oxicuda-levelzero/spirv_xmx.rs`)
-- [ ] Subgroup size 8/16/32 negotiation via subgroup-size-control
+- [x] XMX cooperative-matrix path on Arc A-series (mirrors `oxicuda-levelzero/spirv_xmx.rs`) — same `cooperative_matrix_gemm_spirv` generator (`spirv/cooperative_matrix.rs`) targets Arc XMX. *Dispatch requires Arc hardware with the extension (requires GPU/driver hardware).*
+- [x] Subgroup size 8/16/32 negotiation via subgroup-size-control — `SubgroupSizeController::choose(SubgroupVendor::Intel)` clamps to the device `[min,max]` (CPU-tested). *Pinning at pipeline creation requires the device (requires GPU/driver hardware).*
 - [ ] `VK_INTEL_shader_integer_functions2` for sub-byte integer ops
 
 ### Mesa Lavapipe (CPU software rasterizer)
@@ -160,15 +160,15 @@ Vulkan compute performance varies dramatically by vendor, driver, and feature su
 - [ ] Cooperative-matrix kernels verified vs scalar reference (when `VK_KHR_cooperative_matrix` is implemented)
 - [ ] SPIR-V binary verified by `spirv-val` external tool in CI pre-commit
 - [ ] Pipeline-cache reuse across process restarts validated (binary blob portable)
-- [ ] Subgroup-size-control negotiated correctly per vendor (NVIDIA 32, AMD 32/64, Intel 8/16/32)
+- [x] Subgroup-size-control negotiated correctly per vendor (NVIDIA 32, AMD 32/64, Intel 8/16/32) — **CPU-verified** by the `SubgroupSizeController` unit tests in `spirv/subgroup_size_control.rs` (preference clamped to device `[min,max]`, malformed ranges repaired). On-hardware confirmation of the *pinned* size still needs a GPU.
 
 ### Implementation Deepening
-- [ ] In-house SPIR-V builder fuzz-tested against `spirv-val` for edge cases
-- [ ] `VK_EXT_descriptor_indexing` bindless descriptor sets for large model weight tables
-- [ ] `VK_KHR_buffer_device_address` for pointer-based buffer access (replaces descriptor indirection)
-- [ ] Async pipeline compile via `VK_PIPELINE_CREATE_LIBRARY_BIT_KHR` (compile-while-running)
-- [ ] Memory-budget queries (`VK_EXT_memory_budget`) to drive eviction policy
-- [ ] Performance counters via `VK_KHR_performance_query` for kernel-level GPU timing
+- [ ] In-house SPIR-V builder fuzz-tested against `spirv-val` for edge cases — *needs the external `spirv-val` tool (out-of-process); structural self-tests cover header/opcode/layout in the meantime*
+- [x] `VK_EXT_descriptor_indexing` bindless descriptor sets for large model weight tables — host layout math for bindless descriptor arrays done in `descriptor_buffer.rs` (`LayoutBinding.count > 1`, see `descriptor_array_multiplies_size` test). *Binding into device memory requires a device (requires GPU/driver hardware).*
+- [ ] `VK_KHR_buffer_device_address` for pointer-based buffer access (replaces descriptor indirection) — *requires device pointers (requires GPU/driver hardware)*
+- [ ] Async pipeline compile via `VK_PIPELINE_CREATE_LIBRARY_BIT_KHR` (compile-while-running) — *requires device pipeline compilation (requires GPU/driver hardware)*
+- [ ] Memory-budget queries (`VK_EXT_memory_budget`) to drive eviction policy — *requires a physical device (requires GPU/driver hardware)*
+- [x] Performance counters via `VK_KHR_performance_query` for kernel-level GPU timing — host pool/result planner done in `spirv/performance_query.rs` (`PerformanceQueryPool`). *Counter readback requires a device (requires GPU/driver hardware).*
 
 ## Vulkan Version Compatibility
 

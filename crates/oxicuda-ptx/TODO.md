@@ -86,8 +86,8 @@ The PTX crate is the largest in Vol.1+2 and the core differentiator of OxiCUDA. 
 - [x] Shared memory bank conflict detection -- static analysis for known access patterns
 
 **Templates (P2)**
-- [ ] `cp.async` Generator Module (`templates/cp_async_gen.rs`) -- standalone `CpAsyncGenerator` producing `cp.async.cg.global.L2::128B` / `cp.async.ca.global` PTX sequences with configurable bypass size and multi-stage pipeline loop; `CpAsyncGenerator`
-- [ ] Kernel Fusion Cost Model (`analysis/fusion_cost_model.rs`) -- register-pressure + shared-memory + ILP heuristic model for deciding whether to fuse two adjacent pointwise kernels; `FusionCostModel` replacing current unconditional-fuse placeholder
+- [x] `cp.async` Generator Module (`src/templates/cp_async_gen.rs`) -- standalone `CpAsyncGenerator` producing `cp.async.cg.global.L2::128B` / `cp.async.ca.global` PTX sequences with configurable bypass size (4/8/16 B; `.cg`+`L2::128B` gated to 16 B) and a multi-stage `commit_group`/`wait_group` pipeline loop (prologue primes `stages-1`, steady-state waits to `stages-1` in flight, epilogue drains all); synchronous `ld.global`/`st.shared` fallback for pre-`sm_80`. `CpAsyncGenerator` + `CpAsyncCachePolicy` (23 tests)
+- [x] Kernel Fusion Cost Model (`src/analysis/fusion_cost_model.rs`) -- register-pressure + shared-memory + ILP heuristic `FusionCostModel`/`FusionDecision`/`FusionVerdict` deciding whether to fuse two adjacent pointwise kernels; per-SM budgets via `for_target`. Wired into `kernel_fusion::plan_fusion` (new `plan_fusion_with_model`/`plan_fusion_for_target`), replacing the former unconditional accept of every structurally-legal candidate with a cost-gated fuse/refuse (refuses on register spill > file, shared-mem overflow, or below-threshold benefit) (18 tests)
 - [x] Convolution template (templates/convolution.rs) -- im2col, direct conv, 1x1 optimized, backward data/filter
 - [x] Attention template (templates/attention.rs) -- FlashAttention-style fused attention kernel
 - [x] MoE (Mixture of Experts) template (templates/moe.rs) -- top-k gating, permute, expert GEMM, unpermute
@@ -106,8 +106,8 @@ The PTX crate is the largest in Vol.1+2 and the core differentiator of OxiCUDA. 
 ## Quality Status
 
 - Warnings: 0
-- Tests: 934 passing
-- unwrap() calls: 0
+- Tests: 981 unit + 29 doc passing (added cp_async_gen + fusion_cost_model)
+- unwrap() calls: 0 (production code; tests use `.unwrap()` on infallible `new()` fixtures)
 - Clippy: clean (pedantic + nursery)
 - `#![deny(unsafe_code)]` -- entire crate is safe Rust
 

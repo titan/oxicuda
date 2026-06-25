@@ -9,8 +9,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.21).
 
 ## Implementation Status
 
-- **Actual SLoC:** 16,665 (54 files, Rust 16,665 code + 1,217 comments + 1,074 blanks)
-- **Tests:** 669 passing (#[test] count in src/)
+- **Actual SLoC:** ~24,900 (68 files)
+- **Tests:** 845 passing (#[test] count in src/)
 - **Crate:** `oxicuda-audio` -- Vol.21 Audio/Speech ML Architectures
 
 ### Completed [x]
@@ -96,29 +96,102 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.21).
 #### P0 -- Critical (Mainstream ASR / Speech Coverage)
 - [x] Mel-filterbank computation in this crate (features/mel_filterbank.rs -- triangular mel-scale filterbank from magnitude spectrum; mel↔Hz Slaney/HTK 2595·log10 convention)
 - [ ] Connectionist Temporal Classification (CTC) GPU dispatch via `ctc_alpha_ptx`
-      (currently CPU log-domain only)
-- [ ] Streaming Conformer (chunked attention + left-context cache)
+      (currently CPU log-domain only) (requires GPU hardware)
+- [x] Streaming Conformer (chunked attention + left-context cache)
+      (encoder/streaming_conformer.rs -- block-wise causal-with-left-context MHSA;
+      LeftContextCache + forward_chunk give incremental decode that is numerically
+      equivalent to the full masked forward; Chen 2021 / Wu 2020)
 - [x] RNN-T / Transducer loss (alternative to CTC for streaming ASR)
 - [x] Beam-search lattice rescoring with shallow-fusion LM (rescoring.rs -- shallow-fusion total=acoustic+lm_weight·LM+wip·len, n-best re-ranking + prefix-beam lattice expansion; distinct from ctc/beam_search)
 
 #### P1 -- Important (Architecture and Feature Coverage)
 - [x] Whisper-style encoder (encoder/whisper.rs -- Radford 2023; conv stem (n_mels→d_model k=3 + d_model→d_model k=3 s=2) GELU + sinusoidal positional embedding + n_layers pre-norm transformer encoder blocks)
-- [ ] HuBERT / WavLM SSL pre-training pipeline
+- [x] HuBERT / WavLM SSL pre-training pipeline (encoder/hubert_ssl.rs --
+      KMeansQuantizer acoustic-unit discovery (Lloyd + k-means++), span masking,
+      MaskedPredictionHead cosine-sim logits + masked-only cross-entropy loss;
+      HubertPretrainer.step; Hsu 2021 / Chen 2022)
 - [x] ECAPA-TDNN modern speaker embedding (multi-scale dilated TDNN + SE-block)
 - [x] HiFi-GAN / BigVGAN GAN vocoder generator
 - [x] DPRNN / Conv-TasNet source separation block
 - [x] Voice-Activity Detection (Silero-style) lightweight inference path (vad.rs -- frame log-energy + spectral-flatness classifier with onset + hangover hysteresis smoothing, segment extraction)
 
 #### P2 -- Nice-to-Have (Research / Advanced)
-- [ ] FastSpeech2 / VITS TTS acoustic model
-- [ ] Bark-style hierarchical semantic + acoustic tokens
-- [ ] CTC + Attention joint-decoding helper (ESPnet style)
-- [ ] Quantised Conformer (INT8 / FP8) inference path
-- [ ] Streaming RNN-T greedy decoder
-- [ ] Multi-GPU SSL pre-training helper (DDP-style gradient sync)
-- [ ] Whisper-CTC joint model (`decoder/whisper_ctc.rs`) — Watanabe 2017 Interspeech: shared encoder output fed to both attention-decoder and CTC branch; joint decoding with λ·CTC + (1-λ)·attention log-probs; `WhisperCtcDecoder`
-- [ ] VITS2 TTS end-to-end acoustic model (`synthesis/vits2.rs`) — Kong 2023: improved normalizing-flow acoustic model with transformer-based duration predictor and adversarial training; `Vits2Synthesizer`
-- [ ] Beat Tracker (`rhythm/beat_tracker.rs`) — Böck 2011 ISMIR: dynamic Bayesian network over onset strength function with tempo prior and inter-beat-interval Markov chain; `BeatTracker`
+- [x] FastSpeech2 / VITS TTS acoustic model (synthesis/fastspeech2.rs -- variance
+      adaptor: DurationPredictor (log-domain) + LengthRegulator (frame expansion) +
+      pitch/energy VariancePredictors with bin embeddings; FFT encoder/decoder
+      (conv-FFN transformer blocks) -> mel projection; forward_train (GT durations)
+      + forward_infer; Ren 2021)
+- [x] RVQ neural-codec core (codec/rvq.rs:ResidualVectorQuantizer -- round-trip/nestedness/NN verified)
+      Residual Vector Quantization (SoundStream/EnCodec/Bark acoustic-token core,
+      Zeghidour 2021 / Defossez 2022): `n_quantizers` independent codebooks; greedy
+      stage-by-stage residual Euclidean-NN `encode` -> codes, `decode` = sum of
+      chosen entries, `quantize` -> (x_hat, codes, residual_norm); reserved zero
+      code (row 0) guarantees the monotone residual-descent property per input;
+      stage-wise residual k-means `fit` (guarded, never increases batch error) +
+      `from_codebooks`. codec/bark.rs:`BarkCodec`/`BarkAcousticTokens` is a thin
+      coarse/fine acoustic-token *layout* wrapper over the RVQ stages (loss-free
+      regroup). 9 CPU tests: monotone error sweep [3.013,2.789,2.285,2.101,1.844,
+      1.844,1.600] (non-increasing as n_quantizers grows), exact-sum recovery
+      (codes=[1,2,3] err=0), per-stage NN == brute-force argmin, fit improvement
+      22.08->0.041 on clustered data (<= pre-fit error), determinism/shapes/finite,
+      tier-split round-trip == flat RVQ, coarse-only error >= full error.
+  - [ ] Bark *trained* semantic + acoustic token generation (the autoregressive
+        transformers that generate semantic/coarse/fine tokens from text; Suno 2023)
+        -- requires training-scale data, NOT CPU-unit-verifiable. The codec token
+        *layout* (coarse/fine tiers) + exact round-trip are done above; the closest
+        CPU primitive for semantic units is encoder/hubert_ssl.rs:KMeansQuantizer,
+        but the trained semantic transformer itself is out of scope.
+- [x] CTC + Attention joint-decoding helper (ESPnet style) (already in
+      src/ctc/joint_ctc_attention.rs as `JointCtcAttention` -- Watanabe 2017
+      λ·CTC + (1-λ)·attention joint_score + frame-synchronous greedy decode)
+- [x] Quantised Conformer (INT8) inference path (encoder/quantized.rs --
+      symmetric per-channel INT8 weight quant + per-tensor activation quant,
+      integer-arithmetic-only GEMM (i32 accumulation), QuantizedLinear/QuantizedFfn;
+      Jacob 2018 / Krishnamoorthi 2018). FP8 path remains (requires GPU hardware).
+- [x] Streaming RNN-T greedy decoder (already in src/ctc/transducer_decode.rs as
+      `TransducerGreedyDecoder` -- streaming greedy decode with caller-supplied
+      joint closure; Graves 2012/2013)
+- [ ] Multi-GPU SSL pre-training helper (DDP-style gradient sync) (requires multi-GPU hardware)
+- [x] Whisper-CTC joint model — same construction as the Watanabe 2017 hybrid
+      CTC/attention joint decode, already implemented in
+      src/ctc/joint_ctc_attention.rs as `JointCtcAttention` (shared-encoder output
+      scored by both branches; joint λ·CTC + (1-λ)·attention log-probs)
+- [x] VITS2 TTS end-to-end acoustic model (synthesis/vits2/ submodule: common.rs,
+      flow.rs, duration.rs, encoder.rs, mod.rs) — Kim 2021 / Kong 2023 -- conditional
+      VAE + normalizing-flow core. `Vits2Flow` (ActNorm + affine coupling + channel
+      flip, exact forward/inverse, analytic logdet); `StochasticDurationPredictor`
+      (conditioned coupling flow over a 2-ch duration latent, sampling + stochastic
+      change-of-variables ELBO); `PosteriorEncoder` q(z|x) + `PriorEncoder` p(z|c)
+      (reuses FastSpeech2 FftBlock) + `reparameterize`; `gaussian_kl` (closed-form,
+      >=0) and `flow_kl` (VITS MC ELBO term); `monotonic_alignment_search` (hard DP
+      alignment); `Vits2` analysis (teacher) + inference (synthesis) passes returning
+      a mel [t_mel,n_mels]. 51 CPU tests: flow + SDP-flow invertibility
+      (inverse(forward(x))≈x, max err 4.8e-7 / 3.0e-8), logdet vs finite-difference
+      Jacobian (dim 4/6, max err 3.5e-4 / 2.3e-5), KL>=0 & ==0 at posterior==prior,
+      shape/finiteness/determinism; RQ-spline bijection (scalar fwd/inv 3.8e-6 /
+      3.2e-6, coupling 1.2e-7), scalar logdet vs finite-diff (2.4e-4), coupling
+      logdet vs numerical Jacobian (1.8e-5), C¹ tail continuity, strict monotonicity,
+      spline-dequant ELBO finite/stochastic/deterministic.
+  - [ ] VITS2 adversarial training loop (HiFi-GAN multi-period/multi-scale
+        discriminators + feature-matching + mel reconstruction GAN objective) and
+        the joint end-to-end waveform decoder — out of CPU/honest scope (needs
+        training-scale GPU + a discriminator we cannot meaningfully verify on CPU);
+        the HiFi-GAN *generator* already exists in vocoder/hifigan.rs.
+  - [x] (synthesis/vits2/spline.rs:RationalQuadraticSpline -- monotone RQ spline,
+        bijection+logdet verified) VITS SDP posterior spline-flow dequantization
+        -- Durkan 2019 rational-quadratic neural spline. `RationalQuadraticSpline`
+        (K-bin monotone RQ map on [-B,B], softmax widths/heights + softplus internal
+        derivatives, δ₀=δ_K=1 identity tails; exact forward/inverse via per-bin
+        quadratic + Newton polish, analytic logdet = Σ log(dy/dx)) and
+        `RqSplineCoupling` (Durkan spline coupling: identity half + external cond
+        emits per-element 3K-1 params for the transformed half, triangular Jacobian).
+        Wired into the SDP as the auxiliary dequantiser: base noise u~N(0,1) ->
+        e=T(u) conditioned on log d + text, with exact +logdet_dequant
+        change-of-variables — a strictly tighter, still-valid ELBO (identity spline
+        recovers the old fixed-N(0,1) augmented-flow bound).
+- [x] Beat Tracker (already in src/rhythm/beat_tracker.rs as `BeatTracker` --
+      dynamic-programming beat tracking over an onset-strength function with a
+      tempo prior; Ellis 2007 / Böck 2011)
 
 ## Dependencies
 
@@ -136,7 +209,7 @@ consumed via the `LogMelInput` adapter.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 669 passing
+- Tests: 845 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)
@@ -180,21 +253,21 @@ Target: bandwidth-bound kernels at >=85% peak DRAM throughput on sm_80+.
 - [x] `stats_pool_ptx` uses warp-shuffle reduction
 - [x] `spec_augment_mask_ptx` uses `setp` / `selp.f32` predicate select
 - [x] PTX × SM 80, 86 generation verified in integration tests
-- [ ] `cp.async` 3-stage pipeline for stride-conv1d on long sequences
-- [ ] FP16 Conformer MHSA path with Tensor Cores
+- [ ] `cp.async` 3-stage pipeline for stride-conv1d on long sequences (requires GPU hardware)
+- [ ] FP16 Conformer MHSA path with Tensor Cores (requires GPU hardware)
 
 ### Hopper (sm_90 / sm_90a)
 - [x] PTX SM 90 emission tested for all 7 kernels
-- [ ] TMA (`cp.async.bulk`) for very long audio sequence (T > 16K)
-- [ ] `wgmma.mma_async` for Conformer MHSA QK^T / PV
-- [ ] Cluster-launch CTC alpha for very large vocabulary (V >= 5000)
-- [ ] Distributed-shared-memory for streaming Conformer left-context cache
+- [ ] TMA (`cp.async.bulk`) for very long audio sequence (T > 16K) (requires GPU hardware)
+- [ ] `wgmma.mma_async` for Conformer MHSA QK^T / PV (requires GPU hardware)
+- [ ] Cluster-launch CTC alpha for very large vocabulary (V >= 5000) (requires GPU hardware)
+- [ ] Distributed-shared-memory for streaming Conformer left-context cache (requires GPU hardware)
 
 ### Blackwell (sm_100 / sm_120)
 - [x] PTX SM 100 / 120 emission tested
-- [ ] FP8 (E4M3) Conformer inference path
-- [ ] FP4 streaming RNN-T decoder experimental path
-- [ ] Tensor-Memory (TMEM) staged audio-tile loads
+- [ ] FP8 (E4M3) Conformer inference path (requires GPU hardware; INT8 CPU path done in encoder/quantized.rs)
+- [ ] FP4 streaming RNN-T decoder experimental path (requires GPU hardware)
+- [ ] Tensor-Memory (TMEM) staged audio-tile loads (requires GPU hardware)
 
 ---
 
@@ -218,24 +291,31 @@ Target: bandwidth-bound kernels at >=85% peak DRAM throughput on sm_80+.
 - [x] Attentive pool weights sum to 1 (softmax invariant)
 - [x] X-vector TDNN output dim = 512 (default config)
 - [x] PTX generation across 6 SM versions: 75 / 80 / 86 / 90 / 100 / 120
-- [ ] GPU-hardware correctness for all 7 kernels (gated behind `gpu-tests`)
-- [ ] Numerical agreement with ESPnet / NeMo reference within 1e-4 relative
-- [ ] LibriSpeech CTC WER match for reference small-Conformer checkpoint
-- [ ] VoxCeleb speaker EER match for reference x-vector checkpoint
+- [ ] GPU-hardware correctness for all 7 kernels (gated behind `gpu-tests`) (requires GPU hardware)
+- [ ] Numerical agreement with ESPnet / NeMo reference within 1e-4 relative (requires reference checkpoints / hardware)
+- [ ] LibriSpeech CTC WER match for reference small-Conformer checkpoint (requires reference dataset / checkpoint)
+- [ ] VoxCeleb speaker EER match for reference x-vector checkpoint (requires reference dataset / checkpoint)
 
 ### Implementation Deepening
-- [ ] End-to-end `LogMelExtractor` (STFT -> mel -> log) within this crate (currently
-      consumed from `oxicuda-signal`)
-- [ ] CTC GPU dispatch end-to-end via `ctc_alpha_ptx`
-- [ ] Streaming Conformer left-context cache + chunk-attention helper
-- [ ] RNN-T / Transducer loss with joint network (alternative to CTC)
-- [ ] Beam-search shallow-fusion with external LM scorer interface
-- [ ] HiFi-GAN / BigVGAN GAN vocoder generator (link with `WaveNetStack`)
+- [x] End-to-end `LogMelExtractor` (STFT -> mel -> log) within this crate
+      (features/log_mel_extractor.rs -- composes the crate's own stft_hann + power
+      spectrum + MelFilterbank + log-floor; whisper_like()/tiny() presets;
+      extract / extract_input)
+- [ ] CTC GPU dispatch end-to-end via `ctc_alpha_ptx` (requires GPU hardware)
+- [x] Streaming Conformer left-context cache + chunk-attention helper
+      (encoder/streaming_conformer.rs -- StreamingConformerAttention + LeftContextCache)
+- [x] RNN-T / Transducer loss with joint network (alternative to CTC)
+      (already in src/ctc/rnnt.rs as `rnnt_loss` / `RnntConfig`; Graves 2012)
+- [x] Beam-search shallow-fusion with external LM scorer interface
+      (already in src/rescoring.rs as `LatticeRescorer` / `RescoreConfig`)
+- [x] HiFi-GAN / BigVGAN GAN vocoder generator (already in src/vocoder/hifigan.rs
+      as `HifiGanGenerator` -- transposed-conv upsampling + multi-receptive-field
+      residual blocks; Kong 2020)
 
 ### Benchmark Coverage
 - [x] `benches/audio_ops.rs` Criterion harness wired (CPU-side PTX generation +
       Conformer block / WaveNet stack forward)
 - [ ] GPU-side throughput vs reference (ESPnet, NeMo) once Linux+NVIDIA harness is
-      available
+      available (requires GPU hardware)
 - [ ] Real-time-factor (RTF) measurement for streaming Conformer at various chunk
-      sizes
+      sizes (requires GPU hardware for meaningful RTF)

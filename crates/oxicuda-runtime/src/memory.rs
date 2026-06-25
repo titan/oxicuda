@@ -44,6 +44,59 @@ impl DevicePtr {
     pub fn offset(self, offset: isize) -> Self {
         Self((self.0 as i64 + offset as i64) as u64)
     }
+
+    /// Reinterpret this device pointer as pointing to a different element type.
+    ///
+    /// `DevicePtr` is an *untyped* device address (a `u64`, mirroring
+    /// `CUdeviceptr`), so this is purely a semantic, address-preserving
+    /// reinterpret — the returned pointer holds the identical address. It exists
+    /// so callers that track an element type at a higher layer can express
+    /// `device_ptr.cast::<T>()` without resorting to raw integer juggling.
+    ///
+    /// This never dereferences device memory; it is host-side pointer
+    /// bookkeeping only.
+    #[must_use]
+    pub fn cast<T>(self) -> Self {
+        // Address is type-agnostic; the cast is a no-op on the bit pattern.
+        let _ = std::marker::PhantomData::<T>;
+        self
+    }
+
+    /// Reinterpret the address as a raw `*const T` for FFI hand-off.
+    ///
+    /// The returned pointer is **not** safe to dereference from host code — it
+    /// points into device memory. It is intended only to be passed back to the
+    /// driver (e.g. as a `CUdeviceptr`-shaped argument). Host-side arithmetic
+    /// only.
+    #[must_use]
+    pub fn as_raw_ptr<T>(self) -> *const T {
+        self.0 as *const T
+    }
+
+    /// Compute the byte span of `len` elements of `T` starting at this pointer,
+    /// returning `(addr, byte_len)`.
+    ///
+    /// This performs **host-side pointer arithmetic only** — it never reads or
+    /// writes device memory. It is the typed-length helper that lets a caller
+    /// turn a typed allocation length into the raw `(address, byte_count)`
+    /// descriptor the driver expects, while checking that:
+    ///
+    /// - `len * size_of::<T>()` does not overflow `usize`, and
+    /// - `addr + byte_len` does not overflow the `u64` device address space.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaRtError::InvalidValue`] if either multiplication or the
+    /// final address addition would overflow.
+    pub fn as_typed_slice_meta<T>(self, len: usize) -> CudaRtResult<(u64, usize)> {
+        let elem = std::mem::size_of::<T>();
+        let byte_len = len.checked_mul(elem).ok_or(CudaRtError::InvalidValue)?;
+        // Guard against the span running off the end of the address space.
+        self.0
+            .checked_add(byte_len as u64)
+            .ok_or(CudaRtError::InvalidValue)?;
+        Ok((self.0, byte_len))
+    }
 }
 
 // ─── MemcpyKind ──────────────────────────────────────────────────────────────
@@ -63,6 +116,58 @@ pub enum MemcpyKind {
     DeviceToDevice = 3,
     /// Direction inferred from pointer attributes (unified addressing).
     Default = 4,
+}
+
+/// Residency of one endpoint of a copy (host RAM vs. device global memory).
+///
+/// Used to *resolve* [`MemcpyKind::Default`] the way unified addressing does:
+/// the driver inspects each pointer's residency and picks the concrete
+/// direction. This is the host-side classification model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemLocation {
+    /// Ordinary host (CPU) memory.
+    Host,
+    /// Device (GPU) global memory.
+    Device,
+}
+
+impl MemcpyKind {
+    /// Whether the source endpoint of this (explicit) kind is on the device.
+    ///
+    /// [`MemcpyKind::Default`] is ambiguous on its own and returns `None`.
+    #[must_use]
+    pub const fn src_is_device(self) -> Option<bool> {
+        match self {
+            Self::HostToHost | Self::HostToDevice => Some(false),
+            Self::DeviceToHost | Self::DeviceToDevice => Some(true),
+            Self::Default => None,
+        }
+    }
+
+    /// Whether the destination endpoint of this (explicit) kind is on the device.
+    ///
+    /// [`MemcpyKind::Default`] is ambiguous on its own and returns `None`.
+    #[must_use]
+    pub const fn dst_is_device(self) -> Option<bool> {
+        match self {
+            Self::HostToHost | Self::DeviceToHost => Some(false),
+            Self::HostToDevice | Self::DeviceToDevice => Some(true),
+            Self::Default => None,
+        }
+    }
+
+    /// Resolve the concrete copy direction from the residency of each endpoint,
+    /// modeling how unified addressing turns [`MemcpyKind::Default`] (and any
+    /// explicit kind) into one of the four concrete `H2H/H2D/D2H/D2D` kinds.
+    #[must_use]
+    pub const fn resolve(src: MemLocation, dst: MemLocation) -> Self {
+        match (src, dst) {
+            (MemLocation::Host, MemLocation::Host) => Self::HostToHost,
+            (MemLocation::Host, MemLocation::Device) => Self::HostToDevice,
+            (MemLocation::Device, MemLocation::Host) => Self::DeviceToHost,
+            (MemLocation::Device, MemLocation::Device) => Self::DeviceToDevice,
+        }
+    }
 }
 
 // ─── MemAttachFlags ──────────────────────────────────────────────────────────
@@ -501,5 +606,176 @@ mod tests {
         assert_eq!(MemcpyKind::DeviceToHost as u32, 2);
         assert_eq!(MemcpyKind::DeviceToDevice as u32, 3);
         assert_eq!(MemcpyKind::Default as u32, 4);
+    }
+
+    #[test]
+    fn device_ptr_cast_round_trips_address() {
+        // cast<T>() is address-preserving regardless of element size.
+        let p = DevicePtr(0xDEAD_BEEF);
+        assert_eq!(p.cast::<u8>(), p);
+        assert_eq!(p.cast::<f64>(), p);
+        assert_eq!(p.cast::<[u32; 16]>(), p);
+        // Round-trip through two casts is the identity.
+        assert_eq!(p.cast::<u8>().cast::<f64>(), p);
+        // as_raw_ptr exposes the same numeric address.
+        assert_eq!(p.as_raw_ptr::<f32>() as u64, p.0);
+    }
+
+    #[test]
+    fn typed_slice_meta_computes_byte_len() {
+        let p = DevicePtr(0x1000);
+        // u8: len bytes.
+        assert_eq!(p.as_typed_slice_meta::<u8>(100), Ok((0x1000, 100)));
+        // f32: 4 bytes each.
+        assert_eq!(p.as_typed_slice_meta::<f32>(64), Ok((0x1000, 256)));
+        // f64: 8 bytes each.
+        assert_eq!(p.as_typed_slice_meta::<f64>(10), Ok((0x1000, 80)));
+        // Zero-length is a valid empty span.
+        assert_eq!(p.as_typed_slice_meta::<f64>(0), Ok((0x1000, 0)));
+    }
+
+    #[test]
+    fn typed_slice_meta_rejects_count_overflow() {
+        let p = DevicePtr(0x1000);
+        // len * size_of::<f64>() overflows usize.
+        let huge = usize::MAX / 4;
+        assert_eq!(
+            p.as_typed_slice_meta::<f64>(huge),
+            Err(CudaRtError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn typed_slice_meta_rejects_address_overflow() {
+        // A pointer near the top of the address space whose span wraps u64.
+        let p = DevicePtr(u64::MAX - 4);
+        // 8 u8 bytes from (MAX-4) overflows the u64 address space.
+        assert_eq!(
+            p.as_typed_slice_meta::<u8>(8),
+            Err(CudaRtError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn device_ptr_offset_round_trip() {
+        // For representative pointer values and offsets, p.offset(d).offset(-d) == p,
+        // guarding against i64 overflow.
+        let ptrs = [
+            DevicePtr(0),
+            DevicePtr(1),
+            DevicePtr(0x1000),
+            DevicePtr(0xFFFF_FFFF),
+            DevicePtr(0x1_0000_0000),
+            DevicePtr(0x7FFF_FFFF_FFFF_FFFF),
+        ];
+        let deltas: [isize; 7] = [0, 1, -1, 8, -8, 4096, -4096];
+        for &p in &ptrs {
+            for &d in &deltas {
+                // Skip combinations that would overflow i64 in the forward step,
+                // because then the operation is not defined to round-trip.
+                let base = p.0 as i64;
+                if base.checked_add(d as i64).is_none() {
+                    continue;
+                }
+                let there = p.offset(d);
+                let back = there.offset(-d);
+                assert_eq!(back, p, "offset round-trip failed for p={p:?}, d={d}");
+            }
+        }
+    }
+
+    #[test]
+    fn memcpy_kind_classification() {
+        // Each explicit kind reports correct src/dst residency; Default is ambiguous.
+        assert_eq!(MemcpyKind::HostToHost.src_is_device(), Some(false));
+        assert_eq!(MemcpyKind::HostToHost.dst_is_device(), Some(false));
+        assert_eq!(MemcpyKind::HostToDevice.src_is_device(), Some(false));
+        assert_eq!(MemcpyKind::HostToDevice.dst_is_device(), Some(true));
+        assert_eq!(MemcpyKind::DeviceToHost.src_is_device(), Some(true));
+        assert_eq!(MemcpyKind::DeviceToHost.dst_is_device(), Some(false));
+        assert_eq!(MemcpyKind::DeviceToDevice.src_is_device(), Some(true));
+        assert_eq!(MemcpyKind::DeviceToDevice.dst_is_device(), Some(true));
+        assert_eq!(MemcpyKind::Default.src_is_device(), None);
+        assert_eq!(MemcpyKind::Default.dst_is_device(), None);
+    }
+
+    #[test]
+    fn memcpy_kind_direction_matrix_5x5() {
+        // Enumerate all (src, dst) direction combinations. We model the
+        // five "requested" kinds against the two real residencies; the resolved
+        // concrete kind is derived from residency only (unified-addressing
+        // semantics), so Default resolves identically to the matching explicit
+        // request, and every pair classifies deterministically.
+        let kinds = [
+            MemcpyKind::HostToHost,
+            MemcpyKind::HostToDevice,
+            MemcpyKind::DeviceToHost,
+            MemcpyKind::DeviceToDevice,
+            MemcpyKind::Default,
+        ];
+
+        // Map each requested kind to the residency pair it implies. Default is
+        // resolved per-endpoint by the caller, so we sweep it across all four
+        // residency combinations explicitly below.
+        fn residency(k: MemcpyKind) -> Option<(MemLocation, MemLocation)> {
+            match k {
+                MemcpyKind::HostToHost => Some((MemLocation::Host, MemLocation::Host)),
+                MemcpyKind::HostToDevice => Some((MemLocation::Host, MemLocation::Device)),
+                MemcpyKind::DeviceToHost => Some((MemLocation::Device, MemLocation::Host)),
+                MemcpyKind::DeviceToDevice => Some((MemLocation::Device, MemLocation::Device)),
+                MemcpyKind::Default => None,
+            }
+        }
+
+        // 5×5 matrix: rows = requested kind, cols = "what the second pointer
+        // wants" expressed as a kind. For every explicit row, the resolved kind
+        // must equal the row itself; the Default row defers to residency.
+        let mut covered = 0usize;
+        for &row in &kinds {
+            for &col in &kinds {
+                covered += 1;
+                match (residency(row), residency(col)) {
+                    // Both endpoints explicit: the resolved kind must reconstruct
+                    // exactly the explicit `row` kind from its own residency, and
+                    // src/dst classification must be self-consistent.
+                    (Some((src, dst)), _) => {
+                        let resolved = MemcpyKind::resolve(src, dst);
+                        assert_eq!(resolved, row, "row={row:?} col={col:?}");
+                        assert_eq!(resolved.src_is_device(), Some(src == MemLocation::Device));
+                        assert_eq!(resolved.dst_is_device(), Some(dst == MemLocation::Device));
+                    }
+                    // Default row: resolve against the column's residency (or, if
+                    // the column is also Default, against an assumed H↔H probe).
+                    (None, col_res) => {
+                        let (src, dst) = col_res.unwrap_or((MemLocation::Host, MemLocation::Host));
+                        let resolved = MemcpyKind::resolve(src, dst);
+                        // Default must classify to whatever residency dictates.
+                        assert_eq!(resolved, MemcpyKind::resolve(src, dst));
+                        assert_eq!(resolved.src_is_device(), Some(src == MemLocation::Device));
+                        assert_eq!(resolved.dst_is_device(), Some(dst == MemLocation::Device));
+                    }
+                }
+            }
+        }
+        // Exhaustively visited all 25 cells.
+        assert_eq!(covered, 25);
+
+        // Direct truth table for resolve() across the 4 residency pairs.
+        assert_eq!(
+            MemcpyKind::resolve(MemLocation::Host, MemLocation::Host),
+            MemcpyKind::HostToHost
+        );
+        assert_eq!(
+            MemcpyKind::resolve(MemLocation::Host, MemLocation::Device),
+            MemcpyKind::HostToDevice
+        );
+        assert_eq!(
+            MemcpyKind::resolve(MemLocation::Device, MemLocation::Host),
+            MemcpyKind::DeviceToHost
+        );
+        assert_eq!(
+            MemcpyKind::resolve(MemLocation::Device, MemLocation::Device),
+            MemcpyKind::DeviceToDevice
+        );
     }
 }

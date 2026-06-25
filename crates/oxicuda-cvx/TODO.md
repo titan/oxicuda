@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 
 ## Implementation Status
 
-- **Actual SLoC:** 20,511 (103 files, including 5,420 code + 266 comments + 373 blanks; markdown 403)
-- **Tests:** 616 passing (lib + e2e_tests)
+- **Actual SLoC:** 20,511 (106 files, including 5,420 code + 266 comments + 373 blanks; markdown 403)
+- **Tests:** 659 passing (lib + e2e_tests) + 3 doc-tests
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -110,7 +110,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 - [x] Inexact prox via inner conjugate gradient (for non-closed-form prox) (proximal/inexact_prox.rs -- solve prox_g(v)=argmin g(x)+ρ/2‖x−v‖² for quadratic g via inner CG on (A+ρI)x=ρv+b SPD system)
 - [x] Spectral projected gradient (SPG) with non-monotone line search (gradient/spg.rs -- Birgin 2000; Barzilai-Borwein spectral step + nonmonotone GLL line search + projection closure)
 - [x] Interior-point method with Mehrotra correction for QP (`qp/mehrotra_qp.rs` -- Mehrotra 1992; predictor-corrector IPM for QP with σ=(μ_aff/μ)³ and cross-term correction; 9 unit tests)
-- [ ] `qp/mehrotra_socp.rs` — Mehrotra PC for SOCP: extend QP predictor-corrector to second-order cone; Nesterov-Todd scaling; iterate (x,s,λ) with cone-projection step-length guard; parity with existing LP path
+- [x] `qp/mehrotra_socp.rs` — Mehrotra PC for SOCP: extend QP predictor-corrector to second-order cone; Nesterov-Todd scaling; iterate (x,s,λ) with cone-projection step-length guard; parity with existing LP path (ALREADY EXISTS as `socp/mehrotra_socp.rs` -- full NT scaling via Jordan-algebra quadratic-rep `Q_u=2uuᵀ−det(u)J`, normal equations `A W² Aᵀ`, predictor σ=(μ_aff/μ)³, corrector with cross-term `Δx̂∘Δŝ`, fraction-to-boundary cone-step guard; 11 unit tests; re-exported in `lib.rs`)
 - [x] `riemannian/riemannian_cvx.rs` — Riemannian gradient descent + retraction (Absil 2008): Riemannian gradient via orthogonal projection of Euclidean gradient; retraction via QR/SVD for Stiefel, eigen for SPD, exp map for Grassmann; geodesic Armijo line search
 
 #### P2 -- Nice-to-Have
@@ -119,7 +119,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 - [x] Coordinate descent (cyclic, random, accelerated) for separable smooth objectives
 - [x] Block-coordinate descent (BCD) for structured problems (gradient/block_coord_descent.rs -- Tseng 2001 / Beck-Tetruashvili 2013; cyclic/random sweep, exact per-block SPD solve via linalg::solve_dense or inner gradient descent, specialised quadratic API)
 - [x] Mirror descent for non-Euclidean geometries
-- [ ] `differentiable/kkt_diff.rs` — Differentiating through KKT conditions (Amos-Kolter 2017 OptNet): implicit function theorem on KKT system; dL/dθ via solve of transposed KKT with adjoint; enables cvxpylayers-style end-to-end training
+- [x] `differentiable/kkt_diff.rs` — Differentiating through KKT conditions (Amos-Kolter 2017 OptNet): implicit function theorem on KKT system; dL/dθ via solve of transposed KKT with adjoint; enables cvxpylayers-style end-to-end training
 - [x] `admm/async_admm.rs` — Asynchronous ADMM (Zhang-Recht 2014): parallel block updates without global synchronisation barrier; bounded-delay convergence guarantee for separable problems
 - [x] `gradient/polyak.rs` — Polyak step-size for subgradient (Polyak 1969): αₖ=(f(xₖ)-f*)/‖gₖ‖² with f* unknown (use moving estimate); geometric convergence for strongly convex + sharp subgradient problems
 
@@ -135,7 +135,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 616 passing
+- Tests: 659 passing + 3 doc-tests
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features
@@ -202,16 +202,16 @@ All six SM versions produce non-empty PTX strings and pass content-substring che
 - [ ] FISTA / ADMM throughput vs. CPU `scs` and `osqp` at n = 1e5
 
 ### Algorithmic Deepening
-- [ ] Adaptive penalty `rho` for ADMM (Boyd 2011 residual-balancing)
-- [ ] Restart strategies for FISTA (gradient restart, function restart)
-- [ ] Approximate projection / prox via inner iterations with bounded inexactness
-- [ ] Higher-order primal-dual methods (golden-ratio Chambolle-Pock, GRPDA)
-- [ ] Preconditioned conjugate gradient inside the linear-system solves of IPM
-- [ ] Sparse KKT factorisation (instead of dense Cholesky) for large LP / QP
+- [x] Adaptive penalty `rho` for ADMM (Boyd 2011 residual-balancing) (`admm/adaptive_rho_admm.rs` -- Boyd §3.4.1; ρ⁺=τ⁺ρ when ‖r‖>μ‖s‖, ρ⁻=ρ/τ⁻ when ‖s‖>μ‖r‖, scaled-dual rescale u←(ρ_old/ρ_new)u to preserve y=ρu, throttled via `adapt_every`, Boyd √p·ε_abs+ε_rel·max(‖Ax‖,‖Bz‖,‖c‖) feasibility test; 6 unit tests incl. faster-than-fixed-bad-ρ)
+- [x] Restart strategies for FISTA (gradient restart, function restart) (`proximal/fista_restart.rs` -- O'Donoghue-Candès 2015; `RestartRule::{Gradient,Function,None}`, gradient rule ⟨y−x⁺,x⁺−x⟩>0 (no extra objective eval), function rule on F(x⁺)>F(x) with monotone ISTA-from-x fallback, optional backtracking; 5 unit tests incl. beats-plain-FISTA on κ≈1000)
+- [ ] Approximate projection / prox via inner iterations with bounded inexactness (NOTE: substantially covered by existing `proximal/inexact_prox.rs` -- inner-CG prox for quadratic g)
+- [x] Higher-order primal-dual methods (golden-ratio Chambolle-Pock, GRPDA) (`primal_dual/grpda.rs` -- Chang-Yang 2021; convex-combination z_k=((ψ−1)/ψ)x_{k−1}+(1/ψ)z_{k−1} with ψ∈(1,φ], Gauss-Seidel prox steps, enlarged step region τσ‖K‖²<ψ≤φ vs PDHG's <1, `balanced()` step builder; 7 unit tests incl. matches Chambolle-Pock on least-squares + τσ‖K‖²≈1.5>1 still converges)
+- [ ] Preconditioned conjugate gradient inside the linear-system solves of IPM (internal-refactor of existing dense-Cholesky IPM path; deferred)
+- [ ] Sparse KKT factorisation (instead of dense Cholesky) for large LP / QP (requires sparse-matrix infrastructure; deferred)
 
 ### API Polish
-- [ ] Builder pattern `LpSolverBuilder::tolerance(1e-8).max_iter(100).method(Method::Mehrotra).solve(&problem)`
-- [ ] Common `ProblemSpec` trait so the same problem can be dispatched to LP / QP / SOCP / SDP backends
-- [ ] Re-export the most common prox / projection operators at the crate root for ergonomic use
+- [x] Builder pattern `LpSolverBuilder::tolerance(1e-8).max_iter(100).method(Method::Mehrotra).solve(&problem)` (`builder.rs:LpSolverBuilder` -- fluent `.tolerance()/.max_iter()/.method()/.solve()`; `LpMethod::{Simplex,Mehrotra,PrimalDual}` dispatches to `revised_simplex`/`mehrotra_predictor_corrector`/`primal_dual_lp`; default Mehrotra, tol 1e-9, 200 iters; simplex falls back to trailing-m slack basis; unified `LpSolution`; 7 unit tests verify builder output matches each direct solver call)
+- [x] Common `ProblemSpec` trait so the same problem can be dispatched to LP / QP / SOCP / SDP backends (`problem.rs:ProblemSpec` -- `form()` + `dispatch()`, generic free fn `solve(&impl ProblemSpec)`; self-contained data structs `LpProblem`→`mehrotra_predictor_corrector`, `QpProblem`→`mehrotra_qp`, `SocpProblem`→`mehrotra_socp`, `SdpProblem`→`sdp_interior_point`; uniform `ProblemSolution{x,objective,iter,form}`; 6 unit tests incl. generic-over-`P: ProblemSpec` dispatch and per-form match-vs-direct)
+- [x] Re-export the most common prox / projection operators at the crate root for ergonomic use (`lib.rs` -- `pub use` of `soft_threshold`, `prox_l1/l2/linf/elastic_net/group_lasso/nuclear/tv_1d`, `prox_indicator_box/simplex/l1_ball/l2_ball`, `project_simplex/l1_ball/l2_ball/box/halfspace/psd_cone/soc`; crate-root doc-test exercises `oxicuda_cvx::soft_threshold` / `prox_l1` / `project_simplex`)
 - [ ] Cross-link with `oxicuda-cs` (Vol.58) for sparse recovery via L1 / TV-L2 fronts and with
-  `oxicuda-stats` for penalised regression objectives
+  `oxicuda-stats` for penalised regression objectives (cross-crate; out of scope for a single-crate change, no new deps)

@@ -23,6 +23,7 @@
 
 pub mod audio;
 pub mod beamform;
+pub mod cepstrum;
 pub mod correlation;
 pub mod cwt;
 pub mod dct;
@@ -35,6 +36,8 @@ pub mod image;
 pub mod ptx_helpers;
 pub mod resample;
 pub mod spectral;
+pub mod timefreq;
+pub mod transform;
 pub mod types;
 pub mod window;
 
@@ -58,6 +61,10 @@ pub mod prelude {
         magnitude_spectrogram, mfcc, power_spectrogram, spectrogram, stft_reference,
     };
     pub use crate::beamform::{MvdrConfig, delay_and_sum, mvdr_weights};
+    pub use crate::cepstrum::{
+        cepstral_pitch, complex_cepstrum, highpass_lifter, inverse_complex_cepstrum,
+        lowpass_lifter, power_cepstrum, real_cepstrum, sinusoidal_lifter, unwrap_phase,
+    };
     pub use crate::correlation::{
         autocorr_biased, autocorr_normalised, autocorr_unbiased, autocovariance, convolve,
         convolve_circular, crosscorr, crosscorr_normalised, find_delay, gcc_phat, ljung_box_q,
@@ -68,7 +75,8 @@ pub mod prelude {
         cwt_scalogram,
     };
     pub use crate::dct::{
-        Dct2Plan, MdctPlan, dct2_reference, dct3_reference, dct4_reference, imdct, mdct,
+        Dct2Plan, MdctPlan, Mp3BlockType, Mp3MdctPlan, dct2_reference, dct3_reference,
+        dct4_reference, imdct, mdct, mp3_imdct, mp3_mdct,
     };
     pub use crate::dwt::{
         WaveletDecomposition, hard_threshold, multilevel_forward, multilevel_inverse,
@@ -82,15 +90,25 @@ pub mod prelude {
         Biquad, ButterworthConfig, ButterworthFilter, FilterType, RemezBand, apply_wiener_gains,
         design_bandpass, design_highpass, design_lowpass, design_raised_cosine, estimate_noise_psd,
         fir_apply, iir_apply, local_wiener_1d, median_filter_1d, remez, remez_bandpass,
-        remez_bandstop, remez_highpass, remez_lowpass, weighted_median_1d, wiener_filter,
-        wiener_gain,
+        remez_bandstop, remez_highpass, remez_lowpass, richardson_lucy, weighted_median_1d,
+        wiener_deconvolve, wiener_filter, wiener_gain,
     };
     pub use crate::image::{
         BBox, SoftNmsDecay, close, dilate, erode, gaussian_blur, morphological_gradient,
         nms_greedy, nms_heatmap, nms_soft, open, sobel, sobel_magnitude,
     };
     pub use crate::resample::{resample_poly, resample_rate};
-    pub use crate::spectral::{PsdScaling, bartlett_psd, multitaper_psd, periodogram, welch};
+    pub use crate::spectral::{
+        GoertzelBin, PsdScaling, bartlett_psd, dtmf_decode, goertzel, goertzel_hz,
+        goertzel_power_spectrum, multitaper_psd, periodogram, welch,
+    };
+    pub use crate::timefreq::{
+        WvdConfig, WvdOutput, cross_wvd, wvd, wvd_frequency_marginal, wvd_instantaneous_frequency,
+        wvd_time_marginal,
+    };
+    pub use crate::transform::{
+        CztConfig, CztOutput, czt, czt_magnitude, czt_power, czt_real, dft_via_czt, zoom_fft,
+    };
     pub use crate::types::{
         NormMode, PadMode, SignalPrecision, StructuringElement, TransformDirection, WaveletFamily,
         WindowType,

@@ -88,11 +88,15 @@ The three degrees multiply to `world_size = tp * sp * ep`.
 - [x] Medusa speculative decoding (`speculative/medusa.rs`) — Cai 2024: multiple decoding heads predicting k future tokens simultaneously with tree-structured candidate verification; `MedusaDecoder`
 - [x] Radix-tree prefix-sharing KV cache (`distributed_cache/radix_cache.rs`) — Zheng 2023 vLLM: radix-tree (trie) structure for sharing common prefix KV blocks across requests with LRU eviction; `RadixCache`
 - [x] FP8 inference quantisation (`quantisation/fp8_infer.rs`) — Micikevicius 2022: per-tensor E4M3/E5M2 scaling factors with delayed-scaling recipe for transformer weight + activation quantisation; `Fp8InferQuantiser`
-- [ ] Disaggregated prefill-decode (`scheduler/disagg_pd.rs`) — Zhong 2024 SOSP: separate prefill and decode worker pools with KV-cache migration over interconnect; `DisaggPdScheduler`
+- [x] Disaggregated prefill-decode (`scheduler/disagg_pd.rs`) — Zhong 2024 SOSP/OSDI: separate prefill and decode worker pools with least-loaded assignment + planned KV-cache hand-off (`PrefillHandoff` block-count + worker pair feeds `BlockMigrator`); `DisaggPdScheduler`, `PdPhase`, `PdStats`. (KV-block *transfer execution* over the real interconnect is still hardware-gated; the scheduler plans it.)
 - [x] Per-policy router metrics with prefix hit-rate (`router/policy.rs::RouterMetrics`)
-- [ ] (P2) Real NCCL-equivalent collective backend (currently simulated via in-process function calls)
-- [ ] (P2) Pipeline parallelism axis (PP) for very deep models -- intentionally out of scope of v1
-- [ ] (P2) Dynamic rebalancing trigger on load imbalance (rebalance_suggestions() exists; no autonomous trigger)
+- [x] Pipeline parallelism (PP) axis — *schedule generators & partition planner* (`pipeline_parallel/`): balanced + cost-aware layer→stage partition (`partition.rs::LayerPartition`); GPipe / 1F1B / interleaved-1F1B schedule generators with event-driven hazard verification + bubble accounting (`schedule.rs::PipelineSchedule`, `gpipe_schedule`, `one_f_one_b_schedule`, `interleaved_1f1b_schedule`). Pure CPU scheduling logic with exact oracles (`(p−1)/m` bubble, hazard-freeness). On-device execution of the stages still needs multi-GPU hardware.
+- [x] Collective-communication *step schedules* (`collective/`): ring all-reduce / reduce-scatter / all-gather (`ring.rs::RingCollective` + `execute_ring_*`, Baidu/NCCL ring) and recursive-halving all-reduce / recursive-doubling all-gather (`tree.rs`, MPICH). In-memory executors are bit-exact oracles for the schedule (sum / concatenation correctness). The PTX device kernels live in `ptx_kernels.rs`.
+- [x] Continuous (iteration-level) batching scheduler (`scheduler/continuous_batch.rs`) — Orca/vLLM: waiting/running queues, paged-KV block budget, priority+FCFS admission control, per-iteration decode advance, block-boundary growth, OOM preemption + requeue; `ContinuousBatcher`, `BatchPlan`, `SeqState`.
+- [x] Autonomous rebalancing trigger (`scheduler/rebalance.rs`) — `RebalanceMonitor` watches `CachePartition::utilization_imbalance()` and the MoE `load_balance_cv()`; on threshold crossing synthesises a conservation-checked `MigrationPlan` (ordered `MigrationMove`s) that strictly reduces the spread; `evaluate`, `evaluate_with_moe`, `apply_plan`.
+- [x] Elastic per-rank scaling planner (`scheduler/elastic.rs`) — `ElasticScaler` adds/removes a rank along an `ElasticAxis`, recomputes the TP×SP×EP grid + per-rank `RankCoordinates`, and emits an `ElasticPlan` (`ExpertMove`s + cache `MigrationMove`s) that conserves total expert + cache assignment; `plan_add_rank`, `plan_remove_rank`, `apply_cache_moves`. Planning only.
+- [ ] (P2) Real NCCL-equivalent collective backend — *executes* the ring/tree step schedules above over actual NVLink/PCIe (requires GPU/multi-GPU hardware)
+- [x] (P2) Dynamic rebalancing trigger on load imbalance (`scheduler/rebalance.rs::RebalanceMonitor` -- autonomous host-side trigger: `evaluate()` fires when `CachePartition::utilization_imbalance()` (added: `partition.rs::utilization_imbalance`) reaches a configurable threshold, then `build_plan()` greedily projects smallest-sequence hot→cold moves onto a working copy of the rank stats to synthesise a conservation-checked `MigrationPlan` that strictly reduces the spread; `evaluate_with_moe()` couples in the MoE `load_balance_cv()` signal; `apply_plan()` executes it via `CachePartition::apply_migration`. Tests: `skewed_partition_triggers_and_reduces_imbalance`, `balanced_partition_does_not_trigger`, `plan_conserves_total_blocks`, `plan_application_actually_levels_the_partition`.)
 
 ## Dependencies
 
@@ -104,9 +108,9 @@ The three degrees multiply to `world_size = tp * sp * ep`.
 
 ## Quality Status
 
-- Warnings: 0 (clippy clean)
-- Tests: 133 passing (root TODO.md count)
-- unwrap() calls: 0 (production code; test helpers use `.unwrap()` on infallible handle construction)
+- Warnings: 0 (clippy clean, `-D warnings` across `--all-targets --all-features`)
+- Tests: 233 passing (was 209; +21 for `scheduler/rebalance.rs` autonomous-trigger / MoE-stress + `scheduler/elastic.rs` add/remove-rank planner, +3 for new `partition.rs` accessors)
+- unwrap() calls: 0 (production code; test helpers use `.unwrap()`/`.expect()` on infallible construction)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference simulations work; runtime collective backend returns `UnsupportedPlatform`
 
@@ -144,17 +148,23 @@ The three degrees multiply to `world_size = tp * sp * ep`.
 - [x] EP MoE dispatch + gather is round-trip identity for top-1 routing + identity experts
 - [x] PTX kernels validated for all 5 SM versions (sm_75 / sm_80 / sm_90 / sm_100 / sm_120)
 - [x] Prefix-affinity routing exhibits >0 hit rate after registration
-- [ ] Multi-rank end-to-end roundtrip on actual NVLink hardware (deferred -- single-process simulation only)
-- [ ] Load-imbalance MoE stress (skewed expert load) verifies `load_balance_cv()` triggers rebalancing
+- [x] Ring all-reduce step schedule converges to the exact element-wise sum (`collective/ring.rs`); equals the row-parallel TP all-reduce oracle (`lib.rs::e2e_ring_all_reduce_matches_tp_all_reduce`)
+- [x] Recursive-halving all-reduce / recursive-doubling all-gather converge to the exact sum/concatenation (`collective/tree.rs`)
+- [x] 1F1B / GPipe / interleaved-1F1B schedules are hazard-free (event-driven simulator) with the analytic `2(p−1)` bubble; interleaving strictly shrinks the bubble (`pipeline_parallel/schedule.rs`)
+- [x] Continuous batcher never exceeds block capacity, frees blocks on finish, preempts on OOM, and reports impossible requests as a deadlock (`scheduler/continuous_batch.rs`)
+- [ ] Multi-rank end-to-end roundtrip on actual NVLink hardware (requires GPU/multi-GPU hardware -- single-process simulation only)
+- [x] Load-imbalance MoE stress (skewed expert load) verifies `load_balance_cv()` triggers rebalancing (`scheduler/rebalance.rs::tests::moe_skew_triggers_via_cv_signal` -- routes all 16 tokens to expert 0, asserts `expert_load == [16,0,0,0]` and `load_balance_cv ≈ 1.73`, then verifies `RebalanceMonitor::with_moe_cv_threshold` fires `moe_should_trigger()` and `evaluate_with_moe()` emits a non-empty imbalance-reducing plan; `balanced_moe_does_not_trigger_moe_signal` is the negative control.)
 
 ### Implementation Deepening
 - [x] `RankCoordinates` 3-D tp/sp/ep decomposition with peer lookups
 - [x] `BoundaryExchange::local_attention` supports causal masking and GQA head indexing
 - [x] `ExpertDispatcher::dispatch_and_gather` accepts user-supplied expert closure
 - [x] `BlockMigrator` validates target rank before staging
-- [ ] NCCL-equivalent collective backend (currently in-process simulation; needs real cluster integration)
-- [ ] Dynamic per-rank scaling -- elastic add/remove of ranks during serving
-- [ ] Pipeline parallelism (PP) axis -- intentionally out of scope of v1
+- [x] Pipeline parallelism (PP) axis -- partition planner + GPipe/1F1B/interleaved schedule generators with hazard verification & bubble accounting (`pipeline_parallel/`)
+- [x] Ring & tree collective *step-schedule* generators with in-memory bit-exact executors (`collective/`)
+- [x] Continuous (iteration-level) + disaggregated prefill/decode schedulers (`scheduler/`)
+- [ ] NCCL-equivalent collective backend that *executes* the step schedules on device (requires GPU/multi-GPU hardware + real cluster integration)
+- [x] Dynamic per-rank scaling -- elastic add/remove of ranks during serving (`scheduler/elastic.rs::ElasticScaler` -- host-side planner: `plan_add_rank()`/`plan_remove_rank()` recompute the TP×SP×EP grid by adjusting one `ElasticAxis` by ±1, validate every new rank's `RankCoordinates`, diff expert ownership into `ExpertMove`s via `expert_owners()` (contiguous EP-leader partition from `RankCoordinates::to_global`), and re-level/evacuate the cache into `MigrationMove`s with a fair-share greedy redistribution; the resulting `ElasticPlan` is verified to conserve total experts and total cache assignment (`RedistributionNotConserved` on violation). `apply_cache_moves()` executes the cache portion. Tests: `add_rank_conserves_and_levels_experts`, `remove_rank_redistributes_experts_without_loss`, `add_rank_cache_levels_onto_new_rank`, `remove_rank_evacuates_all_its_sequences`, `apply_cache_moves_executes_on_live_partition_scale_down`. Planning only -- no device sync.)
 
 ## Notes
 

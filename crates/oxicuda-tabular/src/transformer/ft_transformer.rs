@@ -394,6 +394,153 @@ impl FtTransformer {
     }
 }
 
+// ─── Crate-internal accessors used by the analytic backward pass ──────────────
+// The backward implementation lives in `ft_transformer_grad.rs`; it needs
+// read access to the private parameter buffers without exposing them publicly.
+
+impl FtTransformer {
+    pub(crate) fn config_ref(&self) -> &FtConfig {
+        &self.config
+    }
+    pub(crate) fn tokenizer_ref(&self) -> &FeatureTokenizer {
+        &self.tokenizer
+    }
+    pub(crate) fn cls_token_ref(&self) -> &[f32] {
+        &self.cls_token
+    }
+    pub(crate) fn wq_ref(&self, l: usize) -> &[f32] {
+        &self.wq[l]
+    }
+    pub(crate) fn wk_ref(&self, l: usize) -> &[f32] {
+        &self.wk[l]
+    }
+    pub(crate) fn wv_ref(&self, l: usize) -> &[f32] {
+        &self.wv[l]
+    }
+    pub(crate) fn wo_ref(&self, l: usize) -> &[f32] {
+        &self.wo[l]
+    }
+    pub(crate) fn ffn_w1_ref(&self, l: usize) -> &[f32] {
+        &self.ffn_w1[l]
+    }
+    pub(crate) fn ffn_b1_ref(&self, l: usize) -> &[f32] {
+        &self.ffn_b1[l]
+    }
+    pub(crate) fn ffn_w2_ref(&self, l: usize) -> &[f32] {
+        &self.ffn_w2[l]
+    }
+    pub(crate) fn ffn_b2_ref(&self, l: usize) -> &[f32] {
+        &self.ffn_b2[l]
+    }
+    pub(crate) fn ln1_g_ref(&self, l: usize) -> &[f32] {
+        &self.ln1_g[l]
+    }
+    pub(crate) fn ln1_b_ref(&self, l: usize) -> &[f32] {
+        &self.ln1_b[l]
+    }
+    pub(crate) fn ln2_g_ref(&self, l: usize) -> &[f32] {
+        &self.ln2_g[l]
+    }
+    pub(crate) fn ln2_b_ref(&self, l: usize) -> &[f32] {
+        &self.ln2_b[l]
+    }
+    pub(crate) fn head_w_ref(&self) -> &[f32] {
+        &self.head_w
+    }
+    pub(crate) fn head_b_ref(&self) -> &[f32] {
+        &self.head_b
+    }
+
+    /// Read a single scalar parameter (test-only, for finite-difference checks).
+    #[cfg(test)]
+    pub(crate) fn param_get(&self, p: &crate::transformer::ft_transformer_grad::ParamRef) -> f32 {
+        use crate::transformer::ft_transformer_grad::ParamRef as P;
+        match *p {
+            P::Cls(i) => self.cls_token[i],
+            P::ContW(i) => self.tokenizer.cont_w_flat()[i],
+            P::ContB(i) => self.tokenizer.cont_b_flat()[i],
+            P::Cat(f, i) => self.tokenizer.cat_embed_flat(f)[i],
+            P::Wq(l, i) => self.wq[l][i],
+            P::Wk(l, i) => self.wk[l][i],
+            P::Wv(l, i) => self.wv[l][i],
+            P::Wo(l, i) => self.wo[l][i],
+            P::Fw1(l, i) => self.ffn_w1[l][i],
+            P::Fb1(l, i) => self.ffn_b1[l][i],
+            P::Fw2(l, i) => self.ffn_w2[l][i],
+            P::Fb2(l, i) => self.ffn_b2[l][i],
+            P::Ln1g(l, i) => self.ln1_g[l][i],
+            P::Ln1b(l, i) => self.ln1_b[l][i],
+            P::Ln2g(l, i) => self.ln2_g[l][i],
+            P::Ln2b(l, i) => self.ln2_b[l][i],
+        }
+    }
+
+    /// Write a single scalar parameter (test-only, for finite-difference checks).
+    #[cfg(test)]
+    pub(crate) fn param_set(
+        &mut self,
+        p: &crate::transformer::ft_transformer_grad::ParamRef,
+        val: f32,
+    ) {
+        use crate::transformer::ft_transformer_grad::ParamRef as P;
+        match *p {
+            P::Cls(i) => self.cls_token[i] = val,
+            P::ContW(i) => self.tokenizer.cont_w_flat_mut()[i] = val,
+            P::ContB(i) => self.tokenizer.cont_b_flat_mut()[i] = val,
+            P::Cat(f, i) => self.tokenizer.cat_embed_flat_mut(f)[i] = val,
+            P::Wq(l, i) => self.wq[l][i] = val,
+            P::Wk(l, i) => self.wk[l][i] = val,
+            P::Wv(l, i) => self.wv[l][i] = val,
+            P::Wo(l, i) => self.wo[l][i] = val,
+            P::Fw1(l, i) => self.ffn_w1[l][i] = val,
+            P::Fb1(l, i) => self.ffn_b1[l][i] = val,
+            P::Fw2(l, i) => self.ffn_w2[l][i] = val,
+            P::Fb2(l, i) => self.ffn_b2[l][i] = val,
+            P::Ln1g(l, i) => self.ln1_g[l][i] = val,
+            P::Ln1b(l, i) => self.ln1_b[l][i] = val,
+            P::Ln2g(l, i) => self.ln2_g[l][i] = val,
+            P::Ln2b(l, i) => self.ln2_b[l][i] = val,
+        }
+    }
+}
+
+// Crate-internal accessors on the tokenizer for the backward pass.
+impl FeatureTokenizer {
+    pub(crate) fn embed_dim_ref(&self) -> usize {
+        self.embed_dim
+    }
+    pub(crate) fn n_cont_ref(&self) -> usize {
+        self.n_cont
+    }
+    pub(crate) fn cont_w_at(&self, j: usize, d: usize) -> f32 {
+        self.cont_w[j * self.embed_dim + d]
+    }
+    #[cfg(test)]
+    pub(crate) fn cont_w_flat(&self) -> &[f32] {
+        &self.cont_w
+    }
+    #[cfg(test)]
+    pub(crate) fn cont_b_flat(&self) -> &[f32] {
+        &self.cont_b
+    }
+    #[cfg(test)]
+    pub(crate) fn cont_w_flat_mut(&mut self) -> &mut [f32] {
+        &mut self.cont_w
+    }
+    #[cfg(test)]
+    pub(crate) fn cont_b_flat_mut(&mut self) -> &mut [f32] {
+        &mut self.cont_b
+    }
+    #[cfg(test)]
+    pub(crate) fn cat_embed_flat(&self, f: usize) -> &[f32] {
+        &self.cat_embeds[f]
+    }
+    #[cfg(test)]
+    pub(crate) fn cat_embed_flat_mut(&mut self, f: usize) -> &mut [f32] {
+        &mut self.cat_embeds[f]
+    }
+}
+
 // ─── Exported alias so users can call self_attention directly ─────────────────
 // (already pub in saint module; re-exported via prelude)
 

@@ -3,6 +3,7 @@
 pub mod at;
 pub mod crd_multi;
 pub mod cwd;
+pub mod fcfd;
 pub mod fitnets;
 pub mod mgd;
 pub mod ofd;
@@ -17,6 +18,7 @@ pub use crd_multi::{CrdMemoryBank, CrdMultiConfig, CrdMultiLoss};
 pub use cwd::{
     ChannelProjector, CwdConfig, channel_kl, cwd_loss, cwd_loss_projected, spatial_softmax,
 };
+pub use fcfd::{FcfdConfig, banded_mse, dct_basis, dct2_channel, fcfd_loss, low_band_energy_ratio};
 pub use mgd::{MgdConfig, MgdGenerator, forward_generator, generate_mask, mgd_loss};
 pub use ofd::{OfdConnector, estimate_margins, margin_relu, ofd_loss, ofd_loss_batch, partial_l2};
 pub use projection_free::{ProjFreeConfig, ProjFreeDistiller, ProjFreeLossType, ProjFreeNorm};

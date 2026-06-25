@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-25
+
+This release adds no new crates (still 73). It is a depth pass: implementing genuine, CPU-verifiable algorithms across existing crates, reviving orphaned-but-real modules, wiring cross-crate paths, and fixing latent bugs surfaced along the way. Every algorithm was added with correctness tests (finite-difference-verified gradients, analytic-front residuals, bit-exact cross-path checks).
+
+### Added
+
+- Cross-crate integration: `oxicuda-gnn` `GcnLayer::forward_sparse` routes message passing through `oxicuda-sparse` HostCsr SpMM (sparse path bit-exact vs the dense path); `oxicuda-timeseries` `detect_period_fft` computes Wiener–Khinchin autocorrelation via `oxicuda-fft` rfft/irfft (matches the direct O(T²) result to 3.3e-12). Both dependencies are declared `{ workspace = true }` with no dependency cycle.
+- `oxicuda-geometry3d`: PointFlow continuous-normalizing-flow core (reverse-time invertibility 1.1e-16, exact-trace logdet vs finite-difference 6.2e-11). Trained generation parts deferred.
+- `oxicuda-audio`: residual-vector-quantization neural-codec core (Bark RVQ — monotone reconstruction error, exact index recovery, k-means fit non-increase). Trained generation parts deferred.
+- `oxicuda-rlhf` is now fully gradient-capable: 20+ analytic, central-finite-difference-verified gradients across 17 loss modules — the closed-form preference family (DPO/IPO/KTO/SimPO/ORPO/BCO/DPOP/SLiC/Step-DPO/sDPO/RRHF/length-DPO/online-DPO), reward models (Bradley-Terry, soft-BT RLAIF, PRM), and RL estimators (PPO, GRPO clip + k3-KL, REBEL, RLOO, SAC-RLHF). Previously forward-value-only.
+- `oxicuda-evol`: WFG1-9, ZDT4/6, and DTLZ3-7 multi-objective test problems (analytic-front residuals at machine epsilon).
+- `oxicuda-seq`: Gaussian-HMM Baum-Welch EM (monotone log-likelihood); Kalman tracking and CRF chunker examples.
+- `oxicuda-audio`: rational-quadratic spline flow (Durkan 2019) as a VITS stochastic-duration dequantizer.
+- `oxicuda-hdc`: measured Hopfield-capacity and bundle-SNR scaling-law curves.
+- `oxicuda-snn`: NARMA-10 reservoir benchmark and STDP sign/shape verification; sparse spike encoding and event-driven LIF.
+- `oxicuda-ptx`: `CpAsyncGenerator` emitting `cp.async.cg/ca.global` PTX with multi-stage commit_group/wait_group pipelining and a pre-sm_80 fallback; `FusionCostModel` register-pressure + shared-memory + ILP heuristic wired into `kernel_fusion::plan_fusion`.
+- `oxicuda-tabular`: analytic backward passes (FT-Transformer/TabNet/SAINT/NODE) with softmax/sparsemax/entmax Jacobians.
+- `oxicuda-backend`: mixed-precision GEMM (binary16/bfloat16 round-to-nearest-even, FP32 accumulate) and conv2d backward.
+- `oxicuda-quant`: GGUF v3 container read/write.
+- `oxicuda-graph`: reduction-pattern fusion pass.
+- `oxicuda-gnn`: edge-feature support in GAT.
+- `oxicuda-runtime`: device-pointer cast / typed-slice helpers and stream-capture bookkeeping.
+- `oxicuda-privacy`: Philox and ChaCha20 counter-based RNGs, a DP-Adam convergence harness, and PATE-GAN/DP-GAN.
+- `oxicuda-nas`: Bayesian-optimization GP predictor and Once-for-All.
+- `oxicuda-meta`: MAML inner-loop integration.
+- `oxicuda-pinn`: PI-DeepONet forward-mode AD, a tree-GP symbolic regressor, and batched ODE solvers.
+- `oxicuda-gen`: full U-Net assembly and LoRA checkpoint round-trip.
+- `oxicuda-geometry3d`: straight-through FPS gradients.
+- `oxicuda-pde`: convergence-verified Poisson, Crank-Nicolson, and multigrid solvers.
+- `oxicuda-solver`: MINRES/QMR/LSQR Krylov solvers and Gilbert-Peierls sparse LU.
+- `oxicuda-blas`: 2:4 structured-sparse SpGEMM with Ampere `mma.sp` codegen.
+- `oxicuda-autotune`: persistent LRU tune-cache.
+- `oxicuda-cvx`: fluent LP/QP/SOCP/SDP solver builder.
+- `oxicuda-tda`: persistence and Mapper examples.
+- `oxicuda-sketch`: `CuckooFilter32`.
+- `oxicuda-causal`: discrete conditional-independence tests (chi-square / G-test) and the PC algorithm.
+- `oxicuda-peft`: AdaLoRA, TIES, and DARE.
+- `oxicuda-dist-infer`: autonomous `RebalanceMonitor` and `ElasticScaler`.
+- Test suite expanded to 36,984 passing tests (workspace-wide, `--all-features`; 36,546 with default features), up from 32,320 at 0.2.0.
+
+### Changed
+
+- Wired 11 orphaned-but-real modules across 6 crates (180 previously-dead tests revived) — `oxicuda-evol` CMA-ME, `oxicuda-manifold` Isomap / parametric-tSNE / geodesic-regression, `oxicuda-rand` cuRAND-style host API, `oxicuda-rlhf` dpo/ppo loss + reward-norm, `oxicuda-stats` GMM + ARIMA, `oxicuda-timeseries` DTW; plus 4 more orphaned modules in `oxicuda-nas` (Once-for-All, NAS-Bench) and `oxicuda-geometry3d`. These were real, tested algorithm files never declared in `mod.rs`.
+- `oxicuda-ptx`: kernel fusion is now cost-gated — `FusionCostModel` replaces the former unconditional acceptance of every structurally-legal fusion candidate with a register-spill / shared-memory / benefit-threshold fuse-or-refuse decision.
+
+### Fixed
+
+- `oxicuda-ot`: `network_simplex` `find_cycle` had an inverted closing-parity condition that failed 100% of n≥4 dense EMD instances — the exact optimal-transport solver was silently broken for all non-trivial problem sizes. Rewrote the alternating-axis cycle DFS; now a 100% solve rate for n=5..64, agreeing with Sinkhorn to relative gap < 8e-3 as ε→0.
+- `oxicuda-peft`: corrected an NF4 codebook typo — `NF4_TABLE[3]` and `nf4_dequant_ptx` held `-0.3949468731880188`; the canonical QLoRA/bitsandbytes value (and the crate's own `nf4_quant.rs`) is `-0.39491748809814453`.
+- `oxicuda-rand`: fixed an MRG32k3a `[0,1)` contract violation and scrambled-Sobol Inf/NaN (an errant `÷2^31` should have been `÷2^32`).
+- `oxicuda-stats`: fixed a GMM kmeans++ degenerate fallback that could panic with a reversed range or produce wrong-length centers.
+- `oxicuda-solver`: fixed a sparse-LU pivoting bug.
+- `oxicuda-nas`: fixed 2 latent compile bugs (missing `PartialEq` derives) in the previously-never-compiled Once-for-All module.
+
 ## [0.2.0] - 2026-06-16
 
 ### Added

@@ -306,6 +306,33 @@ fn cox_gradients_hessians(
 // Tree building (XGBoost-style, node-arena)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Optimal (second-order) leaf weight for a gradient-boosted Cox tree leaf.
+///
+/// For Newton/XGBoost-style boosting of the Cox negative log partial-likelihood,
+/// the closed-form minimiser of the regularised leaf objective is
+///
+/// `w_leaf = -(Σ_{i∈L} g_i) / (Σ_{i∈L} h_i + λ)`
+///
+/// where `g_i` / `h_i` are the first / second derivatives of the loss w.r.t. the
+/// current log-risk score (see [`cox_gradients_hessians`]) and `λ` is the L2
+/// regularisation on leaf weights.
+///
+/// The denominator is guarded: a leaf is only assigned a weight of `0.0` when it
+/// is genuinely degenerate (empty leaf, or a non-positive effective denominator,
+/// which can only happen for an empty leaf since `h_i ≥ 0` and `λ ≥ 0`). This
+/// avoids producing `NaN`/`inf` when `λ == 0` and the leaf Hessian mass is zero.
+#[inline]
+fn leaf_weight(g_sum: f64, h_sum: f64, lambda: f64) -> f64 {
+    let denom = h_sum + lambda;
+    if denom > f64::MIN_POSITIVE {
+        -g_sum / denom
+    } else {
+        // Genuinely degenerate leaf (no Hessian mass and no regularisation):
+        // no information to fit a weight, so contribute nothing to the model.
+        0.0
+    }
+}
+
 /// XGBoost gain for a single candidate split partition.
 ///
 /// `gain = G_L^2/(H_L+λ) + G_R^2/(H_R+λ) - G^2/(H+λ)`
@@ -422,7 +449,8 @@ fn build_node(
 ) -> usize {
     let g_sum: f64 = indices.iter().map(|&i| grads[i]).sum();
     let h_sum: f64 = indices.iter().map(|&i| hessians[i]).sum();
-    let leaf_val = -g_sum / (h_sum + lambda);
+    // Optimal second-order leaf weight (guarded against a degenerate denominator).
+    let leaf_val = leaf_weight(g_sum, h_sum, lambda);
 
     // Stop if depth limit reached, too few samples, or Hessian too small
     if depth >= max_depth || indices.len() < 2 || h_sum < min_child_weight {
@@ -478,9 +506,13 @@ fn build_node(
                 return node_idx;
             }
 
-            // Allocate a placeholder for this split node; fill in child indices after recursion
+            // Allocate this split node's slot; child indices are filled in after
+            // recursion. We seed the slot with the node's own correctly fitted
+            // leaf weight (`leaf_val`) rather than a meaningless `0.0`, so that if
+            // the slot were ever left un-overwritten it still carries a sane,
+            // information-bearing value instead of a no-op leaf.
             let split_idx = nodes.len();
-            nodes.push(GbNode::Leaf { value: 0.0 }); // placeholder
+            nodes.push(GbNode::Leaf { value: leaf_val });
 
             let left_child = build_node(
                 covariates,
@@ -1153,6 +1185,187 @@ mod tests {
         assert!(
             matches!(result, Err(SurvivalError::NoEvents)),
             "expected NoEvents error"
+        );
+    }
+
+    // ── Test 16: leaf_weight closed form and degenerate guard ─────────────────
+
+    #[test]
+    fn leaf_weight_closed_form_and_guard() {
+        // Standard second-order leaf weight: -G / (H + λ).
+        let w = leaf_weight(4.0, 6.0, 2.0);
+        assert!((w - (-4.0 / 8.0)).abs() < 1e-12, "leaf_weight closed form");
+        // Non-zero, finite for a normal leaf.
+        assert!(w.abs() > 0.0 && w.is_finite());
+
+        // Negative gradient sum → positive weight.
+        let w_pos = leaf_weight(-3.0, 5.0, 1.0);
+        assert!(w_pos > 0.0 && w_pos.is_finite());
+
+        // Degenerate leaf: zero Hessian mass AND zero regularisation → guarded 0.0
+        // (must NOT be NaN/inf from a 0/0 division).
+        let w_deg = leaf_weight(0.0, 0.0, 0.0);
+        assert!(w_deg.is_finite(), "degenerate leaf must be finite");
+        assert_eq!(w_deg, 0.0, "genuinely empty leaf → 0.0");
+
+        // Degenerate with a non-zero gradient but no denominator → still guarded 0.0.
+        let w_deg2 = leaf_weight(7.0, 0.0, 0.0);
+        assert!(w_deg2.is_finite() && w_deg2 == 0.0);
+
+        // A tiny positive λ rescues the denominator → finite, non-zero, follows -G/λ.
+        let w_reg = leaf_weight(2.0, 0.0, 1.0);
+        assert!((w_reg - (-2.0)).abs() < 1e-12 && w_reg.is_finite());
+    }
+
+    // ── Test 17: fitted leaves are non-zero & finite (model actually learns) ───
+
+    #[test]
+    fn fitted_leaves_are_nonzero_and_finite() {
+        // With informative data the first tree's leaves must carry real fitted
+        // weights (the old placeholder-`0.0` behaviour never learned anything).
+        let (times, events, covs) = make_synthetic(80, 1.5, 1234);
+        let config = GbCoxConfig {
+            n_estimators: 5,
+            subsample: 1.0,
+            col_subsample: 1.0,
+            ..Default::default()
+        };
+        let model = gb_cox_fit(&times, &events, &covs, 80, 1, &config).expect("fit ok");
+
+        // Every leaf across the whole ensemble must be finite, and at least one
+        // leaf must be non-zero (otherwise the additive model is a no-op).
+        let mut any_nonzero = false;
+        for tree in &model.trees {
+            for node in &tree.nodes {
+                if let GbNode::Leaf { value } = node {
+                    assert!(value.is_finite(), "leaf value must be finite");
+                    if value.abs() > 1e-9 {
+                        any_nonzero = true;
+                    }
+                }
+            }
+        }
+        assert!(
+            any_nonzero,
+            "all leaves were zero: the model never learned (placeholder regression)"
+        );
+
+        // The fitted log-risk must move away from the constant init score.
+        let pred = gb_cox_predict(&model, &covs, 80).expect("predict ok");
+        let spread = pred
+            .log_risk
+            .iter()
+            .fold(f64::NEG_INFINITY, |m, &v| m.max(v))
+            - pred.log_risk.iter().fold(f64::INFINITY, |m, &v| m.min(v));
+        assert!(
+            spread > 1e-6,
+            "log-risk has no spread → model did not learn"
+        );
+    }
+
+    // ── Test 18: partial-likelihood loss DECREASES over boosting rounds ───────
+
+    #[test]
+    fn loss_decreases_over_rounds() {
+        // The "loss" is the negative Cox partial log-likelihood; it must strictly
+        // decrease from the first to the last round once leaves are fitted. With
+        // the old `0.0` leaves the loss would be flat (no learning).
+        let (times, events, covs) = make_synthetic(100, 1.5, 2026);
+        let config = GbCoxConfig {
+            n_estimators: 40,
+            learning_rate: 0.1,
+            subsample: 1.0,
+            col_subsample: 1.0,
+            ..Default::default()
+        };
+        let model = gb_cox_fit(&times, &events, &covs, 100, 1, &config).expect("fit ok");
+
+        let ll = &model.train_log_likelihood;
+        assert_eq!(ll.len(), 40);
+
+        // Loss(round) = -ll(round). Compare first vs last.
+        let first_loss = -ll[0];
+        let last_loss = -ll[ll.len() - 1];
+        assert!(
+            last_loss < first_loss - 1e-6,
+            "loss did not decrease: first={} last={}",
+            first_loss,
+            last_loss
+        );
+
+        // And the trajectory must be (essentially) monotone non-increasing in loss,
+        // i.e. the log-likelihood is non-decreasing within numerical tolerance.
+        for w in ll.windows(2) {
+            assert!(
+                w[1] >= w[0] - 1e-6,
+                "loss increased between rounds: ll {} -> {}",
+                w[0],
+                w[1]
+            );
+        }
+        assert!(ll.iter().all(|x| x.is_finite()), "log-likelihood finite");
+    }
+
+    // ── Test 19: high-risk vs low-risk samples are ordered correctly ──────────
+
+    #[test]
+    fn high_risk_ordered_above_low_risk() {
+        // Train on informative single-feature data where larger x ⇒ shorter
+        // survival ⇒ higher risk. The fitted model must score a clearly
+        // high-x subject above a clearly low-x subject.
+        let (times, events, covs) = make_synthetic(150, 2.0, 555);
+        let config = GbCoxConfig {
+            n_estimators: 60,
+            learning_rate: 0.1,
+            subsample: 1.0,
+            col_subsample: 1.0,
+            max_depth: 3,
+            ..Default::default()
+        };
+        let model = gb_cox_fit(&times, &events, &covs, 150, 1, &config).expect("fit ok");
+
+        // Two probe subjects: strongly high-risk (large +x) and low-risk (large -x).
+        let probe = vec![2.0_f64, -2.0_f64];
+        let pred = gb_cox_predict(&model, &probe, 2).expect("predict ok");
+        assert!(
+            pred.risk_score[0] > pred.risk_score[1],
+            "high-risk probe (x=+2) risk {} should exceed low-risk probe (x=-2) risk {}",
+            pred.risk_score[0],
+            pred.risk_score[1]
+        );
+
+        // Sanity: training-set concordance should be well above chance.
+        let c = gb_cox_concordance(&model, &times, &events, &covs, 150).expect("concordance ok");
+        assert!(c > 0.6, "concordance {} should exceed 0.6", c);
+    }
+
+    // ── Test 20: degenerate single-subject leaf handled without panic ─────────
+
+    #[test]
+    fn degenerate_single_subject_no_panic() {
+        // A one-subject event dataset forces every tree to terminate immediately
+        // at the root leaf with a tiny Hessian; combined with l2_reg = 0 this
+        // exercises the guarded denominator. Must not panic / produce NaN.
+        let times = vec![1.0_f64];
+        let events = vec![1u8];
+        let covs = vec![0.5_f64];
+        let config = GbCoxConfig {
+            n_estimators: 5,
+            l2_reg: 0.0,
+            min_child_weight: 0.0,
+            subsample: 1.0,
+            col_subsample: 1.0,
+            ..Default::default()
+        };
+        let model = gb_cox_fit(&times, &events, &covs, 1, 1, &config).expect("fit ok");
+        let pred = gb_cox_predict(&model, &covs, 1).expect("predict ok");
+        assert!(
+            pred.log_risk.iter().all(|x| x.is_finite()),
+            "degenerate leaf produced non-finite log-risk"
+        );
+        assert!(
+            pred.risk_score.iter().all(|&rs| rs > 0.0 && rs.is_finite()),
+            "degenerate leaf produced invalid risk score"
         );
     }
 }

@@ -66,3 +66,48 @@ pub fn weighted_sum(deltas: &[&[f32]], weights: &[f32]) -> Vec<f32> {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dare_drop_and_rescale_exact() {
+        // DARE keeps each entry with probability `density`, rescales survivors by
+        // 1/density, and zeros the rest. Reconstruct the exact keep/scale decision
+        // from an independent RNG seeded identically and require bit-exact agreement,
+        // pinning both the 1/density rescale and the zeroing.
+        let delta = vec![1.0_f32, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0];
+        let density = 0.5_f32;
+        let scale = 1.0_f32 / density;
+        let seed = 123_u64;
+
+        let pruned = dare_prune(&delta, density, &mut LcgRng::new(seed));
+        assert_eq!(pruned.len(), delta.len());
+
+        let mut ref_rng = LcgRng::new(seed);
+        for (&v, &p) in delta.iter().zip(pruned.iter()) {
+            let u = ref_rng.next_f32();
+            let expected = if u < density { v * scale } else { 0.0 };
+            assert_eq!(p, expected, "DARE entry mismatch");
+            if p != 0.0 {
+                assert_eq!(p, v * scale, "survivor not rescaled by 1/density");
+            }
+        }
+    }
+
+    #[test]
+    fn dare_rescale_unbiased_in_expectation() {
+        // The 1/density rescale makes DARE an unbiased estimator of the original:
+        // the mean of the pruned vector approximates the constant input value.
+        let value = 2.0_f32;
+        let density = 0.5_f32;
+        let delta = vec![value; 16_384];
+        let pruned = dare_prune(&delta, density, &mut LcgRng::new(7));
+        let mean = pruned.iter().sum::<f32>() / pruned.len() as f32;
+        assert!(
+            (mean - value).abs() < 0.2,
+            "DARE mean {mean} not within 0.2 of expected {value}"
+        );
+    }
+}

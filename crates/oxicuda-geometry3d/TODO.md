@@ -12,7 +12,8 @@ transforms. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.30).
 
 ## Implementation Status
 
-**Actual: 14,490 SLoC (57 files)** -- 328 unit tests + 15 E2E integration tests
+**Actual: 20,639 SLoC (67 files)** -- 535 unit tests + 15 E2E integration tests
+(550 total in the lib test binary)
 
 The crate covers the full point-cloud + 3D Gaussian splatting + classical
 geometry pipeline. CPU paths are simulation-grade for unit testing; PTX
@@ -173,7 +174,13 @@ kernels target NVIDIA SM 7.5 through SM 12.0. The crate is `forbid(unsafe_code)`
       neighbour windows
 - [ ] Tile-based Gaussian rasteriser -- 16 x 16 pixel tiles with sorted
       Gaussian lists per tile (Inria 3DGS layout)
-- [ ] Fused FPS + ball-query + gather kernel for PointNet++ SetAbstraction
+- [x] Fused FPS + ball-query + gather for PointNet++ SetAbstraction
+      (arch/pointnet_pp.rs:fps_ball_gather -- single-call composition of
+      farthest_point_sample -> gather_points(centroids) -> stochastic_ball_query
+      -> group_features producing a [npoint x nsample x C] tensor;
+      FpsBallGather / FpsBallGatherConfig results; 6 tests incl. elementwise
+      equivalence vs the unfused pipeline, raw-gather correctness, and
+      fixed-seed determinism). PTX kernel generator remains hardware-gated.
 
 #### P1 -- Important (Feature Completeness)
 - [x] PointNeXt training-time augmentations (random scale, jitter, drop)
@@ -200,8 +207,30 @@ kernels target NVIDIA SM 7.5 through SM 12.0. The crate is `forbid(unsafe_code)`
 #### P2 -- Nice-to-Have (Advanced Features)
 - [ ] 2D Gaussian splatting (2DGS) primitives
 - [ ] Mip-Splatting anti-aliasing path
-- [ ] Differentiable rasterisation gradients (de-rendering)
-- [ ] Point-cloud generative diffusion models (PointFlow-style)
+- [x] Differentiable rasterisation gradients (de-rendering)
+      (gaussian/raster_grad.rs -- `rasterize_forward_2d` smooth alpha-compositing
+      forward (saves T_final + depth order) + `rasterize_backward_2d` analytic
+      Inria-style backward: per-splat dL/d{color, opacity α, mean μ, cov Σ} with
+      the conic Σ⁻¹ chain via d(inv)=−inv·dΣ·inv. Four finite-difference tests)
+- [x] PointFlow CNF core (generative/pointflow.rs:ContinuousNormalizingFlow/PointFlowModel -- invertibility+logdet verified)
+      (continuous-normalizing-flow over a point's 3D coords / small latent via a
+      learnable tanh velocity field f_theta(x,t); self-contained fixed-step RK4
+      augmented integrator accumulating the instantaneous change-of-variables
+      d(logp)/dt = -tr(df/dx) with the trace computed EXACTLY by per-dimension
+      central finite differences (not Hutchinson); inverse() reverse-time
+      integrates the SAME field; PointFlowModel ties a Gaussian base so
+      log_prob(x) = base_logp(inverse(x)) + delta_logp is the real CNF density;
+      sample(n) draws base + flows forward. f64 throughout for numerical rigor.
+      12 tests: invertibility inverse(forward(x0))=x0 (max err 1.1e-16 @ 40 RK4
+      steps), delta_logp vs finite-difference log|det J| (max err 6.2e-11 < 1e-2),
+      forward+inverse delta_logp round-trip = 0 (3.6e-14), analytic linear-field
+      delta_logp = -tr(A) (2.3e-12), 1-D density integrates to 1.0000000000000004,
+      log_prob finite/deterministic, sample shape/finite/deterministic)
+  - [ ] Trained point-cloud generation (PointFlow shape fidelity) -- needs
+        training-scale data + optimizer + GPU; the untrained CNF core's sample()
+        is documented model STRUCTURE, NOT a learned shape. Generated-realism /
+        Chamfer-to-dataset is not CPU-unit-verifiable and is deliberately not
+        asserted.
 - [ ] SE(3)-equivariant network primitives (EGNN, e3nn-style)
 - [ ] BVH-based ray-Gaussian intersection
 
@@ -217,7 +246,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 328 unit + 15 E2E = 343 passing
+- Tests: 535 unit + 15 E2E = 550 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - All public APIs return `Geom3dResult<T>` or `Result<T, Geom3dError>`
@@ -283,14 +312,45 @@ Reference shapes (FPS and kNN dominate point-cloud pipelines; Gaussian project
 - [x] Chamfer self-distance == 0 (E2E)
 - [ ] Gaussian rasteriser pixel-exact match vs. Inria 3DGS reference
 - [ ] Sinkhorn EMD convergence vs. POT (Python OT library) on small problems
+      (external Python dependency intentionally not added; SELF-CONSISTENCY
+      verified instead — see Implementation Deepening below)
 
 ### Implementation Deepening
 - [x] `forbid(unsafe_code)` enforced at crate level
 - [x] All RNG operations deterministic given seed (E2E test)
 - [x] KD-tree supports `nearest`, `knn`, and `radius_search` with AABB pruning
-- [ ] Batched point-cloud forward (B x N x 3) variants of PointNet
-      architectures
-- [ ] Differentiable FPS gradient (straight-through estimator)
-- [ ] Gradient through `project_gaussian` for differentiable rendering
-- [ ] Stochastic ball query (random subsample when count > nsample)
-- [ ] Mesh topology validation in `Geom3dError::InvalidTopology` path
+- [x] Sinkhorn EMD self-consistency (mesh/earth_movers.rs tests --
+      `emd_is_symmetric` EMD(a,b)=EMD(b,a); `emd_self_is_near_zero_and_below_any_shift`
+      identity-of-indiscernibles relaxed; `emd_self_shrinks_with_epsilon`
+      entropic-blur monotone in ε; `emd_monotone_under_growing_translation`
+      triangle-inequality-flavoured monotonicity) -- POT comparison left `[ ]`
+- [x] Batched point-cloud forward (B x N x 3) variants of PointNet
+      (arch/pointnet_batched.rs:pointnet_forward_batched /
+      pointnet_classify_batched -- runs PointNet over a row-major [B x N x 3]
+      batch, stacks [B x n_classes] logits, argmax-per-row classify; 6 tests
+      incl. batched == per-sample equivalence and deterministic re-run)
+- [x] Differentiable FPS gradient (straight-through estimator)
+      (sampling/fps_grad.rs -- `fps_sample_with_grad` runs the discrete FPS and
+      builds a temperature-β soft assignment S; `gather_ste_hard_backward` is
+      the canonical STE -- identity on the m selected rows, zero on unselected
+      (dL/dX[idx[k]] = dL/dY[k]); `gather_ste_backward` is the soft β-relaxation
+      `Sᵀ·dL/dY`. Tests: identity-on-selected/zero-elsewhere, soft↔hard β→∞
+      agreement, and finite-difference vs the soft gather)
+- [x] Gradient through `project_gaussian` for differentiable rendering
+      (gaussian/project_grad.rs -- `project_backward` analytic chain rule of the
+      EWA-splatting projection: J·R Jacobian for the 3D-mean→2D-screen path AND
+      the covariance transform Σ_2d = W·Σ_3d·Wᵀ; returns dL/dμ (threading through
+      both screen position and Σ_2d's μ-dependence via dJ/dX,dJ/dY,dJ/dZ) and
+      dL/dΣ_3d = Wᵀ·dL/dΣ_2d·W. Tests: central-difference checks of d_mean and
+      every entry of d_cov3d vs `project_raw`)
+- [x] Stochastic ball query (random subsample when count > nsample)
+      (neighborhood/stochastic_ball.rs:stochastic_ball_query -- gathers all
+      in-radius candidates then partial Fisher-Yates subsamples nsample of them
+      without replacement via seeded LcgRng; cycle-pads when count < nsample;
+      usize::MAX sentinel when empty; returns (indices [nq x nsample], counts);
+      7 tests)
+- [x] Mesh topology validation in `Geom3dError::InvalidTopology` path
+      (mesh/topology.rs -- `validate_mesh` / `analyze_topology` / TopologyReport:
+      degenerate-face, out-of-range-index, non-manifold-edge (>2 faces),
+      boundary-edge, and directed-edge orientation checks; reports Euler
+      characteristic χ = V−E+F. Returns InvalidTopology on the first violation)

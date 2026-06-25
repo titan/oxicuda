@@ -9,6 +9,7 @@ pub mod gcn;
 pub mod gin;
 pub mod grand;
 pub mod graph_transformer;
+pub mod hetero_conv;
 pub mod jk_net;
 pub mod k_wl_gnn;
 pub mod mixhop;
@@ -27,6 +28,7 @@ pub use grand::{GrandConfig, GrandLayer};
 pub use graph_transformer::{
     GraphTransformerConfig, GraphTransformerLayer, GraphTransformerWeights,
 };
+pub use hetero_conv::{HeteroConv, HeteroConvConfig, HeteroConvWeights};
 pub use jk_net::{JkMode, JkNet, JkNetConfig};
 pub use k_wl_gnn::{KWlConfig, KWlGnn, PairOp, apply_pair_op, graph_readout_sum};
 pub use mixhop::{MixHopConfig, MixHopLayer};

@@ -194,6 +194,82 @@ pub fn sdpo_total_loss(stages: &[PairBatch], cfg: &SdpoConfig) -> RlhfResult<f32
     Ok(mean)
 }
 
+// ── Stage gradient ──────────────────────────────────────────────────────────
+
+/// Numerically stable sigmoid `σ(x)`.
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let e = x.exp();
+        e / (1.0 + e)
+    }
+}
+
+/// Gradient of a single sDPO stage loss w.r.t. the four per-pair log-probs.
+///
+/// Finite-difference verified against [`sdpo_stage_loss`].
+#[derive(Debug, Clone, Copy)]
+pub struct SdpoStageGrad {
+    /// `∂L/∂(policy chosen log-prob)`.
+    pub d_chosen_logp: f32,
+    /// `∂L/∂(policy rejected log-prob)`.
+    pub d_rejected_logp: f32,
+    /// `∂L/∂(reference chosen log-prob)`.
+    pub d_ref_chosen_logp: f32,
+    /// `∂L/∂(reference rejected log-prob)`.
+    pub d_ref_rejected_logp: f32,
+}
+
+/// Analytic gradient of [`sdpo_stage_loss`] — the standard DPO gradient taken
+/// against *this stage's* (handed-off) reference.
+///
+/// Per pair, with `L = −log σ(β·Δ)` and `Δ = (c − rc) − (l − rr)`,
+/// `dL/dΔ = −β·σ(−β·Δ)`; the four partials follow the `+1, −1, −1, +1` pattern
+/// and are scaled by `1 / batch.len()` for the mean reduction. (The staged
+/// reference only changes *which* `ref_*` values are supplied; the closed form
+/// is identical to [`crate::dpo::dpo::dpo_grad`].)
+///
+/// # Errors
+///
+/// Returns [`RlhfError::EmptyInput`] for an empty stage, [`RlhfError::InvalidBeta`]
+/// for invalid β, and [`RlhfError::NanEncountered`] on a non-finite gradient.
+pub fn sdpo_stage_grad(
+    stage_batch: &PairBatch,
+    cfg: &SdpoConfig,
+) -> RlhfResult<Vec<SdpoStageGrad>> {
+    if stage_batch.is_empty() {
+        return Err(RlhfError::EmptyInput);
+    }
+    if !cfg.beta.is_finite() || cfg.beta <= 0.0 {
+        return Err(RlhfError::InvalidBeta { beta: cfg.beta });
+    }
+    let inv_n = 1.0 / stage_batch.len() as f32;
+    let mut grads = Vec::with_capacity(stage_batch.len());
+    for (((&clp, &rlp), &rclp), &rrlp) in stage_batch
+        .chosen_logps
+        .iter()
+        .zip(stage_batch.rejected_logps.iter())
+        .zip(stage_batch.ref_chosen_logps.iter())
+        .zip(stage_batch.ref_rejected_logps.iter())
+    {
+        let logit = dpo_log_ratio(clp, rclp, rlp, rrlp, cfg.beta);
+        let d_delta = -cfg.beta * sigmoid(-logit) * inv_n;
+        let g = SdpoStageGrad {
+            d_chosen_logp: d_delta,
+            d_rejected_logp: -d_delta,
+            d_ref_chosen_logp: -d_delta,
+            d_ref_rejected_logp: d_delta,
+        };
+        if !g.d_chosen_logp.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        grads.push(g);
+    }
+    Ok(grads)
+}
+
 // ── Staged driver ──────────────────────────────────────────────────────────────
 
 /// Stateful driver for the sDPO staged loop.
@@ -719,5 +795,104 @@ mod tests {
             (loss - std::f32::consts::LN_2).abs() < 1e-6,
             "zero-margin loss should be ln 2, got {loss}"
         );
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn bat() -> PairBatch {
+        PairBatch::new(
+            vec![-0.5_f32, -1.2],
+            vec![-2.0_f32, -0.8],
+            vec![-0.6_f32, -1.0],
+            vec![-1.1_f32, -0.9],
+        )
+        .expect("batch")
+    }
+
+    #[test]
+    fn sdpo_stage_grad_matches_fd() {
+        let cfg = SdpoConfig {
+            beta: 0.3,
+            n_stages: 1,
+        };
+        let b = bat();
+        let grads = sdpo_stage_grad(&b, &cfg).expect("grads");
+        assert_eq!(grads.len(), 2);
+        let h = 1e-2;
+        let idx = 1usize;
+        let fd_c = central_diff(
+            |v| {
+                let mut c = b.chosen_logps.clone();
+                c[idx] = v;
+                let nb = PairBatch::new(
+                    c,
+                    b.rejected_logps.clone(),
+                    b.ref_chosen_logps.clone(),
+                    b.ref_rejected_logps.clone(),
+                )
+                .expect("b");
+                sdpo_stage_loss(&nb, &cfg).expect("loss")
+            },
+            b.chosen_logps[idx],
+            h,
+        );
+        let fd_rc = central_diff(
+            |v| {
+                let mut rc = b.ref_chosen_logps.clone();
+                rc[idx] = v;
+                let nb = PairBatch::new(
+                    b.chosen_logps.clone(),
+                    b.rejected_logps.clone(),
+                    rc,
+                    b.ref_rejected_logps.clone(),
+                )
+                .expect("b");
+                sdpo_stage_loss(&nb, &cfg).expect("loss")
+            },
+            b.ref_chosen_logps[idx],
+            h,
+        );
+        assert_close(grads[idx].d_chosen_logp, fd_c, "d_chosen");
+        assert_close(grads[idx].d_ref_chosen_logp, fd_rc, "d_ref_chosen");
+    }
+
+    #[test]
+    fn sdpo_stage_grad_signs() {
+        let cfg = SdpoConfig {
+            beta: 0.5,
+            n_stages: 1,
+        };
+        let b = PairBatch::new(vec![-1.0], vec![-1.0], vec![-1.0], vec![-1.0]).expect("b");
+        let g = sdpo_stage_grad(&b, &cfg).expect("grad");
+        assert!(g[0].d_chosen_logp < 0.0);
+        assert!(g[0].d_rejected_logp > 0.0);
+    }
+
+    #[test]
+    fn sdpo_stage_grad_invalid_beta_errors() {
+        let cfg = SdpoConfig {
+            beta: 0.0,
+            n_stages: 1,
+        };
+        assert!(matches!(
+            sdpo_stage_grad(&bat(), &cfg),
+            Err(RlhfError::InvalidBeta { .. })
+        ));
     }
 }

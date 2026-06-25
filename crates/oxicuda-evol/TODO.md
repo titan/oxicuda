@@ -8,7 +8,7 @@ neuroevolution (NEAT). Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) 
 
 ## Implementation Status
 
-**Actual: 17,544 SLoC (55 files)** — covers GA building blocks, CMA-ES, DE,
+**Actual: ~29.2k lines (59 files)** — covers GA building blocks, CMA-ES, DE,
 NSGA-II, MOEA/D, NEAT, PSO, ACO, multi-objective metrics, and 7 PTX kernels × 6 SM
 versions. All algorithms are implemented end-to-end in pure Rust with no external
 linear-algebra or RNG dependencies.
@@ -84,6 +84,33 @@ linear-algebra or RNG dependencies.
   hypervolume single point, IGD ordering, PTX × 6 SM versions
 - [x] `benches/evol_ops.rs` — Criterion bench suite: 7 PTX kernels × 4 SM versions plus
   CMA-ES Sphere 5D algorithm bench
+- [x] `benchmarks/bbob.rs` — `zdt3` (discontinuous front) + `dtlz2` (spherical front) analytic
+  objective functions and `*_pareto_front_f2` helpers (joining the existing `zdt1`/`zdt2`/`dtlz1`),
+  plus a standard multi-objective convergence suite running NSGA-II on ZDT1-3 and DTLZ1-2 and
+  asserting closeness to the *analytic* Pareto front via the crate's own GD / IGD metrics and the
+  WFG hypervolume indicator (6 `nsga2_*` tests): ZDT1 GD≈0.0020 / IGD≈0.0047 / full f1-coverage,
+  recovered HV ≥ 0.97× analytic; ZDT2 GD≈0.0015 / IGD≈0.0047; ZDT3 GD≈0.0026 / IGD≈0.0052
+  (five-segment disconnected front, f1-span 0.85); DTLZ2 mean front radius≈1.017 / GD≈0.030 /
+  IGD≈0.063 (unit sphere); DTLZ1 structural non-dominance + progress (multimodal `g`, full
+  convergence compute-gated)
+- [x] `benches/algo_bench.rs` — Criterion NSGA-II benches on the ZDT1-3 and DTLZ1-2 analytic
+  test problems via `run_nsga2_benchmark` (registered `[[bench]]`, deterministic `LcgRng` seeds)
+- [x] `benchmarks/wfg.rs` + `benchmarks/bbob.rs` — full standard MOO test-problem suite
+  (`benchmarks/wfg.rs + bbob.rs:symbols -- implemented test problems`): **ZDT4** (`zdt4`,
+  multimodal convex front) and **ZDT6** (`zdt6`, biased concave front) with `zdt4/zdt6_pareto_front_f2`
+  helpers; **DTLZ3** (`dtlz3`, multimodal sphere), **DTLZ4** (`dtlz4`, α=100 biased sphere),
+  **DTLZ5/6** (`dtlz5`/`dtlz6`, degenerate-curve fronts) and **DTLZ7** (`dtlz7`, 4-patch
+  disconnected front); plus the complete **WFG1-9** toolkit (`wfg1..wfg9`, `WfgParams`,
+  `wfg_optimum_objectives`) — faithful Huband 2006 shape (linear/convex/concave/mixed/disconnected)
+  and transformation (bias poly/flat/param-dependent, shift linear/deceptive/multimodal, reduction
+  weighted-sum/non-separable) functions composed and parameterised by (k position, l distance,
+  M objectives). 36 mathematically-provable analytic-front tests (residuals at machine-ε, 0–5e-15):
+  on-front identities (ZDT4 `f2=1−√f1`, ZDT6 `f2=1−f1²`, DTLZ3/4 unit sphere `Σf²=1`, DTLZ5/6
+  `f1=f2` degeneracy on the sphere, WFG4-9 scaled sphere `Σ(fₘ/2m)²=1`, WFG3 degenerate line
+  `f2=2f1 ∧ f3=6−6f1`), distance-perturbation monotonicity (g ≥ optimum / radius ≥ 1),
+  multimodality (ZDT4/DTLZ3 local fronts at g>0), DTLZ7 4-region and WFG2 disconnection counts, and
+  determinism. **ZDT5 omitted** — it is a binary-string problem (30-bit + 5-bit substrings with
+  unitation counting) incompatible with the real-valued `&[f64]` ZDT/DTLZ signature
 
 ### Future Enhancements [ ]
 
@@ -120,13 +147,17 @@ linear-algebra or RNG dependencies.
 - [x] `evolution/coevolution.rs` — Cooperative / competitive coevolution with subspecies (`evolution/coevolution.rs`)
 - [x] `evolution/island.rs` — Island model: Ring / Star / AllToAll topology with structured migration (`evolution/island.rs`)
 - [x] `genetic/parallel.rs` — Master-slave (μ+λ) GA + toroidal cellular GA with Von Neumann / Moore neighbourhood
-- [ ] `benches/algo_bench.rs` — Extended algorithm benches: NSGA-II ZDT1-6, DTLZ1-7,
-  WFG1-9 standard test suites
+- [x] CMA-ME quality-diversity (`qd/cma_me.rs:cma_me -- wired orphan`) — Fontaine 2020 GECCO:
+  CMA-ES improvement-emitters illuminating a MAP-Elites archive via two-level
+  (new-cell ≻ improvement-delta) ranking with emitter restarts from random elites; `cma_me`
+- [x] `benches/algo_bench.rs` — NSGA-II benches on the ZDT1-3 and DTLZ1-2 analytic test problems
+  (criterion `nsga2_mo` group; convergence asserted separately in `benchmarks/bbob.rs` tests)
+- [ ] Extend `benches/algo_bench.rs` to the full ZDT4-6, DTLZ3-7 and WFG1-9 standard suites
 
 #### P2 — GPU / Architecture-Specific
 - [x] OpenAI ES gradient estimator (`evolution/openai_es.rs`) — Salimans 2017 OpenAI: Gaussian perturbation-based policy gradient estimator with antithetic sampling and rank normalisation of fitness; `OpenAiEs`
 - [x] Natural Evolution Strategies (`evolution/nes.rs`) — Wierstra 2014 JMLR: gradient ascent on expected fitness using the natural gradient (Fisher information matrix); `NaturalEvolutionStrategies`
-- [ ] NEAT + Novelty Search (`neuroevolution/neat_novelty.rs`) — Lehman 2011 Ecal: novelty-archive-driven NEAT where fitness replaced by behavioural novelty metric for deceptive tasks; `NeatNovelty`
+- [x] NEAT + Novelty Search (`neuroevolution/neat_novelty.rs`) — Lehman 2011 Ecal: novelty-archive-driven NEAT where fitness replaced by behavioural novelty metric for deceptive tasks; `NeatNovelty`
 - [x] RVEA reference-vector-guided evolutionary algorithm (`multiobjective/rvea.rs`) — Cheng 2016 IEEE TEC: adaptive reference vector generation + cosine-angle-based scalarisation for many-objective optimisation; `Rvea`
 - [ ] PTX kernel for batched fitness evaluation across populations (currently a
   single-population kernel)
@@ -146,7 +177,10 @@ time and would be JIT-compiled by `oxicuda-driver` on Linux + NVIDIA hardware.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no `#![allow]` escapes besides necessary `type_complexity`)
-- Tests: 18 e2e tests passing (host-side); PTX kernel strings validated per SM version
+- Tests: 596 host-side unit tests + 2 doctests passing (incl. 18 cross-module e2e tests, the
+  6 ZDT1-3 / DTLZ1-2 NSGA-II analytic-front convergence tests, the 6 CMA-ME quality-diversity
+  tests, and 36 ZDT4-6 / DTLZ3-7 / WFG1-9 analytic-front structural tests); PTX kernel strings
+  validated per SM version
 - `unwrap()` calls in production code: 0
 - `unsafe` code: 0 (handled by workspace lints)
 - macOS: compiles; GPU integration paths return `UnsupportedPlatform` at runtime
@@ -210,7 +244,15 @@ Throughput targets assume warm GPU contexts; cold-start overhead is absorbed by 
   PSO / ACO is covered by `e2e_tests.rs`
 - [x] PTX strings are non-empty and contain SM-specific instructions for all 6 SM versions
 - [ ] CMA-ES convergence on the BBOB test suite (24 functions × 5 dimensions)
-- [ ] NSGA-II on the ZDT, DTLZ, and WFG test problem families
+- [x] NSGA-II on the ZDT (ZDT1-3) and DTLZ (DTLZ1-2) test problem families — analytic-front
+  convergence asserted in `benchmarks/bbob.rs` (`nsga2_*` tests): ZDT GD≲0.003 / IGD≲0.006 with
+  full f1-coverage; DTLZ2 unit-sphere mean radius 1.017, GD 0.030, IGD 0.063; DTLZ1 partial
+  (multimodal, compute-gated)
+- [x] WFG1-9 shape / transformation functions implemented as objective functions
+  (`benchmarks/wfg.rs:wfg1..wfg9`, `WfgParams`, `wfg_optimum_objectives`) with analytic-front unit
+  tests (Huband 2006) — see Tests & Benchmarks
+- [ ] NSGA-II *convergence* on the WFG test problem family (requires running an optimiser to a
+  baseline = out of honest unit-test scope; tracked alongside the BBOB / bench-suite items)
 - [ ] NEAT on standard benchmarks (XOR, double pole balancing, retina)
 - [ ] PSO and ACO on TSPLIB instances (eil51, berlin52, kroA100)
 

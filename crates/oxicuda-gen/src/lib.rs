@@ -25,11 +25,13 @@ pub mod prelude {
     };
     pub use crate::guidance::{
         AdaptiveCfgPolicy, AdaptiveCfgScheduler, CfgConfig, CfgGuidance, PerpNegGuidance,
+        PolynomialFit,
     };
     pub use crate::handle::{GenHandle, LcgRng, SmVersion};
     pub use crate::lora::{
-        DoraAdapter, DoraConfig, LoraConfig, LoraLinear, LoraModel, merge_lora, unmerge_lora,
-        verify_merge_roundtrip,
+        BudgetStrategy, DoraAdapter, DoraConfig, LORA_CKPT_MAGIC, LayerSpec, LoraConfig,
+        LoraLinear, LoraModel, MixedRankLoraModel, NF4_LEVELS, Nf4Tensor, QLoraLinear, RankBudget,
+        load_lora, merge_lora, save_lora, unmerge_lora, verify_merge_roundtrip,
     };
     pub use crate::loss::{DdpmLoss, DdpmLossConfig, DdpmLossType};
     pub use crate::ptx_kernels::{
@@ -43,8 +45,9 @@ pub mod prelude {
         sample_euler, sample_euler_ancestral, sample_heun,
     };
     pub use crate::score::{
-        CrossAttentionBlock, FourierEmbedding, RopeSelfAttention, RotaryEmbedding,
-        SelfAttentionBlock, SinusoidalEmbedding, UNetResBlock,
+        AttnWeights, CrossAttentionBlock, CrossAttentionKvCache, FlashAttention, FourierEmbedding,
+        ResBlockWeights, RopeSelfAttention, RotaryEmbedding, SelfAttentionBlock,
+        SinusoidalEmbedding, UNet, UNetConfig, UNetResBlock, UNetWeights,
     };
     pub use crate::solver::{
         CfmConfig, ConditionalFlowMatching, DpmAlgorithm, DpmSolverPp, DpmSolverPpConfig,

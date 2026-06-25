@@ -1,6 +1,7 @@
 pub mod cd_nod;
 pub mod dag_gnn;
 pub mod direct_lingam;
+pub mod discrete_ci;
 pub mod fci;
 mod fci_numeric;
 #[cfg(test)]
@@ -22,7 +23,9 @@ mod rfci_tests;
 pub use cd_nod::{CdNod, CdNodConfig, CdNodResult};
 pub use dag_gnn::{DagGnn, DagGnnConfig, DagGnnResult, dag_gnn};
 pub use direct_lingam::{DirectLingamConfig, DirectLingamResult, direct_lingam};
+pub use discrete_ci::{DiscreteCiTest, DiscreteStatistic};
 pub use fci::{EdgeMark, Fci, FciConfig, Pag};
 pub use gfci::{Gfci, GfciConfig};
 pub use lingam::{Lingam, LingamConfig, LingamGFunction, LingamResult};
+pub use pc::{ConditionalIndependenceTest, FisherZTest, PcAlgorithm};
 pub use rfci::{Rfci, RfciConfig};

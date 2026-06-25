@@ -39,6 +39,150 @@ pub struct UmapResult {
     pub epochs: usize,
 }
 
+/// Ergonomic builder for [`UmapConfig`] with validation on [`build`](UmapConfigBuilder::build).
+///
+/// ```
+/// use oxicuda_manifold::umap::embedding::UmapConfigBuilder;
+/// let cfg = UmapConfigBuilder::new()
+///     .n_components(2)
+///     .n_neighbors(15)
+///     .min_dist(0.1)
+///     .spread(1.0)
+///     .n_epochs(200)
+///     .negative_sample_rate(5)
+///     .initial_alpha(1.0)
+///     .build()
+///     .expect("valid config");
+/// assert_eq!(cfg.n_neighbors, 15);
+/// ```
+#[derive(Debug, Clone)]
+pub struct UmapConfigBuilder {
+    cfg: UmapConfig,
+}
+
+impl Default for UmapConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UmapConfigBuilder {
+    /// Start from the [`UmapConfig`] defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            cfg: UmapConfig::default(),
+        }
+    }
+
+    /// Embedding dimensionality (must be in `1..=8`).
+    #[must_use]
+    pub fn n_components(mut self, n_components: usize) -> Self {
+        self.cfg.n_components = n_components;
+        self
+    }
+
+    /// Number of nearest neighbours used to build the fuzzy simplicial set (must be `>= 1`).
+    #[must_use]
+    pub fn n_neighbors(mut self, n_neighbors: usize) -> Self {
+        self.cfg.n_neighbors = n_neighbors;
+        self
+    }
+
+    /// Number of optimisation epochs (must be `>= 1`).
+    #[must_use]
+    pub fn n_epochs(mut self, n_epochs: usize) -> Self {
+        self.cfg.n_epochs = n_epochs;
+        self
+    }
+
+    /// Initial learning rate `alpha` (must be `> 0`).
+    #[must_use]
+    pub fn initial_alpha(mut self, initial_alpha: f64) -> Self {
+        self.cfg.initial_alpha = initial_alpha;
+        self
+    }
+
+    /// Minimum distance controlling how tightly points are packed (must be `>= 0`).
+    #[must_use]
+    pub fn min_dist(mut self, min_dist: f64) -> Self {
+        self.cfg.min_dist = min_dist;
+        self
+    }
+
+    /// Effective scale of embedded points (must be `> 0`).
+    #[must_use]
+    pub fn spread(mut self, spread: f64) -> Self {
+        self.cfg.spread = spread;
+        self
+    }
+
+    /// Number of negative samples per positive sample (must be `>= 1`).
+    #[must_use]
+    pub fn negative_sample_rate(mut self, negative_sample_rate: usize) -> Self {
+        self.cfg.negative_sample_rate = negative_sample_rate;
+        self
+    }
+
+    /// Validate the accumulated parameters and produce a [`UmapConfig`].
+    ///
+    /// # Errors
+    /// Returns [`ManifoldError::InvalidParameter`] when any knob is outside its valid range,
+    /// e.g. zero neighbours / epochs, non-positive spread, or negative `min_dist`.
+    pub fn build(self) -> ManifoldResult<UmapConfig> {
+        let c = &self.cfg;
+        if c.n_components == 0 || c.n_components > 8 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "n_components".into(),
+                reason: "must be in 1..=8".into(),
+            });
+        }
+        if c.n_neighbors == 0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "n_neighbors".into(),
+                reason: "must be >= 1".into(),
+            });
+        }
+        if c.n_epochs == 0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "n_epochs".into(),
+                reason: "must be >= 1".into(),
+            });
+        }
+        if !c.initial_alpha.is_finite() || c.initial_alpha <= 0.0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "initial_alpha".into(),
+                reason: "must be finite and strictly positive".into(),
+            });
+        }
+        if !c.min_dist.is_finite() || c.min_dist < 0.0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "min_dist".into(),
+                reason: "must be finite and non-negative".into(),
+            });
+        }
+        if !c.spread.is_finite() || c.spread <= 0.0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "spread".into(),
+                reason: "must be finite and strictly positive".into(),
+            });
+        }
+        if c.min_dist > c.spread {
+            return Err(ManifoldError::InvalidParameter {
+                name: "min_dist".into(),
+                reason: "must not exceed spread".into(),
+            });
+        }
+        if c.negative_sample_rate == 0 {
+            return Err(ManifoldError::InvalidParameter {
+                name: "negative_sample_rate".into(),
+                reason: "must be >= 1".into(),
+            });
+        }
+        Ok(self.cfg)
+    }
+}
+
 /// Fit UMAP on row-major data `(n_samples, dim)`.
 pub fn umap_fit(
     x: &[f64],
@@ -195,6 +339,71 @@ fn fit_ab(spread: f64, min_dist: f64) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builder_chains_and_validates() {
+        let cfg = UmapConfigBuilder::new()
+            .n_components(3)
+            .n_neighbors(10)
+            .min_dist(0.05)
+            .spread(2.0)
+            .n_epochs(150)
+            .negative_sample_rate(7)
+            .initial_alpha(0.5)
+            .build()
+            .expect("valid config");
+        assert_eq!(cfg.n_components, 3);
+        assert_eq!(cfg.n_neighbors, 10);
+        assert_eq!(cfg.min_dist, 0.05);
+        assert_eq!(cfg.spread, 2.0);
+        assert_eq!(cfg.n_epochs, 150);
+        assert_eq!(cfg.negative_sample_rate, 7);
+        assert_eq!(cfg.initial_alpha, 0.5);
+    }
+
+    #[test]
+    fn builder_default_runs_fit() {
+        let cfg = UmapConfigBuilder::default()
+            .n_neighbors(3)
+            .n_epochs(40)
+            .build()
+            .expect("valid");
+        let mut rng = LcgRng::new(5);
+        let n = 12;
+        let dim = 3;
+        let mut x = vec![0.0; n * dim];
+        for v in &mut x {
+            *v = rng.next_normal();
+        }
+        let r = umap_fit(&x, n, dim, &cfg, &mut rng).expect("fit ok");
+        assert_eq!(r.embedding.len(), n * 2);
+        assert!(r.a > 0.0 && r.b > 0.0);
+    }
+
+    #[test]
+    fn builder_rejects_bad_parameters() {
+        assert!(UmapConfigBuilder::new().n_components(0).build().is_err());
+        assert!(UmapConfigBuilder::new().n_components(9).build().is_err());
+        assert!(UmapConfigBuilder::new().n_neighbors(0).build().is_err());
+        assert!(UmapConfigBuilder::new().n_epochs(0).build().is_err());
+        assert!(UmapConfigBuilder::new().initial_alpha(0.0).build().is_err());
+        assert!(UmapConfigBuilder::new().min_dist(-0.1).build().is_err());
+        assert!(UmapConfigBuilder::new().spread(0.0).build().is_err());
+        assert!(
+            UmapConfigBuilder::new()
+                .negative_sample_rate(0)
+                .build()
+                .is_err()
+        );
+        // min_dist > spread is invalid.
+        assert!(
+            UmapConfigBuilder::new()
+                .min_dist(2.0)
+                .spread(1.0)
+                .build()
+                .is_err()
+        );
+    }
 
     #[test]
     fn umap_runs_small() {

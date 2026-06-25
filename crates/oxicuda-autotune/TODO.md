@@ -41,9 +41,9 @@ The autotune crate provides the optimization loop that makes OxiCUDA kernels com
 - [x] Incremental re-tuning -- update results when hardware/driver changes detected (incremental.rs)
 
 **Intelligence (P2)**
-- [ ] Analytical cost model (`cost_model/analytical.rs`) -- roofline-model analytical predictor for GEMM tiles: arithmetic-intensity computation, memory-bandwidth-bound vs compute-bound classification, theoretical peak GFLOPS; `AnalyticalCostModel`
-- [ ] Halide-style schedule search (`schedule/halide_schedule.rs`) -- tile-size + loop-order schedule space inspired by Halide autoscheduler; split/vectorise/unroll axes with cost-model-guided pruning; `HalideScheduleSearch`
-- [ ] Persistent tuning cache with versioned schema migration (`cache/persistent_cache.rs`) -- on-disk LRU cache keyed by (kernel-hash, GPU-arch, CUDA-driver-version) distinct from the existing `export.rs` export-only path; `PersistentTuneCache`
+- [x] Analytical cost model -- roofline-model analytical predictor: arithmetic-intensity computation, memory-bandwidth-bound vs compute-bound classification, theoretical peak GFLOPS. ALREADY EXISTS as `cost_model/roofline.rs` (`Roofline`/`RooflineClassification`/`Bound`/`BandwidthCeiling`; ridge point, attainable(), estimated_runtime()), complemented by `cost_model/latency_predictor.rs` (learned ridge-regression surrogate). Williams (2009) model.
+- [x] Halide-style schedule search -- tile-size + loop-order schedule space inspired by Halide autoscheduler; split/vectorise/unroll axes with cost-model-guided pruning. ALREADY EXISTS as `search/halide_schedule.rs` (`ScheduleSearcher`, `LoopNest`/`Loop` IR, `Transform` tile/reorder/vectorize/parallelize/unroll, `FeatureCostModel`, greedy/beam search). Adams et al. (2019).
+- [x] Persistent tuning cache with versioned schema migration (`cache/persistent_cache.rs`) -- on-disk LRU cache keyed by (kernel-hash, GPU-arch, CUDA-driver-version) distinct from the existing `export.rs` export-only path; `PersistentTuneCache` (FNV-1a kernel hash, recency-ordered LRU eviction, `CacheSchemaVersion` envelope + forward migration from legacy bare-array layout, `CacheStats` hit/miss/eviction, save_at/load_at). NEW 2026-06-21.
 - [x] Transfer learning between architectures -- warm-start sm_90 tuning from sm_80 results (transfer_learning.rs)
 - [x] Problem size interpolation (interpolation.rs) -- nearest-neighbor and inverse-distance-weighted interpolation for unseen matrix sizes
 - [x] Kernel similarity detection -- reuse results for structurally similar kernels
@@ -73,7 +73,7 @@ The autotune crate provides the optimization loop that makes OxiCUDA kernels com
 ## Quality Status
 
 - Warnings: 0
-- Tests: 449 passing
+- Tests: 466 unit + 27 doctests passing (was 448 unit + 26 doctests; +18 unit / +1 doctest from `cache/persistent_cache.rs`)
 - unwrap() calls: 0
 - ResultDb uses JSON for human-readable, debuggable persistence
 
@@ -118,7 +118,7 @@ Autotuning overhead is amortized -- invest time once, benefit at every subsequen
 
 ### Statistical Rigor
 - [x] Benchmark variance < 5% verified across 20 runs per config (A2)
-- [ ] Warmup run count (5) sufficient for GPU clock stabilization — verify on variable-frequency GPU
+- [ ] Warmup run count (5) sufficient for GPU clock stabilization — verify on variable-frequency GPU (requires GPU hardware — on-device clock-stabilization measurement)
 - [x] GFLOPS calculation verified: `(2 * M * N * K) / median_us / 1e6` formula validated
 
 ### Search Strategy Deepening
@@ -140,7 +140,8 @@ Autotuning overhead is amortized -- invest time once, benefit at every subsequen
 - [x] Dispatcher 3-tier fallback tested independently (exact, nearest, default) (A4) — 4 tests
 - [x] Genetic algorithm crossover never violates search space constraints — 3 crossover tests
 
-- [x] autotune-adaptive-warmup (planned 2026-05-01)
+- [x] autotune-adaptive-warmup (planned 2026-05-01; DONE -- verified 2026-06-21)
+  - **Status:** Fully implemented. `WarmupStrategy { Fixed(usize), Adaptive { min_iterations, max_iterations, tolerance } }` enum in `benchmark.rs` (default `Fixed(5)`), `warmup_converged()` relative-delta helper, adaptive loop in both timed and untimed benchmark paths; wired through `cli.rs` (`parse_warmup_strategy` parsing `fixed:N` / `adaptive:TOL[,min=N,max=N]`), `power_aware.rs`, and `parallel_bench.rs` ctors. All planned tests present (`cli_warmup_parser_roundtrip`, `parse_tune_warmup_*`, etc.).
   - **Goal:** Replace the fixed 5-iteration warmup in `BenchmarkConfig` with an adaptive convergence detector that warms up until the relative delta between two consecutive timing samples is below a configurable tolerance, or a max-iteration cap is hit.
   - **Design:** New `WarmupStrategy { Fixed(usize), Adaptive { min_iterations, max_iterations, tolerance } }` enum. Replace `warmup_runs: usize` field with `warmup: WarmupStrategy` (default `Fixed(5)` for parity). Adaptive loop: iterate, compare consecutive `Duration` samples by relative delta `|t - t_prev| / t_prev`; break on convergence or hit `max_iterations` with `tracing::warn!`. Wire CLI `--warmup` flag at `cli.rs:464` (currently dead `_warmup` param) with a `clap` value_parser parsing `fixed:N` or `adaptive:TOL[,min=N,max=N]`.
   - **Files:** `src/benchmark.rs` (enum + field + loop at lines ~157, ~229), `src/cli.rs:~464`, `src/power_aware.rs:~385`, `src/parallel_bench.rs` (test ctor updates)

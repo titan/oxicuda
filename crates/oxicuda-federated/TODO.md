@@ -75,26 +75,26 @@ privacy mechanisms with RDP / Moments accountants, secure aggregation
 - [x] Signed-SGD compression -- 1-bit gradient sign communication with majority-vote server reconstruction
 - [x] Atomo / TernGrad ternary quantisation -- 2-bit gradient codes for ultra-low-bandwidth links
 - [x] Sketched updates (compression/sketch.rs -- Count-Sketch depth×width sign-hash table with median estimator + linear merge + heavy-hitter top-k; orthonormal Fast Walsh-Hadamard transform with ±1 diagonal and exact inverse, pow2 padding)
-- [ ] Diffie-Hellman key agreement helpers for secure_agg -- currently the pairwise mask seeds are caller-supplied; a built-in key-exchange layer would close the protocol
-- [ ] DP-SGD client-side gradient clipping helper -- mirroring `dp_clip_gradient_ptx` on the CPU side
+- [x] Diffie-Hellman key agreement helpers for secure_agg (secure_agg/key_exchange.rs -- finite-field DH over the Mersenne prime p=2^61-1; `DhKeyPair::{generate, from_private, public, shared_field_element, shared_seed}` with SplitMix64 seed diffusion; certified primitive root g=37; `pairwise_seed_matrix` builds the symmetric n×n shared-seed table feeding `masking::apply_pairwise_masks` -- closes the caller-supplied-seed gap)
+- [x] DP-SGD client-side gradient clipping helper -- ALREADY EXISTS: `GaussianMechanism::clip_gradient` (privacy/gaussian.rs), `DpFtrl::clip_gradient` (privacy/dp_ftrl.rs), `clip_l2` (privacy/ldp_fl.rs) all mirror `dp_clip_gradient_ptx` on the CPU side (g ← g·min(1, C/‖g‖))
 - [x] Local-DP randomised response for categorical metadata (privacy/randomized_response.rs -- Warner 1965 extended to k-RR: p=e^ε/(e^ε+k−1) truth/uniform-other; unbiased frequency aggregator inverting the perturbation)
 - [x] Asynchronous FedBuff / FedAsync schedulers (algorithm/fedbuff.rs -- Nguyen 2022; server buffer of K most-recent client updates, staleness-weighted 1/(1+α·s) average applied with η_g when buffer fills; non-blocking async client submissions)
 
 #### P2 -- Nice-to-Have (Operational Polish)
-- [ ] Client drift diagnostics -- per-round `||c_i - c||` and gradient-norm histograms for SCAFFOLD
+- [x] Client drift diagnostics (algorithm/scaffold.rs -- `control_variate_drift` computes `‖c_i − c‖`; `gradient_norm_histogram` bins per-client norms into a `DriftDiagnostics { values, bins, min, max, mean, std }`; `scaffold_drift_diagnostics` runs both across a client cohort)
 - [x] Adaptive client selection (selection/power_of_choice.rs -- Cho et al. 2020; Efraimidis-Spirakis weighted-without-replacement candidate sampling ∝ data size + top-m by local loss; LossBased / AvailabilityAware / Random variants)
-- [ ] Cohort fairness metrics (per-stratum accuracy / loss tracking)
-- [ ] PATE Confident-GNMax voter -- noisy-max with stability check on top of `noisy_voting`
-- [ ] Renyi-DP zCDP conversion -- additional accountant interop with zero-concentrated DP
+- [x] Cohort fairness metrics (selection/fairness.rs -- `StratumMetrics` per-cohort accuracy/loss; `fairness_summary` reports mean/min/max accuracy, std, max−min gap, max loss, Jain's fairness index; `CohortFairnessTracker` accumulates across rounds + `worst_stratum`; Li q-FFL + Jain 1984)
+- [x] PATE Confident-GNMax voter (privacy/pate.rs -- `confident_gnmax` + `ConfidentGnMaxConfig { threshold T, sigma_threshold σ₁, sigma_answer σ₂ }`; noisy plurality `max+N(0,σ₁²)` confidence check abstains (returns `None`) below T, else GNMax noisy-argmax with σ₂; Papernot 2018 ICLR §4.1)
+- [x] Renyi-DP zCDP conversion (privacy/zcdp.rs -- `zcdp_gaussian` ρ=1/(2σ²); `rdp_to_zcdp`/`zcdp_to_rdp` exact (α,ρα)-RDP correspondence; `zcdp_to_dp` optimised ε=ρ+2√(ρ·ln(1/δ)); `ZcdpAccountant` additive ρ composition; Bun-Steinke TCC 2016)
 - [x] `federated/moon.rs` — MOON (Li 2021): Model-Contrastive Federated Learning; contrastive loss between current model + global model (positive) vs previous model (negative); representation alignment; `MoonConfig { mu: f32, temperature: f32 }`
-- [ ] `federated/feddf.rs` — FedDF (Lin 2020): ensemble distillation on public data; aggregate by distilling ensemble of client models into global model; removes need for FedAvg aggregation; `FedDf { public_batches: usize }`
-- [ ] `federated/flute.rs` — FLUTE (Dimitriadis 2022): federated learning using heterogeneous data; personalised heads + shared body; task vectors for client adaptation without fine-tuning
+- [x] `federated/feddf.rs` — FedDF (Lin 2020) — ALREADY EXISTS at algorithm/feddf.rs (`FedDf`, `FedDfConfig`, `LinearModel`, ensemble logit distillation on public data via `softmax_with_temperature`/`argmax`; exported from prelude)
+- [x] `federated/flute.rs` — FLUTE (Dimitriadis 2022) — ALREADY EXISTS at algorithm/flute.rs (`Flute`, `FluteConfig`, `FluteModel` shared body + personalised heads, `FluteClientUpdate`/`FluteSample`; exported from prelude)
 - [x] `privacy/ldp_fl.rs` — Local DP for Federated Learning (Truex 2020): Gaussian/Laplace mechanism on client updates before transmission; privacy amplification via subsampling; `LdpFlConfig { epsilon, delta, clip_norm }`
 
 #### GPU Launcher Wiring
-- [ ] Wire `ptx_kernels::*` strings through `oxicuda-launch::Kernel::from_module` for end-to-end GPU execution (PTX strings are emitted but currently only CPU paths are exercised end-to-end)
-- [ ] GPU-resident `aggregate_mean_ptx` launch fused with `dp_clip_gradient_ptx` for a single-kernel DP-FedAvg server step
-- [ ] Multi-stream pairwise-mask generation for large cohorts using `pairwise_mask_ptx`
+- [ ] Wire `ptx_kernels::*` strings through `oxicuda-launch::Kernel::from_module` for end-to-end GPU execution (PTX strings are emitted but currently only CPU paths are exercised end-to-end) (requires GPU hardware)
+- [ ] GPU-resident `aggregate_mean_ptx` launch fused with `dp_clip_gradient_ptx` for a single-kernel DP-FedAvg server step (requires GPU hardware)
+- [ ] Multi-stream pairwise-mask generation for large cohorts using `pairwise_mask_ptx` (requires GPU hardware)
 
 ## Dependencies
 
@@ -164,9 +164,9 @@ addition, not GEMM.
 
 ### Deepening Opportunities
 
-- [ ] Hopper warp-specialised `aggregate_mean_ptx` using `redux.sync.add.f32` for atomic-free per-warp reduction
-- [ ] Blackwell (sm_100+) cluster-launch path for `share_gradient` so a single grid handles many client gradients in parallel
-- [ ] FP16 / BF16 variants of `aggregate_mean_ptx` and `gaussian_noise_ptx` for low-precision federated training
+- [ ] Hopper warp-specialised `aggregate_mean_ptx` using `redux.sync.add.f32` for atomic-free per-warp reduction (requires GPU hardware)
+- [ ] Blackwell (sm_100+) cluster-launch path for `share_gradient` so a single grid handles many client gradients in parallel (requires GPU hardware)
+- [ ] FP16 / BF16 variants of `aggregate_mean_ptx` and `gaussian_noise_ptx` for low-precision federated training (requires GPU hardware)
 
 ---
 

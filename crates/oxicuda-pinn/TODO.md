@@ -13,7 +13,7 @@ adaptive collocation sampling (residual-adaptive / LHS / Halton). Part of
 
 ## Implementation Status
 
-**Actual: 18,135 SLoC (59 files)** -- 624 unit tests + 12 E2E integration tests
+**Actual: 26,676 SLoC (65 files)** -- 696 unit tests + 16 E2E integration tests
 
 The crate is the densest single PINN / scientific-ML library in the OxiCUDA
 ecosystem: forward + reverse AD, four ODE solvers, four neural operator
@@ -78,6 +78,14 @@ families, five PDE templates, and three adaptive samplers. The crate is
       `integrate_fixed` / `integrate_adaptive` -- Dormand-Prince RK4(5) with
       exact Butcher tableau coefficients; adaptive step control with
       0.9 * err^(-0.2) rescaling; `OdeRhsFn` type alias
+- [x] (neural_ode/solvers_batch.rs::euler_step_batch / heun_step_batch /
+      rk4_step_batch / integrate_batch -- batched B-system Euler/Heun/RK4
+      integrating B independent IVPs in one call; reuses the EXACT scalar
+      Butcher tableaus / stage expressions so a batch of identical IVPs is
+      bit-for-bit equal to the scalar solver (verified max|batch-scalar| = 0);
+      per-system `OdeRhsFnBatch` closure f(i,t,y_i,dy_i), `[B*dim]` system-major
+      layout; independence verified -- distinct y'=λ_i·y match e^{λ_i t} to
+      <1e-6 with no cross-talk, RK4 4th-order error ratio ≈16 (measured 19.8))
 - [x] `adjoint.rs::node_forward` / `node_adjoint_grad` -- continuous adjoint
       method: forward trajectory storage, reverse-time integration of
       a-dot = - a^T * df/dy, accumulation of dL/dtheta = - integral a^T * df/dtheta dt
@@ -176,9 +184,9 @@ families, five PDE templates, and three adaptive samplers. The crate is
       Navier-Stokes) (neural_op/fno_3d.rs -- volumetric spectral conv: 3D DFT → keep top (mx,my,mz) modes → per-mode complex linear over channels → 3D iDFT + linear residual)
 - [x] PINNs with hard boundary enforcement via output transform
       (e.g., u(x) = N(x) * x * (1 - x) for Dirichlet on [0, 1]) (network/hard_bc.rs -- Lagaris 1998 / Berg-Nyström 2018; û=g(x)+B(x)·N_θ with B=0 on ∂Ω (1D interval and 2D box); exact Dirichlet by construction — no boundary-loss term)
-- [ ] Causal PINN training (time-marching loss weighting)
-- [ ] Self-Adaptive PINN (SA-PINN) -- per-point trainable weights with maximin
-      formulation
+- [x] Causal PINN training (time-marching loss weighting) (pinn_loss/causal.rs -- Wang et al. 2022; temporal weights w_i=exp(-ε·cumsum_{j<i} r_j²), causal weighted-loss combiner, monotone-non-increasing + eps→0→MSE tests)
+- [x] Self-Adaptive PINN (SA-PINN) -- per-point trainable weights with maximin
+      formulation (pinn_loss/sa_pinn.rs -- McClenny & Braga-Neto 2021; softplus mask m(λ)=log(1+e^λ), maximin λ-ascent λ_i←λ_i+lr·r_i² / θ-descent, weighted loss Σ w_i r_i²; update grows λ more on high-residual points)
 - [x] Neural SDE solver (Euler-Maruyama, Milstein, stochastic adjoint)
 - [x] DeepRitz energy-functional variational PINN (pinn_loss/deep_ritz.rs -- E & Yu 2018; energy functional ∫½|∇u|²−fu dx + β∫(u−g)² ds, residual-block architecture with analytic ∇_x u, MC integration, finite-difference energy-descent train_step verified to decrease energy on 1D Poisson)
 - [x] FBPINN (Finite Basis PINN) -- subdomain decomposition with partition of (network/fbpinn.rs -- Moseley et al. 2023; overlapping-subdomain Hann-window partition of unity Σω̂=1, local input normalization, per-subdomain MLPs, weighted-sum global forward)
@@ -189,12 +197,12 @@ families, five PDE templates, and three adaptive samplers. The crate is
 - [x] hp-variational PINN (`pinn_loss/hp_variational.rs`) — Kharazmi 2021 CMAME: element-wise test functions from the hp-finite-element space; residual minimised in a Petrov-Galerkin variational formulation for improved convergence; `HpVariationalPinn`
 - [x] X-PINN extended domain decomposition (`network/xpinn.rs`) — Jagtap 2021 JSSC: partition of domain into non-overlapping subdomains with interface residual conditions enforcing continuity and flux balance; `XPinn`
 - [x] Wavelet Neural Operator (WNO) on Daubechies / biorthogonal bases (neural_op/wno.rs -- Tripura 2022; 1D Haar wavelet transform + per-level (in_channels×out_channels) channel-linear + inverse Haar reconstruction + linear residual)
-- [ ] PointFNO / Graph FNO for unstructured meshes
-- [ ] PI-DeepONet (physics-informed DeepONet) joint training
-- [ ] Reservoir computing for chaotic dynamical systems
+- [x] PointFNO / Graph FNO for unstructured meshes (neural_op/point_fno.rs -- geometry-aware FNO: Gaussian scatter to a latent grid → per-channel 1D DFT spectral conv with mode truncation + complex channel mixing → Gaussian gather + skip; preserves point count on non-uniform coords)
+- [x] PI-DeepONet (physics-informed DeepONet) joint training (neural_op/pi_deeponet.rs -- Wang et al. 2021; DeepONet feature backbone + trainable coeff readout, joint physics/IC/data loss with closed-form ridge solve; PDE-residual dG/dy now via EXACT forward-mode AD (Dual) through the trunk MLP -- value_dy_ad / antiderivative_residual_ad / physics_loss_ad -- verified against analytic tanh-MLP backprop)
+- [x] Reservoir computing for chaotic dynamical systems (network/reservoir_computing.rs -- Echo State Network: sparse reservoir scaled to target spectral radius via normalised power iteration, leaky-integrator state x←(1-α)x+α·tanh(Wx+W_in u), closed-form ridge readout W_out=YXᵀ(XXᵀ+βI)⁻¹; one-step sine prediction MSE<2e-2)
 - [x] Hamiltonian / Lagrangian neural networks (HNN / LNN)
-- [ ] Symbolic regression integration via PySR-style operator selection
-- [ ] PDE-Net learned PDE discovery primitives
+- [x] Symbolic regression integration via PySR-style operator selection (symbolic/regression.rs -- tree GP over expr trees {+,-,*,/,sin,cos,exp, x, ephemeral consts}: ramped half-and-half init, tournament selection, subtree crossover, point mutation, elitism, MSE+parsimony fitness; all stochastic choice via LcgRng (deterministic); recovers 2x and x²+1 to MSE well below signal variance)
+- [x] PDE-Net learned PDE discovery primitives (variants/pde_discovery.rs::PdeNetCell -- Long et al. 2018; moment-matrix (Vandermonde) constrained stencils so a filter for order q exactly approximates ∂^q/∂x^q; q=1→[-0.5,0,0.5], q=2→[1,-2,1], periodic conv recovers ∂sin/∂x≈cos)
 
 ## Dependencies
 
@@ -208,7 +216,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 624 unit + 12 E2E = 636 passing
+- Tests: 696 unit + 16 E2E = 712 passing (+ 2 doctests)
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - All public APIs return `PinnResult<T>` or `Result<T, PinnError>`
@@ -274,9 +282,9 @@ Reference shapes (FNO and ODE integration are the hot paths):
 - [x] Tape gradient verified on x^2 (analytic = 2x)
 - [x] Dual gradient verified on sin(x^2) (analytic = cos(x^2) * 2x)
 - [x] LHS marginal coverage verified (every cell hit once per dim)
-- [ ] FNO spectral correctness vs. analytic 1D heat solution
-- [ ] CNF log-det numerical parity vs. dense-Jacobian trace on small Gaussians
-- [ ] Dopri45 step-controller stability on stiff problems
+- [x] FNO spectral correctness vs. analytic 1D heat solution (lib.rs::e2e_fno_spectral_matches_analytic_heat -- DFT→per-mode heat propagator exp(-ακ²Δt)→iDFT reproduces sin(2πx)·exp(-α(2π)²Δt) to <1e-4 on N=32 periodic grid)
+- [x] CNF log-det numerical parity vs. dense-Jacobian trace on small Gaussians (lib.rs::e2e_cnf_log_det_parity_dense_trace -- linear flow f=Az, dense_trace recovers tr(A)=0.3; cnf_forward Δlogp matches closed form -tr(A)·T)
+- [x] Dopri45 step-controller stability on stiff problems (lib.rs::e2e_dopri45_step_controller_stiff_stability -- y'=-1000(y-cos t): fixed-step explicit Euler (h=0.05) diverges while adaptive Dopri45 stays finite, takes many small steps, and tracks slow manifold cos t to <1e-2)
 
 ### Implementation Deepening
 - [x] `forbid(unsafe_code)` enforced at crate level
@@ -286,7 +294,7 @@ Reference shapes (FNO and ODE integration are the hot paths):
 - [x] Four neural-operator families (FNO 1D / 2D, DeepONet, MWT, GNO)
 - [ ] Mixed-precision (bf16 storage, fp32 accumulate) variants for FNO
       and DeepONet
-- [ ] Stiff-ODE solvers (Rosenbrock, BDF) for chemistry / circuits
+- [x] Stiff-ODE solvers (Rosenbrock, BDF) for chemistry / circuits (neural_ode/stiff.rs -- Rosenbrock-W ROS2 (L-stable, γ=1-1/√2) + backward-Euler + variable-order BDF1/2 with Newton iteration on a central-difference Jacobian and LU-with-pivot solve; stiff 2D system (λ ratio≈100) stays bounded where explicit Euler diverges)
 - [x] Symplectic integrators (leapfrog, Stormer-Verlet) for Hamiltonian systems
 - [ ] Automatic differentiation of PDE residual w.r.t. inputs via `MultiDual`
       (currently CPU-only via Tape)

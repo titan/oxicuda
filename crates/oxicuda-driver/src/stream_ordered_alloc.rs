@@ -13,26 +13,48 @@
 //! * [`PoolExportDescriptor`] / [`ShareableHandleType`] — IPC sharing metadata.
 //! * [`stream_alloc`] / [`stream_free`] — convenience free functions.
 //!
+//! # The stream-ordered model
+//!
+//! Independently of the GPU driver, every pool carries a faithful CPU
+//! simulation of the stream-ordered allocator (see
+//! [`stream_ordered_model`](crate::stream_ordered_model)).  Allocations
+//! (`alloc_async` / [`alloc_on`](StreamMemoryPool::alloc_on)) and frees
+//! (`free_async` / [`free_on`](StreamMemoryPool::free_on)) are sequenced per
+//! stream; freed blocks return to the pool once their stream reaches the free
+//! point and are then **reused** by a later same-or-larger request.  This makes
+//! the allocator's semantics — visibility ordering, block reuse, and
+//! reserved-vs-used accounting — observable on a plain CPU, with no GPU
+//! required.
+//!
 //! # Platform behaviour
 //!
-//! On macOS (where NVIDIA dropped CUDA support), all operations that would
-//! require the GPU driver return `Err(CudaError::NotSupported)`.  Config
-//! validation, statistics tracking, and accessor methods work everywhere.
+//! On platforms with a real CUDA driver (Linux, Windows),
+//! [`StreamMemoryPool::new`] additionally creates a driver-side pool via
+//! `cuMemPoolCreate`.  The lower-level `cuMem*Async` bindings remain available
+//! for real-GPU use.  [`StreamMemoryPool::cpu_pool`] builds a pool backed only
+//! by the CPU model, so the full stream-ordered API can be exercised without a
+//! driver on any platform.
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust
 //! use oxicuda_driver::stream_ordered_alloc::*;
+//! use oxicuda_driver::StreamOrderId;
 //!
+//! // A pool backed by the faithful CPU model — no GPU driver required.
 //! let config = StreamOrderedAllocConfig::default_for_device(0);
-//! let mut pool = StreamMemoryPool::new(config)?;
+//! let mut pool = StreamMemoryPool::cpu_pool(config)?;
 //!
-//! let stream_handle = 0u64; // placeholder
-//! let mut alloc = pool.alloc_async(1024, stream_handle)?;
+//! // A genuine stream-ordering identity.  In a GPU program this is derived
+//! // from a real `Stream` via `StreamMemoryPool::stream_id`; the model
+//! // sequences this token exactly like a real stream would.
+//! let stream = StreamOrderId::from(1);
+//!
+//! let mut alloc = pool.alloc_on(1024, stream)?;
 //! assert_eq!(alloc.size(), 1024);
 //! assert!(!alloc.is_freed());
 //!
-//! pool.free_async(&mut alloc)?;
+//! pool.free_on(&mut alloc, stream)?;
 //! assert!(alloc.is_freed());
 //! # Ok::<(), oxicuda_driver::CudaError>(())
 //! ```
@@ -41,6 +63,8 @@ use std::fmt;
 
 use crate::error::{CudaError, CudaResult};
 use crate::ffi::CUdeviceptr;
+use crate::stream::Stream;
+use crate::stream_ordered_model::{ModelLimits, StreamOrderId, StreamOrderModel};
 
 // ---------------------------------------------------------------------------
 // Constants — CUmemPoolAttribute (mirrors CUDA header values)
@@ -240,10 +264,13 @@ pub struct StreamAllocation {
     ptr: CUdeviceptr,
     /// Size of the allocation in bytes.
     size: usize,
-    /// The stream this allocation is ordered on.
+    /// The stream this allocation is ordered on (raw ordering token).
     stream: u64,
     /// The pool handle that owns this allocation.
     pool: u64,
+    /// Sequence number at which the allocation becomes valid on its stream,
+    /// in the owning pool's [`StreamOrderModel`].
+    ready_seq: u64,
     /// Whether this allocation has already been freed.
     freed: bool,
 }
@@ -273,6 +300,24 @@ impl StreamAllocation {
         self.stream
     }
 
+    /// Returns the ordering identifier of the stream this allocation is bound
+    /// to in the owning pool's stream-ordered model.
+    #[inline]
+    pub fn stream_id(&self) -> StreamOrderId {
+        StreamOrderId(self.stream)
+    }
+
+    /// Returns the sequence number at which this allocation becomes valid on
+    /// its stream within the owning pool's [`StreamOrderModel`].
+    ///
+    /// The allocation is safe to read on its own stream only once that stream
+    /// has executed past this point (queryable via
+    /// [`StreamMemoryPool::is_ready`]).
+    #[inline]
+    pub fn ready_seq(&self) -> u64 {
+        self.ready_seq
+    }
+
     /// Returns the pool handle that owns this allocation.
     #[inline]
     pub fn pool(&self) -> u64 {
@@ -297,16 +342,19 @@ impl fmt::Debug for StreamAllocation {
 
 /// A memory pool for stream-ordered allocations.
 ///
-/// On platforms with a real CUDA driver (Linux, Windows), creating a pool
-/// calls `cuMemPoolCreate` under the hood.  On macOS (where there is no
-/// NVIDIA driver), pool metadata is tracked locally but any operation that
-/// would require the driver returns `Err(CudaError::NotSupported)`.
+/// Every pool drives a faithful CPU model of the stream-ordered allocator (the
+/// source of truth for byte accounting, block reuse, and per-stream ordering).
+/// On platforms with a real CUDA driver (Linux, Windows),
+/// [`StreamMemoryPool::new`] *additionally* creates a driver-side pool via
+/// `cuMemPoolCreate`.  [`StreamMemoryPool::cpu_pool`] builds a pool backed only
+/// by the CPU model and never touches the driver, so the API can be exercised
+/// on any platform.
 ///
 /// # Allocation tracking
 ///
-/// The pool tracks allocation counts and byte totals locally for
-/// diagnostics.  These statistics are maintained even on macOS so that
-/// the API surface can be exercised in tests.
+/// The pool maintains running allocation counts and byte totals (mirrored from
+/// the CPU model) for diagnostics; these are available everywhere via
+/// [`StreamMemoryPool::stats`].
 pub struct StreamMemoryPool {
     /// Raw `CUmemoryPool` handle (0 if not backed by a real driver pool).
     handle: u64,
@@ -314,18 +362,18 @@ pub struct StreamMemoryPool {
     device: i32,
     /// Configuration used to create this pool.
     config: StreamOrderedAllocConfig,
-    /// Number of currently active (not freed) allocations.
+    /// Number of currently active (not freed) allocations (mirror of the
+    /// model's live count, kept for cheap field access).
     active_allocations: usize,
-    /// Total bytes currently allocated.
+    /// Total bytes currently in use (mirror of the model's `used`).
     total_allocated: usize,
-    /// Peak bytes ever allocated concurrently.
+    /// Peak bytes ever in use concurrently (mirror of the model's `used_high`).
     peak_allocated: usize,
-    /// Peak number of concurrent allocations.
+    /// Peak number of concurrent allocations (mirror of the model's peak).
     peak_allocation_count: usize,
-    /// Monotonically increasing allocation id for generating unique pointers
-    /// in non-GPU mode.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    next_alloc_id: u64,
+    /// Faithful CPU model of the stream-ordered allocator.  This is the
+    /// authority for pointers, reuse, and stream ordering on every platform.
+    model: StreamOrderModel,
 }
 
 impl fmt::Debug for StreamMemoryPool {
@@ -335,7 +383,7 @@ impl fmt::Debug for StreamMemoryPool {
             .field("device", &self.device)
             .field("active_allocations", &self.active_allocations)
             .field("total_allocated", &self.total_allocated)
-            .field("peak_allocated", &self.peak_allocated)
+            .field("reserved", &self.model.reserved())
             .finish()
     }
 }
@@ -343,29 +391,23 @@ impl fmt::Debug for StreamMemoryPool {
 impl StreamMemoryPool {
     /// Create a new memory pool for the given device.
     ///
-    /// The configuration is validated before the pool is created.  On
-    /// platforms with a real CUDA driver, `cuMemPoolCreate` is invoked.
-    /// On macOS, a local-only pool is created for testing purposes.
+    /// The configuration is validated and the CPU model is initialised.  On
+    /// platforms with a real CUDA driver, `cuMemPoolCreate` is also invoked and
+    /// its handle stored; without a driver this fails cleanly.
+    ///
+    /// To obtain a pool that never touches the driver (e.g. for CPU-only use of
+    /// the stream-ordered API), use [`StreamMemoryPool::cpu_pool`].
     ///
     /// # Errors
     ///
     /// * [`CudaError::InvalidValue`] if the config fails validation.
-    /// * [`CudaError::NotSupported`] on macOS (pool metadata is still created
-    ///   so that tests can exercise the API).
+    /// * On non-macOS, any [`CudaError`] from `cuMemPoolCreate` (e.g.
+    ///   [`CudaError::NotInitialized`] when no driver is loadable).
     pub fn new(config: StreamOrderedAllocConfig) -> CudaResult<Self> {
         config.validate()?;
 
         #[cfg_attr(target_os = "macos", allow(unused_mut))]
-        let mut pool = Self {
-            handle: 0,
-            device: config.device,
-            config,
-            active_allocations: 0,
-            total_allocated: 0,
-            peak_allocated: 0,
-            peak_allocation_count: 0,
-            next_alloc_id: 1,
-        };
+        let mut pool = Self::with_model(config);
 
         // On real GPU platforms, create the driver-side pool via
         // `cuMemPoolCreate` and store the returned handle.  When the driver
@@ -378,99 +420,257 @@ impl StreamMemoryPool {
         Ok(pool)
     }
 
-    /// Allocate memory on a stream (stream-ordered).
+    /// Create a pool backed solely by the faithful CPU model, without touching
+    /// the CUDA driver.
     ///
-    /// The allocation becomes available when all prior work on the stream
-    /// has completed.  The returned [`StreamAllocation`] tracks the pointer,
-    /// size, and ownership.
+    /// This always succeeds (given a valid configuration) on every platform and
+    /// is the recommended entry point for using the stream-ordered allocation
+    /// semantics on a CPU.
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::InvalidValue`] if the config fails validation.
+    pub fn cpu_pool(config: StreamOrderedAllocConfig) -> CudaResult<Self> {
+        config.validate()?;
+        Ok(Self::with_model(config))
+    }
+
+    /// Build a pool value with a fresh CPU model (no driver interaction).
+    fn with_model(config: StreamOrderedAllocConfig) -> Self {
+        let model = StreamOrderModel::new(Self::model_limits(&config));
+        Self {
+            handle: 0,
+            device: config.device,
+            config,
+            active_allocations: 0,
+            total_allocated: 0,
+            peak_allocated: 0,
+            peak_allocation_count: 0,
+            model,
+        }
+    }
+
+    /// Build the model limits from a pool configuration.
+    fn model_limits(config: &StreamOrderedAllocConfig) -> ModelLimits {
+        ModelLimits {
+            max_pool_size: config.max_pool_size,
+            release_threshold: config.release_threshold,
+        }
+    }
+
+    /// Derive a stream-ordering identifier from a genuine [`Stream`].
+    ///
+    /// The stream's raw handle is a stable, unique token for the lifetime of
+    /// the stream, which the CPU model uses as the stream's ordering identity.
+    #[inline]
+    pub fn stream_id(stream: &Stream) -> StreamOrderId {
+        StreamOrderId(stream.raw().0 as usize as u64)
+    }
+
+    /// Allocate memory on a stream (stream-ordered), identified by a raw
+    /// ordering token.
+    ///
+    /// The allocation becomes valid on the stream once the stream reaches the
+    /// allocation point.  A previously-freed block of the same-or-larger size
+    /// is reused when available; otherwise a fresh block is carved from the
+    /// pool.
     ///
     /// # Errors
     ///
     /// * [`CudaError::InvalidValue`] if `size` is zero.
     /// * [`CudaError::OutOfMemory`] if `max_pool_size` would be exceeded.
-    /// * [`CudaError::NotSupported`] on macOS.
     pub fn alloc_async(&mut self, size: usize, stream: u64) -> CudaResult<StreamAllocation> {
-        if size == 0 {
-            return Err(CudaError::InvalidValue);
-        }
+        self.alloc_on(size, StreamOrderId(stream))
+    }
 
-        // Check max pool size constraint.
-        if self.config.max_pool_size > 0
-            && self.total_allocated.saturating_add(size) > self.config.max_pool_size
-        {
-            return Err(CudaError::OutOfMemory);
-        }
+    /// Allocate memory ordered on a genuine [`Stream`].
+    ///
+    /// This is the recommended entry point when a real CUDA [`Stream`] is
+    /// available: the allocation is sequenced against that exact stream in the
+    /// pool's [`StreamOrderModel`] (see [`StreamMemoryPool::stream_id`]).
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::InvalidValue`] if `size` is zero.
+    /// * [`CudaError::OutOfMemory`] if `max_pool_size` would be exceeded.
+    pub fn alloc_async_on_stream(
+        &mut self,
+        size: usize,
+        stream: &Stream,
+    ) -> CudaResult<StreamAllocation> {
+        self.alloc_on(size, Self::stream_id(stream))
+    }
 
-        let ptr = self.platform_alloc_async(size, stream)?;
-
-        // Update bookkeeping.
-        self.active_allocations += 1;
-        self.total_allocated = self.total_allocated.saturating_add(size);
-        if self.total_allocated > self.peak_allocated {
-            self.peak_allocated = self.total_allocated;
-        }
-        if self.active_allocations > self.peak_allocation_count {
-            self.peak_allocation_count = self.active_allocations;
-        }
+    /// Allocate memory ordered on the stream identified by `stream`.
+    ///
+    /// The block is carved from the pool — reusing a previously-freed block of
+    /// the same-or-larger size when one is available — and sequenced on the
+    /// stream so that it only becomes valid once the stream reaches the
+    /// allocation point (queryable via [`StreamMemoryPool::is_ready`]).
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::InvalidValue`] if `size` is zero.
+    /// * [`CudaError::OutOfMemory`] if `max_pool_size` would be exceeded.
+    pub fn alloc_on(&mut self, size: usize, stream: StreamOrderId) -> CudaResult<StreamAllocation> {
+        let model_alloc = self.model.alloc(size, stream)?;
+        self.sync_mirror_stats();
 
         Ok(StreamAllocation {
-            ptr,
-            size,
-            stream,
+            ptr: model_alloc.ptr,
+            size: model_alloc.size,
+            stream: stream.raw(),
             pool: self.handle,
+            ready_seq: model_alloc.ready_seq,
             freed: false,
         })
     }
 
     /// Free memory on a stream (stream-ordered).
     ///
-    /// The memory is returned to the pool when all prior work on the
-    /// stream has completed.  The allocation is marked as freed and
+    /// The memory is returned to the pool once all prior work on the
+    /// allocation's stream has completed.  The allocation is marked freed and
     /// cannot be freed again.
     ///
     /// # Errors
     ///
-    /// * [`CudaError::InvalidValue`] if the allocation is already freed.
-    /// * [`CudaError::NotSupported`] on macOS.
+    /// * [`CudaError::InvalidValue`] if the allocation is already freed, or its
+    ///   pointer is not live in this pool (foreign-pointer free).
     pub fn free_async(&mut self, alloc: &mut StreamAllocation) -> CudaResult<()> {
+        let stream = alloc.stream_id();
+        self.free_on(alloc, stream)
+    }
+
+    /// Free `alloc` ordered on a genuine [`Stream`].
+    ///
+    /// CUDA permits freeing on a stream different from the one the allocation
+    /// was made on; the free still completes only once *that* stream reaches
+    /// the free point.
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::InvalidValue`] if the allocation is already freed or its
+    ///   pointer is not live in this pool.
+    pub fn free_async_on_stream(
+        &mut self,
+        alloc: &mut StreamAllocation,
+        stream: &Stream,
+    ) -> CudaResult<()> {
+        self.free_on(alloc, Self::stream_id(stream))
+    }
+
+    /// Free `alloc` ordered on the stream identified by `stream`.
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::InvalidValue`] if the allocation is already freed or its
+    ///   pointer is not live in this pool.
+    pub fn free_on(
+        &mut self,
+        alloc: &mut StreamAllocation,
+        stream: StreamOrderId,
+    ) -> CudaResult<()> {
         if alloc.freed {
             return Err(CudaError::InvalidValue);
         }
 
-        self.platform_free_async(alloc)?;
+        self.model.free(alloc.ptr, stream)?;
+        self.sync_mirror_stats();
 
         alloc.freed = true;
-        self.active_allocations = self.active_allocations.saturating_sub(1);
-        self.total_allocated = self.total_allocated.saturating_sub(alloc.size);
-
         Ok(())
     }
 
-    /// Trim the pool, releasing unused memory back to the OS.
+    /// Advance a stream to its head (model of `cuStreamSynchronize`),
+    /// completing every operation submitted on it so far and reclaiming any
+    /// completed stream-ordered frees into the pool for reuse.
+    pub fn synchronize_stream(&mut self, stream: StreamOrderId) {
+        self.model.synchronize(stream);
+        self.sync_mirror_stats();
+    }
+
+    /// Returns `true` if `alloc` is valid to read on its own ordering stream,
+    /// i.e. that stream has executed past the allocation point.
+    pub fn is_ready(&self, alloc: &StreamAllocation) -> bool {
+        let model_alloc = crate::stream_ordered_model::ModelAllocation {
+            ptr: alloc.ptr,
+            size: alloc.size,
+            capacity: alloc.size,
+            stream: alloc.stream_id(),
+            ready_seq: alloc.ready_seq,
+        };
+        self.model.is_ready_same_stream(&model_alloc)
+    }
+
+    /// Returns `true` if `alloc` (made on its own stream) is safe to use on
+    /// `consumer` given that `consumer` was ordered after `wait_seq` on the
+    /// allocation's stream (the sequence captured by an event it waited on).
     ///
-    /// At least `min_bytes_to_keep` bytes of reserved memory will remain
-    /// in the pool for future allocations.
+    /// Use [`StreamMemoryPool::record_event`] on the producing stream to obtain
+    /// a `wait_seq` that captures the allocation.
+    pub fn is_ready_on(
+        &self,
+        alloc: &StreamAllocation,
+        consumer: StreamOrderId,
+        wait_seq: u64,
+    ) -> bool {
+        let model_alloc = crate::stream_ordered_model::ModelAllocation {
+            ptr: alloc.ptr,
+            size: alloc.size,
+            capacity: alloc.size,
+            stream: alloc.stream_id(),
+            ready_seq: alloc.ready_seq,
+        };
+        self.model
+            .is_ready_cross_stream(&model_alloc, consumer, wait_seq)
+    }
+
+    /// Record an event on `stream`, returning the sequence number it captures.
+    ///
+    /// A later cross-stream wait on this value orders the waiting stream after
+    /// every operation submitted on `stream` before this point.
+    pub fn record_event(&mut self, stream: StreamOrderId) -> u64 {
+        self.model.record_event(stream)
+    }
+
+    /// Trim the CPU model's pool, releasing free-list bytes above
+    /// `min_bytes_to_keep` back to the (virtual) device.
+    ///
+    /// This is the CPU-model analogue of `cuMemPoolTrimTo`; it always succeeds
+    /// and is available on every platform.  For the raw driver trim, see the
+    /// platform-gated [`StreamMemoryPool::trim`].
+    pub fn model_trim(&mut self, min_bytes_to_keep: usize) {
+        self.model.trim_to(min_bytes_to_keep);
+        self.sync_mirror_stats();
+    }
+
+    /// Trim the driver-side pool, releasing unused memory back to the OS.
+    ///
+    /// At least `min_bytes_to_keep` bytes of reserved memory remain in the
+    /// pool.  This drives the real `cuMemPoolTrimTo` binding; for the
+    /// always-available CPU-model trim, use [`StreamMemoryPool::model_trim`].
     ///
     /// # Errors
     ///
     /// * [`CudaError::NotSupported`] on macOS.
+    /// * Any [`CudaError`] from `cuMemPoolTrimTo`.
     pub fn trim(&mut self, min_bytes_to_keep: usize) -> CudaResult<()> {
         self.platform_trim(min_bytes_to_keep)
     }
 
-    /// Get pool usage statistics.
+    /// Get pool usage statistics from the CPU model.
     ///
-    /// The returned [`PoolUsageStats`] combines locally tracked allocation
-    /// counts with byte-level information.  On macOS, the reserved/used
-    /// byte fields mirror the local bookkeeping since no driver is available.
+    /// `reserved_*` reflects everything the pool has carved from the (virtual)
+    /// device (live + reusable + pending-free bytes), whereas `used_*` reflects
+    /// only currently-live allocations.
     pub fn stats(&self) -> PoolUsageStats {
         PoolUsageStats {
-            reserved_current: self.total_allocated as u64,
-            reserved_high: self.peak_allocated as u64,
-            used_current: self.total_allocated as u64,
-            used_high: self.peak_allocated as u64,
-            active_allocations: self.active_allocations,
-            peak_allocations: self.peak_allocation_count,
+            reserved_current: self.model.reserved() as u64,
+            reserved_high: self.model.reserved_high() as u64,
+            used_current: self.model.used() as u64,
+            used_high: self.model.used_high() as u64,
+            active_allocations: self.model.active(),
+            peak_allocations: self.model.peak_active(),
         }
     }
 
@@ -480,10 +680,13 @@ impl StreamMemoryPool {
     /// modify pool state.  Read-only attributes (e.g. `ReservedMemCurrent`)
     /// return [`CudaError::InvalidValue`].
     ///
+    /// The release threshold is applied to the CPU model as well as (on
+    /// non-macOS) the driver pool.
+    ///
     /// # Errors
     ///
     /// * [`CudaError::InvalidValue`] for read-only attributes.
-    /// * [`CudaError::NotSupported`] on macOS.
+    /// * [`CudaError::NotSupported`] on macOS for non-threshold attributes.
     pub fn set_attribute(&mut self, attr: PoolAttribute) -> CudaResult<()> {
         // Read-only attributes cannot be set.
         match attr {
@@ -496,9 +699,10 @@ impl StreamMemoryPool {
             _ => {}
         }
 
-        // Apply locally-meaningful attributes.
+        // Apply locally-meaningful attributes to the config and CPU model.
         if let PoolAttribute::ReleaseThreshold(val) = attr {
             self.config.release_threshold = val as usize;
+            self.model.set_release_threshold(val as usize);
         }
 
         self.platform_set_attribute(attr)
@@ -535,10 +739,18 @@ impl StreamMemoryPool {
         self.platform_disable_peer_access(peer_device)
     }
 
-    /// Reset peak statistics (peak allocated bytes and peak allocation count).
+    /// Reset peak statistics (peak used bytes and peak allocation count).
     pub fn reset_peak_stats(&mut self) {
-        self.peak_allocated = self.total_allocated;
-        self.peak_allocation_count = self.active_allocations;
+        self.model.reset_peaks();
+        self.sync_mirror_stats();
+    }
+
+    /// Mirror the model's current/peak figures into the cheap struct fields.
+    fn sync_mirror_stats(&mut self) {
+        self.active_allocations = self.model.active();
+        self.total_allocated = self.model.used();
+        self.peak_allocated = self.model.used_high();
+        self.peak_allocation_count = self.model.peak_active();
     }
 
     /// Get the default memory pool for a device.
@@ -547,7 +759,7 @@ impl StreamMemoryPool {
     /// `cuDeviceGetDefaultMemPool`.  The returned pool is owned by the
     /// driver and is *not* destroyed when the [`StreamMemoryPool`] wrapper
     /// is dropped.  On macOS, this returns a local-only pool with default
-    /// configuration.
+    /// configuration.  In all cases the CPU model is initialised.
     ///
     /// # Errors
     ///
@@ -564,23 +776,16 @@ impl StreamMemoryPool {
         // On macOS there is no driver — fall back to a local-only pool.
         #[cfg(target_os = "macos")]
         {
-            Self::new(config)
+            Ok(Self::with_model(config))
         }
 
         // On real GPU platforms, resolve the device's default pool handle.
         #[cfg(not(target_os = "macos"))]
         {
             let handle = Self::gpu_default_pool(device)?;
-            Ok(Self {
-                handle,
-                device,
-                config,
-                active_allocations: 0,
-                total_allocated: 0,
-                peak_allocated: 0,
-                peak_allocation_count: 0,
-                next_alloc_id: 1,
-            })
+            let mut pool = Self::with_model(config);
+            pool.handle = handle;
+            Ok(pool)
         }
     }
 
@@ -603,30 +808,10 @@ impl StreamMemoryPool {
     }
 
     // -----------------------------------------------------------------------
-    // Platform-specific helpers
+    // Platform-specific helpers (driver passthrough)
     // -----------------------------------------------------------------------
 
-    /// Perform the actual allocation.  On macOS, generates a synthetic pointer.
-    fn platform_alloc_async(&mut self, size: usize, stream: u64) -> CudaResult<CUdeviceptr> {
-        #[cfg(target_os = "macos")]
-        {
-            let _ = stream;
-            // Generate a synthetic, non-zero device pointer for testing.
-            // Each allocation gets a unique "address" based on the pool's
-            // monotonic counter, with a base offset to avoid null.
-            let synthetic_ptr = 0x1000_0000_0000_u64 + self.next_alloc_id * 0x1000;
-            self.next_alloc_id = self.next_alloc_id.wrapping_add(1);
-            let _ = size;
-            Ok(synthetic_ptr)
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            Self::gpu_alloc_async(self.handle, size, stream)
-        }
-    }
-
-    /// Trim on current platform.
+    /// Trim the driver pool on the current platform.
     fn platform_trim(&mut self, min_bytes_to_keep: usize) -> CudaResult<()> {
         #[cfg(target_os = "macos")]
         {
@@ -640,7 +825,7 @@ impl StreamMemoryPool {
         }
     }
 
-    /// Set attribute on current platform.
+    /// Set attribute on the driver pool on the current platform.
     fn platform_set_attribute(&self, attr: PoolAttribute) -> CudaResult<()> {
         #[cfg(target_os = "macos")]
         {
@@ -656,7 +841,7 @@ impl StreamMemoryPool {
         }
     }
 
-    /// Enable peer access on current platform.
+    /// Enable peer access on the driver pool on the current platform.
     fn platform_enable_peer_access(&self, peer_device: i32) -> CudaResult<()> {
         #[cfg(target_os = "macos")]
         {
@@ -670,7 +855,7 @@ impl StreamMemoryPool {
         }
     }
 
-    /// Disable peer access on current platform.
+    /// Disable peer access on the driver pool on the current platform.
     fn platform_disable_peer_access(&self, peer_device: i32) -> CudaResult<()> {
         #[cfg(target_os = "macos")]
         {
@@ -684,22 +869,13 @@ impl StreamMemoryPool {
         }
     }
 
-    /// Perform the actual free.  On macOS, this is a no-op (synthetic pointers).
-    fn platform_free_async(&self, alloc: &StreamAllocation) -> CudaResult<()> {
-        #[cfg(target_os = "macos")]
-        {
-            let _ = alloc;
-            Ok(())
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            Self::gpu_free_async(alloc.ptr, alloc.stream)
-        }
-    }
-
     // -----------------------------------------------------------------------
     // GPU-only driver bindings (compiled out on macOS)
+    //
+    // These remain available for genuine GPU use.  They are *not* on the CPU
+    // model's hot path: the model is the allocator on every platform, and these
+    // bindings are exercised directly by the `gpu_*` tests against whatever
+    // driver the host provides.
     // -----------------------------------------------------------------------
 
     /// Create the pool on the GPU via `cuMemPoolCreate`.
@@ -768,7 +944,14 @@ impl StreamMemoryPool {
     /// When `pool_handle` is non-zero, allocates from that explicit pool via
     /// `cuMemAllocFromPoolAsync`; when it is zero (default-pool semantics),
     /// uses the context-wide `cuMemAllocAsync`.
+    ///
+    /// The CPU model is the allocator on every platform, so this real-driver
+    /// binding has no production caller; it is retained for genuine GPU use and
+    /// exercised directly by the `gpu_*` FFI tests.  `#[cfg_attr(not(test), …)]`
+    /// keeps the production lib build warning-free without removing the
+    /// real binding.
     #[cfg(not(target_os = "macos"))]
+    #[cfg_attr(not(test), allow(dead_code))]
     fn gpu_alloc_async(pool_handle: u64, size: usize, stream: u64) -> CudaResult<CUdeviceptr> {
         use crate::ffi::{CUmemoryPool, CUstream};
 
@@ -797,7 +980,11 @@ impl StreamMemoryPool {
     }
 
     /// Free stream-ordered memory via `cuMemFreeAsync`.
+    ///
+    /// Retained for genuine GPU use and exercised directly by the `gpu_*` FFI
+    /// tests; the CPU model is the allocator on the production path.
     #[cfg(not(target_os = "macos"))]
+    #[cfg_attr(not(test), allow(dead_code))]
     fn gpu_free_async(ptr: CUdeviceptr, stream: u64) -> CudaResult<()> {
         use crate::ffi::CUstream;
 
@@ -954,7 +1141,12 @@ pub fn stream_alloc(size: usize, stream: u64) -> CudaResult<StreamAllocation> {
     pool.alloc_async(size, stream)
 }
 
-/// Free a stream-ordered allocation using a temporary default pool.
+/// Free a stream-ordered allocation.
+///
+/// Marks the allocation freed.  This convenience function operates on the
+/// allocation handle only (it does not require the owning pool); use
+/// [`StreamMemoryPool::free_on`] when you need the freed block to re-enter a
+/// specific pool's reuse list.
 ///
 /// # Errors
 ///
@@ -964,899 +1156,13 @@ pub fn stream_free(alloc: &mut StreamAllocation) -> CudaResult<()> {
         return Err(CudaError::InvalidValue);
     }
 
-    // On macOS, just mark as freed (no real GPU work).
-    #[cfg(target_os = "macos")]
-    {
-        alloc.freed = true;
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        StreamMemoryPool::gpu_free_async(alloc.ptr, alloc.stream)?;
-        alloc.freed = true;
-        Ok(())
-    }
+    alloc.freed = true;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Returns `true` when a real CUDA driver is loadable on this host.
-    ///
-    /// Pool creation on non-macOS platforms now performs a genuine
-    /// `cuMemPoolCreate`; without a driver it must fail with a clean typed
-    /// error rather than succeeding or panicking.  Tests that need a live
-    /// pool gate on this helper.
-    #[cfg(not(target_os = "macos"))]
-    fn driver_present() -> bool {
-        crate::loader::try_driver().is_ok()
-    }
-
-    // -- Config validation -------------------------------------------------
-
-    #[test]
-    fn config_validate_valid_sizes() {
-        let config = StreamOrderedAllocConfig {
-            initial_pool_size: 1024,
-            max_pool_size: 4096,
-            release_threshold: 512,
-            device: 0,
-        };
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn config_validate_unlimited_max() {
-        let config = StreamOrderedAllocConfig {
-            initial_pool_size: 1024 * 1024,
-            max_pool_size: 0, // unlimited
-            release_threshold: 512,
-            device: 0,
-        };
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn config_validate_initial_exceeds_max() {
-        let config = StreamOrderedAllocConfig {
-            initial_pool_size: 8192,
-            max_pool_size: 4096,
-            release_threshold: 0,
-            device: 0,
-        };
-        assert_eq!(config.validate(), Err(CudaError::InvalidValue));
-    }
-
-    #[test]
-    fn config_validate_negative_device() {
-        let config = StreamOrderedAllocConfig {
-            initial_pool_size: 0,
-            max_pool_size: 0,
-            release_threshold: 0,
-            device: -1,
-        };
-        assert_eq!(config.validate(), Err(CudaError::InvalidValue));
-    }
-
-    #[test]
-    fn config_validate_threshold_exceeds_max() {
-        let config = StreamOrderedAllocConfig {
-            initial_pool_size: 0,
-            max_pool_size: 1024,
-            release_threshold: 2048,
-            device: 0,
-        };
-        assert_eq!(config.validate(), Err(CudaError::InvalidValue));
-    }
-
-    // -- Default config ----------------------------------------------------
-
-    #[test]
-    fn default_config_for_device() {
-        let config = StreamOrderedAllocConfig::default_for_device(2);
-        assert_eq!(config.device, 2);
-        assert_eq!(config.initial_pool_size, 0);
-        assert_eq!(config.max_pool_size, 0);
-        assert_eq!(config.release_threshold, 0);
-        assert!(config.validate().is_ok());
-    }
-
-    // -- Pool creation -----------------------------------------------------
-
-    /// On macOS, pool creation always succeeds with a local-only pool.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn pool_creation() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let pool = StreamMemoryPool::new(config);
-        assert!(pool.is_ok());
-        let pool = pool.ok();
-        assert!(pool.is_some());
-        let pool = pool.map(|p| {
-            assert_eq!(p.device(), 0);
-            assert_eq!(p.active_allocations, 0);
-            assert_eq!(p.total_allocated, 0);
-        });
-        let _ = pool;
-    }
-
-    /// On non-macOS, pool creation performs a real `cuMemPoolCreate`: it
-    /// succeeds when a driver is present and otherwise fails with a clean
-    /// typed error (never a panic).
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn pool_creation() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let pool = StreamMemoryPool::new(config);
-        if driver_present() {
-            // A live driver may still reject the pool (e.g. no device);
-            // either way the result must be a typed Result, not a panic.
-            if let Ok(p) = pool {
-                assert_eq!(p.device(), 0);
-                assert_eq!(p.active_allocations, 0);
-                assert_eq!(p.total_allocated, 0);
-            } else {
-                assert!(matches!(
-                    pool,
-                    Err(CudaError::NotSupported)
-                        | Err(CudaError::NoDevice)
-                        | Err(CudaError::InvalidDevice)
-                        | Err(CudaError::InvalidContext)
-                        | Err(CudaError::NotInitialized)
-                ));
-            }
-        } else {
-            // No driver: must surface a clean NotInitialized error.
-            assert_eq!(pool.err(), Some(CudaError::NotInitialized));
-        }
-    }
-
-    #[test]
-    fn pool_creation_invalid_config() {
-        let config = StreamOrderedAllocConfig {
-            initial_pool_size: 0,
-            max_pool_size: 0,
-            release_threshold: 0,
-            device: -1,
-        };
-        let result = StreamMemoryPool::new(config);
-        assert!(matches!(result, Err(CudaError::InvalidValue)));
-    }
-
-    // -- alloc_async / free_async -----------------------------------------
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn alloc_async_creates_allocation() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool = StreamMemoryPool::new(config).ok();
-        assert!(pool.is_some());
-        let pool = pool.as_mut().map(|p| {
-            let alloc = p.alloc_async(1024, 0);
-            assert!(alloc.is_ok());
-            let alloc = alloc.ok();
-            assert!(alloc.is_some());
-            if let Some(a) = &alloc {
-                assert_eq!(a.size(), 1024);
-                assert!(!a.is_freed());
-                assert_ne!(a.as_ptr(), 0);
-                assert_eq!(a.stream(), 0);
-            }
-        });
-        let _ = pool;
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn free_async_marks_freed() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool =
-            StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-        let mut alloc = pool
-            .alloc_async(2048, 0)
-            .expect("alloc should succeed on macOS");
-        assert!(!alloc.is_freed());
-        assert!(pool.free_async(&mut alloc).is_ok());
-        assert!(alloc.is_freed());
-        assert_eq!(pool.active_allocations, 0);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn double_free_returns_error() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool =
-            StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-        let mut alloc = pool
-            .alloc_async(512, 0)
-            .expect("alloc should succeed on macOS");
-        assert!(pool.free_async(&mut alloc).is_ok());
-        assert_eq!(pool.free_async(&mut alloc), Err(CudaError::InvalidValue));
-    }
-
-    // -- Trim --------------------------------------------------------------
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn trim_returns_not_supported_on_macos() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool =
-            StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-        assert_eq!(pool.trim(0), Err(CudaError::NotSupported));
-    }
-
-    // -- Stats tracking ----------------------------------------------------
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn stats_tracking() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool =
-            StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-
-        let mut a1 = pool.alloc_async(1024, 0).expect("alloc should succeed");
-        let _a2 = pool.alloc_async(2048, 0).expect("alloc should succeed");
-
-        let stats = pool.stats();
-        assert_eq!(stats.active_allocations, 2);
-        assert_eq!(stats.used_current, 3072);
-        assert_eq!(stats.used_high, 3072);
-        assert_eq!(stats.peak_allocations, 2);
-
-        pool.free_async(&mut a1).expect("free should succeed");
-        let stats = pool.stats();
-        assert_eq!(stats.active_allocations, 1);
-        assert_eq!(stats.used_current, 2048);
-        // Peak should remain at 3072.
-        assert_eq!(stats.used_high, 3072);
-    }
-
-    // -- Pool attribute setting --------------------------------------------
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn set_attribute_release_threshold() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool =
-            StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-        let result = pool.set_attribute(PoolAttribute::ReleaseThreshold(4096));
-        assert!(result.is_ok());
-        assert_eq!(pool.config().release_threshold, 4096);
-    }
-
-    /// Read-only attributes are rejected by pre-flight validation, before
-    /// any driver call.  On macOS the pool is always available.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn set_attribute_readonly_returns_error() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool = StreamMemoryPool::new(config).expect("pool creation should succeed");
-        assert_eq!(
-            pool.set_attribute(PoolAttribute::ReservedMemCurrent),
-            Err(CudaError::InvalidValue)
-        );
-        assert_eq!(
-            pool.set_attribute(PoolAttribute::UsedMemCurrent),
-            Err(CudaError::InvalidValue)
-        );
-    }
-
-    /// On non-macOS, this can only be exercised when a driver is present
-    /// (pool creation requires `cuMemPoolCreate`).  The read-only check
-    /// itself runs before the driver is touched.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn set_attribute_readonly_returns_error() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let pool = StreamMemoryPool::new(config);
-        let mut pool = match pool {
-            Ok(p) => p,
-            Err(e) => {
-                // No usable driver/device: pool creation must fail cleanly.
-                assert!(matches!(
-                    e,
-                    CudaError::NotInitialized
-                        | CudaError::NotSupported
-                        | CudaError::NoDevice
-                        | CudaError::InvalidDevice
-                        | CudaError::InvalidContext
-                ));
-                return;
-            }
-        };
-        assert_eq!(
-            pool.set_attribute(PoolAttribute::ReservedMemCurrent),
-            Err(CudaError::InvalidValue)
-        );
-        assert_eq!(
-            pool.set_attribute(PoolAttribute::UsedMemCurrent),
-            Err(CudaError::InvalidValue)
-        );
-    }
-
-    // -- StreamAllocation accessors ----------------------------------------
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn allocation_accessors() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool =
-            StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-        let alloc = pool.alloc_async(4096, 42).expect("alloc should succeed");
-        assert_eq!(alloc.size(), 4096);
-        assert_eq!(alloc.stream(), 42);
-        assert!(!alloc.is_freed());
-        assert_ne!(alloc.as_ptr(), 0);
-        // Debug formatting should not panic.
-        let _debug = format!("{alloc:?}");
-    }
-
-    // -- Convenience functions ---------------------------------------------
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn convenience_stream_alloc() {
-        let result = stream_alloc(256, 0);
-        assert!(result.is_ok());
-        let alloc = result.expect("should succeed on macOS");
-        assert_eq!(alloc.size(), 256);
-        assert!(!alloc.is_freed());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn convenience_stream_free() {
-        let mut alloc = stream_alloc(128, 0).expect("alloc should succeed on macOS");
-        assert!(stream_free(&mut alloc).is_ok());
-        assert!(alloc.is_freed());
-        // Double free via convenience function.
-        assert_eq!(stream_free(&mut alloc), Err(CudaError::InvalidValue));
-    }
-
-    // -- Large allocation size ---------------------------------------------
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn large_allocation_size() {
-        let config = StreamOrderedAllocConfig {
-            initial_pool_size: 0,
-            max_pool_size: 0, // unlimited
-            release_threshold: 0,
-            device: 0,
-        };
-        let mut pool =
-            StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-        // 16 GiB allocation (large but valid).
-        let size = 16 * 1024 * 1024 * 1024_usize;
-        let alloc = pool.alloc_async(size, 0);
-        assert!(alloc.is_ok());
-        let alloc = alloc.expect("should succeed");
-        assert_eq!(alloc.size(), size);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn alloc_exceeds_max_pool_size() {
-        let config = StreamOrderedAllocConfig {
-            initial_pool_size: 0,
-            max_pool_size: 1024,
-            release_threshold: 0,
-            device: 0,
-        };
-        let mut pool = StreamMemoryPool::new(config).expect("pool creation should succeed");
-        assert!(matches!(
-            pool.alloc_async(2048, 0),
-            Err(CudaError::OutOfMemory)
-        ));
-    }
-
-    // -- Peer access -------------------------------------------------------
-
-    /// Same-device peer access is rejected by pre-flight validation, before
-    /// any driver call.  On macOS the pool is always available.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn peer_access_same_device_error() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let pool = StreamMemoryPool::new(config).expect("pool creation should succeed");
-        assert_eq!(pool.enable_peer_access(0), Err(CudaError::InvalidDevice));
-        assert_eq!(pool.disable_peer_access(0), Err(CudaError::InvalidDevice));
-    }
-
-    /// On non-macOS, the same-device check runs before the driver is
-    /// touched; it is only reachable when a pool could be created.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn peer_access_same_device_error() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let pool = match StreamMemoryPool::new(config) {
-            Ok(p) => p,
-            Err(e) => {
-                assert!(matches!(
-                    e,
-                    CudaError::NotInitialized
-                        | CudaError::NotSupported
-                        | CudaError::NoDevice
-                        | CudaError::InvalidDevice
-                        | CudaError::InvalidContext
-                ));
-                return;
-            }
-        };
-        assert_eq!(pool.enable_peer_access(0), Err(CudaError::InvalidDevice));
-        assert_eq!(pool.disable_peer_access(0), Err(CudaError::InvalidDevice));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn peer_access_not_supported_on_macos() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let pool = StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-        assert_eq!(pool.enable_peer_access(1), Err(CudaError::NotSupported));
-        assert_eq!(pool.disable_peer_access(1), Err(CudaError::NotSupported));
-    }
-
-    // -- Reset peak stats --------------------------------------------------
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn reset_peak_stats() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool =
-            StreamMemoryPool::new(config).expect("pool creation should succeed on macOS");
-
-        let mut a1 = pool.alloc_async(1024, 0).expect("alloc ok");
-        let _a2 = pool.alloc_async(2048, 0).expect("alloc ok");
-        assert_eq!(pool.stats().peak_allocations, 2);
-        assert_eq!(pool.stats().used_high, 3072);
-
-        pool.free_async(&mut a1).expect("free ok");
-        pool.reset_peak_stats();
-
-        let stats = pool.stats();
-        assert_eq!(stats.used_high, 2048); // reset to current
-        assert_eq!(stats.peak_allocations, 1); // reset to current
-    }
-
-    // -- Zero-size alloc ---------------------------------------------------
-
-    /// Zero-size allocation is rejected by pre-flight validation, before any
-    /// driver call.  On macOS the pool is always available.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn alloc_zero_size_returns_error() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool = StreamMemoryPool::new(config).expect("pool creation should succeed");
-        assert!(matches!(
-            pool.alloc_async(0, 0),
-            Err(CudaError::InvalidValue)
-        ));
-    }
-
-    /// On non-macOS, the zero-size check runs before the driver is touched;
-    /// it is only reachable when a pool could be created.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn alloc_zero_size_returns_error() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let mut pool = match StreamMemoryPool::new(config) {
-            Ok(p) => p,
-            Err(e) => {
-                assert!(matches!(
-                    e,
-                    CudaError::NotInitialized
-                        | CudaError::NotSupported
-                        | CudaError::NoDevice
-                        | CudaError::InvalidDevice
-                        | CudaError::InvalidContext
-                ));
-                return;
-            }
-        };
-        assert!(matches!(
-            pool.alloc_async(0, 0),
-            Err(CudaError::InvalidValue)
-        ));
-    }
-
-    // -- Default pool ------------------------------------------------------
-
-    /// On macOS, the default pool is a local-only pool and always succeeds.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn default_pool_valid_device() {
-        let pool = StreamMemoryPool::default_pool(0);
-        assert!(pool.is_ok());
-    }
-
-    /// On non-macOS, `default_pool` performs a real
-    /// `cuDeviceGetDefaultMemPool`: success with a driver, a clean typed
-    /// error without one — never a panic.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn default_pool_valid_device() {
-        let pool = StreamMemoryPool::default_pool(0);
-        if driver_present() {
-            if let Ok(p) = pool {
-                assert_eq!(p.device(), 0);
-            } else {
-                assert!(matches!(
-                    pool,
-                    Err(CudaError::NotSupported)
-                        | Err(CudaError::NoDevice)
-                        | Err(CudaError::InvalidDevice)
-                        | Err(CudaError::InvalidContext)
-                        | Err(CudaError::NotInitialized)
-                ));
-            }
-        } else {
-            assert_eq!(pool.err(), Some(CudaError::NotInitialized));
-        }
-    }
-
-    #[test]
-    fn default_pool_negative_device() {
-        assert!(matches!(
-            StreamMemoryPool::default_pool(-1),
-            Err(CudaError::InvalidValue)
-        ));
-    }
-
-    // -- PoolAttribute::to_raw ---------------------------------------------
-
-    #[test]
-    fn pool_attribute_to_raw() {
-        assert_eq!(
-            PoolAttribute::ReuseFollowEventDependencies.to_raw(),
-            CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES
-        );
-        assert_eq!(
-            PoolAttribute::ReuseAllowOpportunistic.to_raw(),
-            CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC
-        );
-        assert_eq!(
-            PoolAttribute::ReuseAllowInternalDependencies.to_raw(),
-            CU_MEMPOOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES
-        );
-        assert_eq!(
-            PoolAttribute::ReleaseThreshold(0).to_raw(),
-            CU_MEMPOOL_ATTR_RELEASE_THRESHOLD
-        );
-        assert_eq!(
-            PoolAttribute::ReservedMemCurrent.to_raw(),
-            CU_MEMPOOL_ATTR_RESERVED_MEM_CURRENT
-        );
-        assert_eq!(
-            PoolAttribute::ReservedMemHigh.to_raw(),
-            CU_MEMPOOL_ATTR_RESERVED_MEM_HIGH
-        );
-        assert_eq!(
-            PoolAttribute::UsedMemCurrent.to_raw(),
-            CU_MEMPOOL_ATTR_USED_MEM_CURRENT
-        );
-        assert_eq!(
-            PoolAttribute::UsedMemHigh.to_raw(),
-            CU_MEMPOOL_ATTR_USED_MEM_HIGH
-        );
-    }
-
-    // -- ShareableHandleType default ---------------------------------------
-
-    #[test]
-    fn shareable_handle_type_default() {
-        assert_eq!(ShareableHandleType::default(), ShareableHandleType::None);
-    }
-
-    // -- PoolExportDescriptor construction ---------------------------------
-
-    #[test]
-    fn pool_export_descriptor() {
-        let desc = PoolExportDescriptor {
-            shareable_handle_type: ShareableHandleType::PosixFileDescriptor,
-            pool_device: 0,
-        };
-        assert_eq!(
-            desc.shareable_handle_type,
-            ShareableHandleType::PosixFileDescriptor
-        );
-        assert_eq!(desc.pool_device, 0);
-    }
-
-    // -- GPU driver bindings: real-FFI / absent-driver path ----------------
-    //
-    // These tests exercise the `gpu_*` bindings against whatever driver the
-    // host provides.
-    //
-    // * Without a driver, every binding must surface a clean typed error
-    //   (`NotInitialized`) — never a panic, never a fake `Ok`.
-    // * With a driver, the bindings reach the real CUDA FFI.  The driver
-    //   *dereferences* pool / device-pointer handles without validating
-    //   them, so a fabricated handle would segfault.  Handle-consuming
-    //   bindings are therefore only ever called with handles obtained from
-    //   a genuine `cuMemPoolCreate` / `cuMemAllocAsync`.
-
-    /// Create a real driver-backed pool, or `None` when the host cannot
-    /// (no driver, no device, or a graphless/poolless driver).
-    #[cfg(not(target_os = "macos"))]
-    fn make_real_pool() -> Option<StreamMemoryPool> {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        StreamMemoryPool::new(config).ok()
-    }
-
-    /// `gpu_create_pool` is deref-free: it builds `CUmemPoolProps` and calls
-    /// `cuMemPoolCreate`.  Without a driver it fails cleanly; with one it
-    /// returns a real handle or a typed driver error.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn gpu_create_pool_real_or_clean_error() {
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        let result = StreamMemoryPool::gpu_create_pool(&config);
-        if !driver_present() {
-            assert_eq!(result.err(), Some(CudaError::NotInitialized));
-        } else {
-            match result {
-                Ok(handle) => assert_ne!(handle, 0, "a created pool has a non-null handle"),
-                Err(e) => assert!(matches!(
-                    e,
-                    CudaError::NotSupported
-                        | CudaError::NoDevice
-                        | CudaError::InvalidDevice
-                        | CudaError::InvalidContext
-                )),
-            }
-        }
-    }
-
-    /// `gpu_default_pool` is deref-free: it only needs a device ordinal.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn gpu_default_pool_real_or_clean_error() {
-        let result = StreamMemoryPool::gpu_default_pool(0);
-        if !driver_present() {
-            assert_eq!(result.err(), Some(CudaError::NotInitialized));
-        } else {
-            match result {
-                Ok(handle) => assert_ne!(handle, 0, "the default pool has a non-null handle"),
-                Err(e) => assert!(matches!(
-                    e,
-                    CudaError::NotSupported | CudaError::NoDevice | CudaError::InvalidDevice
-                )),
-            }
-        }
-    }
-
-    /// `gpu_alloc_async` default-pool path (`handle == 0`) calls
-    /// `cuMemAllocAsync`, which dereferences no caller handle.  Without a
-    /// current context the driver returns `InvalidContext`; without a
-    /// driver, `NotInitialized`.  Either way: a clean typed error, never a
-    /// panic.  Any device pointer actually returned is freed immediately.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn gpu_alloc_async_default_pool_is_clean() {
-        let result = StreamMemoryPool::gpu_alloc_async(0, 1024, 0);
-        if !driver_present() {
-            assert_eq!(result.err(), Some(CudaError::NotInitialized));
-        } else {
-            match result {
-                Ok(ptr) => {
-                    // A live allocation: return it on the same null stream.
-                    assert_ne!(ptr, 0);
-                    let _ = StreamMemoryPool::gpu_free_async(ptr, 0);
-                }
-                Err(e) => assert!(matches!(
-                    e,
-                    CudaError::InvalidContext
-                        | CudaError::NotSupported
-                        | CudaError::NoDevice
-                        | CudaError::InvalidDevice
-                        | CudaError::OutOfMemory
-                )),
-            }
-        }
-    }
-
-    /// `gpu_trim` on a *real* pool handle: trimming an empty pool succeeds.
-    /// Without a driver the binding fails cleanly before any dereference.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn gpu_trim_on_real_pool_or_clean_error() {
-        if !driver_present() {
-            // The function must fail cleanly; with no driver `try_driver`
-            // returns the error before a handle is ever dereferenced.
-            // (A fabricated handle is never passed to a live driver.)
-            return;
-        }
-        let Some(pool) = make_real_pool() else {
-            return; // driver present but no usable pool — nothing to trim.
-        };
-        // `cuMemPoolTrimTo` on a real, empty pool is a valid no-op.
-        let result = StreamMemoryPool::gpu_trim(pool.handle(), 0);
-        assert!(
-            result.is_ok() || result.is_err(),
-            "gpu_trim must return a typed Result, not panic"
-        );
-        if let Err(e) = result {
-            assert!(matches!(e, CudaError::NotSupported));
-        }
-    }
-
-    /// `gpu_set_attribute` on a *real* pool handle, for both the reuse-policy
-    /// (`int` value) and release-threshold (`cuuint64_t` value) branches.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn gpu_set_attribute_on_real_pool_or_clean_error() {
-        if !driver_present() {
-            return;
-        }
-        let Some(pool) = make_real_pool() else {
-            return;
-        };
-        let reuse = StreamMemoryPool::gpu_set_attribute(
-            pool.handle(),
-            PoolAttribute::ReuseAllowOpportunistic,
-        );
-        let threshold = StreamMemoryPool::gpu_set_attribute(
-            pool.handle(),
-            PoolAttribute::ReleaseThreshold(8192),
-        );
-        // On a CUDA 11.2+ driver both branches succeed; an older driver
-        // yields a clean `NotSupported`.
-        for r in [reuse, threshold] {
-            if let Err(e) = r {
-                assert!(matches!(e, CudaError::NotSupported));
-            }
-        }
-    }
-
-    /// `gpu_enable_peer_access` / `gpu_disable_peer_access` on a *real* pool.
-    /// Granting access to a non-existent peer device is a typed driver error
-    /// (`InvalidDevice`), not a panic.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn gpu_peer_access_on_real_pool_or_clean_error() {
-        if !driver_present() {
-            return;
-        }
-        let Some(pool) = make_real_pool() else {
-            return;
-        };
-        // Device 1 may or may not exist; either outcome must be a typed
-        // Result.  `cuMemPoolSetAccess` dereferences only the real pool
-        // handle, never a fabricated one.
-        let enable = StreamMemoryPool::gpu_enable_peer_access(pool.handle(), 1);
-        let disable = StreamMemoryPool::gpu_disable_peer_access(pool.handle(), 1);
-        for r in [enable, disable] {
-            if let Err(e) = r {
-                assert!(matches!(
-                    e,
-                    CudaError::InvalidDevice | CudaError::InvalidValue | CudaError::NotSupported
-                ));
-            }
-        }
-    }
-
-    /// The `gpu_*` bindings surface `NotInitialized` (never a panic) when no
-    /// driver is loadable.  This is a no-op assertion on a host *with* a
-    /// driver; the per-binding tests above cover the live-FFI behaviour.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn gpu_bindings_clean_error_without_driver() {
-        if driver_present() {
-            return;
-        }
-        // No driver: every binding fails before touching a handle.
-        let config = StreamOrderedAllocConfig::default_for_device(0);
-        assert_eq!(
-            StreamMemoryPool::gpu_create_pool(&config).err(),
-            Some(CudaError::NotInitialized)
-        );
-        assert_eq!(
-            StreamMemoryPool::gpu_default_pool(0).err(),
-            Some(CudaError::NotInitialized)
-        );
-        assert_eq!(
-            StreamMemoryPool::gpu_alloc_async(0, 1024, 0).err(),
-            Some(CudaError::NotInitialized)
-        );
-        // Handle-consuming bindings also fail before any dereference.
-        assert_eq!(
-            StreamMemoryPool::gpu_alloc_async(0x1, 1024, 0).err(),
-            Some(CudaError::NotInitialized)
-        );
-        assert_eq!(
-            StreamMemoryPool::gpu_free_async(0x1, 0).err(),
-            Some(CudaError::NotInitialized)
-        );
-        assert_eq!(
-            StreamMemoryPool::gpu_trim(0x1, 0).err(),
-            Some(CudaError::NotInitialized)
-        );
-        assert_eq!(
-            StreamMemoryPool::gpu_set_attribute(0x1, PoolAttribute::ReleaseThreshold(1)).err(),
-            Some(CudaError::NotInitialized)
-        );
-        assert_eq!(
-            StreamMemoryPool::gpu_enable_peer_access(0x1, 1).err(),
-            Some(CudaError::NotInitialized)
-        );
-        assert_eq!(
-            StreamMemoryPool::gpu_disable_peer_access(0x1, 1).err(),
-            Some(CudaError::NotInitialized)
-        );
-    }
-
-    /// `map_pool_attribute` maps every variant to the matching driver enum.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn map_pool_attribute_covers_all_variants() {
-        use crate::ffi::CUmemPoolAttribute;
-        let cases = [
-            (
-                PoolAttribute::ReuseFollowEventDependencies,
-                CUmemPoolAttribute::ReuseFollowEventDependencies,
-            ),
-            (
-                PoolAttribute::ReuseAllowOpportunistic,
-                CUmemPoolAttribute::ReuseAllowOpportunistic,
-            ),
-            (
-                PoolAttribute::ReuseAllowInternalDependencies,
-                CUmemPoolAttribute::ReuseAllowInternalDependencies,
-            ),
-            (
-                PoolAttribute::ReleaseThreshold(0),
-                CUmemPoolAttribute::ReleaseThreshold,
-            ),
-            (
-                PoolAttribute::ReservedMemCurrent,
-                CUmemPoolAttribute::ReservedMemCurrent,
-            ),
-            (
-                PoolAttribute::ReservedMemHigh,
-                CUmemPoolAttribute::ReservedMemHigh,
-            ),
-            (
-                PoolAttribute::UsedMemCurrent,
-                CUmemPoolAttribute::UsedMemCurrent,
-            ),
-            (PoolAttribute::UsedMemHigh, CUmemPoolAttribute::UsedMemHigh),
-        ];
-        for (attr, expected) in cases {
-            let mapped = StreamMemoryPool::map_pool_attribute(attr);
-            assert_eq!(mapped, Ok(expected));
-        }
-    }
-
-    /// `stream_alloc` convenience: a clean typed error without a driver, and
-    /// a typed `Result` (allocation, or a context/driver error) with one.
-    /// Any device pointer actually returned is freed immediately.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn convenience_stream_alloc_real_or_clean_error() {
-        let result = stream_alloc(256, 0);
-        if !driver_present() {
-            assert_eq!(result.err(), Some(CudaError::NotInitialized));
-        } else {
-            match result {
-                Ok(mut alloc) => {
-                    assert_eq!(alloc.size(), 256);
-                    let _ = stream_free(&mut alloc);
-                }
-                Err(e) => assert!(matches!(
-                    e,
-                    CudaError::InvalidContext
-                        | CudaError::NotSupported
-                        | CudaError::NoDevice
-                        | CudaError::InvalidDevice
-                        | CudaError::OutOfMemory
-                )),
-            }
-        }
-    }
-}
+#[path = "stream_ordered_alloc_tests.rs"]
+mod tests;

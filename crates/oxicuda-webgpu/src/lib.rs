@@ -38,13 +38,26 @@
 //! # WGSL Shader Generation
 //!
 //! The [`shader`] module provides helpers that produce WGSL source strings for
-//! common kernels (GEMM, element-wise ops, reductions).
+//! common kernels (GEMM, element-wise ops, reductions).  The [`shader_ext`]
+//! module adds transpose, row-wise softmax, Blelloch prefix scan, layer
+//! normalisation, warp-style subgroup reductions, and emulated-f64 arithmetic,
+//! while the [`fft`] module provides a radix-2 Cooley-Tukey FFT plan
+//! ([`WgslFftPlan`]) plus its butterfly shaders.
+//!
+//! # Dispatch Planning
+//!
+//! The [`planner`] module resolves workgroup sizes and dispatch grids from
+//! adapter [`Limits`] (auto-tuning, 2-D dispatch folding, 256-byte texture row
+//! alignment) — pure host-side arithmetic requiring no GPU.
 
 pub mod backend;
 pub mod device;
 pub mod error;
+pub mod fft;
 pub mod memory;
+pub mod planner;
 pub mod shader;
+pub mod shader_ext;
 
 // WASM target support — compiled on wasm32 or when the `wasm` feature is
 // enabled (so that native tests can exercise the module).
@@ -53,3 +66,6 @@ pub mod wasm;
 
 pub use backend::WebGpuBackend;
 pub use error::{WebGpuError, WebGpuResult};
+pub use fft::{FftDirection, WgslFftPlan};
+pub use planner::{DispatchGrid, Limits, Workgroup1D, Workgroup2D};
+pub use shader_ext::ScanKind;

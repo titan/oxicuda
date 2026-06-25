@@ -12,7 +12,7 @@
 //! ├── evolution/      — ArchEncoding, NSGA-II selection, Population
 //! ├── ops/            — Primitives (8 DARTS ops), MixedOp, SearchSpace
 //! ├── supernet/       — Weight-shared Supernet, PathSampler, SlimmableNet
-//! ├── predictor/      — FLOP/param accountant, latency LUT/MLP, k-NN/RBF accuracy
+//! ├── predictor/      — FLOP/param accountant, latency LUT/MLP, k-NN/RBF/GP/GNN accuracy
 //! ├── proxy/          — Zero-cost proxies (NASWOT, SNIP, GraSP, SynFlow)
 //! ├── controller/     — ENAS LSTM RL controller (REINFORCE + EMA baseline)
 //! ├── error           — NasError / NasResult
@@ -49,6 +49,9 @@ pub mod prelude {
     pub use crate::darts::pc_darts::{PcDarts, PcDartsConfig};
     pub use crate::error::{NasError, NasResult};
     pub use crate::evolution::encoding::ArchEncoding;
+    pub use crate::evolution::nas_bench::{
+        NasBenchCache, TrialResult, arch_key, arch_rng, derive_arch_seed,
+    };
     pub use crate::evolution::nsga2::{
         Individual, crowding_distance, fast_non_dominated_sort, nsga2_select, tournament_select,
     };
@@ -60,8 +63,13 @@ pub mod prelude {
     pub use crate::ops::mixed_op::MixedOp;
     pub use crate::ops::primitives::{OpKind, OpWeights};
     pub use crate::ops::search_space::{CellSpace, NetworkSpace, SearchSpace};
+    pub use crate::ops::transformer_nas::{BlockSpec, TransformerArch, TransformerSearchSpace};
     pub use crate::predictor::accuracy::{KnnAccuracyPredictor, RbfAccuracyPredictor};
+    pub use crate::predictor::bayesian_gp::{Acquisition, GaussianProcess, Kernel};
     pub use crate::predictor::flops::{OpCost, op_cost, total_cost};
+    pub use crate::predictor::gnn_predictor::{
+        CellTopology, GnnPredictor, PathEncodedPredictor, PathEncoder,
+    };
     pub use crate::predictor::latency::{LatencyLut, LatencyMlp};
     pub use crate::predictor::predictor_io::{ArchFeatures, LayerSpec};
     pub use crate::proxy::jacobian_covariance::{
@@ -76,6 +84,9 @@ pub mod prelude {
         gumbel_softmax_ptx, mixed_op_blend_ptx, pareto_dominate_ptx,
     };
     pub use crate::search::darts_ops::{DartsConfig, DartsMixedOp};
+    pub use crate::search::hat::{
+        BlockLatencyLut, Candidate, HatConfig, HatResult, HatSearcher, pareto_front,
+    };
     pub use crate::search::latency_predictor::{
         LatencyPredictor, latency_features, train_latency_predictor,
     };
@@ -87,6 +98,9 @@ pub mod prelude {
         ShaResult, SuccessiveHalving,
     };
     pub use crate::supernet::bignas::{BigNasConfig, BigNasSampler};
+    pub use crate::supernet::once_for_all::{
+        OfaBlockConfig, OfaSpace, OfaSubnet, OfaUnit, ShrinkPhase, ShrinkSchedule,
+    };
     pub use crate::supernet::path_sample::{PathSampler, SamplingStrategy};
     pub use crate::supernet::slimmable::{BnStats, SlimmableNet, WIDTH_MULTIPLIERS};
     pub use crate::supernet::weight_share::Supernet;

@@ -30,11 +30,18 @@ pub mod handle;
 pub mod ptx_kernels;
 pub mod vlm;
 
+#[cfg(test)]
+mod verification;
+
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 /// Convenience re-exports for common multi-modal types.
 pub mod prelude {
+    pub use crate::alignment::audio_clip::{AudioClipConfig, AudioClipLoss, audio_clip_loss};
     pub use crate::alignment::contrastive::{clip_loss, imagebind_loss, l2_normalise};
+    pub use crate::alignment::hard_negative::{
+        hard_negative_infonce, mine_hard_negatives, vse_plus_plus_loss,
+    };
     pub use crate::alignment::llava_projector::{LlavaProjector, LlavaProjectorConfig};
     pub use crate::alignment::matching::{ItmHead, itm_loss};
     pub use crate::alignment::siglip::{
@@ -45,6 +52,10 @@ pub mod prelude {
         AvHubert, AvHubertConfig, AvHubertWeights, FusedFeatures, ModalityDrop,
     };
     pub use crate::caption::prefix_lm::{PrefixLm, PrefixLmConfig, PrefixLmWeights};
+    pub use crate::caption::sampling::{
+        Beam, SamplingConfig, beam_search, nucleus_filter, sample_categorical, sample_token,
+        temperature_softmax, top_k_filter,
+    };
     pub use crate::caption::vqa_head::{VqaHead, softmax, vqa_loss};
     pub use crate::cross_attn::cross_attention::{
         CrossAttention, CrossAttnConfig, CrossAttnWeights,
@@ -61,11 +72,15 @@ pub mod prelude {
     };
     pub use crate::encoder::coca::{CoCa, CoCaConfig, CoCaWeights};
     pub use crate::encoder::image_encoder::{ViTEncoder, ViTEncoderConfig, ViTEncoderWeights};
+    pub use crate::encoder::navit::{
+        ImageShape, NaViT, NaViTConfig, NaViTWeights, PackedSequence, packed_attention_mask,
+    };
     pub use crate::encoder::perceiver_io::{
         PerceiverIo, PerceiverIoConfig, PerceiverIoWeights, PerceiverSelfLayer,
     };
     pub use crate::encoder::qformer::{QFormer, QFormerConfig, QFormerWeights};
     pub use crate::encoder::text_encoder::{BertConfig, BertEncoder, BertWeights};
+    pub use crate::encoder::tome::{MergeResult, merge_to_length, merge_tokens};
     pub use crate::encoder::video_encoder::{
         VideoEncoder, VideoEncoderConfig, VideoEncoderWeights,
     };
@@ -76,6 +91,7 @@ pub mod prelude {
     pub use crate::fusion::film::{FilmGenerator, apply_film};
     pub use crate::fusion::gmu::{GatedMultimodalUnit, sigmoid};
     pub use crate::fusion::lowrank_fusion::LowRankFusion;
+    pub use crate::fusion::mome::{FfnExpert, MoMeConfig, MoMeRouter, Modality};
     pub use crate::fusion::tensor_fusion::TensorFusion;
     pub use crate::grounding::gdino::{GroundingDino, GroundingDinoConfig, GroundingDinoWeights};
     pub use crate::handle::{LcgRng, MultiModalHandle, SmVersion};

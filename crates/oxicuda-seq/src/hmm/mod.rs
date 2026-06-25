@@ -12,7 +12,9 @@ pub mod semimarkov;
 pub mod variational;
 pub mod viterbi;
 
-pub use baum_welch::{BaumWelchResult, baum_welch_discrete};
+pub use baum_welch::{
+    BaumWelchGaussianResult, BaumWelchResult, baum_welch_discrete, baum_welch_gaussian,
+};
 pub use forward_backward::{ForwardBackward, forward_backward};
 pub use hmm::{HmmDiscrete, HmmGaussian, log_safe};
 pub use posterior_decoding::{PosteriorDecode, posterior_decode, posterior_path_is_feasible};

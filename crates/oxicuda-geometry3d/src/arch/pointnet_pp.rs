@@ -2,6 +2,9 @@
 
 use crate::error::{Geom3dError, Geom3dResult};
 use crate::handle::LcgRng;
+use crate::neighborhood::stochastic_ball::stochastic_ball_query;
+use crate::pointops::gather_points::gather_points;
+use crate::pointops::group_features::group_features;
 use crate::sampling::farthest_point_sample::farthest_point_sample;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -185,6 +188,102 @@ impl SetAbstraction {
     }
 }
 
+// ─── Fused FPS → Ball-query → Gather ──────────────────────────────────────────
+
+/// Parameters for the fused [`fps_ball_gather`] grouping primitive.
+#[derive(Debug, Clone)]
+pub struct FpsBallGatherConfig {
+    /// Number of farthest-point-sampled centroids (`npoint`).
+    pub npoint: usize,
+    /// Neighbours gathered per centroid (`nsample`); the stochastic ball query
+    /// cycles (pads) or subsamples-without-replacement to exactly this width.
+    pub nsample: usize,
+    /// Ball-query radius around each centroid.
+    pub radius: f32,
+    /// Deterministic seed for the stochastic in-radius subsample.
+    pub seed: u64,
+}
+
+/// Output of [`fps_ball_gather`].
+#[derive(Debug, Clone)]
+pub struct FpsBallGather {
+    /// FPS centroid indices into the original cloud, length `npoint`.
+    pub centroids: Vec<usize>,
+    /// Ball-query neighbour indices, row-major `[npoint × nsample]`. The
+    /// sentinel `usize::MAX` marks empty slots for centroids with no in-radius
+    /// point.
+    pub neighbor_indices: Vec<usize>,
+    /// Number of distinct in-radius neighbours per centroid (before padding),
+    /// length `npoint`.
+    pub counts: Vec<usize>,
+    /// Grouped neighbour features, row-major `[npoint × nsample × c]`. Sentinel
+    /// (`usize::MAX`) slots are left as zeros.
+    pub grouped: Vec<f32>,
+}
+
+/// Fused PointNet++ grouping: FPS centroids → ball-query neighbourhoods →
+/// gather grouped features, in a single call.
+///
+/// This *composes* three existing primitives rather than re-deriving their
+/// maths:
+///
+/// 1. [`farthest_point_sample`] selects `config.npoint` centroid indices.
+/// 2. [`stochastic_ball_query`] finds (and seed-subsamples) up to
+///    `config.nsample` in-radius neighbours per centroid.
+/// 3. [`group_features`] gathers the neighbour features into a contiguous
+///    `[npoint × nsample × c]` tensor.
+///
+/// The centroid coordinates handed to the ball query are themselves produced by
+/// reusing [`gather_points`] on the FPS indices, so no coordinate slicing is
+/// duplicated either. The result is identical to running those stages
+/// separately (locked in by the `fused_equals_unfused_pipeline` test) but is
+/// exposed as one reusable Set-Abstraction grouping op.
+///
+/// # Errors
+///
+/// Propagates any error from the composed stages: an empty cloud or `npoint == 0`
+/// ([`Geom3dError::EmptyPointCloud`]), a mis-sized `xyz`/`feat` buffer
+/// ([`Geom3dError::DimensionMismatch`]), `npoint > n`
+/// ([`Geom3dError::InvalidSampleCount`]), `nsample == 0`
+/// ([`Geom3dError::InvalidK`]), or a non-positive / non-finite `radius`
+/// ([`Geom3dError::InvalidRadius`]).
+pub fn fps_ball_gather(
+    xyz: &[f32],
+    n: usize,
+    feat: &[f32],
+    c: usize,
+    config: &FpsBallGatherConfig,
+) -> Geom3dResult<FpsBallGather> {
+    // Stage 1 — farthest-point-sample the centroid indices.
+    let centroids = farthest_point_sample(xyz, n, config.npoint)?;
+    let npoint = centroids.len();
+
+    // Stage 2 — gather the centroid coordinates [npoint × 3] (reuse the indexed
+    // gather instead of re-slicing xyz by hand).
+    let centroid_xyz = gather_points(xyz, n, 3, &centroids)?;
+
+    // Stage 3 — stochastic in-radius neighbourhoods [npoint × nsample].
+    let (neighbor_indices, counts) = stochastic_ball_query(
+        &centroid_xyz,
+        npoint,
+        xyz,
+        n,
+        config.nsample,
+        config.radius,
+        config.seed,
+    )?;
+
+    // Stage 4 — gather the neighbour features [npoint × nsample × c].
+    let grouped = group_features(feat, n, c, &neighbor_indices, npoint, config.nsample)?;
+
+    Ok(FpsBallGather {
+        centroids,
+        neighbor_indices,
+        counts,
+        grouped,
+    })
+}
+
 // ─── Feature Propagation ─────────────────────────────────────────────────────
 
 /// Feature Propagation layer (PointNet++ upsampling).
@@ -364,5 +463,236 @@ mod tests {
             .expect("value should be present");
         assert_eq!(out.len(), n2 * 8);
         assert!(out.iter().all(|v| v.is_finite()));
+    }
+}
+
+#[cfg(test)]
+mod fps_ball_gather_tests {
+    use super::*;
+
+    /// Deterministic cloud: a 1-D line of `n` points on the x-axis.
+    fn line_cloud(n: usize) -> Vec<f32> {
+        (0..n).flat_map(|i| [i as f32, 0.0, 0.0]).collect()
+    }
+
+    /// Per-point features derived from the point index so a gather is easy to
+    /// verify by hand: channel `ch` of point `i` is `i * 10 + ch`.
+    fn ramp_feat(n: usize, c: usize) -> Vec<f32> {
+        let mut f = vec![0.0_f32; n * c];
+        for i in 0..n {
+            for ch in 0..c {
+                f[i * c + ch] = (i * 10 + ch) as f32;
+            }
+        }
+        f
+    }
+
+    #[test]
+    fn fused_output_shapes_correct() {
+        let (n, c) = (16, 4);
+        let xyz = line_cloud(n);
+        let feat = ramp_feat(n, c);
+        let cfg = FpsBallGatherConfig {
+            npoint: 5,
+            nsample: 3,
+            radius: 4.0,
+            seed: 7,
+        };
+        let out = fps_ball_gather(&xyz, n, &feat, c, &cfg).expect("fused grouping should succeed");
+        assert_eq!(out.centroids.len(), cfg.npoint);
+        assert_eq!(out.counts.len(), cfg.npoint);
+        assert_eq!(out.neighbor_indices.len(), cfg.npoint * cfg.nsample);
+        assert_eq!(out.grouped.len(), cfg.npoint * cfg.nsample * c);
+    }
+
+    #[test]
+    fn fused_equals_unfused_pipeline() {
+        // The fused helper must equal the composition of the three existing
+        // primitives run separately, elementwise, on a deterministic cloud.
+        let (n, c) = (20, 5);
+        let xyz = line_cloud(n);
+        let feat = ramp_feat(n, c);
+        let cfg = FpsBallGatherConfig {
+            npoint: 6,
+            nsample: 4,
+            radius: 3.5,
+            seed: 123,
+        };
+
+        let fused = fps_ball_gather(&xyz, n, &feat, c, &cfg).expect("fused should succeed");
+
+        // Unfused reference pipeline.
+        let centroids = farthest_point_sample(&xyz, n, cfg.npoint).expect("fps should succeed");
+        let centroid_xyz =
+            gather_points(&xyz, n, 3, &centroids).expect("centroid gather should succeed");
+        let (nbr_idx, counts) = stochastic_ball_query(
+            &centroid_xyz,
+            centroids.len(),
+            &xyz,
+            n,
+            cfg.nsample,
+            cfg.radius,
+            cfg.seed,
+        )
+        .expect("ball query should succeed");
+        let grouped = group_features(&feat, n, c, &nbr_idx, centroids.len(), cfg.nsample)
+            .expect("group should succeed");
+
+        assert_eq!(fused.centroids, centroids);
+        assert_eq!(fused.neighbor_indices, nbr_idx);
+        assert_eq!(fused.counts, counts);
+        assert_eq!(
+            fused.grouped, grouped,
+            "fused tensor must match the unfused pipeline elementwise"
+        );
+    }
+
+    #[test]
+    fn grouped_features_match_raw_gather() {
+        // Independent correctness check: every grouped row equals the raw
+        // feature row at its neighbour index (or zeros for a sentinel slot).
+        let (n, c) = (24, 3);
+        let xyz = line_cloud(n);
+        let feat = ramp_feat(n, c);
+        let cfg = FpsBallGatherConfig {
+            npoint: 5,
+            nsample: 4,
+            radius: 5.0,
+            seed: 42,
+        };
+        let out = fps_ball_gather(&xyz, n, &feat, c, &cfg).expect("fused should succeed");
+
+        for slot in 0..cfg.npoint * cfg.nsample {
+            let ni = out.neighbor_indices[slot];
+            let row = &out.grouped[slot * c..(slot + 1) * c];
+            if ni == usize::MAX {
+                assert!(row.iter().all(|&v| v == 0.0), "sentinel slot must be zero");
+            } else {
+                assert_eq!(
+                    row,
+                    &feat[ni * c..(ni + 1) * c],
+                    "gathered row must equal the source feature row"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deterministic_under_fixed_seed() {
+        let (n, c) = (30, 2);
+        let xyz = line_cloud(n);
+        let feat = ramp_feat(n, c);
+        let cfg = FpsBallGatherConfig {
+            npoint: 8,
+            nsample: 5,
+            radius: 6.0,
+            seed: 99,
+        };
+        let a = fps_ball_gather(&xyz, n, &feat, c, &cfg).expect("first call should succeed");
+        let b = fps_ball_gather(&xyz, n, &feat, c, &cfg).expect("second call should succeed");
+        assert_eq!(a.centroids, b.centroids);
+        assert_eq!(a.neighbor_indices, b.neighbor_indices);
+        assert_eq!(a.counts, b.counts);
+        assert_eq!(a.grouped, b.grouped);
+    }
+
+    #[test]
+    fn different_seed_changes_subsample() {
+        // With many more in-radius candidates than `nsample`, the stochastic
+        // subsample is active and the seed must influence which neighbours win.
+        let (n, c) = (30, 1);
+        let xyz = line_cloud(n);
+        let feat = ramp_feat(n, c);
+        let cfg_a = FpsBallGatherConfig {
+            npoint: 4,
+            nsample: 4,
+            radius: 12.0,
+            seed: 1,
+        };
+        let cfg_b = FpsBallGatherConfig {
+            seed: 2,
+            ..cfg_a.clone()
+        };
+        let a = fps_ball_gather(&xyz, n, &feat, c, &cfg_a).expect("call a should succeed");
+        let b = fps_ball_gather(&xyz, n, &feat, c, &cfg_b).expect("call b should succeed");
+        // FPS is seed-independent, so the centroids must match …
+        assert_eq!(a.centroids, b.centroids);
+        // … but the seeded neighbour draw must differ.
+        assert_ne!(
+            a.neighbor_indices, b.neighbor_indices,
+            "a different seed must change the subsample"
+        );
+    }
+
+    #[test]
+    fn errors_propagate_from_stages() {
+        let (n, c) = (8, 2);
+        let xyz = line_cloud(n);
+        let feat = ramp_feat(n, c);
+        // npoint > n → FPS InvalidSampleCount.
+        assert!(
+            fps_ball_gather(
+                &xyz,
+                n,
+                &feat,
+                c,
+                &FpsBallGatherConfig {
+                    npoint: n + 1,
+                    nsample: 3,
+                    radius: 1.0,
+                    seed: 0,
+                },
+            )
+            .is_err()
+        );
+        // nsample == 0 → ball-query InvalidK.
+        assert!(
+            fps_ball_gather(
+                &xyz,
+                n,
+                &feat,
+                c,
+                &FpsBallGatherConfig {
+                    npoint: 4,
+                    nsample: 0,
+                    radius: 1.0,
+                    seed: 0,
+                },
+            )
+            .is_err()
+        );
+        // radius <= 0 → ball-query InvalidRadius.
+        assert!(
+            fps_ball_gather(
+                &xyz,
+                n,
+                &feat,
+                c,
+                &FpsBallGatherConfig {
+                    npoint: 4,
+                    nsample: 3,
+                    radius: 0.0,
+                    seed: 0,
+                },
+            )
+            .is_err()
+        );
+        // Mis-sized feature buffer → group_features DimensionMismatch.
+        let bad_feat = vec![0.0_f32; n * c - 1];
+        assert!(
+            fps_ball_gather(
+                &xyz,
+                n,
+                &bad_feat,
+                c,
+                &FpsBallGatherConfig {
+                    npoint: 4,
+                    nsample: 3,
+                    radius: 1.0,
+                    seed: 0,
+                },
+            )
+            .is_err()
+        );
     }
 }

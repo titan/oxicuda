@@ -8,7 +8,7 @@ readme = "README.md"
 license.workspace = true
 homepage = "https://github.com/cool-japan/oxicuda"
 repository.workspace = true
-keywords = ["gpu", "differential-privacy", "privacy", "pure-rust"]
+keywords = ["gpu", "diff-privacy", "privacy", "pure-rust"]
 categories = ["science", "algorithms"]
 
 [lints]

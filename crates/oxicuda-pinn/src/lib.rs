@@ -32,6 +32,7 @@ pub mod pde;
 pub mod pinn_loss;
 pub mod ptx_kernels;
 pub mod sampling;
+pub mod symbolic;
 pub mod variants;
 
 /// Convenience re-exports for common PINN types.
@@ -51,6 +52,10 @@ pub mod prelude {
     // Autodiff
     pub use crate::autodiff::dual::Dual;
     pub use crate::autodiff::multidim::MultiDual;
+    pub use crate::autodiff::pde_residual::{
+        HyperDual, burgers_residual_ad, heat_residual_ad, linear_2nd_order_residual_ad,
+        poisson_residual_ad,
+    };
     pub use crate::autodiff::tape::{Tape, Var};
 
     // PINN losses
@@ -75,6 +80,9 @@ pub mod prelude {
 
     // PINN variants
     pub use crate::variants::gpinn::{GPinnConfig, GPinnLoss, GPinnLossTerms};
+    pub use crate::variants::pde_discovery::{
+        LibraryConfig, PdeNetCell, SindyConfig, SindyModel, build_library, fit_sindy,
+    };
 
     // Neural ODE
     pub use crate::neural_ode::adjoint::{node_adjoint_grad, node_forward};
@@ -90,6 +98,13 @@ pub mod prelude {
         OdeRhsFn, dopri45_step, euler_step, heun_step, integrate_adaptive, integrate_fixed,
         rk4_step,
     };
+    pub use crate::neural_ode::solvers_batch::{
+        OdeRhsFnBatch, euler_step_batch, heun_step_batch, integrate_batch, rk4_step_batch,
+    };
+    pub use crate::neural_ode::stiff::{
+        StiffConfig, StiffRhsFn, backward_euler_step, integrate_backward_euler, integrate_bdf,
+        integrate_rosenbrock2, rosenbrock2_step,
+    };
     pub use crate::neural_ode::symplectic::{
         ForceFn, SymplecticMethod, hamiltonian_energy, integrate_symplectic, leapfrog_step,
         stormer_verlet_step, symplectic_euler_step, velocity_verlet_step,
@@ -102,6 +117,7 @@ pub mod prelude {
     pub use crate::neural_op::gno::{Gno, GnoConfig};
     pub use crate::neural_op::mwt::{Mwt, MwtConfig};
     pub use crate::neural_op::pi_deeponet::{PiDeepONet, PiDeepONetConfig};
+    pub use crate::neural_op::point_fno::{PointFno, PointFnoConfig};
     pub use crate::neural_op::wno::{Wno, WnoConfig};
 
     // PDE templates
@@ -125,6 +141,9 @@ pub mod prelude {
     pub use crate::sampling::latin_hypercube::latin_hypercube_sample;
     pub use crate::sampling::quasi_random::{halton, halton_sequence};
     pub use crate::sampling::residual_adaptive::residual_adaptive_sample;
+
+    // Symbolic regression
+    pub use crate::symbolic::regression::{Expr, Individual, SymbolicConfig, SymbolicRegressor};
 }
 
 #[cfg(test)]
@@ -328,6 +347,187 @@ mod e2e_tests {
                 "Not all LHS bins hit exactly once in dim {j}"
             );
         }
+    }
+
+    #[test]
+    fn e2e_fno_spectral_matches_analytic_heat() {
+        // Verification gap: FNO spectral correctness vs the analytic 1-D heat
+        // solution. The heat equation u_t = α u_xx is *diagonal* in the Fourier
+        // basis: a mode of wavenumber κ decays as exp(-α κ² t). The FNO spectral
+        // path is exactly "forward DFT → per-mode complex multiply → inverse DFT",
+        // so applying the analytic heat propagator as the per-mode multiplier must
+        // reproduce the analytic solution evolved by Δt.
+        //
+        // Work on a periodic grid with u₀(x) = sin(2πx) (a single Fourier mode on
+        // [0,1)), for which u(x,t) = sin(2πx)·exp(-α(2π)² t) exactly.
+        let n = 32usize;
+        let alpha = 0.05_f32;
+        let dt = 0.1_f32;
+        let two_pi = 2.0 * std::f32::consts::PI;
+
+        // Sample the initial condition (one period over the grid).
+        let u0: Vec<f32> = (0..n)
+            .map(|i| (two_pi * i as f32 / n as f32).sin())
+            .collect();
+
+        // Forward DFT (the FNO spectral entry point).
+        let (mut re, mut im) = dft_1d(&u0);
+
+        // Per-mode multiply by the heat propagator exp(-α κ_k² Δt), where the
+        // grid wavenumber for bin k on [0,1) is κ_k = 2π·k_signed (k_signed folds
+        // bins above n/2 to negative frequencies, matching the real-DFT symmetry).
+        for k in 0..n {
+            let k_signed = if k <= n / 2 {
+                k as f32
+            } else {
+                k as f32 - n as f32
+            };
+            let kappa = two_pi * k_signed;
+            let decay = (-alpha * kappa * kappa * dt).exp();
+            re[k] *= decay;
+            im[k] *= decay;
+        }
+
+        // Inverse DFT back to physical space (the FNO spectral exit point).
+        let u_spectral = idft_1d(&re, &im);
+
+        // Analytic reference at t = dt.
+        let kappa1 = two_pi; // first mode
+        let decay1 = (-alpha * kappa1 * kappa1 * dt).exp();
+        let u_exact: Vec<f32> = (0..n)
+            .map(|i| (two_pi * i as f32 / n as f32).sin() * decay1)
+            .collect();
+
+        let max_err = u_spectral
+            .iter()
+            .zip(u_exact.iter())
+            .map(|(&a, &b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_err < 1e-4,
+            "FNO spectral heat propagation should match analytic solution, max_err = {max_err}"
+        );
+
+        // Sanity: the analytic single-mode solution agrees with heat_analytic on
+        // the [0,1] Dirichlet problem for the κ = π mode (independent cross-check
+        // that the propagator form exp(-α κ² t) is the correct one).
+        let u_half = heat_analytic(0.5, dt, alpha); // sin(π·0.5)·exp(-απ²·dt)
+        let expect_half = (std::f32::consts::PI * 0.5).sin()
+            * (-alpha * std::f32::consts::PI * std::f32::consts::PI * dt).exp();
+        assert!((u_half - expect_half).abs() < 1e-6);
+    }
+
+    #[test]
+    fn e2e_cnf_log_det_parity_dense_trace() {
+        // Verification gap: CNF log-det numerical parity vs a dense-Jacobian trace
+        // on a small Gaussian. For a linear flow f(z) = A·z the Jacobian is the
+        // constant matrix A, so the exact log-density change over [t0, t1] is
+        //   Δlog p = -∫ tr(∂f/∂z) dt = -tr(A)·(t1 - t0).
+        // Use a 2×2 diagonal "Gaussian-shaping" flow with tr(A) = 0.1 + 0.2 = 0.3.
+        fn linear_flow(_t: f32, z: &[f32], dz: &mut [f32]) {
+            dz[0] = 0.1 * z[0];
+            dz[1] = 0.2 * z[1];
+        }
+        let trace_a = 0.3_f32;
+        let t0 = 0.0_f32;
+        let t1 = 0.75_f32;
+
+        // dense_trace must recover tr(A) exactly (finite-difference of a linear
+        // map is exact up to rounding).
+        let z = vec![0.7_f32, -1.3];
+        let tr = dense_trace(&linear_flow, 0.3, &z);
+        assert!(
+            (tr - trace_a).abs() < 1e-3,
+            "dense_trace should equal tr(A) = 0.3, got {tr}"
+        );
+
+        // cnf_forward integrates -tr over the trajectory; for a constant Jacobian
+        // it must match the closed form -tr(A)·(t1 - t0).
+        let z0 = vec![0.5_f32, -0.2];
+        let (_z1, delta_log_p) = cnf_forward(&linear_flow, &z0, t0, t1, 0.005)
+            .expect("CNF forward with linear Gaussian-shaping flow should succeed");
+        let expected = -trace_a * (t1 - t0);
+        assert!(
+            (delta_log_p - expected).abs() < 5e-3,
+            "CNF Δlog p = {delta_log_p} should match -tr(A)·T = {expected}"
+        );
+    }
+
+    #[test]
+    fn e2e_dopri45_step_controller_stiff_stability() {
+        // Verification gap: Dopri45 step-controller stability on a stiff problem.
+        // The scalar test equation y' = -1000(y - cos t) is stiff: its fast
+        // timescale is 1/1000 while the solution relaxes onto the slow manifold
+        // y ≈ cos t. A fixed-step *explicit Euler* with h on the order of the slow
+        // scale (h = 0.05 ⇒ h·1000 = 50 ≫ 2) is unconditionally unstable and
+        // blows up, whereas the adaptive Dopri45 PI controller must shrink h to
+        // stay in the stability region and track cos t.
+        fn stiff(t: f32, y: &[f32], dy: &mut [f32]) {
+            dy[0] = -1000.0 * (y[0] - t.cos());
+        }
+
+        // (a) Fixed large-step explicit Euler diverges.
+        let mut y_euler = vec![0.0_f32];
+        for step in 0..40 {
+            let t = step as f32 * 0.05;
+            y_euler = euler_step(&stiff, t, &y_euler, 0.05);
+        }
+        assert!(
+            !y_euler[0].is_finite() || y_euler[0].abs() > 1e3,
+            "fixed-step explicit Euler should be unstable on the stiff problem, got {}",
+            y_euler[0]
+        );
+
+        // (b) Adaptive Dopri45 stays bounded and tracks the slow manifold cos t.
+        let (times, states) = integrate_adaptive(&stiff, 0.0, 2.0, &[0.0], 1e-6, 1e-5, 0.05)
+            .expect("adaptive Dopri45 integration of the stiff problem should succeed");
+        assert!(
+            states.iter().all(|s| s[0].is_finite()),
+            "adaptive Dopri45 must keep the stiff solution finite"
+        );
+        let t_final = *times
+            .last()
+            .expect("adaptive integration produced no times");
+        let y_final = states
+            .last()
+            .expect("adaptive integration produced no states")[0];
+        // After the fast initial transient the solution lies on y ≈ cos t.
+        assert!(
+            (y_final - t_final.cos()).abs() < 1e-2,
+            "Dopri45 should track the slow manifold cos t: y({t_final}) = {y_final}, cos = {}",
+            t_final.cos()
+        );
+        // The controller must have refined the step well below the unstable 0.05.
+        assert!(
+            times.len() > 50,
+            "adaptive controller should take many small steps on the stiff problem, took {}",
+            times.len() - 1
+        );
+    }
+
+    #[test]
+    fn e2e_symbolic_regression_recovers_quadratic() {
+        // End-to-end: genetic-programming symbolic regression recovers x²+1.
+        let xs: Vec<f32> = (0..21).map(|i| -2.0 + i as f32 * 0.2).collect();
+        let ys: Vec<f32> = xs.iter().map(|&x| x * x + 1.0).collect();
+        let signal_var = {
+            let mean = ys.iter().sum::<f32>() / ys.len() as f32;
+            ys.iter().map(|&y| (y - mean) * (y - mean)).sum::<f32>() / ys.len() as f32
+        };
+        let mut cfg = SymbolicConfig::new();
+        cfg.population = 500;
+        cfg.generations = 80;
+        let mut rng = LcgRng::new(99);
+        let mut reg = SymbolicRegressor::new(cfg);
+        let best = reg
+            .fit(&xs, &ys, &mut rng)
+            .expect("symbolic regression should recover the quadratic target");
+        assert!(
+            best.mse < 0.05 * signal_var,
+            "recovered MSE {} should be well below signal variance {}",
+            best.mse,
+            signal_var
+        );
     }
 
     #[test]

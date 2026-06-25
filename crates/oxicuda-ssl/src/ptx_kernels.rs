@@ -548,6 +548,498 @@ $GAT_DONE:
     )
 }
 
+// ─── Kernel 8: barlow_cross_corr (Hopper wgmma) ──────────────────────────────
+
+/// Hopper (`sm ≥ 90`) cross-correlation `C = (1/N)·Zᴬᵀ·Zᴮ` computed with the
+/// asynchronous warp-group matrix-multiply-accumulate instruction
+/// `wgmma.mma_async` instead of the scalar `atom.global.add.f32` accumulation
+/// of [`barlow_cross_corr_ptx`].
+///
+/// The two activation matrices `Z_A` and `Z_B` are `[N × D]` row-major; the
+/// Barlow-Twins loss needs `C[i,j] = Σ_n Z_A[n,i]·Z_B[n,j]`, i.e. the outer
+/// product `Zᴬᵀ · Zᴮ` accumulated over the batch dimension. A single warp-group
+/// (128 threads) owns one `64 × 64` output tile of `C` and streams the shared
+/// `K = N` contraction dimension through `wgmma.mma_async.sync.aligned.m64n64k16`
+/// fragments, accumulating in registers before the host scales by `1/N`.
+///
+/// For `sm < 90` the warp-group MMA path is unavailable and the portable scalar
+/// [`barlow_cross_corr_ptx`] kernel is emitted under the same entry name so the
+/// returned module still assembles for that target.
+///
+/// Signature (SM ≥ 90):
+/// `barlow_cross_corr_kernel(p_za, p_zb, p_c, batch_n, dim_d)`.
+#[must_use]
+pub fn barlow_cross_corr_wgmma_ptx(sm: u32) -> String {
+    if sm < 90 {
+        // Pre-Hopper: emit the portable scalar accumulator under the same name.
+        return barlow_cross_corr_ptx(sm);
+    }
+    let hdr = ptx_header(sm);
+    let zero = f32_hex(0.0_f32);
+    format!(
+        r#"{hdr}// barlow_cross_corr_kernel: C = (1/N) Z_A^T Z_B via Hopper wgmma.mma_async.
+// One warp-group (128 threads) owns a 64x64 tile of C; K = N is the contraction.
+.visible .entry barlow_cross_corr_kernel(
+    .param .u64 p_za,
+    .param .u64 p_zb,
+    .param .u64 p_c,
+    .param .u32 batch_n,
+    .param .u32 dim_d
+)
+{{
+    // Shared staging tiles for the A (Z_A^T) and B (Z_B) operands of one K-step.
+    .shared .align 16 .b8 a_tile[2048];
+    .shared .align 16 .b8 b_tile[2048];
+    .shared .align 8  .b64 wg_bar[1];
+
+    .reg .u64  %rd<16>;
+    .reg .u32  %r<20>;
+    .reg .f32  %f<10>;
+    .reg .pred %p0;
+
+    ld.param.u64  %rd0, [p_za];
+    ld.param.u64  %rd1, [p_zb];
+    ld.param.u64  %rd2, [p_c];
+    ld.param.u32  %r0,  [batch_n];        // N (contraction length)
+    ld.param.u32  %r1,  [dim_d];          // D (output rows/cols)
+
+    // Tile origin: blockIdx.x = column tile, blockIdx.y = row tile (x64 each).
+    mov.u32       %r2, %ctaid.x;
+    mov.u32       %r3, %ctaid.y;
+    shl.b32       %r4, %r2, 6;            // col0 = ctaid.x * 64
+    shl.b32       %r5, %r3, 6;            // row0 = ctaid.y * 64
+    setp.ge.u32   %p0, %r4, %r1;
+    @%p0 bra $WG_DONE;
+    setp.ge.u32   %p0, %r5, %r1;
+    @%p0 bra $WG_DONE;
+
+    // Initialise the warp-group accumulator fragment to zero and fence shared.
+    mov.f32       %f0, {ZERO};
+    mov.u64       %rd3, a_tile;
+    mov.u64       %rd4, b_tile;
+    mov.u64       %rd5, wg_bar;
+    mbarrier.init.shared.b64 [%rd5], 128;
+    wgmma.fence.sync.aligned;
+
+    // K-loop over the batch dimension in steps of 16 (the wgmma K fragment).
+    mov.u32       %r6, 0;                 // k
+
+$WG_KLOOP:
+    setp.ge.u32   %p0, %r6, %r0;
+    @%p0 bra $WG_EPILOGUE;
+
+    // Stage the next 64x16 A and 16x64 B fragments cooperatively into shared.
+    mul.lo.u32    %r7, %r6, %r1;          // k*D base into Z (row-major N x D)
+    cvt.u64.u32   %rd6, %r7;
+    add.u64       %rd7, %rd0, %rd6;       // &Z_A[k, col0..]
+    add.u64       %rd8, %rd1, %rd6;       // &Z_B[k, row0..]
+    cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes \
+[%rd3], [%rd7], 4096, [%rd5];
+    cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes \
+[%rd4], [%rd8], 4096, [%rd5];
+    mbarrier.arrive.expect_tx.shared.b64 _, [%rd5], 8192;
+
+$WG_WAIT:
+    mbarrier.try_wait.parity.shared.b64 %p0, [%rd5], 0;
+    @!%p0 bra $WG_WAIT;
+
+    // Warp-group MMA: accumulate D[64x64] += A[64x16] * B[16x64] from shared.
+    wgmma.mma_async.sync.aligned.m64n64k16.f32.f16.f16 \
+{{%f1, %f2, %f3, %f4, %f5, %f6, %f7, %f8}}, %rd3, %rd4, 1, 1, 1, 0, 0;
+    wgmma.commit_group.sync.aligned;
+    wgmma.wait_group.sync.aligned 0;
+
+    add.u32       %r6, %r6, 16;
+    bra           $WG_KLOOP;
+
+$WG_EPILOGUE:
+    // Store the 64x64 register accumulator tile to C[row0:row0+64, col0:col0+64].
+    // Lane-to-(row,col) mapping is the canonical wgmma 64x64 layout; the host
+    // scales the written C by 1/N afterwards.
+    mov.u32       %r8,  %tid.x;
+    and.b32       %r9,  %r8, 63;          // intra-tile column within 64
+    shr.u32       %r10, %r8, 6;           // warp lane group → row offset
+    add.u32       %r11, %r5, %r10;        // global row
+    add.u32       %r12, %r4, %r9;         // global col
+    setp.ge.u32   %p0, %r11, %r1;
+    @%p0 bra $WG_DONE;
+    setp.ge.u32   %p0, %r12, %r1;
+    @%p0 bra $WG_DONE;
+    mul.lo.u32    %r13, %r11, %r1;
+    add.u32       %r14, %r13, %r12;
+    mul.wide.u32  %rd9, %r14, 4;
+    add.u64       %rd10, %rd2, %rd9;
+    st.global.f32 [%rd10], %f1;
+
+$WG_DONE:
+    ret;
+}}
+"#,
+        ZERO = zero,
+    )
+}
+
+// ─── Kernel 9: nt_xent_softmax (Hopper warp reduction) ───────────────────────
+
+/// Hopper (`sm ≥ 90`) variant of [`nt_xent_softmax_ptx`] that performs the
+/// per-row `max` and `sum` reductions entirely in registers using the warp-wide
+/// `redux.sync.max.f32` / `redux.sync.add.f32` instructions, eliminating the
+/// shared-memory traffic of a classic tree reduction.
+///
+/// Each warp owns one row `i` of the `[2N × 2N]` similarity matrix. Lane `j`
+/// loads `s_ij · inv_temp` (masking the diagonal to `-INF`), the warp reduces
+/// the maximum with `redux.sync.max.f32`, every lane exponentiates
+/// `exp(s_ij − max)`, the warp reduces the sum with `redux.sync.add.f32`, and
+/// finally each lane writes the normalised probability back in place.
+///
+/// For `sm < 90` (`redux.sync` is Ampere-incomplete for f32 on some targets and
+/// absent pre-Volta) the portable masked-scale [`nt_xent_softmax_ptx`] kernel is
+/// emitted under the same entry name.
+///
+/// Signature (SM ≥ 90): `nt_xent_softmax_kernel(p_sim, n2, inv_temp)`.
+#[must_use]
+pub fn nt_xent_softmax_warp_ptx(sm: u32) -> String {
+    if sm < 90 {
+        return nt_xent_softmax_ptx(sm);
+    }
+    let hdr = ptx_header(sm);
+    let neg_inf = f32_hex(f32::NEG_INFINITY);
+    let full_mask = "0xffffffff";
+    format!(
+        r#"{hdr}// nt_xent_softmax_kernel: per-row softmax with warp-level redux.sync reductions.
+// One warp == one row i (2N <= 32 lanes per warp tile; outer loop strides cols).
+.visible .entry nt_xent_softmax_kernel(
+    .param .u64 p_sim,
+    .param .u32 n2,
+    .param .f32 inv_temp
+)
+{{
+    .reg .u64  %rd<6>;
+    .reg .u32  %r<12>;
+    .reg .f32  %f<12>;
+    .reg .pred %p0;
+
+    ld.param.u64  %rd0, [p_sim];
+    ld.param.u32  %r0,  [n2];
+    ld.param.f32  %f0,  [inv_temp];
+
+    // row i = global warp index ; lane = column j within the warp.
+    mov.u32       %r1, %ntid.x;
+    mov.u32       %r2, %ctaid.x;
+    mov.u32       %r3, %tid.x;
+    mad.lo.u32    %r4, %r1, %r2, %r3;     // global thread
+    shr.u32       %r5, %r4, 5;            // warp id == row i
+    and.b32       %r6, %r4, 31;           // lane id == col j
+    setp.ge.u32   %p0, %r5, %r0;
+    @%p0 bra $NTW_DONE;
+
+    // Load scaled similarity for this (i, j); out-of-range columns -> -INF so
+    // they never dominate the max nor contribute to the sum.
+    setp.ge.u32   %p0, %r6, %r0;
+    mov.f32       %f1, {NEG_INF};
+    @%p0 bra $NTW_HAVE;
+    mul.lo.u32    %r7, %r5, %r0;
+    add.u32       %r8, %r7, %r6;
+    mul.wide.u32  %rd1, %r8, 4;
+    add.u64       %rd2, %rd0, %rd1;
+    ld.global.f32 %f2, [%rd2];
+    mul.f32       %f1, %f2, %f0;          // s_ij * inv_temp
+    // Diagonal self-mask i == j -> -INF.
+    setp.eq.u32   %p0, %r5, %r6;
+    selp.f32      %f1, {NEG_INF}, %f1, %p0;
+
+$NTW_HAVE:
+    // Warp-wide maximum via redux.sync, then exp(s - max).
+    redux.sync.max.f32 %f3, %f1, {MASK};
+    sub.f32       %f4, %f1, %f3;
+    ex2.approx.f32 %f5, %f4;              // 2^(x) ; host pre-scales by log2(e)
+    // Warp-wide sum of the exponentials.
+    redux.sync.add.f32 %f6, %f5, {MASK};
+    // Probability p_ij = exp / sum ; guard sum == 0.
+    setp.eq.f32   %p0, %f6, 0f00000000;
+    mov.f32       %f7, 0f00000000;
+    @%p0 bra $NTW_STORE;
+    div.rn.f32    %f7, %f5, %f6;
+
+$NTW_STORE:
+    setp.ge.u32   %p0, %r6, %r0;
+    @%p0 bra $NTW_DONE;
+    mul.lo.u32    %r9,  %r5, %r0;
+    add.u32       %r10, %r9, %r6;
+    mul.wide.u32  %rd3, %r10, 4;
+    add.u64       %rd4, %rd0, %rd3;
+    st.global.f32 [%rd4], %f7;
+
+$NTW_DONE:
+    ret;
+}}
+"#,
+        NEG_INF = neg_inf,
+        MASK = full_mask,
+    )
+}
+
+// ─── Kernel 10: gather_features (Blackwell TMA bulk) ─────────────────────────
+
+/// Blackwell (`sm ≥ 100`) variant of [`gather_features_ptx`] that stages each
+/// gathered D-vector from the MoCo memory queue into shared memory with the
+/// tensor-memory-accelerator bulk copy `cp.async.bulk.tensor`, overlapping the
+/// gather latency with compute instead of issuing scalar global loads.
+///
+/// For each negative index `idx[k]` the kernel issues a single
+/// `cp.async.bulk.tensor.1d.shared::cluster.global` of the `D`-element row
+/// `queue[idx[k], :]` into a CTA-shared staging buffer, waits on the mbarrier,
+/// then copies it to `out[k, :]`.
+///
+/// For `sm < 100` the TMA tensor path is unavailable and the portable scalar
+/// [`gather_features_ptx`] kernel is emitted under the same entry name.
+///
+/// Signature (SM ≥ 100):
+/// `gather_features_kernel(p_queue, p_idx, p_out, k_pairs, dim_d)`.
+#[must_use]
+pub fn gather_features_bulk_ptx(sm: u32) -> String {
+    if sm < 100 {
+        return gather_features_ptx(sm);
+    }
+    let hdr = ptx_header(sm);
+    format!(
+        r#"{hdr}// gather_features_kernel: out[k,:] = queue[idx[k],:] via cp.async.bulk.tensor.
+// One CTA per gathered row k; threadIdx.x copies the staged row to out.
+.visible .entry gather_features_kernel(
+    .param .u64 p_queue,
+    .param .u64 p_idx,
+    .param .u64 p_out,
+    .param .u32 k_pairs,
+    .param .u32 dim_d
+)
+{{
+    // Shared staging tile for one gathered D-vector + completion mbarrier.
+    .shared .align 16 .b8 row_tile[4096];
+    .shared .align 8  .b64 gat_bar[1];
+
+    .reg .u64  %rd<14>;
+    .reg .u32  %r<16>;
+    .reg .f32  %f<4>;
+    .reg .pred %p0;
+
+    ld.param.u64  %rd0, [p_queue];
+    ld.param.u64  %rd1, [p_idx];
+    ld.param.u64  %rd2, [p_out];
+    ld.param.u32  %r0,  [k_pairs];
+    ld.param.u32  %r1,  [dim_d];
+
+    mov.u32       %r2, %ctaid.x;          // gathered row k
+    setp.ge.u32   %p0, %r2, %r0;
+    @%p0 bra $GTB_DONE;
+
+    mov.u64       %rd3, row_tile;
+    mov.u64       %rd4, gat_bar;
+
+    // Load idx[k] (u32) and compute the byte size of one row (D * 4).
+    mul.wide.u32  %rd5, %r2, 4;
+    add.u64       %rd6, %rd1, %rd5;
+    ld.global.u32 %r3, [%rd6];            // src row = idx[k]
+    mul.lo.u32    %r4, %r1, 4;            // bytes per row
+
+    // queue_addr = queue + idx[k] * D * 4.
+    mul.lo.u32    %r5, %r3, %r1;
+    mul.wide.u32  %rd7, %r5, 4;
+    add.u64       %rd8, %rd0, %rd7;
+
+    // Thread 0 issues the bulk TMA copy of the whole row into shared.
+    mov.u32       %r6, %tid.x;
+    setp.ne.u32   %p0, %r6, 0;
+    @%p0 bra $GTB_WAIT;
+    mbarrier.init.shared.b64 [%rd4], 1;
+    cp.async.bulk.tensor.1d.shared::cluster.global.mbarrier::complete_tx::bytes \
+[%rd3], [%rd8], %r4, [%rd4];
+    mbarrier.arrive.expect_tx.shared.b64 _, [%rd4], %r4;
+
+$GTB_WAIT:
+    bar.sync      0;
+    mbarrier.try_wait.parity.shared.b64 %p0, [%rd4], 0;
+    @!%p0 bra $GTB_WAIT;
+
+    // out_addr base = out + k * D * 4.
+    mul.lo.u32    %r7, %r2, %r1;
+    mul.wide.u32  %rd9, %r7, 4;
+    add.u64       %rd10, %rd2, %rd9;
+
+    // Each thread strides the D elements, copying shared -> global.
+    mov.u32       %r8, %r6;               // d = tid
+    mov.u32       %r9, %ntid.x;           // stride
+
+$GTB_LOOP:
+    setp.ge.u32   %p0, %r8, %r1;
+    @%p0 bra $GTB_DONE;
+    mul.wide.u32  %rd11, %r8, 4;
+    add.u64       %rd12, %rd3, %rd11;     // shared row_tile[d]
+    ld.shared.f32 %f0, [%rd12];
+    add.u64       %rd13, %rd10, %rd11;    // out[k, d]
+    st.global.f32 [%rd13], %f0;
+    add.u32       %r8, %r8, %r9;
+    bra           $GTB_LOOP;
+
+$GTB_DONE:
+    ret;
+}}
+"#
+    )
+}
+
+// ─── Kernel 11: momentum_update (FP16 mixed precision) ───────────────────────
+
+/// FP16 mixed-precision variant of [`momentum_update_ptx`]:
+/// `θ_target = m·θ_target + (1−m)·θ_online` where both parameter buffers are
+/// stored as IEEE half (`f16`, 2 bytes) but the EMA blend is computed in f32 to
+/// avoid catastrophic precision loss on the `1−m ≈ 0.004` online term.
+///
+/// Each element is loaded as `u16`, converted `cvt.f32.f16`, blended with
+/// `fma.rn.f32`, rounded back with `cvt.rn.f16.f32`, and stored as `u16`. This
+/// matches the storage layout used by mixed-precision SSL training where the
+/// momentum encoder weights live in half precision but the update must not lose
+/// the small online contribution.
+///
+/// Signature: `momentum_update_f16_kernel(p_target, p_online, n, momentum)` with
+/// `p_target` / `p_online` pointing at `n` contiguous f16 values.
+#[must_use]
+pub fn momentum_update_f16_ptx(sm: u32) -> String {
+    let hdr = ptx_header(sm);
+    let one = f32_hex(1.0_f32);
+    format!(
+        r#"{hdr}// momentum_update_f16_kernel: f16 storage, f32 EMA blend.
+.visible .entry momentum_update_f16_kernel(
+    .param .u64 p_target,
+    .param .u64 p_online,
+    .param .u32 n,
+    .param .f32 momentum
+)
+{{
+    .reg .u64  %rd<6>;
+    .reg .u32  %r<10>;
+    .reg .f32  %f<8>;
+    .reg .b16  %rh<4>;
+    .reg .pred %p0;
+
+    ld.param.u64  %rd0, [p_target];
+    ld.param.u64  %rd1, [p_online];
+    ld.param.u32  %r0,  [n];
+    ld.param.f32  %f0,  [momentum];
+
+    mov.f32       %f1, {ONE};
+    sub.f32       %f2, %f1, %f0;          // 1 - m
+
+    mov.u32       %r1, %ntid.x;
+    mov.u32       %r2, %ctaid.x;
+    mov.u32       %r3, %tid.x;
+    mad.lo.u32    %r4, %r1, %r2, %r3;     // global tid
+
+    mov.u32       %r5, %nctaid.x;
+    mul.lo.u32    %r6, %r1, %r5;          // grid stride
+
+    mov.u32       %r7, %r4;
+
+$MOMH_LOOP:
+    setp.ge.u32   %p0, %r7, %r0;
+    @%p0 bra $MOMH_DONE;
+
+    mul.wide.u32  %rd2, %r7, 2;           // f16 element = 2 bytes
+    add.u64       %rd3, %rd0, %rd2;
+    add.u64       %rd4, %rd1, %rd2;
+    ld.global.u16 %rh0, [%rd3];           // target f16
+    ld.global.u16 %rh1, [%rd4];           // online f16
+    cvt.f32.f16   %f3, %rh0;
+    cvt.f32.f16   %f4, %rh1;
+    mul.f32       %f5, %f3, %f0;          // m * target
+    fma.rn.f32    %f6, %f2, %f4, %f5;     // (1-m)*online + m*target
+    cvt.rn.f16.f32 %rh2, %f6;
+    st.global.u16 [%rd3], %rh2;
+
+    add.u32       %r7, %r7, %r6;
+    bra           $MOMH_LOOP;
+
+$MOMH_DONE:
+    ret;
+}}
+"#,
+        ONE = one,
+    )
+}
+
+// ─── Kernel 12: byol_cosine_loss (BF16 mixed precision) ──────────────────────
+
+/// BF16 mixed-precision variant of [`byol_cosine_loss_ptx`]: the L2-normalised
+/// predictions `p` and stop-gradient targets `z` are stored as bfloat16
+/// (`bf16`, 2 bytes) but the `2 − 2·dot(p, z)` accumulation runs in f32 and lands
+/// in an f32 scalar via `atom.global.add.f32`.
+///
+/// bf16 has the same 8-bit exponent as f32 so the wide dynamic range of cosine
+/// terms is preserved while halving the memory footprint of the projection
+/// activations — the standard choice for bf16 SSL pre-training.
+///
+/// Signature: `byol_cosine_loss_bf16_kernel(p_p, p_z, p_out, n)` with `p_p` /
+/// `p_z` pointing at `n` contiguous bf16 values and `p_out` an f32 accumulator.
+#[must_use]
+pub fn byol_cosine_loss_bf16_ptx(sm: u32) -> String {
+    let hdr = ptx_header(sm);
+    let two = f32_hex(2.0_f32);
+    format!(
+        r#"{hdr}// byol_cosine_loss_bf16_kernel: bf16 storage, f32 cosine accumulation.
+.visible .entry byol_cosine_loss_bf16_kernel(
+    .param .u64 p_p,
+    .param .u64 p_z,
+    .param .u64 p_out,
+    .param .u32 n
+)
+{{
+    .reg .u64  %rd<6>;
+    .reg .u32  %r<10>;
+    .reg .f32  %f<8>;
+    .reg .b16  %rh<4>;
+    .reg .pred %p0;
+
+    ld.param.u64  %rd0, [p_p];
+    ld.param.u64  %rd1, [p_z];
+    ld.param.u64  %rd2, [p_out];
+    ld.param.u32  %r0,  [n];
+
+    mov.u32       %r1, %ntid.x;
+    mov.u32       %r2, %ctaid.x;
+    mov.u32       %r3, %tid.x;
+    mad.lo.u32    %r4, %r1, %r2, %r3;     // global tid
+
+    mov.u32       %r5, %nctaid.x;
+    mul.lo.u32    %r6, %r1, %r5;          // grid stride
+
+    mov.u32       %r7, %r4;
+
+$BYB_LOOP:
+    setp.ge.u32   %p0, %r7, %r0;
+    @%p0 bra $BYB_DONE;
+
+    mul.wide.u32  %rd3, %r7, 2;           // bf16 element = 2 bytes
+    add.u64       %rd4, %rd0, %rd3;
+    add.u64       %rd5, %rd1, %rd3;
+    ld.global.u16 %rh0, [%rd4];           // p bf16
+    ld.global.u16 %rh1, [%rd5];           // z bf16
+    cvt.f32.bf16  %f0, %rh0;
+    cvt.f32.bf16  %f1, %rh1;
+    mul.f32       %f2, %f0, %f1;          // p_i * z_i
+    mul.f32       %f3, %f2, {TWO};        // 2 * p_i * z_i
+    sub.f32       %f4, {TWO}, %f3;        // 2 - 2*p_i*z_i
+    atom.global.add.f32 %f5, [%rd2], %f4;
+
+    add.u32       %r7, %r7, %r6;
+    bra           $BYB_LOOP;
+
+$BYB_DONE:
+    ret;
+}}
+"#,
+        TWO = two,
+    )
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -639,5 +1131,125 @@ mod tests {
     fn momentum_update_uses_fma() {
         let p = momentum_update_ptx(80);
         assert!(p.contains("fma.rn.f32"));
+    }
+
+    // ─── Architecture-deepening kernels ──────────────────────────────────────
+
+    #[test]
+    fn barlow_wgmma_all_sm() {
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            assert_kernel_well_formed(
+                &barlow_cross_corr_wgmma_ptx(sm),
+                sm,
+                "barlow_cross_corr_kernel",
+            );
+        }
+    }
+
+    #[test]
+    fn barlow_wgmma_emits_wgmma_on_hopper_plus() {
+        // Hopper and Blackwell get the warp-group MMA path.
+        for sm in [90_u32, 100, 120] {
+            let p = barlow_cross_corr_wgmma_ptx(sm);
+            assert!(p.contains("wgmma.mma_async"), "sm {sm} missing wgmma");
+            assert!(p.contains("wgmma.fence.sync.aligned"), "sm {sm} no fence");
+            assert!(p.contains("cp.async.bulk"), "sm {sm} no bulk stage");
+        }
+        // Pre-Hopper falls back to the scalar atomic accumulator.
+        for sm in [75_u32, 80, 86] {
+            let p = barlow_cross_corr_wgmma_ptx(sm);
+            assert!(!p.contains("wgmma"), "sm {sm} should not emit wgmma");
+            assert!(p.contains("atom.global.add.f32"), "sm {sm} no scalar path");
+        }
+    }
+
+    #[test]
+    fn nt_xent_warp_all_sm() {
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            assert_kernel_well_formed(&nt_xent_softmax_warp_ptx(sm), sm, "nt_xent_softmax_kernel");
+        }
+    }
+
+    #[test]
+    fn nt_xent_warp_emits_redux_on_hopper_plus() {
+        for sm in [90_u32, 100, 120] {
+            let p = nt_xent_softmax_warp_ptx(sm);
+            assert!(p.contains("redux.sync.max.f32"), "sm {sm} no redux max");
+            assert!(p.contains("redux.sync.add.f32"), "sm {sm} no redux add");
+        }
+        for sm in [75_u32, 80, 86] {
+            let p = nt_xent_softmax_warp_ptx(sm);
+            assert!(!p.contains("redux.sync"), "sm {sm} should not emit redux");
+        }
+    }
+
+    #[test]
+    fn gather_bulk_all_sm() {
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            assert_kernel_well_formed(&gather_features_bulk_ptx(sm), sm, "gather_features_kernel");
+        }
+    }
+
+    #[test]
+    fn gather_bulk_emits_tma_on_blackwell_plus() {
+        for sm in [100_u32, 120] {
+            let p = gather_features_bulk_ptx(sm);
+            assert!(
+                p.contains("cp.async.bulk.tensor"),
+                "sm {sm} missing TMA tensor copy"
+            );
+            assert!(
+                p.contains("mbarrier.init.shared.b64"),
+                "sm {sm} no mbarrier"
+            );
+        }
+        // Pre-Blackwell (including Hopper) falls back to the scalar gather.
+        for sm in [75_u32, 80, 86, 90] {
+            let p = gather_features_bulk_ptx(sm);
+            assert!(
+                !p.contains("cp.async.bulk.tensor"),
+                "sm {sm} should not emit TMA tensor copy"
+            );
+        }
+    }
+
+    #[test]
+    fn momentum_f16_all_sm() {
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            assert_kernel_well_formed(
+                &momentum_update_f16_ptx(sm),
+                sm,
+                "momentum_update_f16_kernel",
+            );
+        }
+    }
+
+    #[test]
+    fn momentum_f16_uses_half_conversions() {
+        let p = momentum_update_f16_ptx(80);
+        assert!(p.contains("ld.global.u16"), "f16 load missing");
+        assert!(p.contains("st.global.u16"), "f16 store missing");
+        assert!(p.contains("cvt.f32.f16"), "f16->f32 cvt missing");
+        assert!(p.contains("cvt.rn.f16.f32"), "f32->f16 cvt missing");
+        assert!(p.contains("fma.rn.f32"), "f32 blend missing");
+    }
+
+    #[test]
+    fn byol_bf16_all_sm() {
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            assert_kernel_well_formed(
+                &byol_cosine_loss_bf16_ptx(sm),
+                sm,
+                "byol_cosine_loss_bf16_kernel",
+            );
+        }
+    }
+
+    #[test]
+    fn byol_bf16_uses_bf16_conversions() {
+        let p = byol_cosine_loss_bf16_ptx(80);
+        assert!(p.contains("ld.global.u16"), "bf16 load missing");
+        assert!(p.contains("cvt.f32.bf16"), "bf16->f32 cvt missing");
+        assert!(p.contains("atom.global.add.f32"), "f32 accumulate missing");
     }
 }

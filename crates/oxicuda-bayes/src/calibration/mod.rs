@@ -17,6 +17,7 @@
 
 pub mod beta;
 pub mod conformal;
+pub mod ece_classwise;
 pub mod histogram;
 pub mod isotonic;
 pub mod metrics;
@@ -26,5 +27,10 @@ pub mod vector_scaling;
 
 pub use beta::{BetaCalibConfig, BetaCalibrator};
 pub use conformal::{ConformalClassifier, ConformalRegressor, RapsClassifier, conformal_quantile};
+pub use ece_classwise::{
+    BinningScheme, BrierDecomposition, ClassReliability, ClasswiseEceConfig, ReliabilityPoint,
+    TopLabelCalibration, brier_decomposition, class_wise_eces, classwise_ece,
+    multiclass_brier_score, per_class_reliability, top_label_calibration,
+};
 pub use histogram::{BinStrategy, HistogramBinCalibrator, HistogramBinConfig};
 pub use vector_scaling::{ScalingMode, VectorScaler, VectorScalingConfig};

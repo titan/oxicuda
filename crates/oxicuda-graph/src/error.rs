@@ -50,6 +50,11 @@ pub enum GraphError {
     #[error("invalid execution plan: {0}")]
     InvalidPlan(String),
 
+    /// Validation of a graph operation failed (e.g. an in-place executable
+    /// graph update whose topology or node parameters are incompatible).
+    #[error("graph validation failed: {0}")]
+    ValidationFailed(String),
+
     /// PTX code generation for a fused kernel failed.
     #[error("PTX codegen failed for fusion group {group}: {reason}")]
     PtxCodegenFailed { group: usize, reason: String },

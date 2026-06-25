@@ -3,6 +3,7 @@
 //! Includes HyperLogLog, HyperLogLog++, HLL-TailCut, Linear Counting, and Theta
 //! Sketch.
 
+pub mod dp_hll;
 pub mod hll;
 pub mod hll_plus;
 pub mod hll_tailcut;
@@ -11,6 +12,7 @@ pub mod linear_counting;
 pub mod sliding_window_hll;
 pub mod theta_sketch;
 
+pub use dp_hll::{DpHll, DpHllConfig, DpHllMechanism};
 pub use hll::HyperLogLog;
 pub use hll_plus::HyperLogLogPlus;
 pub use hll_tailcut::HllTailCut;

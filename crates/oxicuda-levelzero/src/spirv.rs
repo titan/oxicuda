@@ -26,6 +26,7 @@ pub const SPIRV_GENERATOR: u32 = 0x000D_0002;
 
 // ─── SPIR-V opcodes ─────────────────────────────────────────
 
+pub(crate) const OP_EXTENSION: u32 = 10;
 pub(crate) const OP_EXT_INST_IMPORT: u32 = 11;
 pub(crate) const OP_EXT_INST: u32 = 12;
 pub(crate) const OP_MEMORY_MODEL: u32 = 14;
@@ -116,6 +117,15 @@ const OPENCL_FMIN: u32 = 28;
 const OPENCL_LOG: u32 = 37;
 const OPENCL_SQRT: u32 = 61;
 const OPENCL_TANH: u32 = 63;
+// Extended transcendental instruction numbers (OpenCL.std).
+const OPENCL_ATAN: u32 = 9;
+const OPENCL_ATAN2: u32 = 11;
+const OPENCL_CBRT: u32 = 14;
+const OPENCL_COS: u32 = 16;
+const OPENCL_ERFC: u32 = 17;
+const OPENCL_ERF: u32 = 18;
+const OPENCL_RSQRT: u32 = 56;
+const OPENCL_SIN: u32 = 57;
 
 /// Workgroup size for 1-D compute kernels.
 pub(crate) const WORKGROUP_SIZE: u32 = 256;
@@ -180,6 +190,12 @@ impl SpvModule {
         let mut ops = vec![id];
         ops.extend(Self::string_words(name));
         self.emit(OP_EXT_INST_IMPORT, &ops);
+    }
+
+    /// Emit an `OpExtension` declaration (a SPIR-V extension string, no result ID).
+    pub(crate) fn emit_extension(&mut self, name: &str) {
+        let ops = Self::string_words(name);
+        self.emit(OP_EXTENSION, &ops);
     }
 
     pub(crate) fn emit_memory_model(&mut self, addressing: u32, memory: u32) {
@@ -1292,6 +1308,217 @@ pub fn trivial_compute_shader_bytes() -> Vec<u8> {
         .collect()
 }
 
+// ─── Extended transcendental-math kernels ───────────────────
+
+/// A transcendental function from the `OpenCL.std` extended instruction set
+/// not already covered by [`UnaryOp`].
+///
+/// These extend OpenCL extended-instruction-set coverage beyond the
+/// relu/gelu/exp/log set with the elementary functions needed for activation
+/// fusions, error-function-based GELU, and angle math.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtMathFn {
+    /// `erf(x)` — Gauss error function (exact-GELU building block).
+    Erf,
+    /// `erfc(x)` — complementary error function.
+    Erfc,
+    /// `sin(x)`.
+    Sin,
+    /// `cos(x)`.
+    Cos,
+    /// `atan(x)`.
+    Atan,
+    /// `tanh(x)` (also reachable via `UnaryOp::Tanh`).
+    Tanh,
+    /// `cbrt(x)` — cube root.
+    Cbrt,
+    /// `rsqrt(x)` — reciprocal square root.
+    Rsqrt,
+}
+
+impl ExtMathFn {
+    /// The `OpenCL.std` extended-instruction number for a single-argument call.
+    #[must_use]
+    pub fn opencl_inst(self) -> u32 {
+        match self {
+            ExtMathFn::Erf => OPENCL_ERF,
+            ExtMathFn::Erfc => OPENCL_ERFC,
+            ExtMathFn::Sin => OPENCL_SIN,
+            ExtMathFn::Cos => OPENCL_COS,
+            ExtMathFn::Atan => OPENCL_ATAN,
+            ExtMathFn::Tanh => OPENCL_TANH,
+            ExtMathFn::Cbrt => OPENCL_CBRT,
+            ExtMathFn::Rsqrt => OPENCL_RSQRT,
+        }
+    }
+
+    /// The lowercase function name (used as the kernel entry-point suffix).
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            ExtMathFn::Erf => "erf",
+            ExtMathFn::Erfc => "erfc",
+            ExtMathFn::Sin => "sin",
+            ExtMathFn::Cos => "cos",
+            ExtMathFn::Atan => "atan",
+            ExtMathFn::Tanh => "tanh",
+            ExtMathFn::Cbrt => "cbrt",
+            ExtMathFn::Rsqrt => "rsqrt",
+        }
+    }
+}
+
+/// Generate an OpenCL SPIR-V kernel applying a single-argument transcendental
+/// [`ExtMathFn`] element-wise.
+///
+/// Kernel parameters: `(CrossWorkgroup float* input, CrossWorkgroup float* output, uint count)`.
+/// Entry-point name: `"main"`.
+pub fn ext_math_compute_shader(func: ExtMathFn) -> Vec<u32> {
+    let mut m = SpvModule::new();
+    let b = emit_preamble(&mut m);
+
+    let main_fn = m.alloc_id();
+    let fn_ty = m.alloc_id();
+    let p_input = m.alloc_id();
+    let p_output = m.alloc_id();
+    let p_count = m.alloc_id();
+
+    m.emit_type_function(
+        fn_ty,
+        b.ty_void,
+        &[b.ty_ptr_cross_float, b.ty_ptr_cross_float, b.ty_uint],
+    );
+
+    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
+    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
+
+    let label_entry = m.alloc_id();
+    let label_body = m.alloc_id();
+    let label_merge = m.alloc_id();
+
+    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function_parameter(b.ty_ptr_cross_float, p_input);
+    m.emit_function_parameter(b.ty_ptr_cross_float, p_output);
+    m.emit_function_parameter(b.ty_uint, p_count);
+    m.emit_label(label_entry);
+
+    let gid = load_gid_x(&mut m, &b);
+    let cond = m.alloc_id();
+    m.emit(OP_U_LESS_THAN, &[b.ty_bool, cond, gid, p_count]);
+    m.emit_selection_merge(label_merge);
+    m.emit_branch_conditional(cond, label_body, label_merge);
+
+    m.emit_label(label_body);
+
+    let inp_ptr = m.alloc_id();
+    m.emit_in_bounds_ptr_access_chain(b.ty_ptr_cross_float, inp_ptr, p_input, gid);
+    let inp_val = m.alloc_id();
+    m.emit_load(b.ty_float, inp_val, inp_ptr);
+
+    let result = m.alloc_id();
+    m.emit_opencl_ext(
+        b.opencl_ext,
+        b.ty_float,
+        result,
+        func.opencl_inst(),
+        &[inp_val],
+    );
+
+    let out_ptr = m.alloc_id();
+    m.emit_in_bounds_ptr_access_chain(b.ty_ptr_cross_float, out_ptr, p_output, gid);
+    m.emit_store(out_ptr, result);
+
+    m.emit_branch(label_merge);
+    m.emit_label(label_merge);
+    m.emit_return();
+    m.emit_function_end();
+
+    m.finalize()
+}
+
+/// Generate an OpenCL SPIR-V kernel computing `atan2(y, x)` element-wise.
+///
+/// `atan2` is the canonical two-argument extended instruction; this exercises
+/// the `OpExtInst` path with multiple arguments.
+///
+/// Kernel parameters: `(CrossWorkgroup float* y, CrossWorkgroup float* x,
+///                      CrossWorkgroup float* output, uint count)`.
+/// Entry-point name: `"atan2"`.
+pub fn atan2_compute_shader() -> Vec<u32> {
+    let mut m = SpvModule::new();
+    let b = emit_preamble(&mut m);
+
+    let main_fn = m.alloc_id();
+    let fn_ty = m.alloc_id();
+    let p_y = m.alloc_id();
+    let p_x = m.alloc_id();
+    let p_out = m.alloc_id();
+    let p_count = m.alloc_id();
+
+    m.emit_type_function(
+        fn_ty,
+        b.ty_void,
+        &[
+            b.ty_ptr_cross_float,
+            b.ty_ptr_cross_float,
+            b.ty_ptr_cross_float,
+            b.ty_uint,
+        ],
+    );
+
+    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "atan2", &[b.var_gid]);
+    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
+
+    let label_entry = m.alloc_id();
+    let label_body = m.alloc_id();
+    let label_merge = m.alloc_id();
+
+    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function_parameter(b.ty_ptr_cross_float, p_y);
+    m.emit_function_parameter(b.ty_ptr_cross_float, p_x);
+    m.emit_function_parameter(b.ty_ptr_cross_float, p_out);
+    m.emit_function_parameter(b.ty_uint, p_count);
+    m.emit_label(label_entry);
+
+    let gid = load_gid_x(&mut m, &b);
+    let cond = m.alloc_id();
+    m.emit(OP_U_LESS_THAN, &[b.ty_bool, cond, gid, p_count]);
+    m.emit_selection_merge(label_merge);
+    m.emit_branch_conditional(cond, label_body, label_merge);
+
+    m.emit_label(label_body);
+
+    let y_ptr = m.alloc_id();
+    m.emit_in_bounds_ptr_access_chain(b.ty_ptr_cross_float, y_ptr, p_y, gid);
+    let y_val = m.alloc_id();
+    m.emit_load(b.ty_float, y_val, y_ptr);
+
+    let x_ptr = m.alloc_id();
+    m.emit_in_bounds_ptr_access_chain(b.ty_ptr_cross_float, x_ptr, p_x, gid);
+    let x_val = m.alloc_id();
+    m.emit_load(b.ty_float, x_val, x_ptr);
+
+    let result = m.alloc_id();
+    m.emit_opencl_ext(
+        b.opencl_ext,
+        b.ty_float,
+        result,
+        OPENCL_ATAN2,
+        &[y_val, x_val],
+    );
+
+    let out_ptr = m.alloc_id();
+    m.emit_in_bounds_ptr_access_chain(b.ty_ptr_cross_float, out_ptr, p_out, gid);
+    m.emit_store(out_ptr, result);
+
+    m.emit_branch(label_merge);
+    m.emit_label(label_merge);
+    m.emit_return();
+    m.emit_function_end();
+
+    m.finalize()
+}
+
 // ─── Tests ──────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1465,5 +1692,72 @@ mod tests {
         assert_eq!(trivial[6], CAPABILITY_SHADER);
         assert_eq!(unary[5], cap_header);
         assert_eq!(unary[6], CAPABILITY_KERNEL);
+    }
+
+    // ── Extended transcendental kernels ──────────────────────
+
+    /// Decode the instruction stream after the header into `(opcode, operands)`.
+    fn decode_insts(words: &[u32]) -> Vec<(u32, Vec<u32>)> {
+        let mut out = Vec::new();
+        let mut i = 5;
+        while i < words.len() {
+            let wc = (words[i] >> 16) as usize;
+            let op = words[i] & 0xffff;
+            if wc == 0 || i + wc > words.len() {
+                break;
+            }
+            out.push((op, words[i + 1..i + wc].to_vec()));
+            i += wc;
+        }
+        out
+    }
+
+    #[test]
+    fn ext_math_fn_metadata() {
+        assert_eq!(ExtMathFn::Erf.opencl_inst(), 18);
+        assert_eq!(ExtMathFn::Erfc.opencl_inst(), 17);
+        assert_eq!(ExtMathFn::Atan.opencl_inst(), 9);
+        assert_eq!(ExtMathFn::Erf.name(), "erf");
+        assert_eq!(ExtMathFn::Rsqrt.name(), "rsqrt");
+    }
+
+    #[test]
+    fn ext_math_all_fns_valid() {
+        let fns = [
+            ExtMathFn::Erf,
+            ExtMathFn::Erfc,
+            ExtMathFn::Sin,
+            ExtMathFn::Cos,
+            ExtMathFn::Atan,
+            ExtMathFn::Tanh,
+            ExtMathFn::Cbrt,
+            ExtMathFn::Rsqrt,
+        ];
+        for f in fns {
+            let words = ext_math_compute_shader(f);
+            check_valid_spirv(&words);
+            let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_ne_bytes()).collect();
+            assert_eq!(bytes.len() % 4, 0);
+            // The OpenCL ext instruction number for `f` must appear in an OpExtInst.
+            let insts = decode_insts(&words);
+            let has_inst = insts
+                .iter()
+                .any(|(op, ops)| *op == OP_EXT_INST && ops.get(3) == Some(&f.opencl_inst()));
+            assert!(has_inst, "missing OpExtInst for {}", f.name());
+        }
+    }
+
+    #[test]
+    fn atan2_shader_emits_two_arg_ext_inst() {
+        let words = atan2_compute_shader();
+        check_valid_spirv(&words);
+        let insts = decode_insts(&words);
+        // OpExtInst with inst number = atan2 (11) and two value args.
+        let atan2_inst = insts
+            .iter()
+            .find(|(op, ops)| *op == OP_EXT_INST && ops.get(3) == Some(&11));
+        let (_, ops) = atan2_inst.expect("atan2 OpExtInst present");
+        // result_ty, result, ext_set, inst, arg0, arg1 → 6 operands.
+        assert_eq!(ops.len(), 6, "atan2 must pass two arguments");
     }
 }

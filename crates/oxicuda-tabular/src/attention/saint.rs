@@ -505,6 +505,111 @@ impl SaintLayer {
     }
 }
 
+// ─── Crate-internal accessors for the analytic backward pass ──────────────────
+// The backward implementation lives in `saint_grad.rs`.
+
+impl SaintLayer {
+    pub(crate) fn config_ref(&self) -> &SaintConfig {
+        &self.config
+    }
+    pub(crate) fn row_wq_ref(&self, l: usize) -> &[f32] {
+        &self.row_wq[l]
+    }
+    pub(crate) fn row_wk_ref(&self, l: usize) -> &[f32] {
+        &self.row_wk[l]
+    }
+    pub(crate) fn row_wv_ref(&self, l: usize) -> &[f32] {
+        &self.row_wv[l]
+    }
+    pub(crate) fn row_wo_ref(&self, l: usize) -> &[f32] {
+        &self.row_wo[l]
+    }
+    pub(crate) fn inter_wq_ref(&self, l: usize) -> &[f32] {
+        &self.inter_wq[l]
+    }
+    pub(crate) fn inter_wk_ref(&self, l: usize) -> &[f32] {
+        &self.inter_wk[l]
+    }
+    pub(crate) fn inter_wv_ref(&self, l: usize) -> &[f32] {
+        &self.inter_wv[l]
+    }
+    pub(crate) fn inter_wo_ref(&self, l: usize) -> &[f32] {
+        &self.inter_wo[l]
+    }
+    pub(crate) fn ffn_w1_ref(&self, l: usize) -> &[f32] {
+        &self.ffn_w1[l]
+    }
+    pub(crate) fn ffn_b1_ref(&self, l: usize) -> &[f32] {
+        &self.ffn_b1[l]
+    }
+    pub(crate) fn ffn_w2_ref(&self, l: usize) -> &[f32] {
+        &self.ffn_w2[l]
+    }
+    pub(crate) fn ffn_b2_ref(&self, l: usize) -> &[f32] {
+        &self.ffn_b2[l]
+    }
+    pub(crate) fn ln_gamma_ref(&self, idx: usize) -> &[f32] {
+        &self.ln_gamma[idx]
+    }
+    pub(crate) fn ln_beta_ref(&self, idx: usize) -> &[f32] {
+        &self.ln_beta[idx]
+    }
+    pub(crate) fn head_w_ref(&self) -> &[f32] {
+        &self.head_w
+    }
+    pub(crate) fn head_b_ref(&self) -> &[f32] {
+        &self.head_b
+    }
+
+    /// Read a single scalar parameter (test-only, for finite-difference checks).
+    #[cfg(test)]
+    pub(crate) fn param_get(&self, p: &crate::attention::saint_grad::SaintParam) -> f32 {
+        use crate::attention::saint_grad::SaintParam as P;
+        match *p {
+            P::RowWq(l, i) => self.row_wq[l][i],
+            P::RowWk(l, i) => self.row_wk[l][i],
+            P::RowWv(l, i) => self.row_wv[l][i],
+            P::RowWo(l, i) => self.row_wo[l][i],
+            P::InterWq(l, i) => self.inter_wq[l][i],
+            P::InterWk(l, i) => self.inter_wk[l][i],
+            P::InterWv(l, i) => self.inter_wv[l][i],
+            P::InterWo(l, i) => self.inter_wo[l][i],
+            P::FfnW1(l, i) => self.ffn_w1[l][i],
+            P::FfnB1(l, i) => self.ffn_b1[l][i],
+            P::FfnW2(l, i) => self.ffn_w2[l][i],
+            P::FfnB2(l, i) => self.ffn_b2[l][i],
+            P::LnGamma(idx, i) => self.ln_gamma[idx][i],
+            P::LnBeta(idx, i) => self.ln_beta[idx][i],
+            P::HeadW(i) => self.head_w[i],
+            P::HeadB(i) => self.head_b[i],
+        }
+    }
+
+    /// Write a single scalar parameter (test-only, for finite-difference checks).
+    #[cfg(test)]
+    pub(crate) fn param_set(&mut self, p: &crate::attention::saint_grad::SaintParam, val: f32) {
+        use crate::attention::saint_grad::SaintParam as P;
+        match *p {
+            P::RowWq(l, i) => self.row_wq[l][i] = val,
+            P::RowWk(l, i) => self.row_wk[l][i] = val,
+            P::RowWv(l, i) => self.row_wv[l][i] = val,
+            P::RowWo(l, i) => self.row_wo[l][i] = val,
+            P::InterWq(l, i) => self.inter_wq[l][i] = val,
+            P::InterWk(l, i) => self.inter_wk[l][i] = val,
+            P::InterWv(l, i) => self.inter_wv[l][i] = val,
+            P::InterWo(l, i) => self.inter_wo[l][i] = val,
+            P::FfnW1(l, i) => self.ffn_w1[l][i] = val,
+            P::FfnB1(l, i) => self.ffn_b1[l][i] = val,
+            P::FfnW2(l, i) => self.ffn_w2[l][i] = val,
+            P::FfnB2(l, i) => self.ffn_b2[l][i] = val,
+            P::LnGamma(idx, i) => self.ln_gamma[idx][i] = val,
+            P::LnBeta(idx, i) => self.ln_beta[idx][i] = val,
+            P::HeadW(i) => self.head_w[i] = val,
+            P::HeadB(i) => self.head_b[i] = val,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

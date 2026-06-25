@@ -35,13 +35,13 @@ Current implementation covers three PRNG engines (Philox-4x32-10, XORWOW, MRG32k
 - [x] Truncated normal (distributions/truncated_normal.rs) -- accept-reject Box-Muller for [a,b] interval (P1)
 - [x] MRG32k3a skip-ahead (engines/mrg32k3a.rs) -- Efficient stream splitting for parallel Monte Carlo via matrix power skip-ahead (P1)
 - [x] AES-CTR CSPRNG -- Cryptographically secure PRNG based on AES counter mode for security-sensitive applications (P2)
-- [x] cuRAND host API compatibility -- Host-side API matching cuRAND's curandGenerator interface for drop-in usage (P2)
+- [x] cuRAND host API compatibility (host_api.rs:CurandGenerator -- wired orphan) -- Host-side API matching cuRAND's curandGenerator interface for drop-in usage (P2)
 - [x] Random matrix generation -- Wishart matrices, random orthogonal matrices (QR of Gaussian) for statistical applications (P2)
 - [x] Random graph generation -- Erdos-Renyi, stochastic block model, Barabasi-Albert, Watts-Strogatz, random regular (graph_gen.rs) (P2)
 - [x] Monte Carlo methods (monte_carlo.rs) -- GPU-accelerated Monte Carlo integration, importance sampling, Markov chain Monte Carlo (MCMC) with Metropolis-Hastings and Hamiltonian MC (P1)
 - [x] PCG (Permuted Congruential Generator) engine (`engines/pcg.rs`) — O'Neill 2014: 64-bit LCG state with output-permutation (XSH-RR) finalizer for excellent statistical quality at low overhead; `PcgEngine`
 - [x] xoshiro256** engine (`engines/xoshiro256ss.rs`) — Blackman-Vigna 2019: 256-bit state, "**" scrambler (left-rotate then multiply), long period 2²⁵⁶−1, jump-ahead for parallel streams; `Xoshiro256ss`
-- [ ] Niederreiter base-2 quasi-random sequences (`quasi/niederreiter.rs`) — Niederreiter 1992: base-2 digital net with generating matrices derived from primitive polynomials over GF(2); `NiederreiterSequence`
+- [x] Niederreiter base-2 quasi-random sequences (`quasi/niederreiter.rs`) — Niederreiter 1992: base-2 digital net with generating matrices derived from primitive polynomials over GF(2); `NiederreiterSequence`
 - [x] Alias method + Bernoulli fast sampler (`distributions/alias.rs`) — Walker 1977 / Vose 1991: O(1) categorical sampling via pre-computed alias + probability tables; `AliasMethod`
 
 ## Dependencies
@@ -57,7 +57,7 @@ Current implementation covers three PRNG engines (Philox-4x32-10, XORWOW, MRG32k
 
 ## Quality Status
 
-- Tests: 368 passing
+- Tests: 404 passing (host_api.rs cuRAND host API wired: +23)
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`

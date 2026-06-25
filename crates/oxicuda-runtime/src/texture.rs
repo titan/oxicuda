@@ -611,7 +611,7 @@ impl ResourceDesc {
 /// Ergonomic texture-object sampling configuration.
 ///
 /// Converted to [`CUDA_TEXTURE_DESC`] when creating a [`CudaTextureObject`].
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextureDesc {
     /// Address mode for the U (X) dimension.
     pub address_u: AddressMode,
@@ -696,6 +696,134 @@ impl TextureDesc {
             border_color: self.border_color,
             reserved: [0i32; 12],
         }
+    }
+}
+
+// ─── TextureDescBuilder ───────────────────────────────────────────────────────
+
+/// Fluent builder for [`TextureDesc`].
+///
+/// The struct-literal style of [`TextureDesc`] is verbose because it has a
+/// dozen optional fields; this builder lets callers set only what they need and
+/// inherit the [`TextureDesc::default_2d`] defaults for everything else.
+///
+/// # Examples
+///
+/// ```
+/// use oxicuda_runtime::texture::{AddressMode, FilterMode, TextureDesc, TextureDescBuilder};
+///
+/// let desc = TextureDescBuilder::new()
+///     .address_mode(AddressMode::Wrap)
+///     .filter_mode(FilterMode::Linear)
+///     .normalized_coords(false)
+///     .build();
+///
+/// assert_eq!(desc.address_u, AddressMode::Wrap);
+/// assert_eq!(desc.address_v, AddressMode::Wrap);
+/// assert_eq!(desc.address_w, AddressMode::Wrap);
+/// assert_eq!(desc.filter_mode, FilterMode::Linear);
+/// assert!(!desc.normalized_coords);
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct TextureDescBuilder {
+    desc: TextureDesc,
+}
+
+impl TextureDescBuilder {
+    /// Start a new builder seeded with [`TextureDesc::default_2d`] defaults.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            desc: TextureDesc::default_2d(),
+        }
+    }
+
+    /// Set the same address mode on all three axes (U, V, W).
+    #[must_use]
+    pub const fn address_mode(mut self, mode: AddressMode) -> Self {
+        self.desc.address_u = mode;
+        self.desc.address_v = mode;
+        self.desc.address_w = mode;
+        self
+    }
+
+    /// Set the address mode for each axis independently.
+    #[must_use]
+    pub const fn address_modes(mut self, u: AddressMode, v: AddressMode, w: AddressMode) -> Self {
+        self.desc.address_u = u;
+        self.desc.address_v = v;
+        self.desc.address_w = w;
+        self
+    }
+
+    /// Set the sampling filter mode.
+    #[must_use]
+    pub const fn filter_mode(mut self, mode: FilterMode) -> Self {
+        self.desc.filter_mode = mode;
+        self
+    }
+
+    /// Set whether texture coordinates are normalized to `[0, 1)`.
+    #[must_use]
+    pub const fn normalized_coords(mut self, normalized: bool) -> Self {
+        self.desc.normalized_coords = normalized;
+        self
+    }
+
+    /// Set whether reads return raw integers rather than normalized floats.
+    #[must_use]
+    pub const fn read_as_integer(mut self, read_as_integer: bool) -> Self {
+        self.desc.read_as_integer = read_as_integer;
+        self
+    }
+
+    /// Set whether the hardware applies sRGB gamma decoding on read.
+    #[must_use]
+    pub const fn srgb(mut self, srgb: bool) -> Self {
+        self.desc.srgb = srgb;
+        self
+    }
+
+    /// Set the maximum anisotropy ratio (1–16; 1 disables anisotropy).
+    #[must_use]
+    pub const fn max_anisotropy(mut self, max_anisotropy: u32) -> Self {
+        self.desc.max_anisotropy = max_anisotropy;
+        self
+    }
+
+    /// Set the mipmap filter mode.
+    #[must_use]
+    pub const fn mipmap_filter(mut self, mode: FilterMode) -> Self {
+        self.desc.mipmap_filter = mode;
+        self
+    }
+
+    /// Set the mipmap LOD bias and `[min, max]` LOD clamp range.
+    #[must_use]
+    pub const fn mipmap_levels(mut self, bias: f32, min_lod: f32, max_lod: f32) -> Self {
+        self.desc.mipmap_bias = bias;
+        self.desc.min_lod = min_lod;
+        self.desc.max_lod = max_lod;
+        self
+    }
+
+    /// Set the RGBA border color (used by [`AddressMode::Border`]).
+    #[must_use]
+    pub const fn border_color(mut self, color: [f32; 4]) -> Self {
+        self.desc.border_color = color;
+        self
+    }
+
+    /// Finalize and return the configured [`TextureDesc`].
+    #[must_use]
+    pub const fn build(self) -> TextureDesc {
+        self.desc
+    }
+}
+
+impl Default for TextureDescBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -901,6 +1029,66 @@ mod tests {
         assert!(matches!(raw.address_mode[0], CUaddress_mode::Clamp));
         assert!(matches!(raw.address_mode[1], CUaddress_mode::Clamp));
         assert!(matches!(raw.address_mode[2], CUaddress_mode::Clamp));
+    }
+
+    #[test]
+    fn texture_desc_builder_defaults_match_default_2d() {
+        // A fresh builder with no overrides must reproduce default_2d() exactly.
+        let built = TextureDescBuilder::new().build();
+        assert_eq!(built, TextureDesc::default_2d());
+        // Default::default() must agree with new().
+        assert_eq!(TextureDescBuilder::default().build(), built);
+    }
+
+    #[test]
+    fn texture_desc_builder_matches_manual_construction() {
+        // Build a fully-customized descriptor with the fluent builder ...
+        let built = TextureDescBuilder::new()
+            .address_modes(AddressMode::Wrap, AddressMode::Mirror, AddressMode::Border)
+            .filter_mode(FilterMode::Linear)
+            .normalized_coords(false)
+            .read_as_integer(true)
+            .srgb(true)
+            .max_anisotropy(8)
+            .mipmap_filter(FilterMode::Linear)
+            .mipmap_levels(0.5, 1.0, 7.0)
+            .border_color([0.1, 0.2, 0.3, 1.0])
+            .build();
+
+        // ... and the same descriptor by hand.
+        let manual = TextureDesc {
+            address_u: AddressMode::Wrap,
+            address_v: AddressMode::Mirror,
+            address_w: AddressMode::Border,
+            filter_mode: FilterMode::Linear,
+            normalized_coords: false,
+            read_as_integer: true,
+            srgb: true,
+            max_anisotropy: 8,
+            mipmap_filter: FilterMode::Linear,
+            mipmap_bias: 0.5,
+            min_lod: 1.0,
+            max_lod: 7.0,
+            border_color: [0.1, 0.2, 0.3, 1.0],
+        };
+
+        assert_eq!(built, manual);
+    }
+
+    #[test]
+    fn texture_desc_builder_address_mode_sets_all_axes() {
+        let built = TextureDescBuilder::new()
+            .address_mode(AddressMode::Wrap)
+            .build();
+        assert_eq!(built.address_u, AddressMode::Wrap);
+        assert_eq!(built.address_v, AddressMode::Wrap);
+        assert_eq!(built.address_w, AddressMode::Wrap);
+        // Other fields stay at their defaults.
+        assert_eq!(built.filter_mode, TextureDesc::default_2d().filter_mode);
+        assert_eq!(
+            built.max_anisotropy,
+            TextureDesc::default_2d().max_anisotropy
+        );
     }
 
     #[test]

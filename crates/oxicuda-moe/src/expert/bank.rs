@@ -5,6 +5,7 @@ use crate::expert::ffn::{ExpertActivation, ExpertFfn, SwiGluExpert};
 use crate::handle::LcgRng;
 
 /// A collection of standard FFN experts.
+#[derive(Debug, Clone)]
 pub struct ExpertBank {
     experts: Vec<ExpertFfn>,
     /// Number of experts.
@@ -42,6 +43,55 @@ impl ExpertBank {
             input_dim,
             ffn_dim,
         })
+    }
+
+    /// Build a bank from a pre-constructed set of experts (e.g. produced by
+    /// sparse upcycling from a dense checkpoint).
+    ///
+    /// All experts must share identical `input_dim` and `ffn_dim`.
+    ///
+    /// # Errors
+    /// Returns [`MoeError::InvalidExpertCount`] for an empty list and
+    /// [`MoeError::DimensionMismatch`] when the experts' dimensions disagree.
+    pub fn from_experts(experts: Vec<ExpertFfn>) -> MoeResult<Self> {
+        let n_experts = experts.len();
+        if n_experts == 0 {
+            return Err(MoeError::InvalidExpertCount { n_experts });
+        }
+        let input_dim = experts[0].input_dim;
+        let ffn_dim = experts[0].ffn_dim;
+        for e in &experts {
+            if e.input_dim != input_dim {
+                return Err(MoeError::DimensionMismatch {
+                    expected: input_dim,
+                    got: e.input_dim,
+                });
+            }
+            if e.ffn_dim != ffn_dim {
+                return Err(MoeError::DimensionMismatch {
+                    expected: ffn_dim,
+                    got: e.ffn_dim,
+                });
+            }
+        }
+        Ok(Self {
+            experts,
+            n_experts,
+            input_dim,
+            ffn_dim,
+        })
+    }
+
+    /// Immutable view of the contained experts.
+    #[must_use]
+    pub fn experts(&self) -> &[ExpertFfn] {
+        &self.experts
+    }
+
+    /// Mutable view of the contained experts (e.g. for in-place upcycling or
+    /// merging of expert weights).
+    pub fn experts_mut(&mut self) -> &mut [ExpertFfn] {
+        &mut self.experts
     }
 
     /// Process a batch of tokens through a single expert.

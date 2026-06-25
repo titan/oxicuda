@@ -100,11 +100,20 @@ pub mod prelude {
     };
     pub use crate::ssl::{
         BackboneOutput, CenteringBuffer, DinoBackbone, DinoHead, cross_entropy, dino_loss,
-        ibot_loss, student_softmax, teacher_softmax,
+        ibot_loss, koleo_loss, student_softmax, teacher_softmax,
     };
     pub use crate::text::{ClipTextConfig, ClipTextEncoder};
+    pub use crate::vit::cait::{CaitConfig, ClassAttention, ClassAttentionStack, LayerScale};
+    pub use crate::vit::drop_path::{DropPath, DropPathConfig, drop_path_schedule};
+    pub use crate::vit::eva::{EvaPoolHead, EvaVariant};
+    pub use crate::vit::flash_attention::{FlashAttnConfig, flash_attention, reference_attention};
+    pub use crate::vit::quantize::{
+        QuantLinear, QuantParams, QuantWeight, fake_quantize_symmetric,
+    };
     pub use crate::vit::swin::{SwinBlock, SwinConfig, SwinWeights};
+    pub use crate::vit::t2t::{SoftSplitConfig, T2tModule, soft_split};
     pub use crate::vit::vit_patch::{VitPatchConfig, VitPatchEmbed};
+    pub use crate::vit::xcit::{XcitBlock, XcitConfig, cross_covariance_attention};
     pub use crate::vit::{ViTConfig, ViTEncoder, ViTModel};
 }
 

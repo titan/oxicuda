@@ -8,7 +8,7 @@ readme = "README.md"
 license.workspace = true
 homepage = "https://github.com/cool-japan/oxicuda"
 repository.workspace = true
-keywords = ["gpu", "evolutionary-algorithms", "cma-es", "nsga2", "pure-rust"]
+keywords = ["gpu", "evolutionary", "cma-es", "nsga2", "pure-rust"]
 categories = ["science", "algorithms"]
 
 [lints]
@@ -22,4 +22,8 @@ criterion.workspace = true
 
 [[bench]]
 name = "evol_ops"
+harness = false
+
+[[bench]]
+name = "algo_bench"
 harness = false

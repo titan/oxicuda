@@ -61,4 +61,39 @@ mod tests {
         assert!((mat[0][0] - 1.0).abs() < 1e-4);
         assert!((mat[1][1] - 1.0).abs() < 1e-4);
     }
+
+    #[test]
+    fn gram_matrix_is_psd() {
+        // A fidelity/overlap kernel Gram matrix K(x,y)=|⟨ψ(x)|ψ(y)⟩|² is positive
+        // semidefinite (it is the entrywise modulus-squared of a Gram matrix of
+        // unit vectors, hence a valid PSD kernel). Verify vᵀKv ≥ 0 for random v.
+        use crate::handle::LcgRng;
+        let xs = vec![
+            vec![0.3_f32, 0.7],
+            vec![1.0_f32, -0.5],
+            vec![-0.2_f32, 0.9],
+            vec![0.6_f32, 0.1],
+            vec![-1.1_f32, 0.4],
+        ];
+        let mat = kernel_matrix(&xs).expect("kernel matrix");
+        let m = xs.len();
+        // Symmetric.
+        for (i, row) in mat.iter().enumerate() {
+            for (j, &v) in row.iter().enumerate() {
+                assert!((v - mat[j][i]).abs() < 1e-5, "asymmetry at ({i},{j})");
+            }
+        }
+        // PSD via many random test vectors.
+        let mut rng = LcgRng::new(2024);
+        for _ in 0..50 {
+            let v: Vec<f32> = (0..m).map(|_| rng.next_normal()).collect();
+            let mut quad = 0.0_f32;
+            for (i, row) in mat.iter().enumerate() {
+                for (j, &kij) in row.iter().enumerate() {
+                    quad += v[i] * kij * v[j];
+                }
+            }
+            assert!(quad >= -1e-3, "quadratic form negative: {quad}");
+        }
+    }
 }

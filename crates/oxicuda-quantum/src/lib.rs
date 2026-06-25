@@ -22,8 +22,10 @@ pub mod mps;
 pub mod pauli;
 pub mod ptx_kernels;
 pub mod qaoa;
+pub mod qml;
 pub mod stabilizer;
 pub mod statevec;
+pub mod tensor;
 pub mod trotter;
 pub mod vqe;
 

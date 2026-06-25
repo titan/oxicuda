@@ -40,6 +40,7 @@ pub mod extremes;
 pub mod goodness_of_fit;
 pub mod handle;
 pub mod mcmc;
+pub mod mixture;
 pub mod multiple;
 pub mod nonparametric;
 pub mod parametric;
@@ -79,6 +80,7 @@ pub use regression::{
     estimate_scale_iqr, estimate_scale_mad, huber_fit, lms_fit, lts_fit, median_absolute_deviation,
     ransac_fit, winsorized_scale,
 };
+pub use regression::{CoxConfig, CoxFit, TieMethod, concordance_index, cox_ph_fit};
 pub use regression::{
     GlmConfig, GlmFamily, GlmFit, GlmLink, glm_fit, glm_lrt, glm_predict, glm_score_test,
 };
@@ -138,6 +140,7 @@ pub use correlation::partial::{
     PartialCorrResult, PointBiserialResult, partial_correlation, point_biserial,
 };
 pub use nonparametric::sign_cochran::{CochranQResult, SignTestResult, cochran_q, sign_test};
+pub use parametric::manova_followup::{ManovaFollowup, UnivariateAnova, manova_followup, w_inv_b};
 pub use parametric::variance_tests::{
     BartlettResult, LeveneCenter, LeveneResult, bartlett_test, levene_test,
 };
@@ -173,6 +176,10 @@ pub use mcmc::hmc::{
     HmcConfig, HmcSamples, PotentialTarget, hamiltonian, hmc_sample, leapfrog, leapfrog_step,
 };
 pub use mcmc::nuts::{NutsConfig, NutsSamples, no_u_turn, nuts_sample};
+pub use mixture::{
+    GmmConfig, GmmCovariance, GmmModel, gmm_aic, gmm_bic, gmm_fit, gmm_predict, gmm_predict_proba,
+    gmm_score,
+};
 pub use point_process::hawkes::{
     HawkesMleConfig, HawkesMleResult, HawkesParams, hawkes_compensator, hawkes_intensity,
     hawkes_log_likelihood, hawkes_log_likelihood_naive, hawkes_mle, hawkes_simulate,

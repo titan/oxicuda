@@ -55,3 +55,10 @@ pub use stabilised_sinkhorn::{
     StabilisedSinkhornConfig, StabilisedSinkhornResult, marginal_violation_row, sq_euclidean_cost,
     stabilised_sinkhorn,
 };
+
+/// Epsilon-scaling (deterministic-annealing) Sinkhorn for the `ε → 0` regime (Schmitzer 2019).
+pub mod epsilon_scaling;
+pub use epsilon_scaling::{
+    EpsilonScalingConfig, EpsilonScalingResult, StabilityRecord, epsilon_scaling_sinkhorn,
+    stability_sweep,
+};

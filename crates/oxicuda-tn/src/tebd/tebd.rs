@@ -162,4 +162,85 @@ mod tests {
         let n_after = mps.norm_squared().expect("ok");
         assert!((n_before - n_after).abs() < 1e-9);
     }
+
+    /// Build the imaginary-time Heisenberg bond gate `exp(-tau h)` as a `(d,d,d,d)`
+    /// tensor, with `h = Sz⊗Sz + 1/2 (S+⊗S- + S-⊗S+)` (spin-1/2, |↑⟩=0,|↓⟩=1).
+    fn heisenberg_imag_gate(tau: f64) -> Vec<f64> {
+        // 4x4 bond Hamiltonian in the (s1 s2) basis 00,01,10,11 (row-major: index
+        // `4*row + col`).
+        let mut h = [0.0_f64; 16];
+        // Diagonal Sz⊗Sz: |00>=+1/4, |11>=+1/4, |01>=-1/4, |10>=-1/4.
+        h[0] = 0.25; // (0,0)
+        h[15] = 0.25; // (3,3)
+        h[5] = -0.25; // (1,1)
+        h[10] = -0.25; // (2,2)
+        // Off-diagonal 1/2 (S+S- + S-S+): couples |01> <-> |10>, i.e. (1,2) and (2,1).
+        h[6] = 0.5; // (1,2)
+        h[9] = 0.5; // (2,1)
+        let u = crate::mps::itebd::mat_exp_4x4(&h, -tau).expect("exp");
+        u.to_vec()
+    }
+
+    #[test]
+    fn imaginary_time_tebd_lowers_heisenberg_energy() {
+        // Verification gap: imaginary-time TEBD under a known Hamiltonian must drive
+        // the (normalised) energy monotonically downward toward the ground state.
+        use crate::dmrg::dmrg::mpo_expectation;
+        use crate::handle::LcgRng;
+        use crate::mpo::mpo::Mpo;
+
+        let n = 6usize;
+        let mpo = Mpo::heisenberg_xxx(n).expect("mpo");
+        let mut rng = LcgRng::new(123);
+        let mut mps = Mps::random_mps(n, 2, 8, &mut rng).expect("mps");
+        let cfg = TebdConfig {
+            chi_max: 24,
+            trunc_tol: 1e-12,
+        };
+        // Second-order Suzuki-Trotter applied manually for full schedule control:
+        // half step on odd bonds, full on even, half on odd.
+        let tau = 0.05_f64;
+        let gate_full = heisenberg_imag_gate(tau);
+        let gate_half = heisenberg_imag_gate(0.5 * tau);
+
+        let energy = |m: &Mps| -> f64 {
+            let h = mpo_expectation(&mpo, m).expect("h");
+            let nrm = m.norm_squared().expect("nrm");
+            h / nrm
+        };
+
+        let e_start = energy(&mps);
+        let mut e_prev = e_start;
+        for _ in 0..150 {
+            // exp(-tau/2 H_odd): bonds s = 0, 2, 4, ...
+            for s in (0..n - 1).step_by(2) {
+                apply_two_site_gate(&mut mps, s, &gate_half, cfg).expect("odd half");
+            }
+            // exp(-tau H_even): bonds s = 1, 3, ...
+            for s in (1..n - 1).step_by(2) {
+                apply_two_site_gate(&mut mps, s, &gate_full, cfg).expect("even full");
+            }
+            // exp(-tau/2 H_odd) again.
+            for s in (0..n - 1).step_by(2) {
+                apply_two_site_gate(&mut mps, s, &gate_half, cfg).expect("odd half");
+            }
+            // Re-normalise (imaginary time shrinks the norm).
+            let nrm = mps.norm().expect("nrm");
+            mps.rescale(1.0 / nrm).expect("rescale");
+            let e = energy(&mps);
+            // Energy must be non-increasing (small Trotter/truncation slack).
+            assert!(e <= e_prev + 1e-6, "energy rose: {e_prev:.8} -> {e:.8}");
+            e_prev = e;
+        }
+        // After convergence the energy reaches the ground-state ballpark of the
+        // 6-site open Heisenberg chain (exact ≈ -2.4936).
+        assert!(
+            e_prev < e_start - 0.5,
+            "energy did not decrease enough: {e_start:.4} -> {e_prev:.4}"
+        );
+        assert!(
+            e_prev < -2.4,
+            "final energy {e_prev:.4} not near ground state"
+        );
+    }
 }

@@ -10,6 +10,8 @@ pub mod adex;
 pub mod alif;
 /// Two-layer nonlinear dendritic neuron (Poirazi-Brannon-Mel 2003).
 pub mod dendritic;
+/// Event-driven LIF simulation backend for very sparse spiking regimes.
+pub mod event_driven;
 /// Heterogeneous LIF population with per-neuron `τ_m` and `v_th`.
 pub mod het_lif;
 /// Hodgkin-Huxley and Pinsky-Rinzel conductance-based neuron models.
@@ -30,6 +32,7 @@ pub mod refractory;
 pub mod srm;
 
 pub use dendritic::{DendriticNeuron, DendriticSubunit, sigmoid as dendritic_sigmoid};
+pub use event_driven::{EventDrivenLif, SpikeRecord, SynapticEvent, clock_stepped_spike_times};
 pub use hodgkin_huxley::{HhConfig, HhState, PrConfig, PrState, hh_run, hh_step, pr_step};
 pub use qif::{
     QifConfig, QifState, ThetaConfig, ThetaState, qif_step, theta_step, theta_to_voltage,

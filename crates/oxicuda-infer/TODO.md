@@ -82,12 +82,16 @@ structured sampling.
 - [x] (P2) Structured output / JSON-constrained sampling (sampling/json_constrained.rs -- char-level pushdown JSON validator state machine + logit masking of structurally-invalid tokens)
 - [x] `sampling/logits_processor.rs` / `LogitsProcessor` — composable logits-processing pipeline: `LogitsProcessor` trait with `process()` over raw logit `Vec<f32>`; built-in processors: `TemperatureScaling`, `RepetitionPenalty`, `TopKFilter`, `TopPFilter`, `MinPFilter`; `LogitsProcessorChain` for sequential composition before sampling
 - [x] `sampling/beam_search.rs` / `BeamSearch` — extended `BeamSearch` struct wrapping `BeamSearchState` with configurable `BeamSearchConfig { beam_width, length_penalty_alpha, min_length, no_repeat_ngram_size }`; `BeamSearch::run()` drives the multi-step decode loop
-- [ ] (P2) Chunked prefill for long-prompt latency reduction (sequence chunking exists but not pipelined)
+- [x] (P2) Chunked prefill for long-prompt latency reduction (`batch/chunked_prefill.rs` -- Sarathi (Agrawal 2023); `ChunkedPrefillPlan` token-budget chunk cursor + `ChunkPlanner::pack_step` decode-priority piggyback packing)
 - [x] (P2) Speculative decoding with verified-tree / Medusa heads (sampling/medusa.rs -- Cai 2024; multi-head top-k candidate tree capped at max_candidates + verify longest-accepted-prefix; extends single-draft SpeculativeDecoder)
 - [x] `kv_cache/paged_kv.rs` — Paged KV cache (Kwon 2023 vLLM): physical KV block table + logical page mapping; dynamic allocation for variable-length sequences; O(1) amortised block allocation
 - [x] `speculative/drafter.rs` — Speculative decoding (Leviathan 2023): small draft model generates k tokens; target model verifies in one forward pass; acceptance ratio approach with temperature-corrected rejection sampling
-- [ ] `quantization/awq.rs` — AWQ activation-aware weight quantization (Lin 2023): per-channel weight scaling based on activation magnitude; protect salient weights from INT4 rounding; no gradient needed
+- [x] `quantization/awq.rs` — AWQ activation-aware weight quantization (Lin 2023): per-channel weight scaling based on activation magnitude; protect salient weights from INT4 rounding; no gradient needed
 - [x] `serving/continuous_batching.rs` — Continuous batching scheduler (Orca 2022): iteration-level scheduling; add new sequences at any step; preemption via swap/recompute; `ContinuousBatchScheduler`
+- [x] `cache/radix_cache.rs` — RadixAttention partial prefix sharing (Zheng 2024 SGLang): token radix tree returning the longest shared prefix at whole-block granularity; edge-split on divergence; LRU leaf eviction; unique block ownership (no double-count on traversal)
+- [x] `sampling/grammar_fsm.rs` — DFA-guided constrained decoding (Willard & Louf 2023 Outlines-style): caller-supplied byte-alphabet `Dfa` (+ `DfaBuilder`, `from_literal`, `char_star`); `GrammarConstraint::mask_logits` masks EXACTLY the illegal tokens (live-state BFS reachability), `commit` advances the automaton; generalises the JSON-only `json_constrained.rs`
+- [x] `cache/sliding_window.rs` — StreamingLLM attention-sink rolling KV window (Xiao 2023): retains the first `n_sink` tokens + last `window` tokens, evicts the middle; maps the policy to paged blocks and returns reclaimable `BlockId`s once a block's every token is evicted
+- [x] `cache/kv_quant.rs` — Quantized KV-cache integration logic (KIVI/vLLM-style): per-token symmetric/asymmetric INT8/INT4 affine quant + dequant of K/V vectors; per-token scale/zero-point from data range; round-trip MSE accounting
 
 ## Dependencies
 
@@ -100,7 +104,7 @@ structured sampling.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 297 passing (root TODO.md count)
+- Tests: 391 lib + 1 doctest passing (added radix cache, grammar FSM, sliding-window/attention-sink, KV quant, page compaction, chunked prefill, per-sequence sampling override + GQA-vs-MHA / preemption-churn verification)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference paths work; runtime GPU executor returns `UnsupportedPlatform`
@@ -139,16 +143,16 @@ structured sampling.
 - [x] Speculative decoding `accepted.len() == k` when draft == target verified
 - [x] Beam search EOS termination preserves `completed` candidates
 - [x] Prefix cache hit-rate statistically tracked and exposed via `hit_rate()`
-- [ ] Multi-head GQA correctness verified against ungrouped MHA reference (kv_heads != n_heads paths)
-- [ ] Continuous batcher memory-pressure preemption traced under heavy churn
+- [x] Multi-head GQA correctness verified against ungrouped MHA reference (kv_heads != n_heads paths) (`executor/attention_backend.rs::gqa_equivalent_to_replicated_mha` -- GQA output is bit-equivalent to an MHA whose KV heads are replicated `gqa_ratio` times)
+- [x] Continuous batcher memory-pressure preemption traced under heavy churn (`batch/scheduler.rs::preemption_under_heavy_churn` -- 12 reqs / 2 slots / 6 blocks; asserts no sequence lost/duplicated, running ≤ max, free-block accounting bounded, full drain; also fixed a latent free-block leak via per-sequence `reserved_blocks` tracking)
 
 ### Implementation Deepening
 - [x] `PagedKvCache` reference counting supports copy-on-write prefix sharing
 - [x] `Scheduler` distinguishes Prefill / Decode phases with token-budget admission
 - [x] `SamplingParams` includes repetition penalty (often absent in early vLLM clones)
 - [x] `BeamSearchState` length normalisation via `score / len^alpha` configurable
-- [ ] Page table compaction / defragmentation routine for long-running engines
-- [ ] Per-sequence sampling parameter override (currently per-batch via `SamplingParams`)
+- [x] Page table compaction / defragmentation routine for long-running engines (`cache/compaction.rs` -- two-pointer mark-compact `plan_compaction` slides live blocks into a dense `[0, n_live)` region (minimal moves, order-preserving) + `rewrite_block_table` applies the remap to per-sequence tables)
+- [x] Per-sequence sampling parameter override (`batch/sampling_override.rs` -- `SamplingOverride` all-optional partial override + `SamplingOverrideTable` layering per-sequence overrides on a shared server-default `SamplingParams`)
 
 ## Notes
 

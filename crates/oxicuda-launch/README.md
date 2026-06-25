@@ -99,7 +99,7 @@ stream.synchronize()?;
 
 | Item       | Value              |
 |------------|--------------------|
-| Version    | 0.2.0 (2026-06-16) |
+| Version    | 0.3.0 (2026-06-25) |
 | Tests      | 214 passing        |
 | Warnings   | 0                  |
 | `unwrap()` | 0                  |

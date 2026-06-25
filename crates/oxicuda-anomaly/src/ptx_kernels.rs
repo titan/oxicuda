@@ -14,6 +14,9 @@
 //! | [`mahal_dist_ptx`]          | `(x−μ)ᵀΣ⁻¹(x−μ)` batch |
 //! | [`iforest_score_ptx`]       | `2^{−avg_path/c_n}` per sample |
 //! | [`ensemble_normalize_ptx`]  | min-max per detector, then combine |
+//! | [`fused_knn_lof_ptx`]       | fused kNN min-reduction + reach-dist (sm_80+) |
+//! | [`abod_batch_ptx`]          | batched angle-variance ABOF over query batches |
+//! | [`fast_mcd_cstep_ptx`]      | device-side MCD C-step Mahalanobis for all `n` |
 
 // ─── PTX header helper ───────────────────────────────────────────────────────
 
@@ -750,6 +753,496 @@ $ENS_DONE:
     )
 }
 
+// ─── Kernel 8: fused_knn_lof ─────────────────────────────────────────────────
+
+/// Fused k-nearest-neighbour + LOF reachability kernel for `sm_80` and above.
+///
+/// One thread block cooperates on a single query point. Each thread walks a
+/// grid-stride slice of the reference set, computing the squared Euclidean
+/// distance to the query and maintaining a thread-local running minimum. The
+/// per-thread minima are reduced with `shfl.sync.down.b32` warp shuffles into a
+/// warp-level minimum, then the warp leaders combine through a small shared
+/// staging buffer (`.shared` "scratch") into the block minimum `d(x, nn₁)`. The
+/// same pass tracks the k-distance of the matched neighbour from the
+/// pre-computed `p_knn_dist[m]` table and forms the LOF reachability distance
+/// `reach = max(knn_dist[nn], d(x, nn₁))` in shared memory, so the k-NN min
+/// reduction and the reach-distance update are fused into a single launch.
+///
+/// The `cp.async`-free shared staging buffer is intentionally one warp wide
+/// (32 slots) to stay bank-conflict free on Ampere/Hopper; the warp-shuffle
+/// reduction uses `shfl.sync.down.b32` (requires `sm_80+`).
+///
+/// Layout:
+/// * `p_query`     `[d]` — single query vector.
+/// * `p_data`      `[m * d]` — reference set (row-major).
+/// * `p_knn_dist`  `[m]` — pre-computed reference k-distances.
+/// * `p_out`       `[2]` — `out[0] = d(x, nn₁)`, `out[1] = reach-distance`.
+/// * `m` reference count, `d` feature dimensionality.
+#[must_use]
+pub fn fused_knn_lof_ptx(sm: u32) -> String {
+    let hdr = ptx_header(sm);
+    let big = f32_hex(1.0e30_f32);
+    let zero = f32_hex(0.0_f32);
+    format!(
+        r#"{hdr}// fused_knn_lof_kernel (sm_80+): block-cooperative nearest-neighbour search
+// fused with the LOF reachability-distance update in shared memory.
+// out[0] = min_j dist(query, data_j); out[1] = max(knn_dist[argmin], out[0]).
+.visible .entry fused_knn_lof_kernel(
+    .param .u64 p_query,
+    .param .u64 p_data,
+    .param .u64 p_knn_dist,
+    .param .u64 p_out,
+    .param .u32 m,
+    .param .u32 d
+)
+{{
+    .reg .u64  %rd<16>;
+    .reg .u32  %r<20>;
+    .reg .f32  %f<16>;
+    .reg .pred %p0, %p1, %p2;
+
+    // 32-slot shared staging buffers: one per warp lane, bank-conflict free.
+    .shared .align 4 .f32 s_dist[32];
+    .shared .align 4 .u32 s_idx[32];
+
+    ld.param.u64  %rd0, [p_query];
+    ld.param.u64  %rd1, [p_data];
+    ld.param.u64  %rd2, [p_knn_dist];
+    ld.param.u64  %rd3, [p_out];
+    ld.param.u32  %r0,  [m];
+    ld.param.u32  %r1,  [d];
+
+    mov.u32       %r2, %tid.x;            // lane within block
+    mov.u32       %r3, %ntid.x;           // block width (grid stride)
+
+    // thread-local running min and its reference index
+    mov.f32       %f0, {BIG};             // best squared distance
+    mov.u32       %r4, 0;                 // best reference index
+
+    mov.u32       %r5, %r2;               // reference index walked by this thread
+$FKL_LOOP:
+    setp.ge.u32   %p0, %r5, %r0;
+    @%p0 bra $FKL_LOOP_DONE;
+
+    // squared Euclidean distance query .. data[r5]
+    mov.f32       %f1, {ZERO};
+    mul.lo.u32    %r6, %r5, %r1;          // row offset = r5 * d
+    mov.u32       %r7, 0;                 // dimension
+$FKL_DIM:
+    setp.ge.u32   %p1, %r7, %r1;
+    @%p1 bra $FKL_DIM_DONE;
+
+    mul.wide.u32  %rd4, %r7, 4;
+    add.u64       %rd5, %rd0, %rd4;
+    ld.global.f32 %f2, [%rd5];            // query[dim]
+
+    add.u32       %r8, %r6, %r7;
+    mul.wide.u32  %rd6, %r8, 4;
+    add.u64       %rd7, %rd1, %rd6;
+    ld.global.f32 %f3, [%rd7];            // data[r5, dim]
+
+    sub.f32       %f4, %f2, %f3;
+    fma.rn.f32    %f1, %f4, %f4, %f1;
+
+    add.u32       %r7, %r7, 1;
+    bra           $FKL_DIM;
+$FKL_DIM_DONE:
+
+    setp.lt.f32   %p2, %f1, %f0;
+    @%p2 mov.f32  %f0, %f1;
+    @%p2 mov.u32  %r4, %r5;
+
+    add.u32       %r5, %r5, %r3;
+    bra           $FKL_LOOP;
+$FKL_LOOP_DONE:
+
+    // ── intra-warp min reduction via shfl.sync.down.b32 (sm_80+) ──
+    mov.u32       %r9, 16;                // offset
+$FKL_WARP:
+    setp.eq.u32   %p0, %r9, 0;
+    @%p0 bra $FKL_WARP_DONE;
+    // shuffle the partner's distance and index down the warp
+    mov.b32       %r10, %f0;
+    shfl.sync.down.b32 %r11, %r10, %r9, 31, -1;
+    mov.b32       %f5, %r11;
+    shfl.sync.down.b32 %r12, %r4, %r9, 31, -1;
+    setp.lt.f32   %p1, %f5, %f0;
+    @%p1 mov.f32  %f0, %f5;
+    @%p1 mov.u32  %r4, %r12;
+    shr.u32       %r9, %r9, 1;
+    bra           $FKL_WARP;
+$FKL_WARP_DONE:
+
+    // lane 0 of each warp writes to shared staging
+    and.b32       %r13, %r2, 31;          // lane id
+    shr.u32       %r14, %r2, 5;           // warp id
+    setp.ne.u32   %p0, %r13, 0;
+    @%p0 bra $FKL_SKIP_STORE;
+    mul.wide.u32  %rd8, %r14, 4;
+    mov.u64       %rd9, s_dist;
+    add.u64       %rd10, %rd9, %rd8;
+    st.shared.f32 [%rd10], %f0;
+    mov.u64       %rd11, s_idx;
+    add.u64       %rd12, %rd11, %rd8;
+    st.shared.u32 [%rd12], %r4;
+$FKL_SKIP_STORE:
+    bar.sync      0;
+
+    // thread 0 reduces the per-warp minima sequentially
+    setp.ne.u32   %p0, %r2, 0;
+    @%p0 bra $FKL_DONE;
+
+    // number of warps = ceil(ntid.x / 32)
+    add.u32       %r15, %r3, 31;
+    shr.u32       %r15, %r15, 5;          // warp count
+
+    mov.u64       %rd9, s_dist;
+    ld.shared.f32 %f0, [%rd9];            // warp 0 min
+    mov.u64       %rd11, s_idx;
+    ld.shared.u32 %r4, [%rd11];
+
+    mov.u32       %r16, 1;
+$FKL_FINAL:
+    setp.ge.u32   %p1, %r16, %r15;
+    @%p1 bra $FKL_FINAL_DONE;
+    mul.wide.u32  %rd8, %r16, 4;
+    add.u64       %rd10, %rd9, %rd8;
+    ld.shared.f32 %f6, [%rd10];
+    add.u64       %rd12, %rd11, %rd8;
+    ld.shared.u32 %r17, [%rd12];
+    setp.lt.f32   %p2, %f6, %f0;
+    @%p2 mov.f32  %f0, %f6;
+    @%p2 mov.u32  %r4, %r17;
+    add.u32       %r16, %r16, 1;
+    bra           $FKL_FINAL;
+$FKL_FINAL_DONE:
+
+    // out[0] = sqrt(min squared distance) = d(x, nn1)
+    sqrt.rn.f32   %f7, %f0;
+    st.global.f32 [%rd3], %f7;
+
+    // reach = max(knn_dist[argmin], d(x, nn1)) — fused reach-distance update
+    mul.wide.u32  %rd13, %r4, 4;
+    add.u64       %rd14, %rd2, %rd13;
+    ld.global.f32 %f8, [%rd14];           // knn_dist[argmin]
+    max.f32       %f9, %f8, %f7;
+    add.u64       %rd15, %rd3, 4;          // out[1]
+    st.global.f32 [%rd15], %f9;
+
+$FKL_DONE:
+    mov.f32       %f10, {ZERO};
+    mov.u32       %r18, 0;
+    mov.u32       %r19, 0;
+    ret;
+}}
+"#,
+        BIG = big,
+        ZERO = zero,
+    )
+}
+
+// ─── Kernel 9: abod_batch ────────────────────────────────────────────────────
+
+/// Batched Angle-Based Outlier Factor (ABOF) kernel.
+///
+/// One thread handles one query in the batch. For query `p` and every unordered
+/// pair `{a, b}` of reference points it accumulates the reciprocal-distance
+/// weighted three-vector inner product
+///
+/// ```text
+/// f(a, b) = ⟨p − a, p − b⟩ / (‖p − a‖² · ‖p − b‖²)
+/// ```
+///
+/// in a streaming (stream-k) fashion: running sums of `f` and `f²` are kept in
+/// registers so the variance `ABOF = E[f²] − E[f]²` is produced in a single
+/// pass with no intermediate storage. The reciprocal `1 / (‖p − a‖²·‖p − b‖²)`
+/// is the reciprocal-distance weight; a guard adds `ε` to the denominator so
+/// coincident reference points do not divide by zero. The kernel writes the
+/// anomaly score `1 / (ABOF + ε)` so that higher means more anomalous, matching
+/// the CPU [`crate::distance::abod::Abod`] convention.
+///
+/// Layout:
+/// * `p_query` `[nq * d]` — batch of query vectors.
+/// * `p_data`  `[m * d]` — reference set.
+/// * `p_out`   `[nq]` — per-query anomaly scores.
+/// * `nq` query count, `m` reference count, `d` feature dimensionality.
+#[must_use]
+pub fn abod_batch_ptx(sm: u32) -> String {
+    let hdr = ptx_header(sm);
+    let zero = f32_hex(0.0_f32);
+    let eps = f32_hex(1.0e-10_f32);
+    format!(
+        r#"{hdr}// abod_batch_kernel: stream-k angle-variance ABOF over a batch of queries.
+// out[q] = 1 / (Var_pairs[<p-a,p-b> / (||p-a||^2 ||p-b||^2)] + eps).
+.visible .entry abod_batch_kernel(
+    .param .u64 p_query,
+    .param .u64 p_data,
+    .param .u64 p_out,
+    .param .u32 nq,
+    .param .u32 m,
+    .param .u32 d
+)
+{{
+    .reg .u64  %rd<16>;
+    .reg .u32  %r<24>;
+    .reg .f32  %f<24>;
+    .reg .pred %p0, %p1, %p2, %p3;
+
+    ld.param.u64  %rd0, [p_query];
+    ld.param.u64  %rd1, [p_data];
+    ld.param.u64  %rd2, [p_out];
+    ld.param.u32  %r0,  [nq];
+    ld.param.u32  %r1,  [m];
+    ld.param.u32  %r2,  [d];
+
+    mov.u32       %r3, %ntid.x;
+    mov.u32       %r4, %ctaid.x;
+    mov.u32       %r5, %tid.x;
+    mad.lo.u32    %r6, %r3, %r4, %r5;     // global query index
+
+    mov.u32       %r7, %nctaid.x;
+    mul.lo.u32    %r8, %r3, %r7;          // grid stride
+
+    mov.f32       %f20, {EPS};
+
+    mov.u32       %r9, %r6;
+$ABB_QUERY:
+    setp.ge.u32   %p0, %r9, %r0;
+    @%p0 bra $ABB_QUERY_DONE;
+
+    // running ABOF accumulators
+    mov.f32       %f0, {ZERO};            // sum f
+    mov.f32       %f1, {ZERO};            // sum f^2
+    mov.u32       %r10, 0;                // pair count
+
+    mul.lo.u32    %r11, %r9, %r2;         // query row offset
+
+    mov.u32       %r12, 0;                // index a
+$ABB_A:
+    setp.ge.u32   %p1, %r12, %r1;
+    @%p1 bra $ABB_A_DONE;
+
+    add.u32       %r13, %r12, 1;          // index b = a + 1
+$ABB_B:
+    setp.ge.u32   %p2, %r13, %r1;
+    @%p2 bra $ABB_B_DONE;
+
+    // accumulate dot = <p-a, p-b>, na2 = ||p-a||^2, nb2 = ||p-b||^2
+    mov.f32       %f2, {ZERO};            // dot
+    mov.f32       %f3, {ZERO};            // na2
+    mov.f32       %f4, {ZERO};            // nb2
+    mul.lo.u32    %r14, %r12, %r2;        // a row offset
+    mul.lo.u32    %r15, %r13, %r2;        // b row offset
+    mov.u32       %r16, 0;                // dimension
+$ABB_DIM:
+    setp.ge.u32   %p3, %r16, %r2;
+    @%p3 bra $ABB_DIM_DONE;
+
+    add.u32       %r17, %r11, %r16;
+    mul.wide.u32  %rd3, %r17, 4;
+    add.u64       %rd4, %rd0, %rd3;
+    ld.global.f32 %f5, [%rd4];            // p[dim]
+
+    add.u32       %r18, %r14, %r16;
+    mul.wide.u32  %rd5, %r18, 4;
+    add.u64       %rd6, %rd1, %rd5;
+    ld.global.f32 %f6, [%rd6];            // a[dim]
+
+    add.u32       %r19, %r15, %r16;
+    mul.wide.u32  %rd7, %r19, 4;
+    add.u64       %rd8, %rd1, %rd7;
+    ld.global.f32 %f7, [%rd8];            // b[dim]
+
+    sub.f32       %f8, %f5, %f6;          // pa = p - a
+    sub.f32       %f9, %f5, %f7;          // pb = p - b
+    fma.rn.f32    %f2, %f8, %f9, %f2;     // dot += pa*pb
+    fma.rn.f32    %f3, %f8, %f8, %f3;     // na2 += pa*pa
+    fma.rn.f32    %f4, %f9, %f9, %f4;     // nb2 += pb*pb
+
+    add.u32       %r16, %r16, 1;
+    bra           $ABB_DIM;
+$ABB_DIM_DONE:
+
+    // f = dot / (na2 * nb2 + eps)  (reciprocal-distance weight)
+    mul.f32       %f10, %f3, %f4;
+    add.f32       %f10, %f10, %f20;
+    div.rn.f32    %f11, %f2, %f10;
+
+    add.f32       %f0, %f0, %f11;         // sum f
+    fma.rn.f32    %f1, %f11, %f11, %f1;   // sum f^2
+    add.u32       %r10, %r10, 1;
+
+    add.u32       %r13, %r13, 1;
+    bra           $ABB_B;
+$ABB_B_DONE:
+    add.u32       %r12, %r12, 1;
+    bra           $ABB_A;
+$ABB_A_DONE:
+
+    // ABOF = E[f^2] - E[f]^2 ; out = 1 / (ABOF + eps)
+    setp.eq.u32   %p1, %r10, 0;
+    @%p1 bra $ABB_WRITE_ZERO;
+
+    cvt.rn.f32.u32 %f12, %r10;            // pair count as f32
+    div.rn.f32    %f13, %f0, %f12;        // mean f
+    div.rn.f32    %f14, %f1, %f12;        // mean f^2
+    mul.f32       %f15, %f13, %f13;
+    sub.f32       %f16, %f14, %f15;       // variance
+    max.f32       %f16, %f16, {ZERO};     // clamp >= 0
+    add.f32       %f16, %f16, %f20;
+    mov.f32       %f17, {ONE};
+    div.rn.f32    %f18, %f17, %f16;       // 1 / (ABOF + eps)
+    bra           $ABB_STORE;
+
+$ABB_WRITE_ZERO:
+    mov.f32       %f18, {ZERO};
+
+$ABB_STORE:
+    mul.wide.u32  %rd9, %r9, 4;
+    add.u64       %rd10, %rd2, %rd9;
+    st.global.f32 [%rd10], %f18;
+
+    add.u32       %r9, %r9, %r8;
+    bra           $ABB_QUERY;
+$ABB_QUERY_DONE:
+    mov.f32       %f19, {ZERO};
+    mov.u32       %r20, 0;
+    ret;
+}}
+"#,
+        ZERO = zero,
+        EPS = eps,
+        ONE = f32_hex(1.0_f32),
+    )
+}
+
+// ─── Kernel 10: fast_mcd_cstep ───────────────────────────────────────────────
+
+/// FastMCD C-step kernel: device-side Mahalanobis distance for all `n` points.
+///
+/// Replaces the host-side per-point loop in
+/// [`crate::density::fast_mcd`]: in a single launch every sample receives its
+/// squared Mahalanobis distance `(xᵢ − μ)ᵀ Σ⁻¹ (xᵢ − μ)` with respect to the
+/// current robust location `μ` and the inverse robust scatter `Σ⁻¹`. One thread
+/// owns one sample and evaluates the quadratic form directly as the double sum
+/// `Σ_r Σ_c diffᵣ · Σ⁻¹[r,c] · diff_c`, so the whole C-step distance vector is
+/// produced on the device and the host only performs the subsequent
+/// partial-sort / h-subset selection.
+///
+/// Layout:
+/// * `p_x`       `[n * d]` — samples (row-major).
+/// * `p_mean`    `[d]` — current robust location `μ`.
+/// * `p_inv_cov` `[d * d]` — inverse robust scatter `Σ⁻¹` (row-major).
+/// * `p_out`     `[n]` — per-sample squared Mahalanobis distances.
+/// * `n` sample count, `d` feature dimensionality.
+#[must_use]
+pub fn fast_mcd_cstep_ptx(sm: u32) -> String {
+    let hdr = ptx_header(sm);
+    let zero = f32_hex(0.0_f32);
+    format!(
+        r#"{hdr}// fast_mcd_cstep_kernel: out[i] = (x_i - mean)^T * inv_cov * (x_i - mean)
+// for every sample i in one launch (device-side MCD C-step distance pass).
+.visible .entry fast_mcd_cstep_kernel(
+    .param .u64 p_x,
+    .param .u64 p_mean,
+    .param .u64 p_inv_cov,
+    .param .u64 p_out,
+    .param .u32 n,
+    .param .u32 d
+)
+{{
+    .reg .u64  %rd<14>;
+    .reg .u32  %r<14>;
+    .reg .f32  %f<12>;
+    .reg .pred %p0, %p1;
+
+    ld.param.u64  %rd0, [p_x];
+    ld.param.u64  %rd1, [p_mean];
+    ld.param.u64  %rd2, [p_inv_cov];
+    ld.param.u64  %rd3, [p_out];
+    ld.param.u32  %r0,  [n];
+    ld.param.u32  %r1,  [d];
+
+    mov.u32       %r2, %ntid.x;
+    mov.u32       %r3, %ctaid.x;
+    mov.u32       %r4, %tid.x;
+    mad.lo.u32    %r5, %r2, %r3, %r4;     // sample index
+
+    mov.u32       %r6, %nctaid.x;
+    mul.lo.u32    %r7, %r2, %r6;          // grid stride
+
+    mov.u32       %r8, %r5;
+$MCD_LOOP:
+    setp.ge.u32   %p0, %r8, %r0;
+    @%p0 bra $MCD_DONE;
+
+    mov.f32       %f0, {ZERO};            // D^2 accumulator
+    mov.u32       %r9, 0;                 // row r
+$MCD_ROW:
+    setp.ge.u32   %p0, %r9, %r1;
+    @%p0 bra $MCD_ROW_DONE;
+
+    // diff_r = x[i,r] - mean[r]
+    mul.lo.u32    %r10, %r8, %r1;
+    add.u32       %r10, %r10, %r9;
+    mul.wide.u32  %rd4, %r10, 4;
+    add.u64       %rd5, %rd0, %rd4;
+    ld.global.f32 %f1, [%rd5];
+    mul.wide.u32  %rd6, %r9, 4;
+    add.u64       %rd7, %rd1, %rd6;
+    ld.global.f32 %f2, [%rd7];
+    sub.f32       %f3, %f1, %f2;          // diff_r
+
+    mov.u32       %r11, 0;                // col c
+$MCD_COL:
+    setp.ge.u32   %p1, %r11, %r1;
+    @%p1 bra $MCD_COL_DONE;
+
+    // diff_c = x[i,c] - mean[c]
+    mul.lo.u32    %r12, %r8, %r1;
+    add.u32       %r12, %r12, %r11;
+    mul.wide.u32  %rd8, %r12, 4;
+    add.u64       %rd9, %rd0, %rd8;
+    ld.global.f32 %f4, [%rd9];
+    mul.wide.u32  %rd10, %r11, 4;
+    add.u64       %rd11, %rd1, %rd10;
+    ld.global.f32 %f5, [%rd11];
+    sub.f32       %f6, %f4, %f5;          // diff_c
+
+    // inv_cov[r,c]
+    mul.lo.u32    %r12, %r9, %r1;
+    add.u32       %r12, %r12, %r11;
+    mul.wide.u32  %rd12, %r12, 4;
+    add.u64       %rd13, %rd2, %rd12;
+    ld.global.f32 %f7, [%rd13];
+
+    // D^2 += diff_r * inv_cov[r,c] * diff_c
+    mul.f32       %f8, %f7, %f6;
+    fma.rn.f32    %f0, %f3, %f8, %f0;
+
+    add.u32       %r11, %r11, 1;
+    bra           $MCD_COL;
+$MCD_COL_DONE:
+    add.u32       %r9, %r9, 1;
+    bra           $MCD_ROW;
+$MCD_ROW_DONE:
+
+    mul.wide.u32  %rd4, %r8, 4;
+    add.u64       %rd5, %rd3, %rd4;
+    st.global.f32 [%rd5], %f0;
+
+    add.u32       %r8, %r8, %r7;
+    bra           $MCD_LOOP;
+$MCD_DONE:
+    mov.f32       %f9, {ZERO};
+    mov.u32       %r13, 0;
+    ret;
+}}
+"#,
+        ZERO = zero,
+    )
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -869,5 +1362,80 @@ mod tests {
     fn iforest_uses_ex2() {
         let p = iforest_score_ptx(80);
         assert!(p.contains("ex2.approx.f32"));
+    }
+
+    #[test]
+    fn fused_knn_lof_all_sm() {
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            check_ptx(&fused_knn_lof_ptx(sm), sm, "fused_knn_lof_kernel");
+        }
+    }
+
+    #[test]
+    fn fused_knn_lof_uses_shfl_and_shared() {
+        // Warp-level distance min reduction + shared-memory reach-dist staging.
+        let p = fused_knn_lof_ptx(80);
+        assert!(p.contains("shfl.sync.down.b32"), "missing warp shuffle");
+        assert!(p.contains(".shared"), "missing shared-memory staging");
+        assert!(p.contains("bar.sync"), "missing block barrier");
+        // fused reach-distance update: max(knn_dist, d(x,nn1))
+        assert!(p.contains("max.f32"), "missing reach-dist max");
+        assert!(p.contains("sqrt.rn.f32"), "missing distance sqrt");
+    }
+
+    #[test]
+    fn abod_batch_all_sm() {
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            check_ptx(&abod_batch_ptx(sm), sm, "abod_batch_kernel");
+        }
+    }
+
+    #[test]
+    fn abod_batch_uses_fma_and_div() {
+        // Three-vector inner product + reciprocal-distance weight + variance.
+        let p = abod_batch_ptx(80);
+        // three FMA accumulators: dot, na2, nb2 plus the f^2 running sum
+        assert!(
+            p.matches("fma.rn.f32").count() >= 4,
+            "expected >=4 fma accumulations for the 3-vector inner product"
+        );
+        assert!(
+            p.contains("div.rn.f32"),
+            "missing reciprocal-distance weight"
+        );
+    }
+
+    #[test]
+    fn fast_mcd_cstep_all_sm() {
+        for sm in [75_u32, 80, 86, 90, 100, 120] {
+            check_ptx(&fast_mcd_cstep_ptx(sm), sm, "fast_mcd_cstep_kernel");
+        }
+    }
+
+    #[test]
+    fn fast_mcd_cstep_uses_quadratic_form() {
+        // Double-sum quadratic form diff_r * inv_cov[r,c] * diff_c via fma.
+        let p = fast_mcd_cstep_ptx(90);
+        assert!(p.contains("fma.rn.f32"), "missing quadratic-form fma");
+        assert!(
+            p.contains("inv_cov"),
+            "missing inverse-covariance comment/param"
+        );
+        assert!(p.contains("p_inv_cov"), "missing inv-cov parameter");
+    }
+
+    #[test]
+    fn new_kernels_share_header() {
+        // All three new kernels carry the unified PTX header for every SM.
+        for sm in [75_u32, 80, 90, 120] {
+            for prog in [
+                fused_knn_lof_ptx(sm),
+                abod_batch_ptx(sm),
+                fast_mcd_cstep_ptx(sm),
+            ] {
+                assert!(prog.contains(".address_size 64"));
+                assert!(prog.contains(&format!(".target sm_{sm}")));
+            }
+        }
     }
 }

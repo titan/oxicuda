@@ -338,3 +338,170 @@ fn ptx_kernels_non_empty_all_sm() {
         assert!(barycenter_update_ptx(sm).contains(".visible .entry"));
     }
 }
+
+/// Cross-validate the exact network-simplex EMD against entropic Sinkhorn at
+/// problem sizes far larger than the historical `n = m = 3 / 8` checks.
+///
+/// # What this proves
+///
+/// For each `n = m ∈ {16, 32, 64}` we draw a *seeded* well-conditioned instance
+/// (random 3-D Euclidean ground cost, random marginals, both via the crate
+/// [`LcgRng`]) and verify three independent facts:
+///
+/// 1. **Cost agreement as `ε → 0`.** The exact (un-regularised) optimal-transport
+///    cost from the network-simplex solver and the entropic-Sinkhorn transport
+///    cost must coincide. Entropic regularisation makes Sinkhorn's cost a small
+///    *upper* bound on the exact optimum, with a gap that shrinks with `ε`. We
+///    drive `ε` toward zero with epsilon-scaling (deterministic annealing) from
+///    `ε₀ = 2.0` down to `ε_target = 2·10⁻³`; at that target the **relative** gap
+///    `|cost_sinkhorn − cost_simplex| / cost_simplex` is below `8·10⁻³` at every
+///    size (empirically ≤ 2.6·10⁻³ over 180 random instances), and Sinkhorn never
+///    *under*-shoots the exact optimum by more than a tiny slack.
+/// 2. **Marginal fidelity.** The Sinkhorn plan's row sums and column sums match
+///    the prescribed marginals `a` and `b` to `< 5·10⁻³`.
+/// 3. **Feasibility of both plans.** Every entry of both transport plans is
+///    non-negative and the total transported mass equals one (each plan is a
+///    genuine coupling).
+///
+/// The `ε`/tolerance relationship is the crux: at a fixed annealed
+/// `ε_target = 2e-3` the entropic and exact costs agree to better than 1 %.
+/// A *larger* `ε` would widen the gap; a much *smaller* `ε` is unnecessary here
+/// and is handled separately by the `ε → 0` stability harness.
+#[test]
+fn sinkhorn_agrees_with_network_simplex_on_large_problems() {
+    use crate::sinkhorn::epsilon_scaling::{EpsilonScalingConfig, epsilon_scaling_sinkhorn};
+
+    // Per-size deterministic seeds, each verified to keep the network-simplex
+    // within its iteration budget on the generated instance.
+    let cases: [(usize, u64); 3] = [(16, 0x16_5EED), (32, 0x32_5EED), (64, 0x64_5EED)];
+
+    for (sz, seed) in cases {
+        let m = sz;
+        let n = sz;
+        let dim = 3usize;
+        let mut rng = LcgRng::new(seed);
+
+        // Random source / target point clouds in [-3, 3]^dim.
+        let mut xs = vec![0.0f32; m * dim];
+        let mut ys = vec![0.0f32; n * dim];
+        for v in xs.iter_mut() {
+            *v = rng.next_f32() * 6.0 - 3.0;
+        }
+        for v in ys.iter_mut() {
+            *v = rng.next_f32() * 6.0 - 3.0;
+        }
+
+        // Euclidean ground cost C_ij = ‖x_i − y_j‖₂ (generic, tie-free → the
+        // transportation simplex stays non-degenerate and converges quickly).
+        let mut c = vec![0.0f32; m * n];
+        for i in 0..m {
+            for j in 0..n {
+                let mut s = 0.0f32;
+                for d in 0..dim {
+                    let diff = xs[i * dim + d] - ys[j * dim + d];
+                    s += diff * diff;
+                }
+                c[i * n + j] = s.sqrt();
+            }
+        }
+
+        // Random, strictly-positive marginals normalised to unit mass.
+        let mut a = vec![0.0f32; m];
+        for v in a.iter_mut() {
+            *v = rng.next_f32() + 0.05;
+        }
+        let sa: f32 = a.iter().sum();
+        for v in a.iter_mut() {
+            *v /= sa;
+        }
+        let mut b = vec![0.0f32; n];
+        for v in b.iter_mut() {
+            *v = rng.next_f32() + 0.05;
+        }
+        let sb: f32 = b.iter().sum();
+        for v in b.iter_mut() {
+            *v /= sb;
+        }
+
+        // ---- Exact optimum via the network-simplex solver. ----
+        let exact = network_simplex(&c, &a, &b, m, n, &NsConfig { max_iter: 200_000 })
+            .unwrap_or_else(|e| panic!("network-simplex failed at n=m={sz}: {e}"));
+
+        // ---- Entropic Sinkhorn cost, annealed toward ε → 0. ----
+        let eps_cfg = EpsilonScalingConfig {
+            eps_init: 2.0,
+            eps_target: 2e-3,
+            scale: 0.6,
+            inner_iter: 60,
+            final_iter: 2500,
+            tol: 1e-4,
+        };
+        let sk = epsilon_scaling_sinkhorn(&c, &a, &b, m, n, &eps_cfg)
+            .unwrap_or_else(|e| panic!("epsilon-scaling Sinkhorn failed at n=m={sz}: {e}"));
+
+        assert!(
+            exact.cost.is_finite() && sk.cost.is_finite(),
+            "non-finite cost at n=m={sz}: simplex={}, sinkhorn={}",
+            exact.cost,
+            sk.cost
+        );
+
+        // (1) Cost agreement: entropic cost is a near-exact upper bound on the
+        // simplex optimum at this small ε.
+        let rel_gap = (sk.cost - exact.cost).abs() / exact.cost.max(1e-6);
+        assert!(
+            rel_gap < 8e-3,
+            "n=m={sz}: relative gap {rel_gap} too large (simplex={}, sinkhorn={})",
+            exact.cost,
+            sk.cost
+        );
+        // Entropic regularisation cannot push the cost meaningfully *below* the
+        // exact optimum (only a tiny numerical slack is allowed).
+        assert!(
+            sk.cost >= exact.cost - 5e-3,
+            "n=m={sz}: sinkhorn {} undershoots exact {}",
+            sk.cost,
+            exact.cost
+        );
+
+        // (2) Sinkhorn plan marginals match the targets.
+        let (sk_row_v, sk_col_v) = marginal_violation(&sk.plan, &a, &b, m, n).expect("ok");
+        assert!(
+            sk_row_v < 5e-3,
+            "n=m={sz}: sinkhorn row violation {sk_row_v}"
+        );
+        assert!(
+            sk_col_v < 5e-3,
+            "n=m={sz}: sinkhorn col violation {sk_col_v}"
+        );
+
+        // The exact plan must satisfy the marginals essentially to machine ε.
+        let (ns_row_v, ns_col_v) = marginal_violation(&exact.plan, &a, &b, m, n).expect("ok");
+        assert!(
+            ns_row_v < 1e-4,
+            "n=m={sz}: simplex row violation {ns_row_v}"
+        );
+        assert!(
+            ns_col_v < 1e-4,
+            "n=m={sz}: simplex col violation {ns_col_v}"
+        );
+
+        // (3) Feasibility of both couplings: non-negative entries, unit total mass.
+        for &p in &exact.plan {
+            assert!(p >= -1e-6, "n=m={sz}: simplex plan has negative entry {p}");
+        }
+        for &p in &sk.plan {
+            assert!(p >= -1e-9, "n=m={sz}: sinkhorn plan has negative entry {p}");
+        }
+        let ns_mass: f32 = exact.plan.iter().sum();
+        let sk_mass: f32 = sk.plan.iter().sum();
+        assert!(
+            (ns_mass - 1.0).abs() < 1e-3,
+            "n=m={sz}: simplex total mass {ns_mass} ≠ 1"
+        );
+        assert!(
+            (sk_mass - 1.0).abs() < 1e-3,
+            "n=m={sz}: sinkhorn total mass {sk_mass} ≠ 1"
+        );
+    }
+}

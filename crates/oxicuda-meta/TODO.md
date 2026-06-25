@@ -70,7 +70,7 @@ Current implementation covers MAML with second-order finite-difference outer gra
 
 #### P1 -- Important Features
 - [x] Convolutional backbone (4-block conv-bn-relu) -- standard MiniImageNet / Omniglot convnet (network/conv4_backbone.rs -- standard 4-block conv-bn-relu-maxpool (Conv3x3 same-pad + BN + ReLU + MaxPool2x2 stride 2); halves H/W per block to H/16×W/16×width flattened)
-- [ ] ResNet-12 backbone -- canonical few-shot benchmark feature extractor
+- [x] ResNet-12 backbone -- canonical few-shot benchmark feature extractor (network/resnet12.rs:ResNet12 -- four residual stages, each 3×Conv3x3-BN(-ReLU) main path + 1×1 conv-BN shortcut, residual-add + ReLU + MaxPool2x2; He-uniform init, canonical widths [64,160,320,640]; now wired into network::mod + lib prelude with 19 deterministic tests)
 - [x] Transductive batch norm (TBN) -- statistics across both support and query for better few-shot adaptation (network/tbn.rs -- transductive batch norm joint over support+query at meta-test, with γ/β affine; non-test-time path uses standard BN)
 - [x] Cross-attention RelationNet (CAN) -- attention-weighted relation scoring across all support examples
 - [x] FEAT (Few-shot Embedding Adaptation with Transformer) -- set-to-set transformer over support embeddings (metric_learning/feat.rs -- Ye 2020 CVPR; multi-head self-attention set-to-set adaptation of support prototypes + ProtoNet classification on adapted prototypes)
@@ -79,9 +79,9 @@ Current implementation covers MAML with second-order finite-difference outer gra
 - [x] MetaOptNet (Lee et al. 2019) -- closed-form differentiable convex solvers (SVM/ridge) as base learner
 - [x] R2D2 (Bertinetto et al. 2019) -- differentiable ridge-regression base learner
 - [x] DeepEMD -- Earth Mover's Distance over local features for fine-grained few-shot (metric_learning/deepemd.rs -- Zhang 2020 CVPR; cost=1-cosine over local features, Sinkhorn entropic OT plan, emd=<T,C>, EMD-to-prototype classification)
-- [ ] Continual Meta-Learning (OML / ANML) -- representation learning under online updates
+- [x] Continual Meta-Learning (OML / ANML) -- representation learning under online updates (online/oml.rs:Oml -- RLN/PLN factorisation, frozen encoder + online head SGD, forgetting-aware FOMAML meta-step; online/anml.rs:Anml -- adds learned neuromodulatory sigmoid gate z=ReLU(PN)⊙sigmoid(NM), analytic backprop; ANML now wired into online::mod + lib prelude with 13 deterministic tests)
 - [ ] Hyperparameter meta-learning (e.g. MAML-LR, ALFA) -- learn per-task inner-loop hyperparameters
-- [ ] Self-supervised pre-training hooks (S2M2, ProtoTransfer) -- contrastive backbone before meta-training
+- [x] Self-supervised pre-training hooks (S2M2, ProtoTransfer) -- contrastive backbone before meta-training (ssl/rotation.rs:RotationHead -- 4-way rotation-prediction pretext over Conv4Backbone; ssl/proto_transfer.rs:ProtoTransferHead -- ProtoCLR per-instance contrastive pretraining (softmax over -‖q-a‖²/τ, analytic gradient through L2-norm Jacobian) + transfer_classify to downstream ProtoNet; proto_transfer now wired into ssl::mod + lib prelude with 16 deterministic tests)
 - [x] `meta/hyper_maml.rs` — HyperMAML (Przewięźlikowski 2022): hypernetwork generates fast-adapt weights rather than shared init; avoids inner-loop gradient computation; `HyperMaml { hyper_dims: Vec<usize> }`
 - [x] `meta/meta_sgd.rs` — Meta-SGD (Li 2017): learn per-parameter learning rates along with init; α learned as parameter; inner update x←x-α⊙∇L; strictly more expressive than MAML
 - [x] `metric/cross_attention_few.rs` — Cross-Attention Few-Shot (Ye 2021): cross-attend query to support set; task-specific attention produces class prototypes; `CafsFewShot { n_heads, n_layers }`
@@ -97,11 +97,11 @@ Current implementation covers MAML with second-order finite-difference outer gra
 
 ## Quality Status
 
-- Tests: 363 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 430 passing (12 e2e in lib.rs + module unit tests; +67 over the prior 363: 15 new maml_conv_backbone + 4 new conv4 round-trip + 19 resnet12 + 13 anml + 16 proto_transfer modules brought online by wiring)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
-- `clippy::all` warnings: 0
+- `clippy::all` warnings: 0 (`cargo clippy -p oxicuda-meta --all-features --all-targets -- -D warnings` clean)
 - `missing_docs` warnings: 0
-- Files: 51 source `.rs` files, all under 2000 lines
+- Files: 54 source `.rs` files, all under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS compiles but returns `UnsupportedPlatform` at runtime
 
@@ -124,9 +124,9 @@ Target: episode forward latency comparable to PyTorch `torchmeta` reference on `
 
 | Metric | Description | Actual |
 |--------|-------------|--------|
-| Files | source `.rs` files under `src/` | 51 |
+| Files | source `.rs` files under `src/` | 54 |
 | SLoC | code lines (tokei) | 13,338 |
-| Tests | e2e + unit | 363 |
+| Tests | e2e + unit | 430 |
 | Coverage | algorithms with both CPU sim + PTX kernel | 7 (Proto/Matching/Relation + MAML/FOMAML/ANIL/Reptile) |
 
 The current implementation provides a compact reference covering all canonical few-shot meta-learning algorithms used in the literature (MAML, FOMAML, ANIL, Reptile, ProtoNet, MatchingNet, RelationNet). The P0/P1/P2 future items cover more recent / specialised approaches and richer backbones.
@@ -166,7 +166,7 @@ The current implementation provides a compact reference covering all canonical f
 - [x] Episode sampler produces correct `(N*K*F, N*K, N*Q*F, N*Q)` shapes for any `(N, K, Q, F)`
 - [x] ProtoNet 100% accuracy when query features equal prototypes (sanity-checked in `e2e_proto_net_correct_class`)
 - [x] MatchingNet softmax attention sums to 1 within `1e-5` for any temperature
-- [ ] Convolutional backbone (4-block) integration with the MAML inner-loop closure pattern
+- [x] Convolutional backbone (4-block) integration with the MAML inner-loop closure pattern (maml/maml_conv_backbone.rs:Conv4MamlModel -- bundles Conv4Backbone + linear head as one flat param vector via to_params()/from_params() [backbone | head_w | head_b], with task_loss_at_params() forward closure and inner_adapt() finite-diff SGD; head slice is bit-compatible with the bare-linear maml_adapt; also added network/conv4_backbone.rs:Conv4Backbone::{to_params,from_params}; 15 + 4 deterministic tests incl. exact round-trip and support-loss-decrease)
 - [ ] Distributed MAML across multiple GPUs (data-parallel task batching with NCCL-equivalent collective)
 - [ ] Mixed-precision inner loop (FP16 forward + FP32 master parameters) for memory-bound large backbones
 

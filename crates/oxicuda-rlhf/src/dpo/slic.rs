@@ -134,6 +134,81 @@ pub fn slic_loss_batch(pairs: &[SlicPair], cfg: &SlicConfig) -> RlhfResult<f32> 
     Ok(total / pairs.len() as f32)
 }
 
+/// Gradient of the per-pair SLiC-HF loss w.r.t. the three sequence log-likelihoods.
+///
+/// Finite-difference verified against [`slic_loss`].
+#[derive(Debug, Clone, Copy)]
+pub struct SlicGrad {
+    /// `∂L/∂s⁺` (preferred sequence log-likelihood).
+    pub d_pos_logp: f32,
+    /// `∂L/∂s⁻` (dispreferred sequence log-likelihood).
+    pub d_neg_logp: f32,
+    /// `∂L/∂s_ref` (reference-target log-likelihood) — always `−reg_weight`.
+    pub d_ref_logp: f32,
+}
+
+#[inline]
+fn slic_pair_grad_inner(pair: &SlicPair, cfg: &SlicConfig) -> SlicGrad {
+    let margin = pair.pos_logp - pair.neg_logp;
+    // Hinge active (binding) iff δ − margin > 0; in the flat region the
+    // calibration gradient is exactly 0.
+    let binding = (cfg.delta - margin) > 0.0;
+    let (d_pos, d_neg) = if binding { (-1.0, 1.0) } else { (0.0, 0.0) };
+    SlicGrad {
+        d_pos_logp: d_pos,
+        d_neg_logp: d_neg,
+        // L_reg = −s_ref enters linearly with weight λ.
+        d_ref_logp: -cfg.reg_weight,
+    }
+}
+
+/// Analytic gradient of [`slic_loss`] for a single pair.
+///
+/// `L = max(0, δ − (s⁺ − s⁻)) + λ·(−s_ref)`. Where the hinge binds
+/// (`s⁺ − s⁻ < δ`) the calibration term contributes `∂L/∂s⁺ = −1`,
+/// `∂L/∂s⁻ = +1`; in the satisfied-margin region both are `0` (sub-gradient).
+/// The regularisation term is linear, giving `∂L/∂s_ref = −λ` always.
+///
+/// # Errors
+/// - [`RlhfError::InvalidMargin`] / [`RlhfError::InvalidLambda`] for an invalid config.
+/// - [`RlhfError::NanEncountered`] if any log-prob is NaN.
+pub fn slic_grad(pair: &SlicPair, cfg: &SlicConfig) -> RlhfResult<SlicGrad> {
+    cfg.validate()?;
+    if pair.pos_logp.is_nan() || pair.neg_logp.is_nan() || pair.ref_logp.is_nan() {
+        return Err(RlhfError::NanEncountered);
+    }
+    Ok(slic_pair_grad_inner(pair, cfg))
+}
+
+/// Analytic gradient of the mean-reduced [`slic_loss_batch`].
+///
+/// Returns one [`SlicGrad`] per pair, each scaled by `1 / pairs.len()` for the
+/// mean reduction.
+///
+/// # Errors
+/// - [`RlhfError::EmptyInput`] for an empty batch.
+/// - Propagates config / NaN errors from [`slic_grad`].
+pub fn slic_grad_batch(pairs: &[SlicPair], cfg: &SlicConfig) -> RlhfResult<Vec<SlicGrad>> {
+    if pairs.is_empty() {
+        return Err(RlhfError::EmptyInput);
+    }
+    cfg.validate()?;
+    let inv_n = 1.0 / pairs.len() as f32;
+    let mut grads = Vec::with_capacity(pairs.len());
+    for p in pairs {
+        if p.pos_logp.is_nan() || p.neg_logp.is_nan() || p.ref_logp.is_nan() {
+            return Err(RlhfError::NanEncountered);
+        }
+        let g = slic_pair_grad_inner(p, cfg);
+        grads.push(SlicGrad {
+            d_pos_logp: g.d_pos_logp * inv_n,
+            d_neg_logp: g.d_neg_logp * inv_n,
+            d_ref_logp: g.d_ref_logp * inv_n,
+        });
+    }
+    Ok(grads)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,5 +413,103 @@ mod tests {
             (cfg.reg_weight - 0.1).abs() < 1e-6,
             "default reg_weight=0.1"
         );
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn mk(pos: f32, neg: f32, refl: f32) -> SlicPair {
+        SlicPair {
+            pos_logp: pos,
+            neg_logp: neg,
+            ref_logp: refl,
+        }
+    }
+
+    #[test]
+    fn slic_grad_matches_fd_binding_region() {
+        // margin = pos - neg = 0.5 < δ = 2 → hinge binds (stable under ±h).
+        let cfg = SlicConfig {
+            delta: 2.0,
+            reg_weight: 0.3,
+        };
+        let p = mk(-1.0, -1.5, -2.0);
+        let g = slic_grad(&p, &cfg).expect("grad");
+        let h = 1e-2;
+        let fd_pos = central_diff(|v| slic_loss(&mk(v, -1.5, -2.0), &cfg).expect("l"), -1.0, h);
+        let fd_neg = central_diff(|v| slic_loss(&mk(-1.0, v, -2.0), &cfg).expect("l"), -1.5, h);
+        let fd_ref = central_diff(|v| slic_loss(&mk(-1.0, -1.5, v), &cfg).expect("l"), -2.0, h);
+        assert_close(g.d_pos_logp, fd_pos, "d_pos");
+        assert_close(g.d_neg_logp, fd_neg, "d_neg");
+        assert_close(g.d_ref_logp, fd_ref, "d_ref");
+        // Binding: ∂/∂s⁺ = −1, ∂/∂s⁻ = +1.
+        assert!((g.d_pos_logp + 1.0).abs() < 1e-7);
+        assert!((g.d_neg_logp - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn slic_grad_zero_calibration_in_satisfied_region() {
+        // margin = 4.5 ≫ δ = 1 → hinge not binding → calibration gradient 0.
+        let cfg = SlicConfig {
+            delta: 1.0,
+            reg_weight: 0.2,
+        };
+        let p = mk(-0.5, -5.0, -0.5);
+        let g = slic_grad(&p, &cfg).expect("grad");
+        let h = 1e-2;
+        let fd_pos = central_diff(|v| slic_loss(&mk(v, -5.0, -0.5), &cfg).expect("l"), -0.5, h);
+        assert!(fd_pos.abs() < 1e-6, "fd in flat region = {fd_pos}");
+        assert_eq!(g.d_pos_logp, 0.0);
+        assert_eq!(g.d_neg_logp, 0.0);
+        // Regulariser still active.
+        assert!((g.d_ref_logp + cfg.reg_weight).abs() < 1e-7);
+    }
+
+    #[test]
+    fn slic_grad_batch_matches_fd() {
+        let cfg = SlicConfig {
+            delta: 2.0,
+            reg_weight: 0.1,
+        };
+        let pairs = vec![mk(-1.0, -1.5, -2.0), mk(-0.5, -1.0, -0.5)];
+        let grads = slic_grad_batch(&pairs, &cfg).expect("grads");
+        let h = 1e-2;
+        let fd = central_diff(
+            |v| {
+                let mut ps = pairs.clone();
+                ps[0].pos_logp = v;
+                slic_loss_batch(&ps, &cfg).expect("loss")
+            },
+            pairs[0].pos_logp,
+            h,
+        );
+        assert_close(grads[0].d_pos_logp, fd, "batch d_pos[0]");
+    }
+
+    #[test]
+    fn slic_grad_invalid_config_errors() {
+        let cfg = SlicConfig {
+            delta: -1.0,
+            reg_weight: 0.1,
+        };
+        assert!(matches!(
+            slic_grad(&mk(-1.0, -2.0, -1.0), &cfg),
+            Err(RlhfError::InvalidMargin { .. })
+        ));
     }
 }

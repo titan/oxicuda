@@ -45,10 +45,9 @@ fn silu(x: f32) -> f32 {
 
 /// Draw a uniform `f32` in `[-1, 1)`.
 ///
-/// The crate RNG's `next_u32()` returns the top 31 bits of the LCG state, so
-/// its range is `[0, 2^31)`; we normalise by `2^31` to obtain a true unit
-/// uniform before mapping to the symmetric interval. (Note: `LcgRng::next_f32`
-/// only spans `[0, 0.5)`, so it is intentionally *not* used here.)
+/// `LcgRng::next_u32()` spans the full 32-bit range `[0, 2^32)`, so dividing by
+/// `2^32` yields a true unit uniform in `[0, 1)` before mapping to the
+/// symmetric interval.
 #[inline]
 fn uniform_pm1(rng: &mut LcgRng) -> f32 {
     let unit = rng.next_u32() as f32 / 4_294_967_296.0_f32; // [0, 1)

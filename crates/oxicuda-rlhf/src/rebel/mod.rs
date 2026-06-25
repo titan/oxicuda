@@ -175,6 +175,87 @@ pub fn rebel_loss_slices(
     Ok(loss)
 }
 
+/// Gradient of the per-pair REBEL squared error w.r.t. the current log-probs.
+///
+/// Finite-difference verified against [`rebel_pair_loss`].
+#[derive(Debug, Clone, Copy)]
+pub struct RebelGrad {
+    /// `∂L/∂(logp_a)` (current-policy log-prob of `y`).
+    pub d_logp_a: f32,
+    /// `∂L/∂(logp_b)` (current-policy log-prob of `y′`).
+    pub d_logp_b: f32,
+}
+
+#[inline]
+fn rebel_pair_grad_inner(pair: &RebelPair, eta: f32) -> RebelGrad {
+    let predicted = predicted_relative_reward(
+        pair.logp_a,
+        pair.old_logp_a,
+        pair.logp_b,
+        pair.old_logp_b,
+        eta,
+    );
+    let target = pair.reward_a - pair.reward_b;
+    let residual = predicted - target;
+    // L = residual²; ∂predicted/∂logp_a = 1/η, ∂predicted/∂logp_b = −1/η.
+    let common = 2.0 * residual / eta;
+    RebelGrad {
+        d_logp_a: common,
+        d_logp_b: -common,
+    }
+}
+
+/// Analytic gradient of [`rebel_pair_loss`].
+///
+/// With `L = (predicted − target)²`,
+/// `predicted = (1/η)·[(logp_a − old_a) − (logp_b − old_b)]`, and `target` held
+/// constant (the observed reward difference), the chain rule gives
+/// `∂L/∂logp_a = 2·residual/η` and `∂L/∂logp_b = −2·residual/η`, where
+/// `residual = predicted − target`. The rewards and behaviour log-probs are
+/// held as inputs.
+///
+/// # Errors
+///
+/// - [`RlhfError::InvalidBeta`] if `eta ≤ 0` or non-finite.
+/// - [`RlhfError::NanEncountered`] if a gradient is non-finite.
+pub fn rebel_pair_grad(pair: &RebelPair, cfg: &RebelConfig) -> RlhfResult<RebelGrad> {
+    cfg.validate()?;
+    let grad = rebel_pair_grad_inner(pair, cfg.eta);
+    if !grad.d_logp_a.is_finite() || !grad.d_logp_b.is_finite() {
+        return Err(RlhfError::NanEncountered);
+    }
+    Ok(grad)
+}
+
+/// Analytic gradient of the mean-reduced [`rebel_loss`].
+///
+/// Returns one [`RebelGrad`] per pair, each scaled by `1 / pairs.len()`.
+///
+/// # Errors
+///
+/// - [`RlhfError::EmptyInput`] if `pairs` is empty.
+/// - Propagates errors from [`rebel_pair_grad`].
+pub fn rebel_grad(pairs: &[RebelPair], cfg: &RebelConfig) -> RlhfResult<Vec<RebelGrad>> {
+    cfg.validate()?;
+    if pairs.is_empty() {
+        return Err(RlhfError::EmptyInput);
+    }
+    let inv_n = 1.0 / pairs.len() as f32;
+    let mut grads = Vec::with_capacity(pairs.len());
+    for p in pairs {
+        let g = rebel_pair_grad_inner(p, cfg.eta);
+        let scaled = RebelGrad {
+            d_logp_a: g.d_logp_a * inv_n,
+            d_logp_b: g.d_logp_b * inv_n,
+        };
+        if !scaled.d_logp_a.is_finite() || !scaled.d_logp_b.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        grads.push(scaled);
+    }
+    Ok(grads)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,5 +449,106 @@ mod tests {
     fn slices_empty_errors() {
         let r = rebel_loss_slices(&[], &[], &[], &[], &[], &[], &cfg(1.0));
         assert!(matches!(r, Err(RlhfError::EmptyInput)));
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn cfg(eta: f32) -> RebelConfig {
+        RebelConfig { eta }
+    }
+
+    fn mk(ra: f32, rb: f32, la: f32, lb: f32, oa: f32, ob: f32) -> RebelPair {
+        RebelPair {
+            reward_a: ra,
+            reward_b: rb,
+            logp_a: la,
+            logp_b: lb,
+            old_logp_a: oa,
+            old_logp_b: ob,
+        }
+    }
+
+    #[test]
+    fn rebel_pair_grad_matches_fd() {
+        let eta = 0.5_f32;
+        let p = mk(3.0, 1.0, -0.5, -1.2, -0.7, -1.0);
+        let g = rebel_pair_grad(&p, &cfg(eta)).expect("grad");
+        let h = 1e-2;
+        let fd_a = central_diff(
+            |v| {
+                let mut q = p.clone();
+                q.logp_a = v;
+                rebel_pair_loss(&q, &cfg(eta)).expect("l")
+            },
+            p.logp_a,
+            h,
+        );
+        let fd_b = central_diff(
+            |v| {
+                let mut q = p.clone();
+                q.logp_b = v;
+                rebel_pair_loss(&q, &cfg(eta)).expect("l")
+            },
+            p.logp_b,
+            h,
+        );
+        assert_close(g.d_logp_a, fd_a, "d_logp_a");
+        assert_close(g.d_logp_b, fd_b, "d_logp_b");
+    }
+
+    #[test]
+    fn rebel_grad_zero_at_perfect_regression() {
+        // predicted exactly equals target → residual 0 → zero gradient.
+        let eta = 0.5_f32;
+        let p = mk(3.0, 1.0, -1.0, -2.0, -1.0, -1.0); // predicted = 2 = target
+        let g = rebel_pair_grad(&p, &cfg(eta)).expect("grad");
+        assert!(g.d_logp_a.abs() < 1e-5, "{}", g.d_logp_a);
+        assert!(g.d_logp_b.abs() < 1e-5, "{}", g.d_logp_b);
+    }
+
+    #[test]
+    fn rebel_grad_batch_matches_fd() {
+        let eta = 0.3_f32;
+        let pairs = vec![
+            mk(1.0, 0.5, -0.5, -1.0, -0.7, -1.1),
+            mk(2.0, 1.0, -0.3, -0.9, -0.4, -1.0),
+        ];
+        let grads = rebel_grad(&pairs, &cfg(eta)).expect("grads");
+        let h = 1e-2;
+        let fd = central_diff(
+            |v| {
+                let mut ps = pairs.clone();
+                ps[1].logp_a = v;
+                rebel_loss(&ps, &cfg(eta)).expect("loss")
+            },
+            pairs[1].logp_a,
+            h,
+        );
+        assert_close(grads[1].d_logp_a, fd, "batch d_logp_a[1]");
+    }
+
+    #[test]
+    fn rebel_grad_invalid_eta_errors() {
+        let p = mk(1.0, 0.0, -1.0, -1.0, -1.0, -1.0);
+        assert!(matches!(
+            rebel_pair_grad(&p, &cfg(0.0)),
+            Err(RlhfError::InvalidBeta { .. })
+        ));
     }
 }

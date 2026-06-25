@@ -2,6 +2,7 @@
 
 pub mod adaptive;
 pub mod butterworth;
+pub mod deconv;
 pub mod fir;
 pub mod iir;
 pub mod median;
@@ -10,6 +11,7 @@ pub mod wiener;
 
 pub use adaptive::{AdaptiveLmsConfig, AdaptiveLmsState, lms_filter, nlms_filter, rls_filter};
 pub use butterworth::{ButterworthConfig, ButterworthFilter, FilterType};
+pub use deconv::{richardson_lucy, wiener_deconvolve};
 pub use fir::{
     design_bandpass, design_highpass, design_lowpass, design_raised_cosine, emit_fir_direct_kernel,
     fir_apply, freq_response as fir_freq_response,

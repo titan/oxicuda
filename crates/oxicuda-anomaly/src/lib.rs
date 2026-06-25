@@ -66,6 +66,7 @@ pub mod prelude {
         KdNode, KdTree, LofKdConfig, LofKdFit, kd_build, kd_knn, kd_knn_ex, lof_kd_fit,
         lof_kd_predict, lof_kd_score,
     };
+    pub use crate::distance::lof_online::{OnlineLof, OnlineLofConfig};
     pub use crate::distance::sod::{Sod, SodConfig};
     pub use crate::ensemble::ensemble::{AnomalyEnsemble, EnsembleMethod};
     pub use crate::ensemble::ext_iforest::{
@@ -89,8 +90,9 @@ pub mod prelude {
         f1_at_threshold,
     };
     pub use crate::ptx_kernels::{
-        copod_ecdf_ptx, ensemble_normalize_ptx, f32_hex, iforest_score_ptx, lof_reach_dist_ptx,
-        mahal_dist_ptx, recon_score_ptx, svdd_loss_ptx,
+        abod_batch_ptx, copod_ecdf_ptx, ensemble_normalize_ptx, f32_hex, fast_mcd_cstep_ptx,
+        fused_knn_lof_ptx, iforest_score_ptx, lof_reach_dist_ptx, mahal_dist_ptx, recon_score_ptx,
+        svdd_loss_ptx,
     };
     pub use crate::reconstruction::autoencoder::{AeConfig, AutoencoderAnomaly};
     pub use crate::reconstruction::dagmm::{

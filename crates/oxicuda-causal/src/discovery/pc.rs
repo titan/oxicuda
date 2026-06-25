@@ -1,3 +1,4 @@
+use super::discrete_ci::DiscreteCiTest;
 use crate::error::{CausalError, CausalResult};
 use std::collections::HashMap;
 
@@ -96,14 +97,39 @@ pub fn fisher_z_test(r: f32, n: usize, cond_set_size: usize, alpha: f32) -> bool
     stat > z_alpha
 }
 
-pub struct PcAlgorithm {
-    pub skeleton: Vec<(usize, usize)>,
-    pub cpdag: Vec<(usize, usize, bool)>,
-    pub sep_sets: HashMap<(usize, usize), Vec<usize>>,
+/// Conditional-independence test interface consumed by the PC skeleton and
+/// orientation phases.
+///
+/// An implementor answers, for variables `x` and `y` (given as column indices)
+/// and a conditioning set `z`, whether the data let us *reject* the null
+/// hypothesis `x ⫫ y | z` — i.e. whether `x` and `y` are judged conditionally
+/// **dependent** at the test's significance level. The PC algorithm removes the
+/// `x – y` edge exactly when some conditioning set renders the pair independent.
+///
+/// [`FisherZTest`] is the linear-Gaussian (partial-correlation) implementation;
+/// [`DiscreteCiTest`] is the categorical
+/// chi-square / G-test implementation. Either can drive [`PcAlgorithm::run_with_test`].
+pub trait ConditionalIndependenceTest {
+    /// Number of variables (graph nodes) the test ranges over.
+    fn num_vars(&self) -> usize;
+
+    /// `true` iff `x` and `y` are judged conditionally **dependent** given `z`.
+    fn dependent(&self, x: usize, y: usize, z: &[usize]) -> bool;
 }
 
-impl PcAlgorithm {
-    pub fn run(data: &[f32], n: usize, d: usize, alpha: f32) -> CausalResult<Self> {
+/// Linear-Gaussian conditional-independence test — the classic PC test under a
+/// multivariate-normal assumption. Wraps [`partial_corr`] (residualised Pearson
+/// correlation) and [`fisher_z_test`] (Fisher z-transform critical value).
+#[derive(Debug, Clone)]
+pub struct FisherZTest {
+    cols: Vec<Vec<f32>>,
+    n: usize,
+    alpha: f32,
+}
+
+impl FisherZTest {
+    /// Build the test from an `n × d` row-major design matrix.
+    pub fn new(data: &[f32], n: usize, d: usize, alpha: f32) -> CausalResult<Self> {
         if data.is_empty() || n < 4 || d < 2 {
             return Err(CausalError::EmptyInput);
         }
@@ -113,11 +139,67 @@ impl PcAlgorithm {
                 got: data.len(),
             });
         }
-
-        // Extract columns
         let cols: Vec<Vec<f32>> = (0..d)
             .map(|j| (0..n).map(|i| data[i * d + j]).collect())
             .collect();
+        Ok(Self { cols, n, alpha })
+    }
+}
+
+impl ConditionalIndependenceTest for FisherZTest {
+    fn num_vars(&self) -> usize {
+        self.cols.len()
+    }
+
+    fn dependent(&self, x: usize, y: usize, z: &[usize]) -> bool {
+        let z_vecs: Vec<Vec<f32>> = z.iter().map(|&k| self.cols[k].clone()).collect();
+        let r = partial_corr(&self.cols[x], &self.cols[y], &z_vecs, self.n);
+        fisher_z_test(r, self.n, z.len(), self.alpha)
+    }
+}
+
+pub struct PcAlgorithm {
+    pub skeleton: Vec<(usize, usize)>,
+    pub cpdag: Vec<(usize, usize, bool)>,
+    pub sep_sets: HashMap<(usize, usize), Vec<usize>>,
+}
+
+impl PcAlgorithm {
+    /// Run PC under the linear-Gaussian (Fisher-Z partial-correlation) test.
+    ///
+    /// `data` is an `n × d` row-major design matrix. This is the classic
+    /// multivariate-normal PC; for categorical data use [`Self::run_discrete`].
+    pub fn run(data: &[f32], n: usize, d: usize, alpha: f32) -> CausalResult<Self> {
+        let test = FisherZTest::new(data, n, d, alpha)?;
+        Self::run_with_test(&test)
+    }
+
+    /// Run PC under the discrete chi-square / G conditional-independence test.
+    ///
+    /// `data` is an `n × d` row-major matrix of category codes
+    /// (`0 ≤ data[i*d + j] < n_levels[j]`); `n_levels[j]` is the cardinality of
+    /// variable `j`. Recovers the skeleton and v-structures of a discrete
+    /// Bayesian network. Uses Pearson's chi-square statistic.
+    pub fn run_discrete(
+        data: &[usize],
+        n: usize,
+        d: usize,
+        n_levels: &[usize],
+        alpha: f32,
+    ) -> CausalResult<Self> {
+        let test = DiscreteCiTest::new(data, n, d, n_levels, alpha)?;
+        Self::run_with_test(&test)
+    }
+
+    /// Run the PC skeleton + v-structure + Meek-rule orientation against an
+    /// arbitrary [`ConditionalIndependenceTest`]. This is the engine shared by
+    /// [`Self::run`] (Fisher-Z) and [`Self::run_discrete`] (chi-square/G); any
+    /// custom CI test plugs in here unchanged.
+    pub fn run_with_test<T: ConditionalIndependenceTest>(test: &T) -> CausalResult<Self> {
+        let d = test.num_vars();
+        if d < 2 {
+            return Err(CausalError::EmptyInput);
+        }
 
         // Start with complete undirected graph
         let mut adj: Vec<Vec<bool>> = vec![vec![true; d]; d];
@@ -131,26 +213,22 @@ impl PcAlgorithm {
         let max_cond_size = d.saturating_sub(2).min(3); // limit for tractability
         for cond_size in 0..=max_cond_size {
             let mut to_remove = Vec::new();
-            for x in 0..d {
+            for (x, adj_x) in adj.iter().enumerate() {
                 for y in (x + 1)..d {
-                    if !adj[x][y] {
+                    if !adj_x[y] {
                         continue;
                     }
                     // Collect neighbors of x (excluding y)
                     let neighbors_x: Vec<usize> =
-                        (0..d).filter(|&v| v != x && v != y && adj[x][v]).collect();
+                        (0..d).filter(|&v| v != x && v != y && adj_x[v]).collect();
                     if neighbors_x.len() < cond_size {
                         continue;
                     }
                     // Try all subsets of size cond_size
                     let subsets = subsets_of_size(&neighbors_x, cond_size);
                     for subset in subsets {
-                        let z_vecs: Vec<Vec<f32>> =
-                            subset.iter().map(|&k| cols[k].clone()).collect();
-                        let r = partial_corr(&cols[x], &cols[y], &z_vecs, n);
-                        let dependent = fisher_z_test(r, n, subset.len(), alpha);
-                        if !dependent {
-                            to_remove.push((x, y, subset.clone()));
+                        if !test.dependent(x, y, &subset) {
+                            to_remove.push((x, y, subset));
                             break;
                         }
                     }
@@ -174,14 +252,21 @@ impl PcAlgorithm {
             }
         }
 
-        // V-structure orientation
+        // V-structure (collider) orientation.
+        //
+        // For every *non-adjacent* pair (x, y) with a common neighbour z, the
+        // unshielded triple x — z — y is a collider x → z ← y iff z is NOT in the
+        // separating set that rendered x and y conditionally independent
+        // (Spirtes-Glymour-Scheines). NOTE: the outer loop must range over
+        // non-adjacent pairs — requiring adjacency here was a latent bug that
+        // made collider orientation unreachable.
         let mut oriented: Vec<Vec<Option<bool>>> = vec![vec![None; d]; d];
         for x in 0..d {
             for y in (x + 1)..d {
-                if !adj[x][y] {
-                    continue;
+                if adj[x][y] {
+                    continue; // x and y adjacent -> not an unshielded pair
                 }
-                // Find common neighbors z where (x,z,y) form a potential v-structure
+                // Common neighbours z of the non-adjacent pair (x, y).
                 for z in 0..d {
                     if z == x || z == y {
                         continue;
@@ -189,13 +274,10 @@ impl PcAlgorithm {
                     if !adj[x][z] || !adj[y][z] {
                         continue;
                     }
-                    if adj[x][y] {
-                        continue; // x and y are adjacent, not a v-structure
-                    }
-                    // x - z - y, x and y non-adjacent
+                    // x - z - y is an unshielded triple. Collider iff z ∉ sep(x,y).
                     let sep_xy = sep_sets.get(&(x, y)).cloned().unwrap_or_default();
                     if !sep_xy.contains(&z) {
-                        // Orient x -> z <- y
+                        // Orient x -> z <- y.
                         oriented[x][z] = Some(true);
                         oriented[y][z] = Some(true);
                         oriented[z][x] = Some(false);

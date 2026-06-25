@@ -77,6 +77,10 @@ pub mod prelude {
     pub use crate::replay::dark_exp_v2::{DerV2Buffer, DerV2Config};
     pub use crate::replay::er::{ErBuffer, er_add, er_buffer_new, er_sample_batch};
     pub use crate::replay::gem::{GemConfig, GemMemory, gem_project_gradient};
+    pub use crate::replay::sharded_buffer::{
+        ReplayShard, ShardPolicy, ShardedReplayBuffer, ShardedReplayConfig, sharded_add,
+        sharded_buffer_new, sharded_len, sharded_sample_balanced,
+    };
     pub use crate::replay::vectorised_gem::{VectorisedGemConfig, vectorised_gem_project};
 
     // Metrics
@@ -85,6 +89,10 @@ pub mod prelude {
     };
     pub use crate::metrics::intransigence::{
         forward_transfer, intransigence, per_task_intransigence,
+    };
+    pub use crate::metrics::verification::{
+        DerSensitivityCell, FisherComparison, GemConvergence, der_sensitivity_grid,
+        gaussian_fisher_comparison, gem_convergence_profile,
     };
 
     // Cross-task sampler
@@ -96,6 +104,10 @@ pub mod prelude {
     pub use crate::stream::class_stream::{
         ClassIncStream, advance_class_inc, class_inc_batch, class_inc_new, init_class_inc,
         n_classes_seen,
+    };
+    pub use crate::stream::scenario::{
+        PermutedScenario, RotatedScenario, ScenarioConfig, SplitScenario, permuted_mnist,
+        rotated_mnist, split_classes,
     };
     pub use crate::stream::task_stream::{
         Task, TaskStream, current_task, next_task, task_batch, task_stream_new,

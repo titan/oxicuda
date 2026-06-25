@@ -9,7 +9,7 @@ pub mod cfg;
 pub mod classifier_guidance;
 pub mod perp_neg;
 
-pub use adaptive::{AdaptiveCfgPolicy, AdaptiveCfgScheduler};
+pub use adaptive::{AdaptiveCfgPolicy, AdaptiveCfgScheduler, PolynomialFit};
 pub use cfg::{CfgConfig, CfgGuidance};
 pub use classifier_guidance::{ClassifierGuidance, ClassifierGuidanceConfig};
 pub use perp_neg::PerpNegGuidance;

@@ -9,8 +9,8 @@ alternatives to attention. Part of [OxiCUDA](https://github.com/cool-japan/oxicu
 
 ## Implementation Status
 
-- **Actual SLoC:** 14,798 (49 files, Rust 7,175 code + 1,870 comments + 1,351 blanks)
-- **Tests:** 627 passing (#[test] count in src/)
+- **Actual SLoC:** ~15,750 (50 files; +selective_scan_parallel.rs +selective_scan_mixed.rs)
+- **Tests:** 660 passing (#[test] count in src/)
 - **Crate:** `oxicuda-mamba` -- Vol.19 State Space Model Primitives
 
 ### Completed [x]
@@ -102,12 +102,21 @@ alternatives to attention. Part of [OxiCUDA](https://github.com/cool-japan/oxicu
 ### Future Enhancements [ ]
 
 #### P0 -- Critical (Mainstream Coverage / Correctness)
-- [ ] Selective-scan parallel (Blelloch) kernel exposed end-to-end through `MambaBlock`
-      (currently CPU sequential reference + PTX template only)
-- [ ] FP16 / BF16 mixed-precision selective-scan (FP32 accumulation for `h`)
+- [x] Selective-scan parallel (Blelloch) scan ALGORITHM
+      (mamba/selective_scan_parallel.rs -- `selective_scan_parallel` runs the work-efficient
+      Blelloch up-sweep/down-sweep associative scan from `ssm::parallel_scan::blelloch_inclusive_scan`;
+      `verify_selective_scan_equivalence` proves it == sequential reference to f32 rounding).
+      NOTE: GPU dispatch end-to-end through `MambaBlock` (fused `parallel_scan_ptx` launch) remains
+      `[ ]` -- requires GPU hardware.
+- [x] FP16 / BF16 mixed-precision selective-scan (FP32 accumulation for `h`)
+      (mamba/selective_scan_mixed.rs -- `MixedPrecision::{Fp16,Bf16}` with exact IEEE binary16
+      (E5M10, subnormals/overflow/RNE) and bfloat16 (E8M7) round-trips; `h`/`y` accumulate in f32;
+      `selective_scan_mixed`, `mixed_precision_max_error`)
 - [x] Mamba-2 SSD chunk-scan GPU dispatch via `ssd_chunk_ptx`
 - [x] RWKV-5 / RWKV-6 time-mixing variants
-- [ ] Backwards pass for `selective_scan` (training support, not just inference)
+- [x] Backwards pass for `selective_scan` (training support, not just inference)
+      (ssm/selective_scan_backward.rs -- `scan_forward`/`scan_backward`/`scan_backward_batched`,
+      adjoint recurrence dL/da=g·h_prev, dL/db=g, dL/dh_init, finite-difference-verified)
 
 #### P1 -- Important (Architecture and Feature Coverage)
 - [x] S5 / Liquid-S4 variants (closed-form HiPPO transitions)
@@ -116,18 +125,29 @@ alternatives to attention. Part of [OxiCUDA](https://github.com/cool-japan/oxicu
 - [x] HiPPO-LegT / HiPPO-FOUT alternative HiPPO matrices
 - [x] Mamba MoE (Mixture-of-Experts) sparse routing layer (mamba_moe.rs -- per-token router top-k expert SSM blocks, renormalized softmax weighted sum, load-balance loss N·mean(f·P) for uniform usage)
 - [x] Hybrid Mamba-Attention block (e.g. Jamba-style interleaving)
-- [ ] `ssm/mamba2.rs` — Mamba-2 / SSD (Dao-Gu 2024): State Space Duality; structured state space as semi-separable matrix multiplication; block-parallel SSD algorithm with chunked computation; O(T/C · C² · d) per layer
-- [ ] `ssm/s5.rs` — S5 (Smith 2022): parallel scan via diagonalisation; block-diagonal MIMO state matrix; parallel prefix scan for efficient training; `S5Layer { d_model, d_state, C_init: InitScheme }`
-- [ ] `ssm/liquid.rs` — Liquid S4 (Hasani 2022): neural ODE dynamics with liquid time-constant; learnable τ per neuron; express temporal dynamics within S4 framework; `LiquidS4 { tau_init: f32 }`
+- [x] `ssm/mamba2.rs` — Mamba-2 / SSD (Dao-Gu 2024): State Space Duality; structured state space as semi-separable matrix multiplication; block-parallel SSD algorithm with chunked computation; O(T/C · C² · d) per layer
+      (ALREADY EXISTS under sibling filenames: mamba2/ssd.rs `ssd_naive`/`ssd_recurrent`/`verify_ssd_equivalence`,
+      mamba2/chunk_scan.rs block-parallel chunked SSD, mamba2/mamba2_block.rs multi-head block)
+- [x] `ssm/s5.rs` — S5 (Smith 2022): parallel scan via diagonalisation; block-diagonal MIMO state matrix; parallel prefix scan for efficient training; `S5Layer { d_model, d_state, C_init: InitScheme }`
+      (ALREADY EXISTS as s5/s5_layer.rs -- `S5Config`/`S5Weights`/`S5Layer` diagonal MIMO ZOH, `forward`/`step`/`sequence_mse`)
+- [x] `ssm/liquid.rs` — Liquid S4 (Hasani 2022): neural ODE dynamics with liquid time-constant; learnable τ per neuron; express temporal dynamics within S4 framework; `LiquidS4 { tau_init: f32 }`
+      (ALREADY EXISTS as ssm/liquid.rs -- `LiquidS4Config`/`LiquidS4Layer` input-modulated-Δ recurrence,
+      per-channel τ, reduces to plain diagonal S4 when liquid disabled)
 
 #### P2 -- Nice-to-Have (Research / Advanced)
-- [ ] Quantised Mamba (Q-Mamba, INT8 / INT4 inference)
+- [x] Quantised Mamba (Q-Mamba, INT8 inference)
+      (quant/qmamba.rs -- symmetric INT8 PTQ, `QuantScheme::{PerTensor,PerChannel}`,
+      `QuantizedTensor` quantize/dequantize/matvec with round-to-nearest error bound s/2,
+      `QMambaQuantizer`. INT4 path not yet implemented.)
 - [x] xLSTM (sLSTM + mLSTM) experimental layer
 - [x] Hyena hierarchy long-conv layer (hyena.rs -- Poli 2023; implicit positional-MLP long-conv filter + multiplicative gating recurrence of order steps, reuses FFT conv)
 - [x] `mega/mega_block.rs` / `MegaBlock` — MEGA (Moving Average Equipped Gated Attention, Ma 2022): EMA-based token mixing (exponential moving average damping + positional bias) fused with single-head gated attention; `MegaConfig { d_model, d_state, chunk_size }`; `MegaBlock::forward` integrating EMA + gated attention + FFN residual
-- [ ] CUDA-Graph capture of multi-layer Mamba forward for inference
-- [ ] Distributed multi-GPU Mamba (sequence-parallel across long contexts)
-- [ ] State-checkpointing helper for long-context inference (kv-cache analogue)
+- [ ] CUDA-Graph capture of multi-layer Mamba forward for inference (requires GPU hardware)
+- [ ] Distributed multi-GPU Mamba (sequence-parallel across long contexts) (requires multi-GPU hardware)
+- [x] State-checkpointing helper for long-context inference (kv-cache analogue)
+      (ssm/state_cache.rs -- `SsmStateCache` persistent `[D×N]` recurrent state, `step`/`advance_chunk`
+      streaming, `checkpoint`/`restore`/`from_checkpoint`; streaming-in-chunks == full scan and
+      checkpoint resume == continuous roll-out, both unit-verified)
 
 ## Dependencies
 
@@ -142,7 +162,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 627 passing
+- Tests: 671 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)
@@ -185,8 +205,10 @@ required); RWKV WKV within 20% of `rwkv_kernel` reference.
 - [x] `rms_norm_silu_ptx` warp-shuffle butterfly via `shfl.sync.bfly.b32`
 - [x] `wkv_forward_ptx` uses `ex2.approx.f32` HW path
 - [x] PTX × SM 80, 86 generation verified in integration tests
-- [ ] `cp.async` double-buffer for selective-scan parameter staging
-- [ ] FP16 selective-scan with FP32 `h` accumulator
+- [ ] `cp.async` double-buffer for selective-scan parameter staging (requires GPU hardware)
+- [x] FP16 selective-scan with FP32 `h` accumulator
+      (numerical model in mamba/selective_scan_mixed.rs -- exact IEEE binary16 operands, f32 `h`/`y`
+      accumulator; on-device tensor-core execution remains gated by the GPU items above)
 
 ### Hopper (sm_90 / sm_90a)
 - [x] PTX SM 90 emission tested for all 7 kernels
@@ -219,21 +241,30 @@ required); RWKV WKV within 20% of `rwkv_kernel` reference.
 - [x] RWKV WKV stability under large-positive-key sequences (no NaN/Inf)
 - [x] RWKV channel-mixing Square-ReLU monotonicity test
 - [x] PTX generation across 6 SM versions: 75 / 80 / 86 / 90 / 100 / 120
-- [ ] GPU-hardware correctness for all 7 kernels (gated behind `gpu-tests`)
-- [ ] Numerical agreement with `mamba-ssm` reference within 1e-3 relative
-- [ ] Mamba LM head perplexity match on small reference dataset (e.g. WikiText-2)
-- [ ] RWKV-4 generation match vs reference HF model on first 50 tokens
+- [x] Selective-scan parallel (Blelloch) == sequential reference within 1e-3
+      (mamba/selective_scan_parallel.rs tests + ssm/parallel_scan.rs blelloch_* tests)
+- [x] Mixed-precision (FP16/BF16) selective-scan close to FP32 + IEEE-half round-trip exactness
+      (mamba/selective_scan_mixed.rs tests)
+- [x] SSM state-cache streaming/checkpoint == full scan (ssm/state_cache.rs tests)
+- [ ] GPU-hardware correctness for all 7 kernels (gated behind `gpu-tests`) (requires GPU hardware)
+- [ ] Numerical agreement with `mamba-ssm` reference within 1e-3 relative (requires external reference model)
+- [ ] Mamba LM head perplexity match on small reference dataset (e.g. WikiText-2) (requires external dataset + trained weights)
+- [ ] RWKV-4 generation match vs reference HF model on first 50 tokens (requires external reference model)
 
 ### Implementation Deepening
-- [ ] End-to-end `MambaModel::forward` GPU dispatch (currently CPU sequential)
-- [ ] Backward pass for selective-scan and SSD (training-capable)
-- [ ] `S4Layer` FFT-based convolution mode (link with `oxicuda-fft`)
-- [ ] State-checkpointing helper for streaming long-context inference
-- [ ] Multi-GPU sequence-parallel Mamba (split L across devices, exchange boundary `h`)
+- [ ] End-to-end `MambaModel::forward` GPU dispatch (currently CPU sequential) (requires GPU hardware)
+- [x] Backward pass for selective-scan (training-capable)
+      (ssm/selective_scan_backward.rs -- finite-difference-verified adjoint scan; SSD backward not yet added)
+- [x] `S4Layer` FFT-based convolution mode
+      (ALREADY EXISTS as s4/s4_fft.rs -- radix-2 Cooley-Tukey `fft`, `fft_conv1d`, causal O(L log L)
+      `s4_fft_conv` matching `naive_conv1d`; native pure-Rust FFT, no external oxicuda-fft link needed)
+- [x] State-checkpointing helper for streaming long-context inference
+      (ssm/state_cache.rs -- `SsmStateCache` checkpoint/restore; streaming==full-scan verified)
+- [ ] Multi-GPU sequence-parallel Mamba (split L across devices, exchange boundary `h`) (requires multi-GPU hardware)
 
 ### Benchmark Coverage
 - [x] `benches/mamba_ops.rs` Criterion harness wired (CPU-side PTX generation +
       scan / block forward)
 - [ ] GPU-side throughput vs reference (`mamba_ssm`, `rwkv-cuda`) once Linux+NVIDIA
-      harness is available
-- [ ] Long-context sweep (L in 1K / 4K / 16K / 64K) for selective-scan throughput
+      harness is available (requires GPU hardware)
+- [ ] Long-context sweep (L in 1K / 4K / 16K / 64K) for selective-scan throughput (requires GPU hardware)

@@ -66,10 +66,12 @@
 pub mod context;
 pub mod context_config;
 pub mod cooperative_launch;
+pub mod cupti_stubs;
 pub mod debug;
 pub mod device;
 pub mod error;
 pub mod event;
+pub mod fabric_handle;
 pub mod ffi;
 pub mod function_attr;
 pub mod graph;
@@ -81,10 +83,12 @@ pub mod multi_gpu;
 pub mod nvlink_topology;
 pub mod occupancy;
 pub mod occupancy_ext;
+pub mod occupancy_register_count;
 pub mod primary_context;
 pub mod profiler;
 pub mod stream;
 pub mod stream_ordered_alloc;
+pub mod stream_ordered_model;
 pub mod tma;
 
 // ---------------------------------------------------------------------------
@@ -124,9 +128,16 @@ pub use cooperative_launch::{
     CooperativeLaunchConfig, CooperativeLaunchSupport, DeviceLaunchConfig,
     MultiDeviceCooperativeLaunchConfig, cooperative_launch, cooperative_launch_multi_device,
 };
+pub use cupti_stubs::{
+    ActivityRecord, ActivitySession, CuptiActivityError, CuptiActivityKind, cupti_available,
+};
 pub use debug::{DebugLevel, DebugSession, KernelDebugger, MemoryChecker, NanInfChecker};
 pub use device::{Device, DeviceInfo, best_device, can_access_peer, driver_version, list_devices};
 pub use event::Event;
+pub use fabric_handle::{
+    FABRIC_HANDLE_BYTES, FabricAccess, FabricAllocationProps, FabricHandle, FabricImport,
+    FabricImporter, FabricMemory,
+};
 pub use graph::{Graph, GraphExec, GraphNode, MemcpyDirection, StreamCapture};
 pub use link::{
     FallbackStrategy, LinkInputType, LinkedModule, Linker, LinkerOptions, OptimizationLevel,
@@ -135,12 +146,14 @@ pub use loader::try_driver;
 pub use module::{Function, JitDiagnostic, JitLog, JitOptions, JitSeverity, Module};
 pub use multi_gpu::DevicePool;
 pub use nvlink_topology::{GpuTopology, NvLinkVersion, TopologyTree, TopologyType};
+pub use occupancy_register_count::{OccupancyFromPtx, PtxKernel, PtxRegisterUsage};
 pub use primary_context::PrimaryContext;
 pub use profiler::ProfilerGuard;
 pub use stream::Stream;
 pub use stream_ordered_alloc::{
     StreamAllocation, StreamMemoryPool, StreamOrderedAllocConfig, stream_alloc, stream_free,
 };
+pub use stream_ordered_model::StreamOrderId;
 
 // ---------------------------------------------------------------------------
 // Driver initialisation
@@ -174,15 +187,16 @@ pub fn init() -> CudaResult<()> {
 /// ```
 pub mod prelude {
     pub use crate::{
-        CacheConfig, Context, CooperativeLaunchConfig, CooperativeLaunchSupport, CudaError,
-        CudaResult, DebugLevel, DebugSession, Device, DeviceLaunchConfig, DevicePool, Event,
-        FallbackStrategy, Function, GpuTopology, Graph, GraphExec, GraphNode, KernelDebugger,
-        LinkInputType, LinkedModule, Linker, LinkerOptions, MemcpyDirection, Module,
-        MultiDeviceCooperativeLaunchConfig, NvLinkVersion, OptimizationLevel, PrimaryContext,
-        ProfilerGuard, SharedMemConfig, Stream, StreamAllocation, StreamCapture, StreamMemoryPool,
-        StreamOrderedAllocConfig, TopologyTree, TopologyType, can_access_peer, cooperative_launch,
-        cooperative_launch_multi_device, driver_version, init, stream_alloc, stream_free,
-        try_driver,
+        ActivitySession, CacheConfig, Context, CooperativeLaunchConfig, CooperativeLaunchSupport,
+        CudaError, CudaResult, DebugLevel, DebugSession, Device, DeviceLaunchConfig, DevicePool,
+        Event, FabricHandle, FabricImporter, FabricMemory, FallbackStrategy, Function, GpuTopology,
+        Graph, GraphExec, GraphNode, KernelDebugger, LinkInputType, LinkedModule, Linker,
+        LinkerOptions, MemcpyDirection, Module, MultiDeviceCooperativeLaunchConfig, NvLinkVersion,
+        OccupancyFromPtx, OptimizationLevel, PrimaryContext, ProfilerGuard, SharedMemConfig,
+        Stream, StreamAllocation, StreamCapture, StreamMemoryPool, StreamOrderedAllocConfig,
+        TopologyTree, TopologyType, can_access_peer, cooperative_launch,
+        cooperative_launch_multi_device, cupti_available, driver_version, init, stream_alloc,
+        stream_free, try_driver,
     };
 }
 

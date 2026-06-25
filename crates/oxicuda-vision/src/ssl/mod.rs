@@ -13,5 +13,5 @@ pub mod dinov2;
 
 pub use dinov2::{
     BackboneOutput, CenteringBuffer, DinoBackbone, DinoHead, cross_entropy, dino_loss, ibot_loss,
-    student_softmax, teacher_softmax,
+    koleo_loss, student_softmax, teacher_softmax,
 };

@@ -5,5 +5,5 @@ pub mod hosvd;
 pub mod sthosvd;
 
 pub use hooi::hooi;
-pub use hosvd::{TuckerResult, hosvd};
+pub use hosvd::{TuckerResult, hosvd, tucker_reconstruct};
 pub use sthosvd::{SthosvdConfig, SthosvdResult, sthosvd, sthosvd_reconstruct};

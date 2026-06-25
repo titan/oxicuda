@@ -24,10 +24,15 @@
 //! ## Iterative sparse solvers
 //!
 //! - **CG** — Conjugate Gradient for SPD systems
+//! - **MINRES** — Minimal Residual for symmetric (possibly indefinite) systems
 //! - **BiCGSTAB** — Biconjugate Gradient Stabilized for non-symmetric systems
+//! - **QMR** — Quasi-Minimal Residual for non-symmetric systems
 //! - **GMRES(m)** — Generalized Minimal Residual with restart
 //! - **FGMRES(m)** — Flexible GMRES with variable preconditioner
+//! - **LSQR** — Iterative least squares `min ‖A·x − b‖₂` for rectangular `A`
 //! - **Direct** — Direct sparse solver via dense LU (small systems)
+//! - **Left-looking sparse LU** — Gilbert–Peierls / SuperLU column-by-column LU
+//! - **PARDISO-compatible** — phased sparse direct solver with reordering
 //! - **Preconditioned CG** — PCG with pluggable preconditioners (Identity, Jacobi, ILU, IC)
 //! - **Preconditioned GMRES** — Left-preconditioned GMRES(m) with restart
 //!
@@ -64,9 +69,11 @@ pub use error::{SolverError, SolverResult};
 pub use handle::SolverHandle;
 pub use helpers::{IterRefineConfig, iterative_refinement};
 pub use sparse::{
-    AdjacencyGraph, EliminationTree, FgmresConfig, MultifrontalLUSolver, NestedDissectionOrdering,
-    OrderingQuality, Permutation, SupernodalCholeskySolver, SupernodalStructure,
-    SymbolicFactorization, fgmres, sparse_cholesky_solve, sparse_lu_solve,
+    AdjacencyGraph, EliminationTree, FgmresConfig, LeftLookingLu, LsqrConfig, MinresConfig,
+    MultifrontalLUSolver, NestedDissectionOrdering, OrderingQuality, PardisoCompatSolver,
+    Permutation, Phase, SupernodalCholeskySolver, SupernodalStructure, SymbolicFactorization,
+    fgmres, left_looking_lu_solve, lsqr_solve, minres_solve, pardiso_solve, qmr_solve,
+    sparse_cholesky_solve, sparse_lu_solve,
 };
 
 /// Prelude for convenient imports.

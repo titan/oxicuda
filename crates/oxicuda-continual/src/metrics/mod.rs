@@ -5,3 +5,10 @@
 
 pub mod forgetting;
 pub mod intransigence;
+pub mod verification;
+
+// ─── Verification utilities re-exports ────────────────────────────────────────
+pub use verification::{
+    DerSensitivityCell, FisherComparison, GemConvergence, der_sensitivity_grid,
+    gaussian_fisher_comparison, gem_convergence_profile,
+};

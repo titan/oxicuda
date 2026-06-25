@@ -237,6 +237,83 @@ pub fn rrhf_loss_batch(samples: &[RrhfSample], cfg: &RrhfConfig) -> RlhfResult<f
     Ok(total / samples.len() as f32)
 }
 
+/// Sub-gradient of the pairwise ranking (hinge) loss w.r.t. the scores `p`.
+///
+/// `L_rank = Σ_{r_i < r_j} max(0, p_i − p_j)`. Each active term (`r_i < r_j` and
+/// `p_i > p_j`) contributes `+1` to `∂/∂p_i` and `−1` to `∂/∂p_j`; on the flat
+/// side and at the hinge kink the contribution is `0`. Finite-difference
+/// verified against [`ranking_loss`].
+///
+/// # Errors
+/// - [`RlhfError::EmptyInput`] if `scores` is empty.
+/// - [`RlhfError::DimensionMismatch`] if `scores.len() != rewards.len()`.
+pub fn ranking_grad(scores: &[f32], rewards: &[f32]) -> RlhfResult<Vec<f32>> {
+    if scores.is_empty() {
+        return Err(RlhfError::EmptyInput);
+    }
+    if scores.len() != rewards.len() {
+        return Err(RlhfError::DimensionMismatch {
+            expected: scores.len(),
+            got: rewards.len(),
+        });
+    }
+    let k = scores.len();
+    let mut grad = vec![0.0_f32; k];
+    for i in 0..k {
+        for j in 0..k {
+            if rewards[i] < rewards[j] {
+                let margin = scores[i] - scores[j];
+                if margin > 0.0 {
+                    grad[i] += 1.0;
+                    grad[j] -= 1.0;
+                }
+            }
+        }
+    }
+    Ok(grad)
+}
+
+/// Gradient of the full RRHF loss w.r.t. the per-response summed log-probs.
+///
+/// Finite-difference verified against [`rrhf_loss`].
+#[derive(Debug, Clone)]
+pub struct RrhfGrad {
+    /// `∂L/∂(sum_logp_i)` for each candidate response.
+    pub d_sum_logps: Vec<f32>,
+}
+
+/// Analytic (sub-)gradient of [`rrhf_loss`] w.r.t. the summed log-probs.
+///
+/// `L = L_rank(p) + β · (−p_{i⋆})` with `p_i = sum_logp_i / |y_i|` and
+/// `i⋆ = argmax_i r_i`. So `∂L/∂p_i = ranking_grad_i − β·[i = i⋆]`, and chaining
+/// through the length normalisation gives `∂L/∂sum_logp_i = (∂L/∂p_i) / |y_i|`.
+/// The rewards and lengths are held constant (they select the ordering and the
+/// best response, not differentiated).
+///
+/// # Errors
+/// - [`RlhfError::InvalidLambda`] if `cfg.ft_weight` is invalid.
+/// - Propagates validation errors from [`RrhfSample`].
+/// - [`RlhfError::NanEncountered`] on a non-finite gradient.
+pub fn rrhf_grad(sample: &RrhfSample, cfg: &RrhfConfig) -> RlhfResult<RrhfGrad> {
+    cfg.validate()?;
+    let scores = length_normalized_scores(sample)?;
+    let rank_grad = ranking_grad(&scores, &sample.rewards)?;
+    let best = argmax_reward(&sample.rewards);
+    let mut d_sum_logps = Vec::with_capacity(sample.len());
+    for (i, &len) in sample.lengths.iter().enumerate() {
+        let mut d_score = rank_grad[i];
+        if i == best {
+            d_score -= cfg.ft_weight;
+        }
+        let g = d_score / len as f32;
+        if !g.is_finite() {
+            return Err(RlhfError::NanEncountered);
+        }
+        d_sum_logps.push(g);
+    }
+    Ok(RrhfGrad { d_sum_logps })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,5 +503,128 @@ mod tests {
         assert!(!s.is_empty());
         let empty = sample(&[], &[], &[]);
         assert!(empty.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn sample(sum_logps: &[f32], lengths: &[usize], rewards: &[f32]) -> RrhfSample {
+        RrhfSample {
+            sum_logps: sum_logps.to_vec(),
+            lengths: lengths.to_vec(),
+            rewards: rewards.to_vec(),
+        }
+    }
+
+    #[test]
+    fn ranking_grad_matches_fd_misranked() {
+        // Misranked, well-separated margins so no hinge flips under ±h.
+        let scores = [-2.0_f32, -1.0, -3.0];
+        let rewards = [3.0_f32, 1.0, 2.0];
+        let g = ranking_grad(&scores, &rewards).expect("grad");
+        let h = 1e-2;
+        for i in 0..scores.len() {
+            let fd = central_diff(
+                |v| {
+                    let mut s = scores;
+                    s[i] = v;
+                    ranking_loss(&s, &rewards).expect("loss")
+                },
+                scores[i],
+                h,
+            );
+            assert_close(g[i], fd, "ranking_grad");
+        }
+        // Closed form: g0 = -1, g1 = +2, g2 = -1.
+        assert!((g[0] + 1.0).abs() < 1e-7);
+        assert!((g[1] - 2.0).abs() < 1e-7);
+        assert!((g[2] + 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn ranking_grad_zero_when_well_ordered() {
+        let scores = [-1.0_f32, -2.0, -3.0];
+        let rewards = [3.0_f32, 2.0, 1.0];
+        let g = ranking_grad(&scores, &rewards).expect("grad");
+        for &gi in &g {
+            assert_eq!(gi, 0.0, "well-ordered → zero ranking gradient");
+        }
+    }
+
+    #[test]
+    fn rrhf_grad_matches_fd() {
+        // Misranked sample, distinct rewards, length-normalised.
+        let s = sample(&[-2.0, -1.0, -3.0], &[1, 1, 1], &[3.0, 1.0, 2.0]);
+        let cfg = RrhfConfig { ft_weight: 1.0 };
+        let g = rrhf_grad(&s, &cfg).expect("grad");
+        let h = 1e-2;
+        for i in 0..s.len() {
+            let fd = central_diff(
+                |v| {
+                    let mut ss = s.clone();
+                    ss.sum_logps[i] = v;
+                    rrhf_loss(&ss, &cfg).expect("loss")
+                },
+                s.sum_logps[i],
+                h,
+            );
+            assert_close(g.d_sum_logps[i], fd, "rrhf_grad");
+        }
+    }
+
+    #[test]
+    fn rrhf_grad_length_normalised() {
+        // Non-unit lengths; chosen so the normalised scores [-2,-1,-3] are
+        // distinct and the hinge margins are well separated from 0.
+        let s = sample(&[-4.0, -1.0, -9.0], &[2, 1, 3], &[3.0, 1.0, 2.0]);
+        let cfg = RrhfConfig { ft_weight: 0.5 };
+        let g = rrhf_grad(&s, &cfg).expect("grad");
+        let h = 1e-2;
+        for i in 0..s.len() {
+            let fd = central_diff(
+                |v| {
+                    let mut ss = s.clone();
+                    ss.sum_logps[i] = v;
+                    rrhf_loss(&ss, &cfg).expect("loss")
+                },
+                s.sum_logps[i],
+                h,
+            );
+            assert_close(g.d_sum_logps[i], fd, "rrhf_grad_len");
+        }
+    }
+
+    #[test]
+    fn rrhf_grad_best_response_pushed_up() {
+        // ft term pushes the best-reward response's log-prob up (negative grad).
+        let s = sample(&[-1.0, -2.0], &[1, 1], &[2.0, 1.0]); // well-ordered → rank grad 0
+        let cfg = RrhfConfig { ft_weight: 1.0 };
+        let g = rrhf_grad(&s, &cfg).expect("grad");
+        assert!(g.d_sum_logps[0] < 0.0, "best response pushed up");
+    }
+
+    #[test]
+    fn rrhf_grad_invalid_ft_weight_errors() {
+        let s = sample(&[-2.0, -4.0], &[2, 2], &[2.0, 1.0]);
+        let cfg = RrhfConfig { ft_weight: -1.0 };
+        assert!(matches!(
+            rrhf_grad(&s, &cfg),
+            Err(RlhfError::InvalidLambda { .. })
+        ));
     }
 }

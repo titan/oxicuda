@@ -58,7 +58,11 @@
 pub mod device;
 pub mod error;
 pub mod event;
+pub mod graph_capture;
+pub mod host_mem;
 pub mod launch;
+pub mod launch_config;
+pub mod mem_pool;
 pub mod memory;
 pub mod peer;
 pub mod profiler;
@@ -69,13 +73,25 @@ pub mod texture;
 
 pub use device::CudaDeviceProp;
 pub use error::{CudaRtError, CudaRtResult};
-pub use event::{CudaEvent, EventFlags};
+pub use event::{CudaEvent, EventFlags, EventIdAllocator};
+pub use graph_capture::{
+    CaptureMode, CaptureStatus, CudaGraph, CudaGraphExec, GraphNode, GraphNodeKind, StreamCapture,
+};
+pub use host_mem::{
+    HostMemoryRegistry, HostRegisterFlags, IpcEventHandle, IpcMemFlags, IpcMemHandle, IpcRegistry,
+    PeerAccessMatrix,
+};
 pub use launch::{CudaFunction, CudaModule, Dim3, FuncAttribute, FuncAttributes};
-pub use memory::DevicePtr;
-pub use stream::{CudaStream, StreamFlags};
+pub use launch_config::{
+    DeviceLaunchLimits, KernelResourceUsage, LaunchConfig, Occupancy, OccupancyCalculator,
+    OccupancyLimiter,
+};
+pub use mem_pool::{MemPool, MemPoolAttr, MemPoolAttributes, MemPoolHandle, MemPoolStats};
+pub use memory::{DevicePtr, MemLocation, MemcpyKind};
+pub use stream::{CudaStream, StreamFlags, StreamIdAllocator};
 pub use texture::{
     AddressMode, Array3DFlags, ArrayFormat, CudaArray, CudaArray3D, CudaSurfaceObject,
-    CudaTextureObject, FilterMode, ResourceDesc, ResourceViewDesc, TextureDesc,
+    CudaTextureObject, FilterMode, ResourceDesc, ResourceViewDesc, TextureDesc, TextureDescBuilder,
 };
 
 // ─── Convenience API (flat namespace) ────────────────────────────────────────

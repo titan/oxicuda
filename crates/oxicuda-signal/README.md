@@ -21,7 +21,7 @@ Part of the [OxiCUDA](https://github.com/cool-japan/oxicuda) ecosystem — Pure 
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-oxicuda-signal = "0.2.0"
+oxicuda-signal = "0.3.0"
 ```
 
 ```rust
@@ -40,7 +40,7 @@ let reconstructed = multilevel_inverse(&decomp, WaveletFamily::Haar).unwrap();
 
 ## Status
 
-**v0.2.0** (2026-06-16) — 414 tests passing
+**v0.3.0** (2026-06-25) — 491 tests passing
 
 ## License
 

@@ -69,6 +69,16 @@ impl DeviceScanConfig {
         self.num_blocks(n) * elem
     }
 
+    /// Scratch-buffer bytes the caller must allocate for `n` elements.
+    ///
+    /// For device scan this is the per-block aggregates buffer; it is an alias
+    /// of [`temp_bytes`](Self::temp_bytes) provided so that every device
+    /// template exposes a uniform `workspace_bytes` query.
+    #[must_use]
+    pub fn workspace_bytes(&self, n: u64) -> u64 {
+        self.temp_bytes(n)
+    }
+
     /// Kernel name for the block-scan pass.
     #[must_use]
     pub fn block_kernel_name(&self) -> String {
@@ -591,6 +601,7 @@ mod tests {
         assert_eq!(c.num_blocks(256), 1);
         assert_eq!(c.num_blocks(257), 2);
         assert_eq!(c.temp_bytes(256), 4); // 1 block × 4 bytes/f32
+        assert_eq!(c.workspace_bytes(257), c.temp_bytes(257));
     }
 
     #[test]

@@ -114,6 +114,7 @@ pub(super) const BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID: u32 = 41;
 pub(super) const BUILTIN_NUM_SUBGROUPS: u32 = 38;
 pub(super) const BUILTIN_SUBGROUP_ID: u32 = 40;
 pub(super) const BUILTIN_LOCAL_INVOCATION_ID: u32 = 27;
+pub(super) const BUILTIN_WORKGROUP_ID: u32 = 26;
 
 // Storage class for Workgroup shared memory
 pub(super) const STORAGE_CLASS_WORKGROUP: u32 = 4;
@@ -138,3 +139,68 @@ pub(super) const GLSL_F_MAX: u32 = 40;
 
 /// Workgroup size for 1-D compute shaders.
 pub(super) const WORKGROUP_SIZE: u32 = 256;
+
+// ─── SPIR-V version constants (extended) ────────────────────
+
+/// SPIR-V version 1.4 (required for some descriptor / cooperative-matrix paths).
+pub const SPIRV_VERSION_1_4: u32 = 0x0001_0400;
+/// SPIR-V version 1.5.
+pub const SPIRV_VERSION_1_5: u32 = 0x0001_0500;
+/// SPIR-V version 1.6 (conditional emit when device supports it).
+pub const SPIRV_VERSION_1_6: u32 = 0x0001_0600;
+
+// ─── Specialization constants (`VK_EXT_subgroup_size_control` etc.) ──
+
+/// `OpSpecConstant` — a scalar specialization constant.
+pub(super) const OP_SPEC_CONSTANT: u32 = 50;
+/// `SpecId` decoration — links a constant to a specialization-info entry.
+pub(super) const DECORATION_SPEC_ID: u32 = 1;
+
+// ─── Cooperative-matrix opcodes & capabilities (`VK_KHR_cooperative_matrix`) ──
+
+/// `OpTypeCooperativeMatrixKHR`.
+pub(super) const OP_TYPE_COOPERATIVE_MATRIX_KHR: u32 = 4456;
+/// `OpCooperativeMatrixLoadKHR`.
+pub(super) const OP_COOPERATIVE_MATRIX_LOAD_KHR: u32 = 4457;
+/// `OpCooperativeMatrixStoreKHR`.
+pub(super) const OP_COOPERATIVE_MATRIX_STORE_KHR: u32 = 4458;
+/// `OpCooperativeMatrixMulAddKHR` — the fused multiply-add (MMA) op.
+pub(super) const OP_COOPERATIVE_MATRIX_MUL_ADD_KHR: u32 = 4459;
+/// Capability `CooperativeMatrixKHR`.
+pub(super) const CAPABILITY_COOPERATIVE_MATRIX_KHR: u32 = 6022;
+/// Capability `VulkanMemoryModel`.
+pub(super) const CAPABILITY_VULKAN_MEMORY_MODEL: u32 = 5345;
+/// Cooperative-matrix use: `MatrixAKHR`.
+pub(super) const COOPERATIVE_MATRIX_USE_A: u32 = 0;
+/// Cooperative-matrix use: `MatrixBKHR`.
+pub(super) const COOPERATIVE_MATRIX_USE_B: u32 = 1;
+/// Cooperative-matrix use: `MatrixAccumulatorKHR`.
+pub(super) const COOPERATIVE_MATRIX_USE_ACC: u32 = 2;
+/// Cooperative-matrix layout: `RowMajorKHR`.
+pub(super) const COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR: u32 = 0;
+
+// ─── Atomic-float opcodes & capabilities (`VK_EXT_shader_atomic_float`) ──
+
+/// `OpAtomicFAddEXT` — atomic floating-point add.
+pub(super) const OP_ATOMIC_F_ADD_EXT: u32 = 6035;
+/// `OpAtomicFMinEXT`.
+pub(super) const OP_ATOMIC_F_MIN_EXT: u32 = 5614;
+/// `OpAtomicFMaxEXT`.
+pub(super) const OP_ATOMIC_F_MAX_EXT: u32 = 5615;
+/// Capability `AtomicFloat32AddEXT`.
+pub(super) const CAPABILITY_ATOMIC_FLOAT32_ADD_EXT: u32 = 6033;
+/// Capability `AtomicFloat32MinMaxEXT`.
+pub(super) const CAPABILITY_ATOMIC_FLOAT32_MIN_MAX_EXT: u32 = 5612;
+
+// ─── Vulkan-memory-model semantics (explicit availability/visibility) ──
+
+/// Memory operand flag `MakePointerAvailable`.
+pub(super) const MEMORY_OPERAND_MAKE_POINTER_AVAILABLE: u32 = 0x8;
+/// Memory operand flag `MakePointerVisible`.
+pub(super) const MEMORY_OPERAND_MAKE_POINTER_VISIBLE: u32 = 0x10;
+/// Memory operand flag `NonPrivatePointer`.
+pub(super) const MEMORY_OPERAND_NON_PRIVATE_POINTER: u32 = 0x20;
+/// Scope `QueueFamily` (used by the Vulkan memory model).
+pub(super) const SCOPE_QUEUE_FAMILY: u32 = 5;
+/// Scope `Device`.
+pub(super) const SCOPE_DEVICE: u32 = 1;

@@ -87,6 +87,20 @@ pub enum DistInferError {
     #[error("dimension mismatch: expected {expected}, got {got}")]
     DimensionMismatch { expected: usize, got: usize },
 
+    // ── Autonomous Rebalancing / Elastic Scaling ─────────────────────────────
+    /// A rebalance/elastic threshold is outside the valid `[0, 1]` range.
+    #[error("invalid threshold {threshold}: must be in [0.0, 1.0]")]
+    InvalidThreshold { threshold: f32 },
+
+    /// An elastic scaling operation would leave fewer than one rank.
+    #[error("cannot scale below a single rank (current world_size={world_size})")]
+    CannotScaleBelowOne { world_size: usize },
+
+    /// A redistribution plan failed its conservation invariant (work lost or
+    /// duplicated). Carries the expected vs. observed total assignment counts.
+    #[error("redistribution did not conserve work: expected {expected}, got {got}")]
+    RedistributionNotConserved { expected: usize, got: usize },
+
     // ── Other ────────────────────────────────────────────────────────────────
     #[error("internal error: {0}")]
     Internal(&'static str),

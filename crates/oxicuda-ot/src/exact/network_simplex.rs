@@ -212,82 +212,103 @@ fn select_entering(
     best
 }
 
-/// DFS to find a closed cycle in the basis that includes the entering cell.
+/// Find the unique stepping-stone cycle introduced by adding `enter` to the basis.
+///
+/// The transportation basis is a spanning tree of the bipartite (rows ↔ columns)
+/// graph; inserting the entering cell creates **exactly one** cycle. A valid
+/// stepping-stone cycle is an even-length sequence of cells beginning at `enter`
+/// in which consecutive cells alternate between *sharing a row* and *sharing a
+/// column* (a closed rectilinear loop with corners only at basic cells). The
+/// returned vector starts at `enter` and lists the corner cells in cycle order;
+/// even indices (`0, 2, …`) are `θ⁺` legs and odd indices are `θ⁻` legs.
+///
+/// We perform an iterative depth-first search whose state is `(cell, axis)`,
+/// where `axis` records whether the move *into* this cell was along a row or a
+/// column — the next move must be along the opposite axis. The cycle is closed
+/// the moment a legal move would land back on `enter` (with at least four cells
+/// on the path, the minimum length of a transportation cycle). Because the basis
+/// plus `enter` contains a single cycle through `enter`, the first closure found
+/// is the unique stepping-stone loop. The search is deterministic (candidate
+/// cells are visited in basis order), which keeps pivoting reproducible.
 fn find_cycle(
     basis: &[(usize, usize)],
     enter: (usize, usize),
     m: usize,
     n: usize,
 ) -> Option<Vec<(usize, usize)>> {
-    // Build adjacency: for each row, list cells; for each column, list cells.
+    // Adjacency by row and by column over the basic cells (the entering cell is
+    // handled separately as the start / target so it is never an interior stop).
     let mut by_row: Vec<Vec<(usize, usize)>> = vec![Vec::new(); m];
     let mut by_col: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
     for &(i, j) in basis {
+        if (i, j) == enter {
+            continue;
+        }
         by_row[i].push((i, j));
         by_col[j].push((i, j));
     }
-    by_row[enter.0].push(enter);
-    by_col[enter.1].push(enter);
 
-    // DFS alternating row/column moves starting from `enter` looking for `enter`.
-    // Path is even-length, alternating axes. We track visited cells per axis-state.
-    let mut path: Vec<(usize, usize)> = vec![enter];
-    let mut found: Option<Vec<(usize, usize)>> = None;
-    fn dfs(
-        path: &mut Vec<(usize, usize)>,
-        target: (usize, usize),
+    // Iterative DFS frame: the current cell, whether the NEXT move is along a row,
+    // and how many candidates of the current cell have already been tried.
+    struct Frame {
+        cell: (usize, usize),
         next_axis_row: bool,
-        by_row: &[Vec<(usize, usize)>],
-        by_col: &[Vec<(usize, usize)>],
-        found: &mut Option<Vec<(usize, usize)>>,
-    ) {
-        if found.is_some() {
-            return;
-        }
-        let cur = match path.last() {
-            Some(&c) => c,
-            None => return,
-        };
-        let candidates: &[(usize, usize)] = if next_axis_row {
-            &by_row[cur.0]
-        } else {
-            &by_col[cur.1]
-        };
-        for &cell in candidates {
-            if cell == cur {
-                continue;
+        cursor: usize,
+    }
+
+    // Try both initial move directions (row-first, then column-first). For a tree
+    // basis only one of them can reach back to `enter`, but attempting both makes
+    // the search robust to which leg of the loop is incident to the entering cell.
+    for &start_row_first in &[true, false] {
+        let mut path: Vec<(usize, usize)> = vec![enter];
+        let mut in_path = vec![false; m * n];
+        in_path[enter.0 * n + enter.1] = true;
+        let mut stack: Vec<Frame> = vec![Frame {
+            cell: enter,
+            next_axis_row: start_row_first,
+            cursor: 0,
+        }];
+
+        while let Some(top) = stack.last_mut() {
+            let cur = top.cell;
+            let next_axis_row = top.next_axis_row;
+            let candidates: &[(usize, usize)] = if next_axis_row {
+                &by_row[cur.0]
+            } else {
+                &by_col[cur.1]
+            };
+
+            // Closing test: along the current axis we can step straight back to
+            // `enter` once the path already has ≥ 4 cells (a genuine loop).
+            let can_close = path.len() >= 4
+                && ((next_axis_row && cur.0 == enter.0) || (!next_axis_row && cur.1 == enter.1));
+            if can_close {
+                return Some(path);
             }
-            if cell == target && path.len() >= 3 && path.len() % 2 == 1 {
-                let mut closed = path.clone();
-                closed.push(cell);
-                *found = Some(closed);
-                return;
+
+            if top.cursor < candidates.len() {
+                let cell = candidates[top.cursor];
+                top.cursor += 1;
+                if cell == cur || in_path[cell.0 * n + cell.1] {
+                    continue;
+                }
+                in_path[cell.0 * n + cell.1] = true;
+                path.push(cell);
+                stack.push(Frame {
+                    cell,
+                    next_axis_row: !next_axis_row,
+                    cursor: 0,
+                });
+            } else {
+                // Exhausted this cell: backtrack.
+                if let Some(c) = path.pop() {
+                    in_path[c.0 * n + c.1] = false;
+                }
+                stack.pop();
             }
-            if path.contains(&cell) {
-                continue;
-            }
-            path.push(cell);
-            dfs(path, target, !next_axis_row, by_row, by_col, found);
-            if found.is_some() {
-                return;
-            }
-            path.pop();
         }
     }
-    dfs(&mut path, enter, true, &by_row, &by_col, &mut found);
-    if found.is_none() {
-        // Try starting along columns first (allows alternative routes).
-        path.clear();
-        path.push(enter);
-        dfs(&mut path, enter, false, &by_row, &by_col, &mut found);
-    }
-    found.map(|mut c| {
-        // Drop trailing duplicate of entering cell.
-        if c.len() >= 2 && c[0] == c[c.len() - 1] {
-            c.pop();
-        }
-        c
-    })
+    None
 }
 
 /// Run the network-simplex algorithm.
@@ -442,5 +463,118 @@ mod tests {
         let b = vec![0.5_f32, 0.5];
         let res = network_simplex(&c, &a, &b, 2, 2, &NsConfig::default());
         assert!(matches!(res, Err(OtError::MarginalMismatch { .. })));
+    }
+
+    /// Regression test for the stepping-stone cycle search.
+    ///
+    /// Dense, *well-conditioned* instances with `n ≥ 4` must now solve, stay
+    /// feasible, and reach the true optimum. Before the `find_cycle` fix every
+    /// such instance failed immediately with "could not close cycle for entering
+    /// variable", so the solver was effectively unusable above `n = 3`.
+    ///
+    /// We use random Euclidean ground costs in dimension 2 (generic, tie-free →
+    /// the transportation simplex stays non-degenerate and terminates quickly; see
+    /// the worst-case pivot counts well under the budget). Optimality is verified
+    /// by cross-checking the simplex cost against the entropic optimum recovered by
+    /// epsilon-scaling Sinkhorn at a small `ε`, which is an independent solver.
+    ///
+    /// (Highly degenerate *collinear* 1-D `|x − y|` costs are deliberately *not*
+    /// asserted here: textbook transportation-simplex with Bland's rule can stall
+    /// in long degenerate-pivot sequences on such instances. Those problems have a
+    /// robust closed-form solver, [`crate::exact::emd::emd_1d`], and are covered by
+    /// its own tests; this module-level test targets the dense regime the simplex
+    /// is meant for.)
+    #[test]
+    fn solves_generic_instances_above_n3() {
+        use crate::handle::LcgRng;
+        use crate::sinkhorn::epsilon_scaling::{EpsilonScalingConfig, epsilon_scaling_sinkhorn};
+
+        for &sz in &[4usize, 8, 16, 24] {
+            let mut worst_iters = 0usize;
+            for seed in 0..10u64 {
+                let m = sz;
+                let n = sz;
+                let mut rng = LcgRng::new(seed.wrapping_mul(2_654_435_761) ^ sz as u64);
+                let dim = 2usize;
+                let mut xs = vec![0.0f32; m * dim];
+                let mut ys = vec![0.0f32; n * dim];
+                for v in xs.iter_mut() {
+                    *v = rng.next_f32() * 4.0 - 2.0;
+                }
+                for v in ys.iter_mut() {
+                    *v = rng.next_f32() * 4.0 - 2.0;
+                }
+                let mut c = vec![0.0f32; m * n];
+                for i in 0..m {
+                    for j in 0..n {
+                        let mut s = 0.0f32;
+                        for d in 0..dim {
+                            let diff = xs[i * dim + d] - ys[j * dim + d];
+                            s += diff * diff;
+                        }
+                        c[i * n + j] = s.sqrt();
+                    }
+                }
+                let mut a = vec![0.0f32; m];
+                for v in a.iter_mut() {
+                    *v = rng.next_f32() + 0.1;
+                }
+                let sa: f32 = a.iter().sum();
+                for v in a.iter_mut() {
+                    *v /= sa;
+                }
+                let mut b = vec![0.0f32; n];
+                for v in b.iter_mut() {
+                    *v = rng.next_f32() + 0.1;
+                }
+                let sb: f32 = b.iter().sum();
+                for v in b.iter_mut() {
+                    *v /= sb;
+                }
+                let ns = network_simplex(&c, &a, &b, m, n, &NsConfig { max_iter: 200_000 })
+                    .unwrap_or_else(|e| panic!("n=m={sz} seed={seed}: {e}"));
+                worst_iters = worst_iters.max(ns.iters);
+
+                // Feasibility: non-negative entries, unit mass, exact marginals.
+                for &p in &ns.plan {
+                    assert!(p >= -1e-6, "n=m={sz} seed={seed}: negative entry {p}");
+                }
+                let mass: f32 = ns.plan.iter().sum();
+                assert!(
+                    (mass - 1.0).abs() < 1e-3,
+                    "n=m={sz} seed={seed}: mass {mass} ≠ 1"
+                );
+                for (i, &ai) in a.iter().enumerate() {
+                    let rs: f32 = (0..n).map(|j| ns.plan[i * n + j]).sum();
+                    assert!((rs - ai).abs() < 1e-4, "row {i} sum {rs} ≠ {ai}");
+                }
+                for (j, &bj) in b.iter().enumerate() {
+                    let cs: f32 = (0..m).map(|i| ns.plan[i * n + j]).sum();
+                    assert!((cs - bj).abs() < 1e-4, "col {j} sum {cs} ≠ {bj}");
+                }
+
+                // Optimality: independent entropic solver must agree to ~1 %.
+                let cfg = EpsilonScalingConfig {
+                    eps_init: 2.0,
+                    eps_target: 2e-3,
+                    scale: 0.6,
+                    inner_iter: 60,
+                    final_iter: 2000,
+                    tol: 1e-4,
+                };
+                let sk = epsilon_scaling_sinkhorn(&c, &a, &b, m, n, &cfg).expect("eps-scaling");
+                let rel = (sk.cost - ns.cost).abs() / ns.cost.max(1e-6);
+                assert!(
+                    rel < 1e-2,
+                    "n=m={sz} seed={seed}: simplex {} vs entropic {} (rel {rel})",
+                    ns.cost,
+                    sk.cost
+                );
+            }
+            assert!(
+                worst_iters < 200_000,
+                "n=m={sz}: pivots {worst_iters} approached the budget"
+            );
+        }
     }
 }

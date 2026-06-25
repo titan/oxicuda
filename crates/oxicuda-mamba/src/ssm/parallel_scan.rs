@@ -107,6 +107,122 @@ pub fn exclusive_scan(pairs: &[ScanPair]) -> Vec<ScanPair> {
     out
 }
 
+// ─── Work-efficient Blelloch scan ────────────────────────────────────────────
+
+/// Work-efficient inclusive prefix scan (Blelloch up-sweep / down-sweep).
+///
+/// This is the CPU model of the *parallel associative scan* that a GPU kernel
+/// would execute: a balanced binary-tree reduction (**up-sweep**) followed by a
+/// distribution phase (**down-sweep**) producing an *exclusive* scan, which is
+/// then converted to the inclusive scan by one combine with the input element.
+///
+/// The result is **bit-for-bit comparable** to [`inclusive_scan`] up to the
+/// floating-point reassociation that the tree introduces — for the SSM
+/// `(a, b)` operator the two agree to `f32` rounding, which the unit tests
+/// assert.  The algorithm is *work-efficient*: it performs `O(n)` combines
+/// (`2(n − 1)` for a power-of-two length) rather than the `O(n log n)` of a
+/// naive Hillis–Steele scan, which is exactly why it is the algorithm of
+/// choice for the fused selective-scan kernel.
+///
+/// Internally the input is padded up to the next power of two with the
+/// [`ScanPair::identity`] element (the identity makes the padding inert), so
+/// any length is accepted.
+///
+/// Returns `output[t] = pairs[0] ⊕ pairs[1] ⊕ … ⊕ pairs[t]` (length
+/// `pairs.len()`).  Empty input returns an empty `Vec`.
+#[must_use]
+pub fn blelloch_inclusive_scan(pairs: &[ScanPair]) -> Vec<ScanPair> {
+    let len = pairs.len();
+    if len == 0 {
+        return Vec::new();
+    }
+
+    // Pad up to the next power of two with the identity element.
+    let mut m = 1_usize;
+    while m < len {
+        m <<= 1;
+    }
+    let mut tree = Vec::with_capacity(m);
+    tree.extend_from_slice(pairs);
+    tree.resize(m, ScanPair::identity());
+
+    // ── Up-sweep (reduce): build partial aggregates in place. ────────────────
+    // After stage `d`, tree[i + 2^{d+1} − 1] holds the combine of the
+    // 2^{d+1}-wide block ending at that index.
+    let mut step = 1_usize;
+    while step < m {
+        let stride = step << 1;
+        let mut i = step - 1;
+        while i + step < m {
+            let left = tree[i];
+            let right = tree[i + step];
+            // left covers the earlier sub-block, right the later one.
+            tree[i + step] = ScanPair::combine(left, right);
+            i += stride;
+        }
+        step = stride;
+    }
+
+    // ── Down-sweep: turn the reduction into an exclusive scan. ───────────────
+    // Seed the root with the identity, then push aggregates down the tree.
+    tree[m - 1] = ScanPair::identity();
+    let mut step = m >> 1;
+    while step >= 1 {
+        let stride = step << 1;
+        let mut i = step - 1;
+        while i + step < m {
+            let left = tree[i];
+            let right = tree[i + step];
+            // Left child inherits the parent prefix; right child becomes
+            // parent ⊕ (old left sub-aggregate).
+            tree[i] = right;
+            tree[i + step] = ScanPair::combine(right, left);
+            i += stride;
+        }
+        if step == 1 {
+            break;
+        }
+        step >>= 1;
+    }
+
+    // `tree` now holds the EXCLUSIVE scan over the padded array.  Convert to
+    // the inclusive scan by combining each exclusive prefix with its own input.
+    let mut out = Vec::with_capacity(len);
+    for (t, &p) in pairs.iter().enumerate() {
+        out.push(ScanPair::combine(tree[t], p));
+    }
+    out
+}
+
+/// Compute SSM hidden states via the work-efficient Blelloch prefix scan.
+///
+/// Identical contract to [`ssm_state_scan`] but computed with
+/// [`blelloch_inclusive_scan`] (the parallel-associative-scan model) instead of
+/// the sequential fold.  The two agree to `f32` rounding.
+///
+/// # Errors
+///
+/// * [`MambaError::EmptyInput`]        — if input is empty.
+/// * [`MambaError::DimensionMismatch`] — if `a_bar` and `b_bar_u` differ in length.
+pub fn ssm_state_scan_blelloch(a_bar: &[f32], b_bar_u: &[f32]) -> MambaResult<Vec<f32>> {
+    if a_bar.is_empty() {
+        return Err(MambaError::EmptyInput("a_bar"));
+    }
+    if a_bar.len() != b_bar_u.len() {
+        return Err(MambaError::DimensionMismatch {
+            expected: a_bar.len(),
+            got: b_bar_u.len(),
+        });
+    }
+    let pairs: Vec<ScanPair> = a_bar
+        .iter()
+        .zip(b_bar_u.iter())
+        .map(|(&a, &b)| ScanPair { a, b })
+        .collect();
+    let scanned = blelloch_inclusive_scan(&pairs);
+    Ok(scanned.into_iter().map(|p| p.b).collect())
+}
+
 // ─── SSM state computation ───────────────────────────────────────────────────
 
 /// Compute SSM hidden states via inclusive prefix scan.
@@ -376,6 +492,114 @@ mod tests {
             "state should converge near limit 2.0, got {}",
             h[l - 1]
         );
+    }
+
+    // ── blelloch_inclusive_scan ───────────────────────────────────────────────
+
+    /// Blelloch scan agrees with the sequential inclusive scan (power-of-two L).
+    #[test]
+    fn blelloch_matches_sequential_pow2() {
+        use crate::handle::LcgRng;
+        let mut rng = LcgRng::new(11);
+        for &l in &[1_usize, 2, 4, 8, 16, 64] {
+            let pairs: Vec<ScanPair> = (0..l)
+                .map(|_| ScanPair {
+                    a: rng.next_f32() * 0.9 + 0.05, // (0.05, 0.95) stable
+                    b: rng.next_f32() * 2.0 - 1.0,
+                })
+                .collect();
+            let seq = inclusive_scan(&pairs);
+            let par = blelloch_inclusive_scan(&pairs);
+            assert_eq!(seq.len(), par.len(), "length mismatch L={l}");
+            for (t, (s, p)) in seq.iter().zip(par.iter()).enumerate() {
+                assert!(
+                    (s.a - p.a).abs() < 1e-4,
+                    "L={l} t={t}: a {} vs {}",
+                    s.a,
+                    p.a
+                );
+                assert!(
+                    (s.b - p.b).abs() < 1e-4,
+                    "L={l} t={t}: b {} vs {}",
+                    s.b,
+                    p.b
+                );
+            }
+        }
+    }
+
+    /// Blelloch scan agrees with the sequential scan for non-power-of-two L
+    /// (identity padding must be inert).
+    #[test]
+    fn blelloch_matches_sequential_non_pow2() {
+        use crate::handle::LcgRng;
+        let mut rng = LcgRng::new(23);
+        for &l in &[3_usize, 5, 7, 9, 13, 17, 31, 100] {
+            let pairs: Vec<ScanPair> = (0..l)
+                .map(|_| ScanPair {
+                    a: rng.next_f32() * 0.8 + 0.1,
+                    b: rng.next_f32() * 4.0 - 2.0,
+                })
+                .collect();
+            let seq = inclusive_scan(&pairs);
+            let par = blelloch_inclusive_scan(&pairs);
+            assert_eq!(seq.len(), par.len(), "length mismatch L={l}");
+            for (t, (s, p)) in seq.iter().zip(par.iter()).enumerate() {
+                assert!((s.a - p.a).abs() < 1e-4, "L={l} t={t}: a");
+                assert!((s.b - p.b).abs() < 1e-4, "L={l} t={t}: b");
+            }
+        }
+    }
+
+    /// Single element and empty edge cases for the Blelloch scan.
+    #[test]
+    fn blelloch_edge_cases() {
+        assert!(blelloch_inclusive_scan(&[]).is_empty());
+        let p = ScanPair { a: 0.7, b: 1.3 };
+        let r = blelloch_inclusive_scan(&[p]);
+        assert_eq!(r.len(), 1);
+        assert!((r[0].a - p.a).abs() < 1e-6);
+        assert!((r[0].b - p.b).abs() < 1e-6);
+    }
+
+    /// `ssm_state_scan_blelloch` matches the sequential `ssm_state_scan`.
+    #[test]
+    fn ssm_state_scan_blelloch_matches() {
+        use crate::handle::LcgRng;
+        let mut rng = LcgRng::new(31);
+        let l = 50_usize;
+        let a_bar: Vec<f32> = (0..l).map(|_| rng.next_f32() * 0.9 + 0.05).collect();
+        let mut b_bar_u = vec![0.0_f32; l];
+        rng.fill_normal(&mut b_bar_u);
+        let seq = ssm_state_scan(&a_bar, &b_bar_u).expect("seq");
+        let par = ssm_state_scan_blelloch(&a_bar, &b_bar_u).expect("blelloch");
+        for (t, (&s, &p)) in seq.iter().zip(par.iter()).enumerate() {
+            assert!((s - p).abs() < 1e-4, "t={t}: {s} vs {p}");
+        }
+    }
+
+    /// Blelloch cumulative-sum mode: a=1 everywhere ⇒ h[t] = Σ b.
+    #[test]
+    fn blelloch_cumsum_mode() {
+        let a_bar = vec![1.0_f32; 6];
+        let b_bar_u = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let h = ssm_state_scan_blelloch(&a_bar, &b_bar_u).expect("blelloch");
+        let expected = [1.0_f32, 3.0, 6.0, 10.0, 15.0, 21.0];
+        for (t, (&got, &exp)) in h.iter().zip(expected.iter()).enumerate() {
+            assert!((got - exp).abs() < 1e-4, "cumsum t={t}: {got} vs {exp}");
+        }
+    }
+
+    #[test]
+    fn ssm_state_scan_blelloch_errors() {
+        assert!(matches!(
+            ssm_state_scan_blelloch(&[], &[]),
+            Err(MambaError::EmptyInput(_))
+        ));
+        assert!(matches!(
+            ssm_state_scan_blelloch(&[0.5, 0.5], &[1.0]),
+            Err(MambaError::DimensionMismatch { .. })
+        ));
     }
 
     /// Manual recurrence check for 3 steps.

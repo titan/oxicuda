@@ -7,9 +7,9 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 
 ## Implementation Status
 
-- **Actual SLoC:** 4,395 across 13 files
-- **Tests:** 152 passing
-- **Status:** Full memory + compute backend with MSL, MPS interop, ANE hints, GPU FFT
+- **Actual SLoC:** 8,747 across 22 files
+- **Tests:** 217 unit + 3 doc = 220 passing (host/codegen surface; on-device tests are `#[cfg(target_os = "macos")]`-gated and skip without a GPU)
+- **Status:** Full memory + compute backend with MSL, MPS interop, ANE hints, GPU FFT, plus host-side codegen/builders for `simdgroup_matrix`/df64-FP64/INT8 GEMM, MTLHeap suballocation, storage-mode planning, argument buffers, events/fences, indirect command + blit lists, GPU-family capability gating, and dispatch planning
 - **Targets:** Apple Silicon (M1/M2/M3/M4 series) and Intel Mac (discrete + integrated)
 
 ### Completed
@@ -31,6 +31,14 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 - [x] `reduction_msl` -- dedicated MSL shaders for sum/max/min/mean using `simdgroup_*` intrinsics
 - [x] Conv2D MSL kernel with NCHW layout + CPU fallback for unsupported tile sizes
 - [x] Attention MSL kernel -- scaled dot-product + stable softmax + causal masking
+- [x] `softmax_msl` (`msl_nn.rs`) -- row-wise numerically-stable softmax (threadgroup max/sum reductions)
+- [x] `layernorm_msl` (`msl_nn.rs`) -- row-wise layer-norm with affine `gamma`/`beta` and `rsqrt(var+eps)`
+- [x] `scan_msl` (`msl_nn.rs`) -- Hillis-Steele inclusive/exclusive prefix sum with ping-pong threadgroup buffers
+
+#### Host-side builders & planners (`*.rs`, CPU-testable)
+- [x] `dispatch.rs` -- `DispatchPlanner`/`DispatchPlan`: 1D/2D/batched threadgroup + grid sizing, SIMD-aligned widths, threadgroup-scratch budgeting
+- [x] `storage.rs` -- `MetalStorageMode` (Shared/Managed/Private/Memoryless), `StoragePlanner` mode selection, `align_up`/`align_down` buffer math
+- [x] `command.rs` -- `BlitCommandList` (copy/fill/synchronize op list with overlap validation) alongside the `IndirectCommandBuffer` recorder
 
 #### FFT Pipeline (`fft.rs`, ~35.3K)
 - [x] `MetalFftPlan::new()` -- compiles MSL `fft_butterfly` and `bit_reverse` shaders **once** at plan creation
@@ -56,25 +64,25 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 ### Future Enhancements
 
 #### P0 -- Critical
-- [ ] Native MSL `simdgroup_matrix` GEMM kernels -- use Apple's SIMD-group matrix multiply for M2/M3 (analogous to Tensor Cores) for 4-8x speedup over current tiled GEMM
-- [ ] `MTLHeap` / `MTLResourceStorageModeManaged` budgeting for large model weights exceeding unified-memory pressure
-- [ ] `MPSGraph` integration -- use `MPSGraphExecutable` for fused op chains (transformer blocks) instead of per-op MSL dispatch
+- [x] Native MSL `simdgroup_matrix` GEMM kernels -- `msl_nn::simdgroup_gemm_msl` emits the `simdgroup_float8x8` MMA-tile GEMM source (8x8 `simdgroup_load`/`simdgroup_multiply_accumulate`/`simdgroup_store`); `device_family::MetalDeviceCapabilities::prefer_simdgroup_gemm` gates dispatch on family + 8-alignment. *Codegen + gating CPU-tested; on-GPU 4-8x speedup measurement requires Apple GPU/Metal hardware.*
+- [x] `MTLHeap` / `MTLResourceStorageModeManaged` budgeting -- `heap::MetalHeapAllocator` (first-fit suballocator with coalescing) + `heap::MemoryBudget` (unified-memory pressure tracking) + `storage::StoragePlanner` (Shared/Managed/Private selection, alignment math). *Placement/budgeting logic CPU-tested; driving a real `MTLHeap` requires Apple GPU/Metal hardware.*
+- [ ] `MPSGraph` integration -- use `MPSGraphExecutable` for fused op chains (transformer blocks) instead of per-op MSL dispatch *(requires Apple GPU/Metal hardware -- needs the MPSGraph runtime)*
 
 #### P1 -- Important
-- [ ] f64 emulation path -- Metal has no native `double` type; implement double-single arithmetic for scientific workloads
-- [ ] INT8 dynamic quantization GEMM for ANE/CPU offload of inference workloads (Apple Silicon int8 path)
-- [ ] Argument buffers (`MTLArgumentEncoder`) for bindless texture/buffer access -- reduces per-dispatch overhead
-- [ ] `MTLEvent` / `MTLSharedEvent` cross-queue and cross-process synchronization
-- [ ] Indirect command buffers (`MTLIndirectCommandBuffer`) for low-overhead GPU-driven dispatch
+- [x] f64 emulation path -- `msl_nn::gemm_msl_f64_ds` emits a double-single (`df64`) GEMM (Dekker `two_prod`/`fma` + Knuth `two_sum`, `float2` limb storage); `numeric::DoubleSingle` + `pack_df64`/`unpack_df64` provide the matching host-side split arithmetic. *Codegen + host math CPU-tested.*
+- [x] INT8 dynamic quantization GEMM -- `msl_nn::int8_quant_gemm_msl` emits the `char`x`char`->`int`->dequant-`float` GEMM; `numeric::Int8Quantizer` (symmetric + asymmetric) derives the scale/zero-point constants the kernel consumes. *Codegen + quant math CPU-tested.*
+- [x] Argument buffers (`MTLArgumentEncoder`) -- `argbuffer::ArgumentBufferLayout` + builder lay out `[[id(n)]]` slots, byte offsets, and `encodedLength` for bindless buffer/texture/sampler/inline-constant tables. *Layout logic CPU-tested; encoding into a real argument buffer requires Apple GPU/Metal hardware.*
+- [x] `MTLEvent` / `MTLSharedEvent` cross-queue synchronization -- `event::MetalEvent`/`MetalFence`/`EventTimeline` model monotonic signal/wait values and validate a multi-queue sync plan for satisfiability + deadlock cycles. *Ordering logic CPU-tested; real cross-process events require Apple GPU/Metal hardware.*
+- [x] Indirect command buffers (`MTLIndirectCommandBuffer`) -- `command::IndirectCommandBuffer` records a fixed-capacity, pre-encoded compute-dispatch list (`set_compute_command`/`reset_range`). *Recording logic CPU-tested; GPU-driven replay requires Apple GPU/Metal hardware.*
 
 #### P2 -- Nice-to-Have
-- [ ] `fft/mps_fft.rs` — MPS FFT integration via `MPSMatrixFourierTransform` (Apple 2021): 1D/2D power-of-2 FFT through Metal Performance Shaders for tuned Apple GPU paths; `MpsFftPlan`
-- [ ] `device/device_family.rs` — Metal GPU family and feature gating (Apple 2022): query `MTLGPUFamily` (Apple5/6/7/8, Mac2) to gate `simdgroup_matrix`, dynamic caching, and mesh shaders per chip generation at runtime; `MetalDeviceFamily`
-- [ ] Mac Pro multi-GPU peer copy via `MTLDevice::peerGroupID` (Intel Mac Pro era; legacy support)
-- [ ] Tile shaders for compute-in-rasterization hybrid workloads (M-series tile memory)
-- [ ] Hardware mesh shader support for graphics-compute fusion (M3+)
-- [ ] CoreML stub integration -- emit `.mlmodel` blobs from kernel graphs for ANE offload
-- [ ] Metal3 dynamic libraries (`MTLDynamicLibrary`) for shader hot-reload in development builds
+- [ ] `fft/mps_fft.rs` — MPS FFT integration via `MPSMatrixFourierTransform` (Apple 2021): 1D/2D power-of-2 FFT through Metal Performance Shaders for tuned Apple GPU paths; `MpsFftPlan` *(requires Apple GPU/Metal hardware -- MPS runtime)*
+- [x] `device_family.rs` — Metal GPU family and feature gating: `device_family::MetalGpuFamily` (Apple4..9, Mac2) + `MetalDeviceCapabilities` gate `simdgroup_matrix`, dynamic caching, mesh shaders, argument-buffer tier-2, threadgroup-memory budget, and unified-memory per chip generation; `from_device_name` heuristic + `dispatch::DispatchPlanner` consume it. *Capability table CPU-tested; live `supportsFamily:` query requires Apple GPU/Metal hardware.*
+- [ ] Mac Pro multi-GPU peer copy via `MTLDevice::peerGroupID` (Intel Mac Pro era; legacy support) *(requires Apple GPU/Metal hardware -- multiple physical GPUs)*
+- [ ] Tile shaders for compute-in-rasterization hybrid workloads (M-series tile memory) *(requires Apple GPU/Metal hardware)*
+- [ ] Hardware mesh shader support for graphics-compute fusion (M3+) *(requires Apple GPU/Metal hardware)*
+- [ ] CoreML stub integration -- emit `.mlmodel` blobs from kernel graphs for ANE offload *(requires Apple GPU/Metal hardware + CoreML)*
+- [ ] Metal3 dynamic libraries (`MTLDynamicLibrary`) for shader hot-reload in development builds *(requires Apple GPU/Metal hardware)*
 
 ## Dependencies
 
@@ -88,9 +96,9 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 ## Quality Status
 
 - Warnings: 0
-- Tests: 152 passing
-- unwrap() calls: 0
-- Clippy: clean (pedantic + nursery)
+- Tests: 220 passing (217 unit + 3 doc)
+- unwrap() calls: 0 (production code; tests use `.expect(...)`)
+- Clippy: clean (`-D warnings`, all-features all-targets)
 
 ## Performance Targets
 
@@ -152,19 +160,19 @@ Apple Silicon GPUs share memory with CPU (unified memory architecture) -- bandwi
 > Items marked `[x]` above represent API surface coverage. These items represent the gap between current implementation depth and production-grade Metal parity.
 
 ### Test Coverage Gaps
-- [ ] M1/M2/M3 dispatch matrix verified across all chip variants (currently single-device CI)
-- [ ] MPS interop accuracy vs `MPSMatrixMultiplication` reference for SGEMM
-- [ ] FFT correctness vs vDSP for sizes 64, 256, 1024, 4096, 16384, 65536
-- [ ] ANE dispatch decisions verified against actual CoreML execution
-- [ ] Conv2D NCHW vs MPS image-format reference correctness
+- [ ] M1/M2/M3 dispatch matrix verified across all chip variants (currently single-device CI) *(requires Apple GPU/Metal hardware)*
+- [ ] MPS interop accuracy vs `MPSMatrixMultiplication` reference for SGEMM *(requires Apple GPU/Metal hardware)*
+- [ ] FFT correctness vs vDSP for sizes 64, 256, 1024, 4096, 16384, 65536 *(requires Apple GPU/Metal hardware)*
+- [ ] ANE dispatch decisions verified against actual CoreML execution *(requires Apple GPU/Metal hardware + CoreML)*
+- [ ] Conv2D NCHW vs MPS image-format reference correctness *(requires Apple GPU/Metal hardware)*
 
 ### Implementation Deepening
-- [ ] `simdgroup_matrix` kernels for M2+ (currently tiled scalar GEMM only)
-- [ ] Heap-based allocation for >4 GiB working sets on M-series
-- [ ] MPSGraph executable caching across `execute()` calls
-- [ ] `MTLCounterSampleBuffer` integration for kernel-level GPU timing
-- [ ] Pipeline state cache shared across `MetalBackend` instances (currently per-pipeline)
-- [ ] `MTLDynamicLibrary` for shader hot-reload during MSL development
+- [x] `simdgroup_matrix` kernel codegen for M2+ -- `msl_nn::simdgroup_gemm_msl` (on-hardware perf vs tiled scalar GEMM still requires Apple GPU/Metal hardware)
+- [x] Heap-based allocation for large working sets -- `heap::MetalHeapAllocator` + `MemoryBudget` (placement logic; driving a real `MTLHeap` requires Apple GPU/Metal hardware)
+- [ ] MPSGraph executable caching across `execute()` calls *(requires Apple GPU/Metal hardware -- MPSGraph runtime)*
+- [ ] `MTLCounterSampleBuffer` integration for kernel-level GPU timing *(requires Apple GPU/Metal hardware)*
+- [ ] Pipeline state cache shared across `MetalBackend` instances (currently per-pipeline) *(requires Apple GPU/Metal hardware to validate dispatch)*
+- [ ] `MTLDynamicLibrary` for shader hot-reload during MSL development *(requires Apple GPU/Metal hardware)*
 
 ## macOS Version Compatibility
 

@@ -4,9 +4,12 @@
 //!
 //! ```text
 //! oxicuda-numeric
-//! ├── root/        — Root finding (bisection, Newton, secant, Brent, Halley, Aberth)
+//! ├── root/        — Root finding (bisection, Newton, secant, Brent, Halley, Aberth),
+//! │                  plus multi-precision (double-double) residual refinement for
+//! │                  ill-conditioned / multiple roots (compensated Horner)
 //! ├── quadrature/  — Quadrature: Romberg, Gauss-Legendre/Hermite/Laguerre/Chebyshev,
-//! │                  Clenshaw-Curtis, adaptive Simpson, Gauss-Kronrod, tanh-sinh,
+//! │                  Clenshaw-Curtis, adaptive Simpson, Gauss-Kronrod,
+//! │                  Gauss-Kronrod-Patterson (nested, + Smolyak), tanh-sinh,
 //! │                  Smolyak sparse grid (nested Clenshaw-Curtis)
 //! ├── special/     — Special functions: Bessel J/Y/I/K, Airy, Lambert W, Wright ω,
 //! │                  hypergeometric 2F1, elliptic K/E, zeta, dilogarithm, Ei, polygamma
@@ -20,15 +23,18 @@
 //! │                  Broyden quasi-Newton, BFGS minimiser
 //! ├── poly/        — Polynomial roots: Durand-Kerner, Jenkins-Traub, companion matrix,
 //! │                  Horner evaluation, polynomial deflation
-//! ├── diff/        — Numerical differentiation: central diff, Richardson, complex step
+//! ├── diff/        — Differentiation: central diff, Richardson, complex step,
+//! │                  forward-mode dual-number automatic differentiation
 //! ├── interp/      — Interpolation: linear, cubic spline, Akima, PCHIP, Lagrange,
 //! │                  Hermite, barycentric Lagrange, Floater-Hormann barycentric
 //! │                  rational, Chebyshev series, RBF (scattered)
 //! ├── approx/      — Function approximation: Padé rational approximants from Taylor series
 //! ├── cubature/    — Multi-D cubature: Monte Carlo, quasi-MC Sobol, tensor-product Gauss,
-//! │                  Genz-Malik adaptive
+//! │                  Genz-Malik adaptive, globally-adaptive cubature with the
+//! │                  Berntsen-Espelid-Genz null-rule error estimator
 //! ├── series/       — Sequence acceleration: Aitken Δ², Wynn ε-algorithm (Shanks)
-//! ├── linalg/      — Linalg helpers (private): Jacobi eig, QR Givens, LU, Householder QR
+//! ├── linalg/      — Linalg helpers (private): Jacobi eig, symmetric-tridiagonal QL
+//! │                  eig (implicit shifts), QR Givens, LU, Householder QR
 //! └── metrics/     — Relative error, condition number, residual diagnostics
 //! ```
 //!
@@ -61,6 +67,7 @@ pub use bvp::{
     FiniteDifferenceConfig, FiniteDifferenceSolution, ShootingConfig, ShootingSolution,
     solve_finite_difference, solve_shooting,
 };
+pub use cubature::adaptive_cubature::{AdaptiveCubature, CubatureResult};
 pub use error::{NumericError, NumericResult};
 pub use handle::{LcgRng, NumericHandle, SmVersion};
 pub use interp::barycentric_rational::FloaterHormann;
@@ -73,7 +80,14 @@ pub use nonlinear::{
 pub use ode::dae::{DaeConfig, DaeSolution, DaeSolver};
 pub use ode::radau_iia::{RadauConfig, RadauIia};
 pub use ode::sdirk::{Sdirk, SdirkConfig};
+pub use quadrature::gauss_patterson::{
+    GaussPatterson, QuadResult, patterson_exact_degree, patterson_point_count,
+};
 pub use quadrature::sparse_grid::{SparseGrid, smolyak_integrate, smolyak_integrate_unit};
+pub use root::residual_refine::{
+    Double, RefineConfig, RefineResult, compensated_horner, refine_polynomial_root,
+    refine_root_extended,
+};
 pub use series::acceleration::{
     WynnEpsilon, aitken_accelerate, aitken_sequence, aitken_step, shanks, wynn_epsilon,
 };

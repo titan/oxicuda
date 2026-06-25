@@ -57,6 +57,7 @@ pub struct Conv4Config {
 /// row-major) and the per-channel BN affine parameters γ (`bn_scale`),
 /// β (`bn_shift`).  The implicit ReLU and 2×2 stride-2 max-pool are applied
 /// inside `Conv4Block::forward`.
+#[derive(Debug, Clone)]
 pub struct Conv4Block {
     /// Conv 3×3 same-pad weights: layout `[out_c, in_c, kh, kw]` row-major,
     /// total length `width · prev_channels · 9`.
@@ -237,6 +238,30 @@ impl Conv4Block {
     pub fn out_channels(&self) -> usize {
         self.out_channels
     }
+
+    /// Append this block's trainable parameters — conv weights, then BN γ, then
+    /// BN β — to `out`, in the canonical order used by [`Conv4Backbone::to_params`].
+    fn append_params(&self, out: &mut Vec<f32>) {
+        out.extend_from_slice(&self.conv_w);
+        out.extend_from_slice(&self.bn_scale);
+        out.extend_from_slice(&self.bn_shift);
+    }
+
+    /// Overwrite this block's trainable parameters from `params[offset..]` in the
+    /// same conv-weights / BN-γ / BN-β order produced by [`Self::append_params`],
+    /// returning the new offset just past this block's slice.
+    fn load_params(&mut self, params: &[f32], offset: usize) -> usize {
+        let mut o = offset;
+        let cw = self.conv_w.len();
+        self.conv_w.copy_from_slice(&params[o..o + cw]);
+        o += cw;
+        let s = self.bn_scale.len();
+        self.bn_scale.copy_from_slice(&params[o..o + s]);
+        o += s;
+        let b = self.bn_shift.len();
+        self.bn_shift.copy_from_slice(&params[o..o + b]);
+        o + b
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -248,6 +273,7 @@ impl Conv4Block {
 /// `forward(x)` consumes a row-major `(in_channels × input_h × input_w)`
 /// tensor and returns a flattened feature vector of length
 /// `width · (input_h/16) · (input_w/16)`.
+#[derive(Debug, Clone)]
 pub struct Conv4Backbone {
     blocks: [Conv4Block; 4],
     cfg: Conv4Config,
@@ -381,6 +407,44 @@ impl Conv4Backbone {
     /// Read-only access to the configuration.
     pub fn config(&self) -> &Conv4Config {
         &self.cfg
+    }
+
+    /// Flatten every trainable parameter of the backbone into a single
+    /// `n_params()`-length `Vec<f32>`, block by block, each block contributing
+    /// its conv weights, then BN γ, then BN β.
+    ///
+    /// This is the flatten half of the MAML inner-loop closure contract — it lets
+    /// the meta-learner treat the whole convnet as a flat parameter vector,
+    /// exactly like [`crate::network::backbone::MlpBackbone::to_params`].
+    pub fn to_params(&self) -> Vec<f32> {
+        let mut out = Vec::with_capacity(self.n_params());
+        for block in self.blocks.iter() {
+            block.append_params(&mut out);
+        }
+        out
+    }
+
+    /// Overwrite every trainable parameter of the backbone from a flat
+    /// `n_params()`-length slice, in the same order produced by
+    /// [`Self::to_params`].
+    ///
+    /// This is the unflatten half of the MAML inner-loop closure contract.
+    ///
+    /// # Errors
+    /// [`MetaError::DimensionMismatch`] if `params.len() != n_params()`.
+    pub fn from_params(&mut self, params: &[f32]) -> MetaResult<()> {
+        let expected = self.n_params();
+        if params.len() != expected {
+            return Err(MetaError::DimensionMismatch {
+                expected,
+                got: params.len(),
+            });
+        }
+        let mut offset = 0;
+        for block in self.blocks.iter_mut() {
+            offset = block.load_params(params, offset);
+        }
+        Ok(())
     }
 }
 
@@ -726,6 +790,60 @@ mod tests {
         let x = vec![0.0_f32; 7];
         assert!(matches!(
             bb.forward_partial(&x, 1),
+            Err(MetaError::DimensionMismatch { .. })
+        ));
+    }
+
+    // ── to_params / from_params (MAML flatten/unflatten contract) ────────────
+
+    #[test]
+    fn to_params_length_matches_n_params() {
+        let bb = make_backbone(tiny_cfg());
+        assert_eq!(bb.to_params().len(), bb.n_params());
+    }
+
+    #[test]
+    fn to_params_from_params_round_trips_exactly() {
+        // Flatten, perturb, unflatten, re-flatten: must recover the perturbed
+        // vector bit-for-bit (no reordering, no loss).
+        let mut bb = make_backbone(tiny_cfg());
+        let original = bb.to_params();
+        // A deterministic perturbation of every parameter.
+        let perturbed: Vec<f32> = original
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| v + (i as f32) * 0.001 - 0.5)
+            .collect();
+        bb.from_params(&perturbed).expect("from_params ok");
+        let reread = bb.to_params();
+        assert_eq!(reread, perturbed, "to/from_params must round-trip exactly");
+    }
+
+    #[test]
+    fn from_params_changes_forward_output() {
+        // Loading different parameters must change the forward output — proving
+        // the flat vector genuinely drives the convolution weights.
+        let mut bb = make_backbone(tiny_cfg());
+        let cfg = bb.config().clone();
+        let x = vec![0.3_f32; cfg.in_channels * cfg.input_h * cfg.input_w];
+        let y_before = bb.forward(&x).expect("forward ok");
+        let mut params = bb.to_params();
+        for p in params.iter_mut() {
+            *p += 0.25;
+        }
+        bb.from_params(&params).expect("from_params ok");
+        let y_after = bb.forward(&x).expect("forward ok");
+        assert_ne!(
+            y_before, y_after,
+            "changing the flat params must change the forward output"
+        );
+    }
+
+    #[test]
+    fn from_params_wrong_length_errs() {
+        let mut bb = make_backbone(tiny_cfg());
+        assert!(matches!(
+            bb.from_params(&[0.0_f32; 3]),
             Err(MetaError::DimensionMismatch { .. })
         ));
     }

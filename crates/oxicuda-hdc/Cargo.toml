@@ -8,7 +8,7 @@ readme = "README.md"
 license.workspace = true
 homepage = "https://github.com/cool-japan/oxicuda"
 repository.workspace = true
-keywords = ["gpu", "hyperdimensional-computing", "vsa", "neuromorphic", "pure-rust"]
+keywords = ["gpu", "hyperdimensional", "vsa", "neuromorphic", "pure-rust"]
 categories = ["science", "algorithms"]
 
 [lints]

@@ -21,6 +21,7 @@
 //! ├── encoding/      — Rate, TTFS, phase, Poisson input encodings
 //! ├── layer/         — Spiking linear, conv, pool, recurrent
 //! ├── reservoir/     — Liquid State Machine
+//! ├── tasks/         — NARMA-10 / memory-capacity & STDP verification suites
 //! ├── metrics/       — Firing rate, ISI, CV, van Rossum, Victor-Purpura, sync
 //! ├── handle         — SmVersion, LcgRng, SnnHandle
 //! ├── error          — SnnError / SnnResult
@@ -39,6 +40,7 @@ pub mod ptx_kernels;
 pub mod reservoir;
 pub mod surrogate;
 pub mod synapse;
+pub mod tasks;
 pub mod training;
 
 #[cfg(test)]

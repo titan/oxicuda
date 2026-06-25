@@ -41,9 +41,9 @@ Vol.1 Foundation covers driver + memory + launch. The driver crate is the lowest
 - [x] NVLink topology detection (nvlink.rs) -- NVLink/NVSwitch topology discovery, bandwidth query, peer link enumeration for multi-GPU communication planning (P1)
 - [x] GPU topology mapping (topology.rs) -- PCIe/NVLink topology graph construction, NUMA-aware device placement, optimal peer selection (P1)
 - [x] Debug and diagnostic tools (debug.rs) -- GPU memory leak detection, kernel launch tracing, error backtrace capture, device state snapshot for debugging (P2)
-- [ ] NVLink fabric handles (`fabric/fabric_handle.rs`) -- cuMemImportFromShareableHandle / cuMemExportToShareableHandle for NVLink fabric memory sharing between multi-process peer GPUs (P1)
-- [ ] PTX-parseable SM occupancy helper (`occupancy/register_count.rs`) -- parse `.reg` directive count from PTX string and feed into cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags for exact register-count-aware occupancy; `OccupancyFromPtx` (P1)
-- [ ] CUPTI-lite profiler API stubs (`profiler/cupti_stubs.rs`) -- runtime-load `libcupti.so` via libloading for cuptiActivityEnable / cuptiActivityRegisterCallbacks / cuptiActivityFlushAll for kernel-level profiling (P2)
+- [x] NVLink fabric handles (`fabric_handle.rs`) -- shareable-handle export/import model for NVLink fabric memory sharing between multi-process peer GPUs: `FabricMemory` (exporter, ref-counted), 64-byte opaque `FabricHandle` round-trip (cuMemExportToShareableHandle wire form), `FabricImporter`/`FabricImport` (importer, access-controlled), `FabricAccess`/`FabricAllocationProps`; CPU-modelled state machine + 17 unit tests (P1)
+- [x] PTX-parseable SM occupancy helper (`occupancy_register_count.rs`) -- parses `.reg` directives per `.entry` from PTX (vectorised `<N>` counts, 64-bit types = 2 slots, predicates excluded) and feeds register-count into the CPU `OccupancyCalculator`; `OccupancyFromPtx`/`PtxRegisterUsage`/`PtxKernel` with `estimate_for(sm_major, sm_minor, ...)`; 17 unit tests (P1)
+- [x] CUPTI-lite profiler API stubs (`cupti_stubs.rs`) -- runtime-loads `libcupti.so` via libloading (`CuptiLibrary::load`, probes cuptiActivityEnable/RegisterCallbacks/FlushAll, honest `LibraryNotFound` when absent) plus a CPU-modelled Activity-buffer state machine `ActivitySession` (enable/disable kinds, register callbacks, record→flush→drain, buffer-full + disabled-drop semantics); 16 unit tests (P2)
 
 ## Dependencies
 
@@ -56,7 +56,7 @@ Vol.1 Foundation covers driver + memory + launch. The driver crate is the lowest
 ## Quality Status
 
 - Warnings: 0
-- Tests: 383 passing
+- Tests: 467 passing (369 lib unit + 54 + 8 + 36 integration; +48 from fabric_handle / occupancy_register_count / cupti_stubs)
 - unwrap() calls: 0
 - Clippy: clean (pedantic + nursery)
 

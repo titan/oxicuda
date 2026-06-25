@@ -138,6 +138,61 @@ fn sigmoid_sharp(beta: f32, x: f32) -> f32 {
     1.0 / (1.0 + (-beta * x).exp())
 }
 
+// ─── Crate-internal accessors for the analytic backward pass ──────────────────
+// The backward implementation lives in `node_grad.rs`.
+
+impl NodeTree {
+    pub(crate) fn depth_ref(&self) -> usize {
+        self.depth
+    }
+    pub(crate) fn input_dim_ref(&self) -> usize {
+        self.input_dim
+    }
+    pub(crate) fn output_dim_ref(&self) -> usize {
+        self.output_dim
+    }
+    pub(crate) fn beta_ref(&self) -> f32 {
+        self.beta
+    }
+    pub(crate) fn feature_logits_ref(&self) -> &[f32] {
+        &self.feature_logits
+    }
+    pub(crate) fn thresholds_ref(&self) -> &[f32] {
+        &self.thresholds
+    }
+    pub(crate) fn leaf_values_ref(&self) -> &[f32] {
+        &self.leaf_values
+    }
+
+    /// Mutable feature logits for test setup (finite-difference fixtures).
+    #[cfg(test)]
+    pub(crate) fn feature_logits_mut_for_test(&mut self) -> &mut [f32] {
+        &mut self.feature_logits
+    }
+
+    /// Read a single scalar parameter (test-only, for finite-difference checks).
+    #[cfg(test)]
+    pub(crate) fn param_get(&self, p: &crate::tree::node_grad::NodeParam) -> f32 {
+        use crate::tree::node_grad::NodeParam as P;
+        match *p {
+            P::FeatLogit(i) => self.feature_logits[i],
+            P::Threshold(i) => self.thresholds[i],
+            P::Leaf(i) => self.leaf_values[i],
+        }
+    }
+
+    /// Write a single scalar parameter (test-only, for finite-difference checks).
+    #[cfg(test)]
+    pub(crate) fn param_set(&mut self, p: &crate::tree::node_grad::NodeParam, val: f32) {
+        use crate::tree::node_grad::NodeParam as P;
+        match *p {
+            P::FeatLogit(i) => self.feature_logits[i] = val,
+            P::Threshold(i) => self.thresholds[i] = val,
+            P::Leaf(i) => self.leaf_values[i] = val,
+        }
+    }
+}
+
 // ─── NodeEnsemble ─────────────────────────────────────────────────────────────
 
 /// An ensemble of soft oblivious decision trees.
@@ -166,6 +221,11 @@ impl NodeEnsemble {
             )?);
         }
         Ok(Self { trees, config: cfg })
+    }
+
+    /// Crate-internal access to the underlying trees (used by the backward pass).
+    pub(crate) fn trees_ref(&self) -> &[NodeTree] {
+        &self.trees
     }
 
     /// Forward pass for a single sample `x [input_dim]`.

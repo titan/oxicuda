@@ -181,6 +181,24 @@ impl MoeLayer {
         })
     }
 
+    /// Immutable access to the underlying expert bank.
+    #[must_use]
+    pub fn experts(&self) -> &ExpertBank {
+        &self.experts
+    }
+
+    /// Mutable access to the underlying expert bank (e.g. to overwrite expert
+    /// weights when sparse-upcycling from a dense checkpoint).
+    pub fn experts_mut(&mut self) -> &mut ExpertBank {
+        &mut self.experts
+    }
+
+    /// Immutable access to the top-k router.
+    #[must_use]
+    pub fn router(&self) -> &TopKRouter {
+        &self.router
+    }
+
     /// Return the total parameter count (router + all experts).
     #[must_use]
     pub fn param_count(&self) -> usize {

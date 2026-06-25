@@ -9,7 +9,7 @@ NetworkX / SNAP / igraph-style toolkits. Part of [OxiCUDA](https://github.com/co
 
 - **Actual SLoC:** 11,913 (98 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 7,043
-- **Tests:** 327 passing
+- **Tests:** 351 passing
 - **Vol.59 scope:** Complete classical graph-algorithm coverage (traversal, shortest
   paths, MST, max-flow, matching, connectivity, centrality, community detection,
   graph coloring, TSP, isomorphism). Complements oxicuda-graph (GNN-oriented) by
@@ -143,13 +143,13 @@ NetworkX / SNAP / igraph-style toolkits. Part of [OxiCUDA](https://github.com/co
 - [ ] PageRank topology-aware partitioning and async pull/push hybrid for sm_90 NVLink
 
 #### P2 -- Algorithmic Extensions
-- [ ] Weighted general matching (`matching/weighted_general.rs`) — Galil 1986: O(n·m·α(n)) weighted general matching via augmenting paths; `WeightedGeneralMatching`
-- [ ] Parametric max-flow (`max_flow/parametric_maxflow.rs`) — Hochbaum 2008: solve a family of max-flow problems with parametrically varying capacities via monotone incremental pushes; `ParametricMaxFlow`
-- [ ] Planar graph separator (`separation/planar_separator.rs`) — Lipton-Tarjan 1979: O(√n) separator theorem for planar graphs via BFS levelling + balance split; `PlanarSeparator`
+- [x] Weighted general matching (`matching/weighted_general.rs`) — Edmonds/Galil O(n³) primal-dual weighted blossom (Van Rantwijk formulation): vertex+blossom potentials, alternating trees, contraction/expansion; `WeightedGeneralMatching` (+ `solve_max_cardinality`). Validated against subset-DP oracle on random graphs.
+- [x] Parametric max-flow (`max_flow/parametric_maxflow.rs`) — Gallo-Grigoriadis-Tarjan / Hochbaum: affine GGT-monotone arc capacities, nested min-cut source sets, divide-and-conquer breakpoint slicing; `ParametricMaxFlow` (`solve_at`/`solve_grid`/`find_breakpoints`).
+- [x] Planar graph separator (`separation/planar_separator.rs`) — Lipton-Tarjan BFS-level separator + tree-centroid specialisation with exact subset-sum balancing; `PlanarSeparator` (O(√n) on grids/trees/paths).
 - [x] Harmonic centrality (`centrality/harmonic.rs`) — Marchiori-Latora 2000: harmonic mean of inverse distances `Σ 1/d(v,u)` as the harmonic centrality, well-defined for disconnected graphs unlike closeness; `HarmonicCentrality`
 - [ ] Multi-GPU partitioned BFS / Dijkstra with edge-cut overlap
 - [x] Delta-stepping shortest paths as an alternative to heap-based Dijkstra for GPU
-- [ ] Streaming dynamic graph updates (add/remove edge) for incremental SCC / PageRank
+- [x] Streaming dynamic graph updates (add/remove edge) for incremental SCC / PageRank (`dynamic/`): `DynamicGraph` (mutable digraph with reverse index + edge multiplicity), `IncrementalPageRank` (warm-started power iteration resuming from the prior stationary vector → same ranks as a cold solve, fewer iterations), `IncrementalScc` (merge components on cycle-closing inserts via condensation forward/backward reachability; re-split only the affected component on deletes). All validated against from-scratch Tarjan / static PageRank, incl. a randomised 40×60-step update-stream test.
 - [ ] Persistent kernel path for `triangle_count` on repeated subgraph queries
 
 ## Dependencies
@@ -168,7 +168,7 @@ implemented natively.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 327 passing (unit + 33 e2e cross-module)
+- Tests: 351 passing (unit + 33 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns
@@ -224,7 +224,7 @@ tuning is currently uniform; targeted tuning is tracked under Future Enhancement
 |--------|----------------------------------|--------|
 | SLoC | 70K-130K (median ~100K) | 11,913 |
 | Files | ~30-50 algorithm modules | 98 |
-| Tests | algorithm-grade coverage | 327 |
+| Tests | algorithm-grade coverage | 351 |
 
 The gap to the median estimate reflects the estimation targeting full
 NetworkX-/SNAP-grade production parity including streaming dynamic graph algorithms,

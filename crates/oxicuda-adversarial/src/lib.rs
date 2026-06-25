@@ -53,15 +53,26 @@ pub mod prelude {
     pub use crate::defenses::macer::{MacerConfig, MacerLoss};
     pub use crate::defenses::mart::{MartConfig, mart_loss};
     pub use crate::defenses::randomized_smoothing::{RsConfig, certified_radius, smoothed_predict};
+    pub use crate::defenses::smooth_adv::{
+        SmoothAdvConfig, SmoothAdvNorm, smooth_adv_attack, smooth_adv_attack_spsa, smooth_adv_batch,
+    };
     pub use crate::defenses::smoothing_lp::LpSmoothingCertifier;
     pub use crate::defenses::trades::{TradesConfig, trades_loss};
     pub use crate::error::{AdvError, AdvResult};
     pub use crate::handle::{AdvHandle, LcgRng, SmVersion};
     pub use crate::metrics::asr::attack_success_rate;
+    pub use crate::metrics::corruption::{
+        Corruption, CorruptionErrors, CorruptionSummary, box_blur, brightness, contrast,
+        gaussian_noise, impulse_noise, shot_noise,
+    };
     pub use crate::metrics::feature_squeezing::{FeatureSqueezingConfig, FeatureSqueezingDetector};
     pub use crate::metrics::gradient_masking::{
         GradMaskingConclusion, GradMaskingConfig, GradientMaskingReport, diagnose_gradient_masking,
         random_perturbation_asr,
+    };
+    pub use crate::metrics::loss_landscape::{
+        Histogram, LandscapeProbeConfig, LandscapeReport, ProbeNorm, loss_profile,
+        multi_restart_probe,
     };
     pub use crate::metrics::robust_accuracy::{
         ClassResult, RobustAccConfig, certified_accuracy, robust_accuracy, robust_accuracy_report,

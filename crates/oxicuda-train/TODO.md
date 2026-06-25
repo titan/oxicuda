@@ -97,9 +97,17 @@ and large-scale ZeRO-style distributed training.
 - [x] `optimizer/adopt.rs` — ADOPT (Taniguchi 2024): convergence without bounded second-moment assumption; adaptive gradient with corrected denominators dₜ=|∇ₜ|/(1-β₁ᵗ), stable at high β₁ and sparse grads
 - [x] `optimizer/muon.rs` — Muon (Kosson 2024): momentum + Nesterov + orthogonalisation via Newton-Schulz iteration; updates W←W-η·orth(M) where M is Nesterov momentum; empirically faster than Adam on LLMs
 - [x] `scheduler/wsd.rs` — WSD (Warmup-Stable-Decay, Hu 2024): three-phase schedule; stable LR plateau for extended training + fast cooldown; recommended for continued training of Llama-style models
-- [ ] `regularization/sophia.rs` — Sophia (Liu 2023): second-order optimizer via Hutchinson estimator of Hessian diagonal hₜ = ∇f·v where v∼N(0,I); update = η·g/(max(ρ·h,ε)); 2× fewer steps vs Adam on GPT-2
+- [x] `regularization/sophia.rs` — Sophia (Liu 2023): second-order optimizer via Hutchinson estimator of Hessian diagonal hₜ = ∇f·v where v∼N(0,I); update = η·g/(max(ρ·h,ε)); 2× fewer steps vs Adam on GPT-2
 - [x] `optimizer/lamb.rs` — LAMB (You 2019): Layer-wise Adaptive Moments with trust-ratio r = ||w|| / ||g + λw||; scaled Adam update η · r · (m / (√v + ε)); converges large-batch BERT training; `GpuLamb { beta1, beta2, eps, weight_decay }`
 - [x] `grad_clip/grad_clip.rs` / `GradClip` — gradient clipping abstraction covering `GlobalNormClip`, `PerLayerClip`, `ValueClip`; unified `GradClip` trait with `apply()` and `last_scale()` inspector; gradient_clipping policy enforced across all optimisers
+- [x] `optimizer/adafactor.rs` — Adafactor (Shazeer & Stern 2018): sublinear-memory adaptive optimizer; factored per-row/per-col second moment `V̂[i,j]=R[i]·C[j]/(1ᵀR)` → O(m+n) for 2-D params (dense fallback for vectors); β̂₂(t)=1−t⁻ᶜ decay, update clipping by RMS, relative step ρ(t)=min(eps_rel,1/√t) and AdamW-style decoupled decay; `Adafactor { dim, shape, AdafactorConfig }`
+- [x] `optimizer/shampoo.rs` — Shampoo (Gupta et al. 2018): preconditioned tensor optimization; two-sided per-dimension preconditioners L=ΣGGᵀ, R=ΣGᵀG with Ĝ=L⁻¹ᐟ⁴·G·R⁻¹ᐟ⁴ via cyclic-Jacobi symmetric eigendecomposition + damped inverse-pth-root (diagonal/AdaGrad fallback for vectors); optional heavy-ball momentum, lazy `precond_interval` root refresh
+- [x] `scheduler/cosine_restart.rs` — SGDR (Loshchilov & Hutter 2017): cosine annealing with warm restarts; lr(T_cur)=η_min+½(η_max−η_min)(1+cos(π·T_cur/T_i)), geometric cycle growth T_{i+1}=⌈t_mult·T_i⌉; implements `LrScheduler` (`CosineAnnealingWarmRestarts`)
+- [x] `training/swa.rs` — Stochastic Weight Averaging (Izmailov et al. 2018): equal-weight running parameter average W_SWA←(n·W_SWA+W)/(n+1) (distinct from EMA's exponential weighting) + companion `SwaLr` linear/cosine anneal-then-hold schedule
+- [x] `training/label_smoothing.rs` — label smoothing CE (Szegedy et al. 2016): q_k=(1−α)[k=y]+α/K soft targets, numerically-stable (log-sum-exp) loss with closed-form `∂L/∂z=p−q` gradient, per-example and batch APIs; α=0 reduces to plain cross-entropy
+- [x] `training/early_stopping.rs` — early stopping: Min/Max-mode metric monitor with `patience`, `min_delta` noise threshold, best/best-epoch tracking and `should_stop()`
+- [x] `training/curriculum.rs` — competence-based curriculum (Platanios et al. 2019): Linear/Sqrt/Geometric/Step pacing functions c(t)∈[c₀,1] gating the admissible easy-to-hard example window over a difficulty-sorted dataset
+- [x] `training/sampler.rs` — data-loader index samplers: `SequentialSampler`, `RandomSampler` (Fisher–Yates permutation / with-replacement), `WeightedRandomSampler` (inverse-CDF binary search for class rebalancing), `SubsetRandomSampler`, `BatchSampler` (drop-last); all built on the deterministic crate `LcgRng`
 
 ## Dependencies
 
@@ -116,7 +124,7 @@ and large-scale ZeRO-style distributed training.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![warn(missing_docs)]`)
-- Tests: 250 passing (root TODO.md count)
+- Tests: 352 lib + 9 doc passing (`cargo test -p oxicuda-train --all-features`)
 - unwrap() calls: 0 (production code; test code documented with `.expect()` messages)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime

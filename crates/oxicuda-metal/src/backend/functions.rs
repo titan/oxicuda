@@ -1063,4 +1063,92 @@ mod tests {
         b.free(vh).expect("free");
         b.free(oh).expect("free");
     }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn launch_custom_kernel_fma_roundtrip() -> oxicuda_backend::BackendResult<()> {
+        use super::{read_f32_le, write_f32_le};
+
+        let mut backend = MetalBackend::new();
+        if backend.init().is_err() {
+            // No Metal device available (e.g. headless CI) — skip gracefully.
+            return Ok(());
+        }
+
+        // Fused multiply-add kernel with an explicit bounds check.
+        let msl = r#"
+#include <metal_stdlib>
+using namespace metal;
+
+kernel void fma_kernel(
+    device const float* a   [[buffer(0)]],
+    device const float* b   [[buffer(1)]],
+    device float*       out [[buffer(2)]],
+    constant uint&      n   [[buffer(3)]],
+    constant float&     c   [[buffer(4)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= n) return;
+    out[gid] = a[gid] * b[gid] + c;
+}
+"#;
+
+        let count: usize = 1024;
+        let byte_len = count * std::mem::size_of::<f32>();
+        // Deterministic inputs — no randomness.
+        let a: Vec<f32> = (0..count).map(|i| i as f32 * 0.5).collect();
+        let b: Vec<f32> = (0..count).map(|i| i as f32 - 100.0).collect();
+        let c: f32 = 3.25;
+
+        let a_h = backend.alloc(byte_len)?;
+        let b_h = backend.alloc(byte_len)?;
+        let out_h = backend.alloc(byte_len)?;
+        backend.copy_htod(a_h, &write_f32_le(&a))?;
+        backend.copy_htod(b_h, &write_f32_le(&b))?;
+
+        let n_le = (count as u32).to_le_bytes();
+        let c_le = c.to_le_bytes();
+        backend.launch_custom_kernel(
+            msl,
+            "fma_kernel",
+            &[a_h, b_h, out_h],
+            &[&n_le, &c_le],
+            count,
+        )?;
+
+        let mut out_bytes = vec![0u8; byte_len];
+        backend.copy_dtoh(&mut out_bytes, out_h)?;
+        let out = read_f32_le(&out_bytes);
+
+        for i in 0..count {
+            let want = a[i] * b[i] + c;
+            let tol = 1e-3 * want.abs().max(1.0);
+            assert!(
+                (out[i] - want).abs() <= tol,
+                "index {i}: got {}, want {want}",
+                out[i]
+            );
+        }
+
+        // A second launch must reuse the cached pipeline and stay correct.
+        backend.launch_custom_kernel(
+            msl,
+            "fma_kernel",
+            &[a_h, b_h, out_h],
+            &[&n_le, &c_le],
+            count,
+        )?;
+        backend.copy_dtoh(&mut out_bytes, out_h)?;
+        let out2 = read_f32_le(&out_bytes);
+        for i in 0..count {
+            let want = a[i] * b[i] + c;
+            let tol = 1e-3 * want.abs().max(1.0);
+            assert!((out2[i] - want).abs() <= tol, "second launch index {i}");
+        }
+
+        backend.free(a_h)?;
+        backend.free(b_h)?;
+        backend.free(out_h)?;
+        Ok(())
+    }
 }

@@ -9,7 +9,14 @@ pub mod dark_exp_v2;
 pub mod der_plus_plus;
 pub mod er;
 pub mod gem;
+pub mod sharded_buffer;
 pub mod vectorised_gem;
+
+// ─── Sharded replay buffer re-exports ─────────────────────────────────────────
+pub use sharded_buffer::{
+    ReplayShard, ShardPolicy, ShardedReplayBuffer, ShardedReplayConfig, sharded_add,
+    sharded_buffer_new, sharded_len, sharded_sample_balanced,
+};
 
 // ─── Vectorised GEM re-exports ────────────────────────────────────────────────
 pub use vectorised_gem::{VectorisedGemConfig, vectorised_gem_project};

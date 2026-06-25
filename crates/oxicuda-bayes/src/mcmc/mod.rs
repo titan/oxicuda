@@ -16,9 +16,14 @@
 //! given its seed, which makes the chains reproducible for testing.
 
 pub mod hmc;
+pub mod metropolis;
 pub mod sgld;
 
 pub use hmc::{HmcConfig as McmcHmcConfig, HmcSampler};
+pub use metropolis::{
+    MetropolisConfig, MetropolisResult, MetropolisSampler, SliceConfig, SliceSampler, sample_mean,
+    sample_variance,
+};
 pub use sgld::{SgldConfig, SgldSampler};
 
 /// Deterministic 64-bit random number generator for `f64` MCMC sampling.

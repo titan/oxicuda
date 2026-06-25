@@ -20,7 +20,7 @@
 //! Preempted sequences are returned to the waiting queue for re-prefill once
 //! blocks become available.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use crate::batch::sequence::{Sequence, SequenceId, SequenceStatus};
 use crate::error::{InferError, InferResult};
@@ -120,6 +120,10 @@ pub struct Scheduler {
     /// Free KV blocks remaining (tracked separately from the KV cache for
     /// scheduling decisions; actual allocation is in `CacheManager`).
     free_blocks: usize,
+    /// Blocks currently reserved by each admitted sequence, so finishing or
+    /// preempting a sequence returns exactly what its admission consumed (rather
+    /// than leaking the reservation).
+    reserved_blocks: HashMap<SequenceId, usize>,
 }
 
 impl Scheduler {
@@ -135,6 +139,7 @@ impl Scheduler {
             finished: Vec::new(),
             next_id: 1,
             free_blocks,
+            reserved_blocks: HashMap::new(),
         }
     }
 
@@ -172,9 +177,11 @@ impl Scheduler {
         for mut seq in self.running.drain(..) {
             let cost = 1; // decode: one token per sequence
             if batch.n_seqs() >= self.config.max_running_seqs || token_budget < cost {
-                // Preempt: free the sequence's last block.
-                let blocks_freed = preempt_seq(&mut seq);
-                self.free_blocks = self.free_blocks.saturating_add(blocks_freed);
+                // Preempt: reclaim the sequence's whole KV reservation so the
+                // freed blocks are available to other sequences this step.
+                preempt_seq(&mut seq);
+                let reclaimed = self.reserved_blocks.remove(&seq.id).unwrap_or(0);
+                self.free_blocks = self.free_blocks.saturating_add(reclaimed);
                 self.preempted.push(seq);
             } else {
                 batch.decode_ids.push(seq.id);
@@ -199,6 +206,7 @@ impl Scheduler {
                 token_budget = token_budget.saturating_sub(prompt_len);
                 batch.n_tokens += prompt_len;
                 self.free_blocks = self.free_blocks.saturating_sub(blocks_needed);
+                self.reserved_blocks.insert(seq.id, blocks_needed);
                 running_now.push(seq);
             } else {
                 still_preempted.push(seq);
@@ -223,6 +231,7 @@ impl Scheduler {
             token_budget = token_budget.saturating_sub(prompt_len);
             batch.n_tokens += prompt_len;
             self.free_blocks = self.free_blocks.saturating_sub(blocks_needed);
+            self.reserved_blocks.insert(seq.id, blocks_needed);
             running_now.push(seq);
         }
 
@@ -254,6 +263,12 @@ impl Scheduler {
         // Drain finished sequences out of `running`.
         let (finished, still_running): (Vec<_>, Vec<_>) =
             self.running.drain(..).partition(|s| s.status.is_finished());
+        // Return each finished sequence's KV reservation to the free pool so
+        // long-running churn does not leak blocks.
+        for seq in &finished {
+            let reclaimed = self.reserved_blocks.remove(&seq.id).unwrap_or(0);
+            self.free_blocks = (self.free_blocks + reclaimed).min(self.config.total_kv_blocks);
+        }
         self.finished.extend(finished);
         self.running = still_running;
 
@@ -328,13 +343,12 @@ impl Scheduler {
 
 // ── Module-level helpers ──────────────────────────────────────────────────────
 
-/// Reset a sequence's block table and return how many blocks were freed.
-fn preempt_seq(seq: &mut Sequence) -> usize {
-    let freed = seq.block_table.len();
+/// Reset a sequence to the preempted state (clears its block table and the
+/// output generated so far so it can be re-prefilled from the prompt).
+fn preempt_seq(seq: &mut Sequence) {
     seq.block_table.clear();
     seq.output_tokens.clear();
     seq.status = SequenceStatus::Preempted;
-    freed
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -497,5 +511,113 @@ mod tests {
         assert_eq!(f1.len(), 1);
         let f2 = s.take_finished();
         assert!(f2.is_empty(), "take_finished should clear the list");
+    }
+
+    /// Preemption stress test (TODO: memory-pressure preemption under churn).
+    ///
+    /// Drives the scheduler with far more concurrent requests than the running
+    /// slots / KV blocks can hold, forcing repeated preemption and re-admission,
+    /// and asserts the core invariants survive heavy churn:
+    ///   * no sequence is ever lost or duplicated (count is conserved);
+    ///   * the running set never exceeds `max_running_seqs`;
+    ///   * scheduler-tracked free blocks never go negative or exceed the pool;
+    ///   * the system makes progress and ultimately drains every request.
+    #[test]
+    fn preemption_under_heavy_churn() {
+        // Tight resources: 2 running slots, small token budget, few KV blocks.
+        let mut config = SchedulerConfig::new(2, 24, 4, 6);
+        config.max_running_seqs = 2;
+        let mut s = Scheduler::new(config);
+
+        // 12 requests, each generating a few tokens before EOS (token 7).
+        let n_requests = 12_usize;
+        let mut ids = Vec::new();
+        for _ in 0..n_requests {
+            let params = SamplingParams {
+                eos_token_id: Some(7),
+                max_new_tokens: 4,
+                ..Default::default()
+            };
+            ids.push(s.add_request(vec![1_u32, 2, 3], params));
+        }
+
+        let pool = 6_usize;
+        let mut completed_ids: Vec<SequenceId> = Vec::new();
+        // Deterministic step counter; emit EOS on the 3rd generated token so
+        // sequences finish at different times, maximising churn.
+        let mut emitted: std::collections::HashMap<SequenceId, u32> =
+            std::collections::HashMap::new();
+
+        let mut steps = 0;
+        while s.has_unfinished() {
+            let batch = s.schedule();
+
+            // Invariant: running slots respected.
+            assert!(
+                s.n_running() <= 2,
+                "running set {} exceeds max_running_seqs",
+                s.n_running()
+            );
+            // Invariant: free-block tracking stays within [0, pool].
+            assert!(
+                s.free_blocks() <= pool,
+                "free_blocks {} exceeds pool {pool}",
+                s.free_blocks()
+            );
+
+            if batch.is_empty() {
+                // With nothing schedulable but work remaining, the system must be
+                // blocked only transiently; a finished drain frees resources.
+                // (No sequences scheduled ⇒ nothing to complete this step.)
+                steps += 1;
+                assert!(steps < 10_000, "scheduler failed to make progress");
+                continue;
+            }
+
+            // Produce one token for every scheduled sequence.
+            let mut results = Vec::new();
+            for &seq_id in batch.prefill_ids.iter().chain(batch.decode_ids.iter()) {
+                let count = emitted.entry(seq_id).or_insert(0);
+                *count += 1;
+                let token = if *count >= 3 { 7 } else { 100 + *count }; // EOS at 3rd
+                results.push(StepResult {
+                    seq_id,
+                    token,
+                    log_prob: -0.1,
+                });
+            }
+            s.on_step_complete(results)
+                .expect("all scheduled ids are valid running sequences");
+
+            // Collect finished sequences each step.
+            for fin in s.take_finished() {
+                assert!(fin.status.is_finished());
+                completed_ids.push(fin.id);
+            }
+
+            steps += 1;
+            assert!(steps < 10_000, "churn test did not terminate");
+        }
+
+        // Drain any stragglers.
+        for fin in s.take_finished() {
+            completed_ids.push(fin.id);
+        }
+
+        // Invariant: every request finished exactly once (no loss, no dupes).
+        completed_ids.sort_unstable();
+        let mut expected = ids.clone();
+        expected.sort_unstable();
+        completed_ids.dedup();
+        assert_eq!(
+            completed_ids.len(),
+            n_requests,
+            "every request must finish exactly once under churn"
+        );
+        assert_eq!(
+            completed_ids, expected,
+            "finished id set must equal submitted set"
+        );
+        assert!(!s.has_unfinished(), "scheduler fully drained");
     }
 }

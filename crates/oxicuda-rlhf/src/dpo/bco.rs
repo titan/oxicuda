@@ -198,6 +198,87 @@ pub fn bco_loss(
     bco_loss_from_rewards(&desirable_rewards, &undesirable_rewards, cfg)
 }
 
+/// Numerically stable sigmoid `σ(x)`.
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let e = x.exp();
+        e / (1.0 + e)
+    }
+}
+
+/// Gradient of [`bco_loss_from_rewards`] w.r.t. the per-example implicit rewards.
+///
+/// Finite-difference verified against [`bco_loss_from_rewards`].
+#[derive(Debug, Clone)]
+pub struct BcoGrad {
+    /// `∂L/∂r` for each desirable reward (same length / order as the input).
+    pub d_desirable: Vec<f32>,
+    /// `∂L/∂r` for each undesirable reward (same length / order as the input).
+    pub d_undesirable: Vec<f32>,
+}
+
+/// Analytic gradient of [`bco_loss_from_rewards`] w.r.t. the per-example
+/// implicit rewards (the shift `δ` is held constant).
+///
+/// For a desirable reward `r`, the contribution is `−log σ(r − δ) / N_d`, whose
+/// derivative is `−σ(δ − r) / N_d` (negative: raising a desirable reward lowers
+/// the loss). For an undesirable reward `r`, the contribution is
+/// `−log σ(δ − r) / N_u`, whose derivative is `+σ(r − δ) / N_u` (positive:
+/// raising an undesirable reward raises the loss).
+///
+/// # Errors
+///
+/// - [`RlhfError::EmptyInput`] if both reward slices are empty.
+/// - [`RlhfError::InvalidBeta`] / [`RlhfError::InvalidMargin`] for a bad config.
+/// - [`RlhfError::NanEncountered`] if any gradient is non-finite.
+pub fn bco_grad(
+    desirable_rewards: &[f32],
+    undesirable_rewards: &[f32],
+    cfg: &BcoConfig,
+) -> RlhfResult<BcoGrad> {
+    cfg.validate()?;
+    if desirable_rewards.is_empty() && undesirable_rewards.is_empty() {
+        return Err(RlhfError::EmptyInput);
+    }
+    let delta = cfg.reward_shift;
+
+    let d_desirable = if desirable_rewards.is_empty() {
+        Vec::new()
+    } else {
+        let inv_n = 1.0 / desirable_rewards.len() as f32;
+        desirable_rewards
+            .iter()
+            .map(|&r| -sigmoid(delta - r) * inv_n)
+            .collect()
+    };
+    let d_undesirable = if undesirable_rewards.is_empty() {
+        Vec::new()
+    } else {
+        let inv_n = 1.0 / undesirable_rewards.len() as f32;
+        undesirable_rewards
+            .iter()
+            .map(|&r| sigmoid(r - delta) * inv_n)
+            .collect()
+    };
+
+    let grad = BcoGrad {
+        d_desirable,
+        d_undesirable,
+    };
+    if grad
+        .d_desirable
+        .iter()
+        .chain(grad.d_undesirable.iter())
+        .any(|g| !g.is_finite())
+    {
+        return Err(RlhfError::NanEncountered);
+    }
+    Ok(grad)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,5 +443,95 @@ mod tests {
         let loss = bco_loss_from_rewards(&desirable, &undesirable, &cfg(1.0, delta))
             .expect("value should be present");
         assert!(loss.is_finite() && loss > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod grad_tests {
+    use super::*;
+
+    fn central_diff(f: impl Fn(f32) -> f32, x: f32, h: f32) -> f32 {
+        ((f(x + h) as f64 - f(x - h) as f64) / (2.0 * h as f64)) as f32
+    }
+
+    fn assert_close(analytic: f32, fd: f32, label: &str) {
+        let denom = analytic.abs().max(1e-3);
+        let rel = (analytic - fd).abs() / denom;
+        assert!(
+            rel <= 1e-3,
+            "{label}: analytic={analytic}, fd={fd}, rel_err={rel}"
+        );
+    }
+
+    fn cfg(beta: f32, shift: f32) -> BcoConfig {
+        BcoConfig {
+            beta,
+            reward_shift: shift,
+        }
+    }
+
+    #[test]
+    fn bco_grad_matches_finite_difference() {
+        let c = cfg(0.5, 0.2);
+        let des = [0.9_f32, -0.3];
+        let und = [-0.4_f32, 0.6];
+        let g = bco_grad(&des, &und, &c).expect("grad");
+        let h = 1e-2;
+        for i in 0..des.len() {
+            let fd = central_diff(
+                |v| {
+                    let mut d = des.to_vec();
+                    d[i] = v;
+                    bco_loss_from_rewards(&d, &und, &c).expect("loss")
+                },
+                des[i],
+                h,
+            );
+            assert_close(g.d_desirable[i], fd, "d_desirable");
+        }
+        for i in 0..und.len() {
+            let fd = central_diff(
+                |v| {
+                    let mut u = und.to_vec();
+                    u[i] = v;
+                    bco_loss_from_rewards(&des, &u, &c).expect("loss")
+                },
+                und[i],
+                h,
+            );
+            assert_close(g.d_undesirable[i], fd, "d_undesirable");
+        }
+    }
+
+    #[test]
+    fn bco_grad_signs_are_aligned() {
+        // Desirable rewards pushed up (negative gradient), undesirable down (positive).
+        let g = bco_grad(&[0.3], &[0.3], &cfg(1.0, 0.0)).expect("grad");
+        assert!(g.d_desirable[0] < 0.0, "{}", g.d_desirable[0]);
+        assert!(g.d_undesirable[0] > 0.0, "{}", g.d_undesirable[0]);
+    }
+
+    #[test]
+    fn bco_grad_handles_empty_side() {
+        let g = bco_grad(&[0.5, 0.2], &[], &cfg(0.5, 0.0)).expect("grad");
+        assert_eq!(g.d_desirable.len(), 2);
+        assert!(g.d_undesirable.is_empty());
+    }
+
+    #[test]
+    fn bco_grad_is_deterministic() {
+        let c = cfg(0.4, 0.1);
+        let a = bco_grad(&[0.5], &[-0.5], &c).expect("a");
+        let b = bco_grad(&[0.5], &[-0.5], &c).expect("b");
+        assert_eq!(a.d_desirable[0], b.d_desirable[0]);
+        assert_eq!(a.d_undesirable[0], b.d_undesirable[0]);
+    }
+
+    #[test]
+    fn bco_grad_empty_both_errors() {
+        assert!(matches!(
+            bco_grad(&[], &[], &cfg(0.5, 0.0)),
+            Err(RlhfError::EmptyInput)
+        ));
     }
 }

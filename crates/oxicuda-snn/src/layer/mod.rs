@@ -27,5 +27,9 @@ pub mod spiking_pool;
 pub mod spiking_regularization;
 /// Spiking residual / skip-connection layer (spiking ResNet block).
 pub mod spiking_residual;
+/// Spiking transformer encoder block (Spikformer: SSA + spiking MLP + residual).
+pub mod spiking_transformer;
+/// Spiking variational autoencoder (FSVAE-style) building blocks.
+pub mod spiking_vae;
 /// Threshold-dependent batch normalisation (tdBN).
 pub mod td_bn;

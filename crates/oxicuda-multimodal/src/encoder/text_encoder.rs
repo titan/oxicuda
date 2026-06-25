@@ -2,7 +2,9 @@
 //!
 //! Produces a CLS-pooled `[d_model]` embedding from token ID sequences.
 
-use crate::cross_attn::cross_attention::{CrossAttention, CrossAttnConfig, CrossAttnWeights};
+use crate::cross_attn::cross_attention::{
+    CrossAttention, CrossAttnConfig, CrossAttnWeights, softmax_rows_inplace,
+};
 use crate::cross_attn::self_cross_block::LayerNorm;
 use crate::error::{MmResult, MultiModalError};
 
@@ -249,6 +251,198 @@ impl BertEncoder {
         let cls = hidden[..d].to_vec();
         Ok(cls)
     }
+
+    /// Encode a token sequence with an explicit key-padding mask.
+    ///
+    /// `attention_mask[i] == true` marks position `i` as a **real** token;
+    /// `false` marks it as padding. Padded positions are excluded from every
+    /// query's attention (their pre-softmax scores are set to `-∞`), so the
+    /// representation of the real tokens is identical to the representation that
+    /// would be produced if the padding had never been appended. This matches the
+    /// Hugging Face `attention_mask` convention (1 = keep, 0 = pad).
+    ///
+    /// Position 0 (CLS) must be a real token. The mask length must equal the
+    /// sequence length.
+    ///
+    /// # Errors
+    /// - Every error of [`BertEncoder::forward`].
+    /// - [`MultiModalError::MismatchedSeqLens`] when `attention_mask.len()` does
+    ///   not equal `token_ids.len()`.
+    /// - [`MultiModalError::EmptyInput`] when no position is a real token.
+    pub fn forward_masked(
+        token_ids: &[u32],
+        attention_mask: &[bool],
+        weights: &BertWeights,
+        cfg: &BertConfig,
+    ) -> MmResult<Vec<f32>> {
+        cfg.validate()?;
+        let d = cfg.d_model;
+        let seq_len = token_ids.len();
+        if seq_len == 0 {
+            return Err(MultiModalError::EmptyInput);
+        }
+        if attention_mask.len() != seq_len {
+            return Err(MultiModalError::MismatchedSeqLens {
+                q_len: seq_len,
+                kv_len: attention_mask.len(),
+            });
+        }
+        if !attention_mask.iter().any(|&m| m) {
+            return Err(MultiModalError::EmptyInput);
+        }
+        for &tid in token_ids {
+            if tid as usize >= cfg.vocab_size {
+                return Err(MultiModalError::TokenOutOfRange {
+                    token_id: tid,
+                    vocab_size: cfg.vocab_size,
+                });
+            }
+        }
+
+        let mut hidden = vec![0.0_f32; seq_len * d];
+        for (pos, &tid) in token_ids.iter().enumerate() {
+            let tok_row = &weights.token_embed[tid as usize * d..(tid as usize + 1) * d];
+            let pos_row = &weights.pos_embed
+                [pos.min(cfg.max_seq_len - 1) * d..(pos.min(cfg.max_seq_len - 1) + 1) * d];
+            for i in 0..d {
+                hidden[pos * d + i] = tok_row[i] + pos_row[i];
+            }
+        }
+
+        for layer_w in &weights.layers {
+            hidden = bert_layer_forward_masked(&hidden, seq_len, attention_mask, cfg, layer_w)?;
+        }
+
+        let ln = LayerNorm {
+            weight: weights.final_ln_weight.clone(),
+            bias: weights.final_ln_bias.clone(),
+            d_model: d,
+        };
+        hidden = ln.forward(&hidden, seq_len)?;
+
+        let cls = hidden[..d].to_vec();
+        Ok(cls)
+    }
+}
+
+/// BERT transformer layer with a key-padding mask applied to self-attention.
+fn bert_layer_forward_masked(
+    input: &[f32],
+    seq: usize,
+    mask: &[bool],
+    cfg: &BertConfig,
+    w: &BertLayerWeights,
+) -> MmResult<Vec<f32>> {
+    let d = cfg.d_model;
+    let h = cfg.n_heads;
+    let d_k = d / h;
+
+    let ln1 = LayerNorm {
+        weight: w.ln1_weight.clone(),
+        bias: w.ln1_bias.clone(),
+        d_model: d,
+    };
+    let normed = ln1.forward(input, seq)?;
+
+    // Split the combined QKV weight into Q/K/V projections.
+    let mut w_q = vec![0.0_f32; d * d];
+    let mut w_k = vec![0.0_f32; d * d];
+    let mut w_v = vec![0.0_f32; d * d];
+    for i in 0..d {
+        for j in 0..d {
+            w_q[i * d + j] = w.self_attn_qkv[i * 3 * d + j];
+            w_k[i * d + j] = w.self_attn_qkv[i * 3 * d + d + j];
+            w_v[i * d + j] = w.self_attn_qkv[i * 3 * d + 2 * d + j];
+        }
+    }
+    let proj_q = linear_rows(&normed, &w_q, seq, d, d);
+    let proj_k = linear_rows(&normed, &w_k, seq, d, d);
+    let proj_v = linear_rows(&normed, &w_v, seq, d, d);
+
+    let scale = 1.0 / (d_k as f32).sqrt();
+    let mut head_outputs = vec![0.0_f32; seq * d];
+    for head in 0..h {
+        let col = head * d_k;
+        let mut scores = vec![0.0_f32; seq * seq];
+        for qi in 0..seq {
+            for ki in 0..seq {
+                if !mask[ki] {
+                    scores[qi * seq + ki] = f32::NEG_INFINITY;
+                    continue;
+                }
+                let mut dot = 0.0_f32;
+                for di in 0..d_k {
+                    dot += proj_q[qi * d + col + di] * proj_k[ki * d + col + di];
+                }
+                scores[qi * seq + ki] = dot * scale;
+            }
+        }
+        softmax_rows_inplace(&mut scores, seq, seq);
+        for qi in 0..seq {
+            for vi in 0..d_k {
+                let mut s = 0.0_f32;
+                for ki in 0..seq {
+                    s += scores[qi * seq + ki] * proj_v[ki * d + col + vi];
+                }
+                head_outputs[qi * d + col + vi] = s;
+            }
+        }
+    }
+    let sa_out = linear_rows(&head_outputs, &w.self_attn_out, seq, d, d);
+
+    let mut x: Vec<f32> = input
+        .iter()
+        .zip(sa_out.iter())
+        .map(|(a, b)| a + b)
+        .collect();
+
+    let ln2 = LayerNorm {
+        weight: w.ln2_weight.clone(),
+        bias: w.ln2_bias.clone(),
+        d_model: d,
+    };
+    let normed2 = ln2.forward(&x, seq)?;
+
+    let f = cfg.d_ff;
+    let mut hidden = vec![0.0_f32; seq * f];
+    for s in 0..seq {
+        for fi in 0..f {
+            let mut acc = w.ffn_b1[fi];
+            for di in 0..d {
+                acc += normed2[s * d + di] * w.ffn_w1[di * f + fi];
+            }
+            hidden[s * f + fi] = bert_gelu(acc);
+        }
+    }
+    let mut ffn_out = vec![0.0_f32; seq * d];
+    for s in 0..seq {
+        for di in 0..d {
+            let mut acc = w.ffn_b2[di];
+            for fi in 0..f {
+                acc += hidden[s * f + fi] * w.ffn_w2[fi * d + di];
+            }
+            ffn_out[s * d + di] = acc;
+        }
+    }
+    for (xi, fi) in x.iter_mut().zip(ffn_out.iter()) {
+        *xi += fi;
+    }
+    Ok(x)
+}
+
+/// `A [rows × in_dim] · W [in_dim × out_dim]` → `[rows × out_dim]`, `W` row-major.
+fn linear_rows(a: &[f32], w: &[f32], rows: usize, in_dim: usize, out_dim: usize) -> Vec<f32> {
+    let mut out = vec![0.0_f32; rows * out_dim];
+    for r in 0..rows {
+        for o in 0..out_dim {
+            let mut acc = 0.0_f32;
+            for i in 0..in_dim {
+                acc += a[r * in_dim + i] * w[i * out_dim + o];
+            }
+            out[r * out_dim + o] = acc;
+        }
+    }
+    out
 }
 
 /// Apply a single BERT transformer layer.
@@ -434,5 +628,118 @@ mod tests {
         let w = BertWeights::zeros(&cfg);
         assert!(w.token_embed.iter().all(|&v| v == 0.0));
         assert!(w.pos_embed.iter().all(|&v| v == 0.0));
+    }
+
+    /// Build a deterministic, non-trivial BERT so that masking actually changes
+    /// the output (zero/ones presets are too degenerate to test invariance).
+    fn random_bert(cfg: &BertConfig, seed: u64) -> BertWeights {
+        use crate::handle::LcgRng;
+        let mut rng = LcgRng::new(seed);
+        let mut w = BertWeights::zeros(cfg);
+        rng.fill_normal(&mut w.token_embed);
+        rng.fill_normal(&mut w.pos_embed);
+        for layer in w.layers.iter_mut() {
+            rng.fill_normal(&mut layer.self_attn_qkv);
+            rng.fill_normal(&mut layer.self_attn_out);
+            rng.fill_normal(&mut layer.ffn_w1);
+            rng.fill_normal(&mut layer.ffn_w2);
+            // Keep init scale small so activations stay well-conditioned.
+            for v in layer.self_attn_qkv.iter_mut() {
+                *v *= 0.2;
+            }
+            for v in layer.self_attn_out.iter_mut() {
+                *v *= 0.2;
+            }
+        }
+        w
+    }
+
+    #[test]
+    fn bert_masked_all_true_equals_unmasked() {
+        let cfg = BertConfig::tiny();
+        let w = random_bert(&cfg, 1);
+        let token_ids = [0_u32, 5, 9, 13, 2];
+        let mask = [true; 5];
+        let masked =
+            BertEncoder::forward_masked(&token_ids, &mask, &w, &cfg).expect("masked forward");
+        let plain = BertEncoder::forward(&token_ids, &w, &cfg).expect("forward");
+        for (a, b) in masked.iter().zip(plain.iter()) {
+            assert!(
+                (a - b).abs() < 1e-5,
+                "all-true mask must match forward: {a} vs {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn bert_padding_is_invariant() {
+        // The CLS embedding of a real sequence must not change when padding tokens
+        // are appended and masked out. (Position 0 = CLS is real.)
+        let cfg = BertConfig::tiny();
+        let w = random_bert(&cfg, 2);
+
+        let real = [0_u32, 7, 3];
+        let real_mask = [true, true, true];
+        let cls_real =
+            BertEncoder::forward_masked(&real, &real_mask, &w, &cfg).expect("real forward");
+
+        // Append two padding tokens (arbitrary ids) flagged false in the mask.
+        let padded = [0_u32, 7, 3, 11, 4];
+        let padded_mask = [true, true, true, false, false];
+        let cls_padded =
+            BertEncoder::forward_masked(&padded, &padded_mask, &w, &cfg).expect("padded forward");
+
+        for (a, b) in cls_real.iter().zip(cls_padded.iter()) {
+            assert!(
+                (a - b).abs() < 1e-4,
+                "padding changed the CLS embedding: {a} vs {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn bert_masking_changes_output_vs_full_attention() {
+        // Masking a token out should produce a *different* CLS than attending to
+        // it, confirming the mask actually takes effect.
+        let cfg = BertConfig::tiny();
+        let w = random_bert(&cfg, 3);
+        let token_ids = [0_u32, 7, 3, 11];
+        let full = [true, true, true, true];
+        let drop_last = [true, true, true, false];
+        let cls_full = BertEncoder::forward_masked(&token_ids, &full, &w, &cfg).expect("full");
+        let cls_drop = BertEncoder::forward_masked(&token_ids, &drop_last, &w, &cfg).expect("drop");
+        let diff: f32 = cls_full
+            .iter()
+            .zip(cls_drop.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            diff > 1e-5,
+            "masking a token should change the output, diff={diff}"
+        );
+    }
+
+    #[test]
+    fn bert_masked_wrong_mask_len_errors() {
+        let cfg = BertConfig::tiny();
+        let w = BertWeights::zeros(&cfg);
+        let token_ids = [0_u32, 1, 2];
+        let mask = [true, true]; // wrong length
+        assert!(matches!(
+            BertEncoder::forward_masked(&token_ids, &mask, &w, &cfg),
+            Err(MultiModalError::MismatchedSeqLens { .. })
+        ));
+    }
+
+    #[test]
+    fn bert_masked_all_false_errors() {
+        let cfg = BertConfig::tiny();
+        let w = BertWeights::zeros(&cfg);
+        let token_ids = [0_u32, 1, 2];
+        let mask = [false, false, false];
+        assert!(matches!(
+            BertEncoder::forward_masked(&token_ids, &mask, &w, &cfg),
+            Err(MultiModalError::EmptyInput)
+        ));
     }
 }

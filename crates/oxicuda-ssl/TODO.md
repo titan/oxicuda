@@ -11,7 +11,7 @@ data augmentation. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol
 ## Implementation Status
 
 - **Actual SLoC:** 13,881 (47 files)
-- **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
+- **PTX kernels:** 12 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120) — 7 portable scalar + 5 architecture-deepening (Hopper `wgmma`/`redux.sync`, Blackwell `cp.async.bulk.tensor`, FP16/BF16 mixed precision)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
 ### Completed
@@ -91,10 +91,10 @@ data augmentation. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol
 - [ ] Wire `ptx_kernels::*` strings through `oxicuda-launch::Kernel::from_module` for end-to-end GPU execution (PTX strings are emitted; CPU paths are the authoritative reference)
 - [ ] GPU-resident `nt_xent_softmax_ptx` integrated with `oxicuda-blas` GEMM for the `Z @ Z^T` similarity step
 - [ ] GPU-resident `momentum_update_ptx` parameter update fused with optimiser step
-- [x] `ssl/i_jepa.rs` — I-JEPA (Assran 2023): Image Joint Embedding Predictive Architecture; context encoder + target encoder (EMA); predict target patch representations from context; no pixel reconstruction
-- [x] `ssl/data2vec.rs` — data2vec (Baevski 2022): top-K layers average of masked teacher as regression targets; works across modalities (text/audio/vision) by replacing modality-specific tokens
-- [x] `ssl/dino_v2.rs` — DINOv2 (Oquab 2023): curated data + KoLeo regularisation + iBOT patch-level loss + center momentum normalization; `DinoV2Config { n_register_tokens: usize }`
-- [x] `ssl/jem.rs` — JEM (Grathwohl 2019): joint energy model; classifier p(y|x) = exp(f_y(x))/Z reinterprets as energy; MCMC sampling for generation; contrastive divergence gradient
+- [x] I-JEPA (Assran 2023): Image Joint Embedding Predictive Architecture; context encoder + target encoder (EMA); predict target patch representations from context; no pixel reconstruction (`masked/i_jepa.rs` — `IJepa` / `IJepaConfig`)
+- [x] data2vec (Baevski 2022): top-K layers average of masked teacher as regression targets; works across modalities (text/audio/vision) by replacing modality-specific tokens (`masked/data2vec.rs` functional API + `ssl/data2vec_v2.rs` `Data2VecModel` struct API)
+- [x] DINOv2 (Oquab 2023): curated data + KoLeo regularisation + iBOT patch-level loss + center momentum normalization; `DinoV2Config { n_register_tokens: usize }` (`clustering/dino_v2.rs` — `DinoV2` / `DinoV2Config`)
+- [x] JEM (Grathwohl 2019): joint energy model; classifier p(y|x) = exp(f_y(x))/Z reinterprets as energy; MCMC sampling for generation; contrastive divergence gradient (`ssl/jem.rs` — `Jem` / `JemConfig`)
 
 ## Dependencies
 
@@ -160,17 +160,19 @@ throughput for the projection-similarity step.
 | sm_90 / sm_90a (Hopper) | 8.4 | No `wgmma` usage -- SSL kernels are reductions / blends |
 | sm_100 / sm_120 (Blackwell) | 8.7 | Same scalar pattern |
 
-The 7 generators all dispatch on the SM string and emit identical scalar PTX
-modulo the `.target` directive. SSL losses are dominated by reductions and
-masking, while the heavy `Z @ Z^T` work is intentionally delegated to
-`oxicuda-blas`.
+The 7 portable generators all dispatch on the SM string and emit identical
+scalar PTX modulo the `.target` directive. SSL losses are dominated by
+reductions and masking, while the heavy `Z @ Z^T` work is intentionally
+delegated to `oxicuda-blas`. The 5 architecture-deepening generators below add
+Hopper/Blackwell fast paths under the same entry names with automatic scalar
+fallback below their minimum SM, plus FP16/BF16 mixed-precision storage variants.
 
 ### Deepening Opportunities
 
-- [ ] Hopper `barlow_cross_corr_ptx` rewrite using `wgmma.mma_async` for the `Z_A^T @ Z_B` outer product (currently scalar with atomic accumulate)
-- [ ] Hopper `nt_xent_softmax_ptx` warp-level reduction with `redux.sync.max.f32` + `redux.sync.add.f32` to eliminate shared-memory traffic
-- [ ] Blackwell (sm_100+) `cp.async.bulk.tensor` for the MoCo queue gather in `gather_features_ptx`
-- [ ] FP16 / BF16 variants of `momentum_update_ptx` and `byol_cosine_loss_ptx` for mixed-precision SSL training
+- [x] Hopper `barlow_cross_corr_ptx` rewrite using `wgmma.mma_async` for the `Z_A^T @ Z_B` outer product (currently scalar with atomic accumulate) (`ptx_kernels::barlow_cross_corr_wgmma_ptx` — `sm >= 90` emits `wgmma.mma_async.sync.aligned.m64n64k16` + `cp.async.bulk` operand staging + `wgmma.fence`/`commit_group`/`wait_group`; `sm < 90` falls back to the scalar atomic accumulator)
+- [x] Hopper `nt_xent_softmax_ptx` warp-level reduction with `redux.sync.max.f32` + `redux.sync.add.f32` to eliminate shared-memory traffic (`ptx_kernels::nt_xent_softmax_warp_ptx` — one warp per row, `redux.sync.max.f32`/`redux.sync.add.f32` for the max/sum reductions, `ex2.approx.f32` exponentials; `sm < 90` falls back to the masked-scale kernel)
+- [x] Blackwell (sm_100+) `cp.async.bulk.tensor` for the MoCo queue gather in `gather_features_ptx` (`ptx_kernels::gather_features_bulk_ptx` — `sm >= 100` issues `cp.async.bulk.tensor.1d.shared::cluster.global` per gathered row + mbarrier wait; `sm < 100` falls back to the scalar gather)
+- [x] FP16 / BF16 variants of `momentum_update_ptx` and `byol_cosine_loss_ptx` for mixed-precision SSL training (`ptx_kernels::momentum_update_f16_ptx` — f16 storage via `ld/st.global.u16` + `cvt.f32.f16`/`cvt.rn.f16.f32` with an f32 EMA blend; `ptx_kernels::byol_cosine_loss_bf16_ptx` — bf16 storage via `cvt.f32.bf16` with an f32 `atom.global.add.f32` accumulation)
 
 ---
 

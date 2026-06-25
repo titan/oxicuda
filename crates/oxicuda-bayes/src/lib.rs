@@ -45,6 +45,11 @@ pub mod prelude {
     pub use crate::calibration::conformal::{
         ConformalClassifier, ConformalRegressor, RapsClassifier, conformal_quantile,
     };
+    pub use crate::calibration::ece_classwise::{
+        BinningScheme, BrierDecomposition, ClassReliability, ClasswiseEceConfig, ReliabilityPoint,
+        TopLabelCalibration, brier_decomposition, class_wise_eces, classwise_ece,
+        multiclass_brier_score, per_class_reliability, top_label_calibration,
+    };
     pub use crate::calibration::histogram::{
         BinStrategy, HistogramBinCalibrator, HistogramBinConfig,
     };
@@ -75,9 +80,16 @@ pub mod prelude {
         BayesLstm, BayesLstmConfig, BayesLstmSampledWeights, BayesLstmWeights,
     };
     pub use crate::layers::flipout::{FlipoutConv2d, FlipoutLinear};
+    pub use crate::mc::conjugate::{
+        BetaPosterior, DirichletPosterior, GammaPosterior, NormalInverseGamma,
+        NormalKnownVarPosterior,
+    };
     pub use crate::mc::convergence_diagnostics::{
         ConvergenceSummary, GewekeConfig, diagnose as mcmc_diagnose, geweke_z, multi_chain_ess,
         r_hat,
+    };
+    pub use crate::mc::model_selection::{
+        DicResult, PsisLooResult, WaicResult, compare_elpd, dic, psis_loo, waic,
     };
     pub use crate::mc::smc::{
         SmcConfig, SmcState, effective_sample_size, smc_filter, smc_init, smc_mean, smc_step,
@@ -85,6 +97,9 @@ pub mod prelude {
     };
     pub use crate::mcmc::BayesRng;
     pub use crate::mcmc::hmc::{HmcConfig as McmcHmcConfig, HmcSampler};
+    pub use crate::mcmc::metropolis::{
+        MetropolisConfig, MetropolisResult, MetropolisSampler, SliceConfig, SliceSampler,
+    };
     pub use crate::mcmc::sgld::{SgldConfig, SgldSampler};
     pub use crate::ptx_kernels::{
         ece_bucket_ptx, ensemble_aggregate_ptx, f32_hex, flipout_perturb_ptx, kl_gaussian_ptx,
@@ -94,6 +109,7 @@ pub mod prelude {
         HorseshoeConfig, HorseshoeFit, HorseshoeRegression, half_cauchy_log_pdf, horseshoe_log_pdf,
         ridge_regression, shrinkage_factor,
     };
+    pub use crate::sparse::spike_slab::{SpikeSlabConfig, SpikeSlabFit, SpikeSlabRegression};
     pub use crate::uncertainty::deep_ensemble::{DeepEnsemble, EnsembleStats};
     pub use crate::uncertainty::entropy::{
         aleatoric_entropy, epistemic_entropy, mutual_information, predictive_entropy,

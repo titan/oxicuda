@@ -9,8 +9,8 @@ and hierarchical pooling, Set2Set readout. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 16,973 (52 files, Rust 6,282 code + 881 comments + 798 blanks)
-- **Tests:** 613 passing (#[test] count in src/)
+- **Files:** 54 Rust source files in `src/`
+- **Tests:** 662 passing (#[test] count in src/)
 - **Crate:** `oxicuda-gnn` -- Vol.18 Graph Neural Network Primitives
 
 ### Completed [x]
@@ -85,10 +85,18 @@ and hierarchical pooling, Set2Set readout. Part of
 ### Future Enhancements [ ]
 
 #### P0 -- Critical (Performance and Correctness)
-- [ ] CSR-balanced SpMV (warp-per-row variable balance / merge-based) for highly skewed
-      degree distributions
-- [ ] Edge-parallel GAT (one warp per edge) for high-degree graphs
-- [ ] Sparse-tensor backend integration with `oxicuda-sparse` for SpMM-based GCN
+- [x] CSR-balanced SpMV (merge-based / merge-path, Merrill & Garland SC 2016) for highly
+      skewed degree distributions (`ops/balanced_spmv.rs` -- `balanced_spmv` +
+      `BalancedSpmvConfig`; CUB-style merge-path endpoint search + carry-out serial fix-up;
+      bit-stable vs `CsrGraph::spmv`, validated on star / power-law graphs across segment counts)
+- [x] Edge-parallel GAT (one logical warp per edge) for high-degree graphs
+      (`ops/edge_parallel_gat.rs` -- `EdgeParallelGat` + `EdgeParallelGatConfig`; flat per-edge
+      score / per-source scatter-softmax / scatter-aggregate; multi-head concat|mean; numerically
+      identical to `GatLayer::forward`, validated on hub graphs)
+- [x] Sparse-tensor backend integration with `oxicuda-sparse` for SpMM-based GCN
+      (`layers/gcn.rs` -- `GcnLayer::forward_sparse` + `propagation_matrix`; aggregation
+      routed through `oxicuda_sparse::host_csr::HostCsr` SpMV per feature column, bit-exact
+      vs the dense `forward` on dyadic operators)
 - [x] `scatter_softmax` numerical-stability test on >1M edges
 
 #### P1 -- Important (Architecture Coverage)
@@ -97,23 +105,25 @@ and hierarchical pooling, Set2Set readout. Part of
 - [x] EdgeConv (DGCNN, Wang 2019) point-cloud style layer
 - [x] R-GCN multi-relational layer (layers/rgcn.rs -- Schlichtkrull 2018; per-relation message passing with in-degree normalization + basis decomposition W_r=Σ_b a_rb V_b + self-loop; one CsrGraph per relation)
 - [x] Neighbour sampling for mini-batch training (GraphSAGE inductive style)
-- [ ] Cluster-GCN partitioning helper for very large graphs
+- [x] Cluster-GCN partitioning helper for very large graphs (`sampling/cluster_gcn.rs` --
+      `ClusterGcn` / `Partition` / `BatchSubgraph`; deterministic balanced-BFS clustering, Chiang 2019)
 
 #### P2 -- Nice-to-Have (Research / Advanced)
 - [x] SIGN scalable inception graph network (`layers/sign.rs`) — Rossi 2020 ICML workshop: multi-hop diffusion pre-computation Aᵏ X followed by MLP over concatenated hop features; `SignConv`
-- [ ] GRAND graph random neural diffusion (`layers/grand.rs`) — Chamberlain 2021 ICML: message passing as neural PDE diffusion with dropout augmentation for stochastic depth regularisation; `GrandLayer`
-- [ ] k-WL expressive GNN (`layers/k_wl_gnn.rs`) — Maron 2019 NeurIPS: invariant / equivariant networks over k-dimensional higher-order Weisfeiler-Leman features for improved expressivity; `KWlGnn`
+- [x] GRAND graph random neural diffusion (`layers/grand.rs`) — Chamberlain 2021 ICML: GRAND-l linear-diffusion PDE message passing `x_{k+1}=(1-Δ)x_k+Δ·A_att·x_k` with row-stochastic scaled-dot-product attention operator; `GrandLayer` + `GrandConfig` (15 tests)
+- [x] k-WL expressive GNN (`layers/k_wl_gnn.rs`) — Maron 2019 NeurIPS: order-2 invariant/equivariant network over node-pair tensors with the Bell(4)=15 equivariant basis ops + permutation-invariant graph readout; `KWlGnn` + `KWlConfig` / `PairOp` (18 tests)
 - [x] SGC (Simple Graph Convolution, Wu 2019) closed-form precomputation
 - [x] APPNP (predict-then-propagate) personalised PageRank propagation
 - [x] JK-Net Jumping Knowledge aggregator (layers/jk_net.rs -- Xu 2018 ICML; Concat / MaxPool / forward-LSTM-attention aggregation of per-node representations across all layers)
 - [x] DGI (Deep Graph Infomax) contrastive pre-training loss
-- [ ] Mixed-precision GAT softmax (FP16 attention with FP32 accumulation)
-- [ ] CUDA-Graph capture of multi-layer GCN forward for inference
+- [ ] Mixed-precision GAT softmax (FP16 attention with FP32 accumulation) (requires GPU hardware: FP16 tensor path)
+- [ ] CUDA-Graph capture of multi-layer GCN forward for inference (requires GPU hardware: CUDA-Graph capture)
 
 ## Dependencies
 
 | Dependency | Purpose | Pure Rust? |
 |------------|---------|------------|
+| oxicuda-sparse | Host CSR SpMM (`HostCsr`) for the GCN sparse-tensor path | Yes |
 | thiserror | Error derive macros | Yes |
 | criterion (dev) | Benchmarking harness | Yes |
 
@@ -123,7 +133,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 613 passing
+- Tests: 662 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)
@@ -162,19 +172,19 @@ Target: >=85% peak DRAM throughput on SpMV, >=80% peak atomic throughput on scat
 - [x] `csr_spmv_ptx` warp-shuffle butterfly reduction (no shared-memory atomics)
 - [x] `scatter_add_ptx` uses `atom.global.add.f32` (Ampere has 2x faster atomics vs Volta)
 - [x] PTX × SM 80, 86 generation verified in integration tests
-- [ ] `cp.async` prefetch of `col_idx` / `edge_weight` for SpMV
-- [ ] Vectorised `ld.global.v4.f32` for dense node-feature loads in GAT
+- [ ] `cp.async` prefetch of `col_idx` / `edge_weight` for SpMV (requires GPU hardware)
+- [ ] Vectorised `ld.global.v4.f32` for dense node-feature loads in GAT (requires GPU hardware)
 
 ### Hopper (sm_90 / sm_90a)
 - [x] PTX SM 90 emission tested for all 7 kernels
-- [ ] TMA (`cp.async.bulk`) for dense node-feature tile staging
-- [ ] Distributed-shared-memory cluster aggregation for very high-degree nodes
-- [ ] `wgmma.mma_async` for GAT QK^T attention path
+- [ ] TMA (`cp.async.bulk`) for dense node-feature tile staging (requires GPU hardware)
+- [ ] Distributed-shared-memory cluster aggregation for very high-degree nodes (requires GPU hardware)
+- [ ] `wgmma.mma_async` for GAT QK^T attention path (requires GPU hardware)
 
 ### Blackwell (sm_100 / sm_120)
 - [x] PTX SM 100 / 120 emission tested
-- [ ] FP8 (E4M3) node-feature representation for inference
-- [ ] Tensor-Memory (TMEM) staged dense-feature reduction
+- [ ] FP8 (E4M3) node-feature representation for inference (requires GPU hardware)
+- [ ] Tensor-Memory (TMEM) staged dense-feature reduction (requires GPU hardware)
 
 ---
 
@@ -194,21 +204,35 @@ Target: >=85% peak DRAM throughput on SpMV, >=80% peak atomic throughput on scat
 - [x] Set2Set permutation invariance test
 - [x] Random walk / Node2Vec biased walk distributional tests
 - [x] PTX generation across 6 SM versions: 75 / 80 / 86 / 90 / 100 / 120
-- [ ] GPU-hardware correctness for all 7 kernels (gated behind `gpu-tests`)
-- [ ] Numerical agreement with `torch_geometric` reference within 1e-4 relative
-- [ ] OGB-arxiv full-graph GCN inference accuracy match (within 0.5 % accuracy)
-- [ ] Scalability test on OGB-products (2.4 M nodes) on multi-GPU
+- [ ] GPU-hardware correctness for all 7 kernels (gated behind `gpu-tests`) (requires GPU hardware)
+- [ ] Numerical agreement with `torch_geometric` reference within 1e-4 relative (requires PyG reference / GPU)
+- [ ] OGB-arxiv full-graph GCN inference accuracy match (within 0.5 % accuracy) (requires OGB dataset / GPU)
+- [ ] Scalability test on OGB-products (2.4 M nodes) on multi-GPU (requires multi-GPU hardware)
 
 ### Implementation Deepening
-- [ ] Multi-GPU partitioning helper (Metis-style or hash-partition) with edge replication
-- [ ] Sparse-tensor backend: route `GcnLayer::forward` through `oxicuda-sparse` SpMM
-- [ ] Mini-batch training loop helper (random-walk sampling + neighbour-batch assembly)
-- [ ] Heterogeneous-graph message-passing dispatch (per-relation weight matrices)
-- [ ] Edge-feature support in `GatLayer` and `MessagePassing` interface
+- [ ] Multi-GPU partitioning helper (Metis-style or hash-partition) with edge replication (requires multi-GPU hardware; single-device balanced partitioning exists in `sampling/cluster_gcn.rs`)
+- [x] Sparse-tensor backend: route `GcnLayer::forward` through `oxicuda-sparse` SpMM (`layers/gcn.rs::GcnLayer::forward_sparse` + `propagation_matrix`/`coo_to_host_csr` -- builds the normalised (or raw) adjacency Â as `oxicuda_sparse::host_csr::HostCsr` and aggregates Â·(HW) via `HostCsr::matvec` per feature column; HostCsr SpMM path == dense `forward`, elementwise ≤1e-9 (bit-exact, max err 0.0 on dyadic operators); GPU-SpMM / tensor-core variant still `[ ]`)
+- [ ] Mini-batch training loop helper (random-walk sampling + neighbour-batch assembly) (sampling primitives exist in `sampling/`; full train-loop orchestration is application-level)
+- [x] Heterogeneous-graph message-passing dispatch (per-relation weight matrices)
+      (`layers/hetero_conv.rs` -- `HeteroConv` / `HeteroConvConfig` / `HeteroConvWeights`;
+      PyG-`HeteroConv`-style dispatch over a `HeteroGraph`'s named typed relations -- per-relation
+      `H_s·W_r` projection scattered source→destination with R-GCN in-degree mean normalisation +
+      optional per-dst-type self-loop; output map keyed by destination type)
+- [x] Edge-feature support in `GatLayer` and `MessagePassing` interface
+      (`layers/gat.rs` -- `GatLayer::forward_with_edges` / `forward_inner` / `EdgeAttention`:
+      attention logit `e_ij = LeakyReLU(a_src^T Wx_i + a_dst^T Wx_j + a_edge^T (W_e edge_ij))`,
+      per-head `W_e` edge projection into head space, edges indexed in CSR order; the edge-free
+      `forward` delegates to the shared core unchanged -- bit-for-bit regression-safe.
+      `message_passing/aggregate.rs` -- `build_edge_messages`: MPNN `message(x_src, edge_attr) =
+      W_x·x_src [+ W_e·edge]` step threading an optional edge attribute through the message
+      function before any `aggregate_*` / `scatter_*` reducer. GATv2 keeps its own dynamic-attention
+      path and is out of scope for this item. `EdgeConv` / `GraphTransformer` already consume edge
+      features.)
 
 ### Benchmark Coverage
 - [x] `benches/gnn_ops.rs` Criterion harness wired (CPU-side PTX generation + layer
       forward on small graphs)
 - [ ] GPU-side throughput numbers vs reference (cuSPARSE SpMV, DGL/PyG layer) once
-      Linux+NVIDIA harness is available
-- [ ] Degree-distribution sensitivity sweep on power-law graphs
+      Linux+NVIDIA harness is available (requires GPU hardware)
+- [ ] Degree-distribution sensitivity sweep on power-law graphs (bench-only; CPU `balanced_spmv`
+      already validated across skewed/star graphs in `ops/balanced_spmv.rs` tests)

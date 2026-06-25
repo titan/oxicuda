@@ -17,7 +17,11 @@
 //! ```
 
 pub mod bpe;
+pub mod unigram;
 pub mod vocab;
+pub mod wordpiece;
 
 pub use bpe::{BpeBuilder, BpeTokenizer};
+pub use unigram::UnigramTokenizer;
 pub use vocab::Vocab;
+pub use wordpiece::{WordPieceTokenizer, basic_pretokenize};

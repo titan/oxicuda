@@ -9,7 +9,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.54).
 ## Implementation Status
 
 - **Actual SLoC:** 33,056 (137 files, including 5,342 code + 164 comments + 489 blanks; markdown 365)
-- **Tests:** 938 passing (lib + e2e_tests)
+- **Tests:** 1008 passing (lib + e2e_tests) + 2 doctests
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -116,7 +116,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.54).
 - [x] Quantile regression (Koenker-Bassett) via primal-dual IPM (`regression/quantile.rs`)
 - [x] Negative binomial regression with iteratively reweighted least squares (`regression/negbinom.rs`)
 - [x] Ordinal logistic / multinomial logistic with parallel-regression assumption tests (`regression/multinomial.rs`)
-- [ ] Cox proportional hazards (delegate to `oxicuda-survival`; cross-link tests here)
+- [x] Cox proportional hazards: partial-likelihood Newton-Raphson with Breslow + Efron tie handling, Wald inference, Breslow baseline cumulative hazard, survival function, Harrell's concordance index (`regression/cox_ph.rs`)
 - [x] Survey-design corrections: stratified / clustered / weighted variance estimators (`survey/design.rs`)
 
 #### P2 -- Nice-to-Have
@@ -140,7 +140,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 938 passing
+- Tests: 1008 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features
@@ -215,17 +215,22 @@ All six SM versions produce non-empty PTX strings and pass content-substring che
 ### API Polish
 - [x] Builder-pattern `TTestBuilder`, `AnovaBuilder`, `BootstrapBuilder` configurators (`parametric/test_builder.rs`)
 - [ ] Convenience traits to consume `ndarray::Array1` / `ndarray::Array2` once
-  the optional `ndarray` feature lands
+  the optional `ndarray` feature lands (blocked: SCIRS2 no-ndarray policy — the
+  crate intentionally avoids the `ndarray` dependency)
 - [ ] Cross-link with `oxicuda-survival` for hazard regression and with `oxicuda-cvx`
-  for constrained MLE (e.g., box-constrained quantile regression)
+  for constrained MLE (e.g., box-constrained quantile regression) (blocked:
+  requires adding cross-crate dependencies. Hazard regression is now provided
+  natively in-crate via `regression/cox_ph.rs`.)
 
 ---
 
 ## v0.2.0 Extension Targets
 
 - [x] `circular/circular_stats.rs` — Circular/directional statistics (Mardia 1972): mean direction (atan2 of mean sin/cos), concentration parameter κ via Newton on modified Bessel ratio I₁/I₀=R̄, Rayleigh test, Watson-Williams F-test for mean direction equality
-- [ ] `copula/gaussian_copula.rs` — Gaussian copula (Sklar 1959, Li 2000): map marginals to U[0,1] via empirical CDF then Normal PPF; fit correlation Σ via maximum-likelihood on pseudo-observations; `GaussianCopula { rho: Vec<f32> }`
-- [ ] `copula/archimedean.rs` — Archimedean copulas (Frank/Clayton/Gumbel): generator φ(t) characterisation; maximum-likelihood parameter estimation; `ArchimedeanCopula { family: CopulaFamily, theta: f32 }`
-- [ ] `multivariate/manova_followup.rs` — MANOVA follow-up contrasts: Roy's greatest root test statistic; Pillai-Bartlett trace; discriminant function coefficients; post-hoc univariate ANOVA-like tests on canonical variates
+- [x] `copula/gaussian_copula.rs` — Gaussian copula (Sklar 1959, Li 2000): map marginals to U[0,1] via empirical CDF then Normal PPF; fit correlation Σ via maximum-likelihood on pseudo-observations. ALREADY IMPLEMENTED in `copula/gaussian_copula.rs` (`GaussianCopula { dim, corr, n_samples }`, `pseudo_observations`, log-density, sampling, conditional-normal)
+- [x] `copula/archimedean.rs` — Archimedean copulas (Frank/Clayton/Gumbel): generator φ(t) characterisation; maximum-likelihood parameter estimation. ALREADY IMPLEMENTED in `copula/archimedean.rs` (`ArchimedeanCopula { family, theta }`, golden-section MLE, Kendall τ↔θ, tail dependence, conditional-inversion sampling)
+- [x] `multivariate/manova_followup.rs` — MANOVA follow-up contrasts: Roy's greatest root test statistic; Pillai-Bartlett trace; discriminant function coefficients; post-hoc univariate ANOVA-like tests on canonical variates
 - [x] `bayes/dirichlet_mult.rs` — Dirichlet-Multinomial model (Minka 2003): conjugate prior for categorical counts; maximum-likelihood concentration parameter α via Newton (Minka's fixed-point iteration); `DirichletMultinomial`
 - [x] `time_series/acf_pacf.rs` — ACF/PACF computation: sample autocorrelation + Bartlett standard error; partial AC via Durbin-Levinson recursion; `acf(x: &[f32], max_lag: usize) -> Vec<f32>`, `pacf(x: &[f32], max_lag: usize) -> Vec<f32>`
+- [x] (time_series/arima.rs:arima_fit -- wired orphan) ARIMA(p,d,q) via Hannan-Rissanen 3-stage OLS init (ridge-regularised) + CSS coordinate-descent fine-tuning with step-halving line search (Box-Jenkins; Hannan & Rissanen 1982): `arima_fit`, `arima_forecast`, `arima_residuals`, `arima_predict_in_sample`, `ArimaConfig`, `ArimaFit`. Added `pub mod arima;` + re-export to `time_series/mod.rs`; 22 tests
+- [x] (mixture/gmm.rs:gmm_fit -- wired orphan) Gaussian Mixture Models via EM (Dempster-Laird-Rubin 1977; Bishop 2006 ch.9): k-means++ init, full/diagonal/spherical covariances, Cholesky log-density + log-sum-exp, n_init restarts: `gmm_fit`, `gmm_predict`, `gmm_predict_proba`, `gmm_score`, `gmm_aic`, `gmm_bic`, `GmmConfig`, `GmmModel`, `GmmCovariance`. Added `pub mod mixture;` + re-export to `lib.rs`; 22 tests

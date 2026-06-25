@@ -42,6 +42,7 @@ pub mod linalg;
 pub mod matrix_completion;
 pub mod measurement;
 pub mod metrics;
+pub mod ptx_advanced;
 pub mod ptx_kernels;
 pub mod robust_pca;
 pub mod sbl;
@@ -61,6 +62,15 @@ pub use robust_pca::{RpcaGd, RpcaGdConfig};
 pub use dictionary::{CoupledDictionary, CoupledDlConfig, couple_code, coupled_dl};
 pub use measurement::{CodedDiffraction, MaskKind, WirtingerConfig, phase_aligned_error};
 pub use sbl::{Rvm, RvmConfig, RvmFit, RvmKernel, rvm_fit_design};
+
+// Sequential compressed sensing via SMC (Ji, Xue & Carin 2008).
+pub use sbl::{SmcCs, SmcCsConfig};
+
+// Architecture-specialised PTX kernel variants + per-SM tile configuration.
+pub use ptx_advanced::{
+    TileConfig, correlate_fp8_ptx, correlate_tma_ptx, iht_step_cp_async_ptx,
+    svt_threshold_warpshuffle_ptx,
+};
 
 #[cfg(test)]
 mod e2e_tests;

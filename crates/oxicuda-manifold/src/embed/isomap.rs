@@ -106,7 +106,10 @@ mod tests {
     fn output_shape() {
         let n = 8;
         let data = line_data(n);
-        let cfg = IsomapConfig { n_neighbors: 3, n_components: 2 };
+        let cfg = IsomapConfig {
+            n_neighbors: 3,
+            n_components: 2,
+        };
         let emb = isomap(&data, n, 2, &cfg).expect("isomap should succeed");
         assert_eq!(emb.len(), n * cfg.n_components);
     }
@@ -116,7 +119,10 @@ mod tests {
     fn output_finite() {
         let n = 10;
         let data = line_data(n);
-        let cfg = IsomapConfig { n_neighbors: 3, n_components: 2 };
+        let cfg = IsomapConfig {
+            n_neighbors: 3,
+            n_components: 2,
+        };
         let emb = isomap(&data, n, 2, &cfg).expect("isomap should succeed");
         for v in &emb {
             assert!(v.is_finite(), "non-finite value: {v}");
@@ -128,7 +134,10 @@ mod tests {
     fn n_components_gt_n_error() {
         let n = 5;
         let data = line_data(n);
-        let cfg = IsomapConfig { n_neighbors: 2, n_components: n };
+        let cfg = IsomapConfig {
+            n_neighbors: 2,
+            n_components: n,
+        };
         assert!(isomap(&data, n, 2, &cfg).is_err());
     }
 
@@ -137,7 +146,10 @@ mod tests {
     fn n_1_works() {
         let n = 8;
         let data = line_data(n);
-        let cfg = IsomapConfig { n_neighbors: 3, n_components: 1 };
+        let cfg = IsomapConfig {
+            n_neighbors: 3,
+            n_components: 1,
+        };
         let emb = isomap(&data, n, 2, &cfg).expect("isomap should succeed");
         assert_eq!(emb.len(), n);
         assert!(emb.iter().all(|v| v.is_finite()));
@@ -148,9 +160,14 @@ mod tests {
     fn knn_graph_shape() {
         let n = 6;
         let data = line_data(n);
-        let cfg = IsomapConfig { n_neighbors: 2, n_components: 1 };
+        let cfg = IsomapConfig {
+            n_neighbors: 2,
+            n_components: 1,
+        };
         // Verify that isomap_fit returns geodesic_distances of size n*n
-        let result = crate::local::isomap::isomap_fit(&data, n, 2, 2, 1).expect("isomap_fit should succeed");
+        let result =
+            crate::local::isomap::isomap_fit(&data, n, 2, cfg.n_neighbors, cfg.n_components)
+                .expect("isomap_fit should succeed");
         assert_eq!(result.geodesic_distances.len(), n * n);
     }
 
@@ -159,12 +176,18 @@ mod tests {
     fn geodesic_distances_symmetric() {
         let n = 6;
         let data = line_data(n);
-        let result = crate::local::isomap::isomap_fit(&data, n, 2, 2, 1).expect("isomap_fit should succeed");
+        let result =
+            crate::local::isomap::isomap_fit(&data, n, 2, 2, 1).expect("isomap_fit should succeed");
         let g = &result.geodesic_distances;
         for i in 0..n {
             for j in 0..n {
                 let diff = (g[i * n + j] - g[j * n + i]).abs();
-                assert!(diff < 1e-10, "g[{i},{j}]={} != g[{j},{i}]={}", g[i*n+j], g[j*n+i]);
+                assert!(
+                    diff < 1e-10,
+                    "g[{i},{j}]={} != g[{j},{i}]={}",
+                    g[i * n + j],
+                    g[j * n + i]
+                );
             }
         }
     }
@@ -174,7 +197,10 @@ mod tests {
     fn n_neighbors_0_error() {
         let n = 5;
         let data = line_data(n);
-        let cfg = IsomapConfig { n_neighbors: 0, n_components: 1 };
+        let cfg = IsomapConfig {
+            n_neighbors: 0,
+            n_components: 1,
+        };
         assert!(isomap(&data, n, 2, &cfg).is_err());
     }
 
@@ -189,7 +215,10 @@ mod tests {
         for i in 0..n {
             data2[i * 2 + 1] = i as f64;
         }
-        let cfg = IsomapConfig { n_neighbors: 3, n_components: 1 };
+        let cfg = IsomapConfig {
+            n_neighbors: 3,
+            n_components: 1,
+        };
         let emb1 = isomap(&data1, n, 2, &cfg).expect("isomap should succeed");
         let emb2 = isomap(&data2, n, 2, &cfg).expect("isomap should succeed");
         // Embeddings should be the same up to reflection (same geodesic structure)
@@ -203,7 +232,10 @@ mod tests {
     fn mds_centered_output() {
         let n = 10;
         let data = line_data(n);
-        let cfg = IsomapConfig { n_neighbors: 3, n_components: 2 };
+        let cfg = IsomapConfig {
+            n_neighbors: 3,
+            n_components: 2,
+        };
         let emb = isomap(&data, n, 2, &cfg).expect("isomap should succeed");
         for c in 0..cfg.n_components {
             let col_sum: f64 = (0..n).map(|i| emb[i * cfg.n_components + c]).sum();
@@ -217,7 +249,10 @@ mod tests {
     /// Empty input returns EmptyInput error.
     #[test]
     fn empty_input_error() {
-        let cfg = IsomapConfig { n_neighbors: 2, n_components: 1 };
+        let cfg = IsomapConfig {
+            n_neighbors: 2,
+            n_components: 1,
+        };
         assert!(isomap(&[], 0, 2, &cfg).is_err());
     }
 
@@ -225,7 +260,10 @@ mod tests {
     #[test]
     fn single_point_valid_check() {
         let data = vec![1.0_f64, 2.0];
-        let cfg = IsomapConfig { n_neighbors: 1, n_components: 1 };
+        let cfg = IsomapConfig {
+            n_neighbors: 1,
+            n_components: 1,
+        };
         // n=1, n_components=1 → n_components >= n → error
         let result = isomap(&data, 1, 2, &cfg);
         assert!(result.is_err());

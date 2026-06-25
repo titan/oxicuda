@@ -71,6 +71,12 @@ pub mod prelude {
     };
     pub use crate::mamba::mamba_model::{MambaConfig, MambaModel, MambaModelWeights};
     pub use crate::mamba::selective_scan::{SelectiveScanConfig, selective_scan, softplus};
+    pub use crate::mamba::selective_scan_mixed::{
+        MixedPrecision, bf16_round, f16_round, mixed_precision_max_error, selective_scan_mixed,
+    };
+    pub use crate::mamba::selective_scan_parallel::{
+        selective_scan_parallel, verify_selective_scan_equivalence,
+    };
     pub use crate::mamba_moe::{MambaMoe, MambaMoeConfig};
     pub use crate::mamba2::chunk_scan::{ChunkConfig, chunk_scan, verify_chunk_equivalence};
     pub use crate::mamba2::mamba2_block::{Mamba2Block, Mamba2BlockConfig, Mamba2BlockWeights};
@@ -102,11 +108,15 @@ pub mod prelude {
         hippo_legs_matrix,
     };
     pub use crate::ssm::liquid::{LiquidS4Config, LiquidS4Layer};
-    pub use crate::ssm::parallel_scan::{ScanPair, exclusive_scan, inclusive_scan, ssm_state_scan};
+    pub use crate::ssm::parallel_scan::{
+        ScanPair, blelloch_inclusive_scan, exclusive_scan, inclusive_scan, ssm_state_scan,
+        ssm_state_scan_blelloch,
+    };
     pub use crate::ssm::selective_scan_backward::{
         BatchedScanGrads, ScanGrads, scan_backward, scan_backward_batched, scan_forward,
     };
     pub use crate::ssm::ssm_kernel::{SsmConfig, SsmKernel};
+    pub use crate::ssm::state_cache::SsmStateCache;
     pub use crate::xlstm::{MLstm, MLstmConfig, MLstmState, SLstm, SLstmConfig, SLstmState};
 }
 
@@ -311,6 +321,43 @@ mod tests {
     }
 
     #[test]
+    fn e2e_mamba_parallel_scan_equals_sequential() {
+        // The work-efficient Blelloch parallel selective scan must agree with
+        // the sequential reference (the algorithm the fused GPU kernel realises).
+        use crate::mamba::selective_scan_parallel::verify_selective_scan_equivalence;
+        let cfg = SelectiveScanConfig::new(2, 16, 4, 8).expect("config");
+        let mut rng = make_rng();
+        let u = randn(&mut rng, 2 * 16 * 4);
+        let delta = randn(&mut rng, 2 * 16 * 4);
+        let a_log = randn(&mut rng, 4 * 8);
+        let b_proj = randn(&mut rng, 2 * 16 * 8);
+        let c_proj = randn(&mut rng, 2 * 16 * 8);
+        let ok =
+            verify_selective_scan_equivalence(&u, &delta, &a_log, &b_proj, &c_proj, &cfg, 1e-3)
+                .expect("verify");
+        assert!(ok, "parallel selective scan must match sequential");
+    }
+
+    #[test]
+    fn e2e_mamba_mixed_precision_close_to_fp32() {
+        // FP16 / BF16 mixed-precision scan with FP32 accumulation stays close to
+        // the full-FP32 reference.
+        use crate::mamba::selective_scan_mixed::{MixedPrecision, mixed_precision_max_error};
+        let cfg = SelectiveScanConfig::new(1, 16, 4, 8).expect("config");
+        let mut rng = make_rng();
+        let u: Vec<f32> = randn(&mut rng, 16 * 4).iter().map(|v| v * 0.4).collect();
+        let delta = vec![0.0_f32; 16 * 4];
+        let a_log = vec![0.0_f32; 4 * 8];
+        let b_proj: Vec<f32> = randn(&mut rng, 16 * 8).iter().map(|v| v * 0.3).collect();
+        let c_proj: Vec<f32> = randn(&mut rng, 16 * 8).iter().map(|v| v * 0.3).collect();
+        for prec in [MixedPrecision::Fp16, MixedPrecision::Bf16] {
+            let err = mixed_precision_max_error(&u, &delta, &a_log, &b_proj, &c_proj, &cfg, prec)
+                .expect("err");
+            assert!(err < 0.5, "{prec:?} max error {err} too large");
+        }
+    }
+
+    #[test]
     fn e2e_mamba_softplus_values() {
         assert!((softplus(0.0) - 2.0_f32.ln()).abs() < 1e-5);
         assert!((softplus(100.0) - 100.0).abs() < 1e-4);
@@ -400,6 +447,54 @@ mod tests {
         for x in [-100.0_f32, -1.0, 0.0, 1.0, 100.0] {
             let s = sigmoid(x);
             assert!((0.0..=1.0).contains(&s), "sigmoid({x})={s} out of [0,1]");
+        }
+    }
+
+    // ── SSM State Cache (streaming / checkpoint) ──────────────────────────────
+
+    #[test]
+    fn e2e_ssm_state_cache_streaming_and_checkpoint() {
+        // Streaming in two chunks (with a checkpoint/restore across the split)
+        // must equal a single full-sequence scan.
+        use crate::ssm::state_cache::SsmStateCache;
+        let (d, n, l) = (2_usize, 3_usize, 12_usize);
+        let mut rng = make_rng();
+        let u = randn(&mut rng, l * d);
+        let a_bar: Vec<f32> = (0..l * d * n)
+            .map(|_| rng.next_f32() * 0.9 + 0.05)
+            .collect();
+        let b_bar = randn(&mut rng, l * d * n);
+        let c = randn(&mut rng, l * d * n);
+
+        let mut full = SsmStateCache::new(d, n).expect("cache");
+        let reference = full.advance_chunk(&u, &a_bar, &b_bar, &c, l).expect("full");
+
+        let split = 5_usize;
+        let mut cache = SsmStateCache::new(d, n).expect("cache");
+        let _ = cache
+            .advance_chunk(
+                &u[..split * d],
+                &a_bar[..split * d * n],
+                &b_bar[..split * d * n],
+                &c[..split * d * n],
+                split,
+            )
+            .expect("first");
+        let snap = cache.checkpoint();
+        let mut resumed = SsmStateCache::from_checkpoint(d, n, &snap).expect("resume");
+        let rest = l - split;
+        let tail = resumed
+            .advance_chunk(
+                &u[split * d..],
+                &a_bar[split * d * n..],
+                &b_bar[split * d * n..],
+                &c[split * d * n..],
+                rest,
+            )
+            .expect("second");
+        for (i, &v) in tail.iter().enumerate() {
+            let r = reference[split * d + i];
+            assert!((v - r).abs() < 1e-5, "stream/checkpoint mismatch at {i}");
         }
     }
 

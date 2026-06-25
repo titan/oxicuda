@@ -32,6 +32,7 @@ pub mod iv;
 pub mod metrics;
 pub mod ptx_kernels;
 pub mod sensitivity;
+pub mod verification;
 
 #[cfg(test)]
 mod e2e_tests {

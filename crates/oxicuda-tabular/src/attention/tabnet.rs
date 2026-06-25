@@ -389,6 +389,78 @@ impl TabNetLayer {
     }
 }
 
+// ─── Crate-internal accessors for the analytic backward pass ──────────────────
+// The backward implementation lives in `tabnet_grad.rs`.
+
+impl TabNetLayer {
+    pub(crate) fn config_ref(&self) -> &TabNetConfig {
+        &self.config
+    }
+    pub(crate) fn shared_w_ref(&self) -> &[f32] {
+        &self.shared_w
+    }
+    pub(crate) fn shared_b_ref(&self) -> &[f32] {
+        &self.shared_b
+    }
+    pub(crate) fn step_w_ref(&self, s: usize) -> &[f32] {
+        &self.step_w[s]
+    }
+    pub(crate) fn step_b_ref(&self, s: usize) -> &[f32] {
+        &self.step_b[s]
+    }
+    pub(crate) fn att_w_ref(&self, s: usize) -> &[f32] {
+        &self.att_w[s]
+    }
+    pub(crate) fn att_b_ref(&self, s: usize) -> &[f32] {
+        &self.att_b[s]
+    }
+    pub(crate) fn final_w_ref(&self) -> &[f32] {
+        &self.final_w
+    }
+    pub(crate) fn final_b_ref(&self) -> &[f32] {
+        &self.final_b
+    }
+    pub(crate) fn bn_ref(&self) -> &BatchNorm1d {
+        &self.bn
+    }
+
+    /// Read a single scalar parameter (test-only, for finite-difference checks).
+    #[cfg(test)]
+    pub(crate) fn param_get(&self, p: &crate::attention::tabnet_grad::TnParam) -> f32 {
+        use crate::attention::tabnet_grad::TnParam as P;
+        match *p {
+            P::SharedW(i) => self.shared_w[i],
+            P::SharedB(i) => self.shared_b[i],
+            P::StepW(s, i) => self.step_w[s][i],
+            P::StepB(s, i) => self.step_b[s][i],
+            P::AttW(s, i) => self.att_w[s][i],
+            P::AttB(s, i) => self.att_b[s][i],
+            P::FinalW(i) => self.final_w[i],
+            P::FinalB(i) => self.final_b[i],
+            P::BnGamma(i) => self.bn.gamma[i],
+            P::BnBeta(i) => self.bn.beta[i],
+        }
+    }
+
+    /// Write a single scalar parameter (test-only, for finite-difference checks).
+    #[cfg(test)]
+    pub(crate) fn param_set(&mut self, p: &crate::attention::tabnet_grad::TnParam, val: f32) {
+        use crate::attention::tabnet_grad::TnParam as P;
+        match *p {
+            P::SharedW(i) => self.shared_w[i] = val,
+            P::SharedB(i) => self.shared_b[i] = val,
+            P::StepW(s, i) => self.step_w[s][i] = val,
+            P::StepB(s, i) => self.step_b[s][i] = val,
+            P::AttW(s, i) => self.att_w[s][i] = val,
+            P::AttB(s, i) => self.att_b[s][i] = val,
+            P::FinalW(i) => self.final_w[i] = val,
+            P::FinalB(i) => self.final_b[i] = val,
+            P::BnGamma(i) => self.bn.gamma[i] = val,
+            P::BnBeta(i) => self.bn.beta[i] = val,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

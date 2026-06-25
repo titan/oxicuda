@@ -6,6 +6,8 @@
 //! - [`hippo_variants`] — HiPPO-LegT and HiPPO-FOUT alternative polynomial projection matrices.
 //! - [`liquid`] — Liquid-S4: input-modulated-`Δ` diagonal SSM with per-neuron `τ`.
 //! - [`selective_scan_backward`] — Reverse-mode gradients for the linear scan recurrence.
+//! - [`state_cache`] — Streaming SSM state cache (KV-cache analogue) with
+//!   checkpoint / restore for long-context inference.
 
 pub mod discretize;
 pub mod hippo_variants;
@@ -13,6 +15,7 @@ pub mod liquid;
 pub mod parallel_scan;
 pub mod selective_scan_backward;
 pub mod ssm_kernel;
+pub mod state_cache;
 
 pub use hippo_variants::{
     HippoFou, HippoFouConfig, HippoLegT, HippoLegTConfig, HippoMatrix, compare_hippo_variants,

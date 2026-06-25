@@ -1,6 +1,7 @@
 //! Linear, logistic, ridge, generalised linear, robust, quantile, mixed-effects,
 //! multinomial logistic, negative binomial regression, and GAM.
 
+pub mod cox_ph;
 pub mod diagnostics;
 pub mod gam;
 pub mod glm;
@@ -16,6 +17,7 @@ pub mod robust;
 pub mod theil_sen;
 pub mod tweedie;
 
+pub use cox_ph::{CoxConfig, CoxFit, TieMethod, concordance_index, cox_ph_fit};
 pub use diagnostics::{
     breusch_pagan_test, cooks_distance, dffits, durbin_watson_ols, durbin_watson_residuals,
     leverage, ols_standard_errors, standardized_residuals, vif,

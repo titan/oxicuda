@@ -16,6 +16,7 @@
 //! ├── voxel/         — voxel grid scatter, sparse 3D conv
 //! ├── mesh/          — Chamfer, EMD, normal estimation
 //! ├── gaussian/      — 3DGS primitives, projection, 2D/3D rasterization
+//! ├── generative/    — PointFlow CNF generative core (invertible flow + log-det)
 //! ├── transform/     — rigid body, quaternion, ICP
 //! ├── io/            — ASCII PLY / PCD point-cloud readers (pure std)
 //! ├── error          — Geom3dError / Geom3dResult
@@ -28,6 +29,7 @@
 pub mod arch;
 pub mod error;
 pub mod gaussian;
+pub mod generative;
 pub mod handle;
 pub mod io;
 pub mod mesh;
@@ -44,12 +46,17 @@ pub mod prelude {
     pub use crate::arch::egnn::{Egnn, EgnnConfig, EgnnLayer};
     pub use crate::arch::point_transformer::{PointTransformerConfig, PointTransformerLayer};
     pub use crate::arch::pointnet::{PointNet, PointNetConfig};
-    pub use crate::arch::pointnet_pp::{FeaturePropagation, SetAbstraction, SetAbstractionConfig};
+    pub use crate::arch::pointnet_batched::{pointnet_classify_batched, pointnet_forward_batched};
+    pub use crate::arch::pointnet_pp::{
+        FeaturePropagation, FpsBallGather, FpsBallGatherConfig, SetAbstraction,
+        SetAbstractionConfig, fps_ball_gather,
+    };
     pub use crate::error::{Geom3dError, Geom3dResult};
     pub use crate::gaussian::gaussian::Gaussian3d;
     pub use crate::gaussian::gaussian_2d::{Gaussian2d, rasterize_gaussians_2d};
     pub use crate::gaussian::project::{CameraIntrinsics, ProjectedGaussian, project_gaussian};
     pub use crate::gaussian::rasterize::{RasterConfig, rasterize_gaussians};
+    pub use crate::generative::pointflow::{CnfConfig, ContinuousNormalizingFlow, PointFlowModel};
     pub use crate::handle::{Geom3dHandle, LcgRng, SmVersion};
     pub use crate::io::{PointCloud, parse_pcd_str, parse_ply_str, read_pcd, read_ply};
     pub use crate::mesh::barycentric::{
@@ -77,6 +84,7 @@ pub mod prelude {
     pub use crate::neighborhood::grid_knn::{GridKnnConfig, SpatialHashGrid};
     pub use crate::neighborhood::kd_tree::KdTree;
     pub use crate::neighborhood::knn::knn;
+    pub use crate::neighborhood::stochastic_ball::stochastic_ball_query;
     pub use crate::pointops::gather_points::gather_points;
     pub use crate::pointops::group_features::group_features;
     pub use crate::pointops::interp_features::interp_features;

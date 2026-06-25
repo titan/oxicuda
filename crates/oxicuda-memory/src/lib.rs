@@ -49,6 +49,7 @@
 pub mod aligned;
 pub mod bandwidth_profiler;
 pub mod buffer_view;
+pub mod compression;
 pub mod copy;
 pub mod copy_2d3d;
 pub mod device_buffer;
@@ -56,9 +57,11 @@ pub mod host_buffer;
 pub mod host_registered;
 pub mod managed_hints;
 pub mod memory_info;
+pub mod numa;
 pub mod peer_copy;
 #[cfg(feature = "pool")]
 pub mod pool;
+pub mod pool_pressure;
 pub mod pool_stats;
 pub mod unified;
 pub mod virtual_memory;
@@ -74,6 +77,10 @@ pub use bandwidth_profiler::{
     estimate_transfer_time, format_bytes, theoretical_peak_bandwidth,
 };
 pub use buffer_view::{BufferView, BufferViewMut};
+pub use compression::{
+    CompressedDeviceBuffer, CompressionPlan, CompressionSupport, CompressionType,
+    DEFAULT_COMPRESSION_GRANULARITY,
+};
 pub use copy_2d3d::{Memcpy2DParams, Memcpy3DParams};
 pub use device_buffer::{DeviceBuffer, DeviceSlice};
 pub use host_buffer::PinnedBuffer;
@@ -83,6 +90,12 @@ pub use host_registered::{
 };
 pub use managed_hints::{ManagedMemoryHints, MigrationPolicy, PrefetchPlan};
 pub use memory_info::{MemAdvice, MemoryInfo, mem_advise, mem_prefetch, memory_info};
+pub use numa::{
+    LOCAL_NUMA_DISTANCE, NumaAllocTracker, NumaBuffer, NumaTopology, closest_node_to_gpu,
+};
+pub use pool_pressure::{
+    MemoryPressureMonitor, PressureLevel, PressureSample, validate_thresholds,
+};
 pub use unified::UnifiedBuffer;
 pub use virtual_memory::{
     AccessFlags, PhysicalAllocation, VirtualAddressRange, VirtualMemoryManager,
@@ -111,6 +124,7 @@ pub use pool::{MemoryPool, PoolStats, PooledBuffer};
 pub mod prelude {
     pub use crate::aligned::{AlignedBuffer, Alignment, AlignmentInfo};
     pub use crate::buffer_view::{BufferView, BufferViewMut};
+    pub use crate::compression::{CompressedDeviceBuffer, CompressionSupport, CompressionType};
     pub use crate::copy::{
         copy_dtod, copy_dtod_async, copy_dtoh, copy_dtoh_async_raw, copy_dtoh_region_async,
         copy_htod, copy_htod_async_raw, copy_htod_region_async,
@@ -126,6 +140,8 @@ pub mod prelude {
     };
     pub use crate::managed_hints::{ManagedMemoryHints, MigrationPolicy, PrefetchPlan};
     pub use crate::memory_info::{MemAdvice, MemoryInfo, mem_advise, mem_prefetch, memory_info};
+    pub use crate::numa::{NumaAllocTracker, NumaBuffer, NumaTopology};
+    pub use crate::pool_pressure::{MemoryPressureMonitor, PressureLevel};
     pub use crate::unified::UnifiedBuffer;
     pub use crate::virtual_memory::{AccessFlags, VirtualAddressRange, VirtualMemoryManager};
 }

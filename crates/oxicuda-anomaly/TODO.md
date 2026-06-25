@@ -46,7 +46,7 @@ Current implementation covers all canonical anomaly-detection families: DeepSVDD
 - [x] `metrics/anomaly_metrics.rs` -- `auc_roc_anomaly`, `auc_pr` (precision-recall trapezoidal), `f1_at_threshold`, `compute_detection_metrics` (AUC-ROC + AUC-PR + F1 combined into `AnomalyDetectionMetrics`)
 
 #### PTX Kernels
-- [x] `ptx_kernels.rs` -- 7 GPU kernels x 6 SM versions (75/80/86/90/100/120):
+- [x] `ptx_kernels.rs` -- 10 GPU kernels x 6 SM versions (75/80/86/90/100/120):
   - [x] `svdd_loss_kernel` -- `||z - c||^2` per sample
   - [x] `recon_score_kernel` -- MSE reconstruction error per sample via warp-shuffle reduction
   - [x] `lof_reach_dist_kernel` -- k-distance lookup + max for LOF reachability
@@ -54,6 +54,9 @@ Current implementation covers all canonical anomaly-detection families: DeepSVDD
   - [x] `mahal_dist_kernel` -- quadratic form `diff^T * Sigma^(-1) * diff` per sample
   - [x] `iforest_score_kernel` -- `2^(-avg_path / c_n)` via `ex2.approx`
   - [x] `ensemble_normalize_kernel` -- per-detector min-max then mean / max / weighted combination
+  - [x] `fused_knn_lof_kernel` -- block-cooperative `shfl.sync.down.b32` nearest-neighbour min reduction fused with the LOF reach-distance update in `.shared` (sm_80+ warp-shuffle path)
+  - [x] `abod_batch_kernel` -- stream-k angle-variance ABOF over query batches (3-vector inner product with reciprocal-distance weighting)
+  - [x] `fast_mcd_cstep_kernel` -- device-side MCD C-step Mahalanobis distance for all `n` samples in one launch
 
 #### Integration Tests
 - [x] 12 e2e tests (lib.rs): AE finite for train and noise, AE finite for arbitrary input, VAE finite, DeepSVDD score increases for far-away outlier, LOF finite for trivial uniform data, COPOD higher for extreme outlier, Mahalanobis higher for OOD point, Isolation score in `[0, 1]`, Z-score flags outlier, MAD finite, ensemble combine in `[0, 1]`, PTX kernels x 6 SM versions
@@ -97,10 +100,10 @@ Current implementation covers all canonical anomaly-detection families: DeepSVDD
 - [x] `statistical/extreme_value.rs` — Extreme Value Theory detector (Gnedenko 1943, Clifton 2011): GPD tail fitting on high-score exceedances via maximum-likelihood; automatic threshold selection by mean-excess plot; `GpdDetector`
 - [x] `distance/abod_approx.rs` — FastABOD / approximate ABOD (Kriegel 2008 §4): restrict angle variance computation to k-NN set instead of all pairs; reduces O(n²d) to O(knd); `AbodApprox { k: usize }`
 - [x] `distance/sod.rs` — SOD (Subspace Outlier Degree, Kriegel 2009): per-point shared-nearest-neighbour subspace projection; SOD=d(x,μ_snn)/Var_snn_subspace; handles high-dimensional feature irrelevance
-- [ ] `ensemble/lscp.rs` — LSCP (Zhao 2019, Locally Selective Combination in Parallel): local pseudo-ground-truth via max-score in neighbourhood + greedy detector selection; `LscpEnsemble`
-- [ ] Fused kNN+LOF PTX kernel: warp-level distance min reduction + concurrent reach-dist update in shared memory on sm_80+
-- [ ] ABOD batch PTX kernel: stream-k angle-variance accumulation over query batches; 3-vector inner-product with reciprocal-distance weighting
-- [ ] FastMCD GPU C-step: device-side Mahalanobis distance for all n points in one kernel call (replaces host-side loop in `density/fast_mcd.rs`)
+- [x] `ensemble/lscp.rs` — LSCP (Zhao 2019, Locally Selective Combination in Parallel): local pseudo-ground-truth via max-score in neighbourhood + greedy detector selection; `LscpEnsemble` (implemented in `ensemble/lscp.rs`: `LscpConfig` / `LscpEnsemble` / `LscpTarget` / `LscpStrategy`, score-space local region + Pearson-correlation competent-detector selection, 6 unit tests; exported in prelude)
+- [x] Fused kNN+LOF PTX kernel: warp-level distance min reduction + concurrent reach-dist update in shared memory on sm_80+ (`ptx_kernels::fused_knn_lof_ptx` — block-cooperative `shfl.sync.down.b32` min reduction into 32-slot `.shared` staging + fused `max(knn_dist, d(x,nn₁))` reach-distance update; structural tests across 6 SM versions)
+- [x] ABOD batch PTX kernel: stream-k angle-variance accumulation over query batches; 3-vector inner-product with reciprocal-distance weighting (`ptx_kernels::abod_batch_ptx` — streaming running sums of `f` and `f²`, `f=⟨p-a,p-b⟩/(‖p-a‖²·‖p-b‖²+ε)`, `out=1/(Var[f]+ε)`; structural tests across 6 SM versions)
+- [x] FastMCD GPU C-step: device-side Mahalanobis distance for all n points in one kernel call (replaces host-side loop in `density/fast_mcd.rs`) (`ptx_kernels::fast_mcd_cstep_ptx` — per-sample `(xᵢ-μ)ᵀΣ⁻¹(xᵢ-μ)` double-sum quadratic form in one launch; structural tests across 6 SM versions)
 
 ## Dependencies
 
@@ -112,7 +115,7 @@ Current implementation covers all canonical anomaly-detection families: DeepSVDD
 
 ## Quality Status
 
-- Tests: 582 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 601 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
@@ -142,7 +145,7 @@ Target: scoring throughput comparable to PyOD CPU reference and (for deep detect
 |--------|-------------|--------|
 | Files | source `.rs` files under `src/` | 69 |
 | SLoC | code lines (tokei) | ~23,650 |
-| Tests | e2e + unit | 582 |
+| Tests | e2e + unit | 601 |
 | Coverage | detector families | 5 (deep, distance, density, isolation, statistical) |
 | Coverage | ensemble methods | 3 (Average, Maximum, Weighted) |
 

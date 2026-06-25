@@ -51,9 +51,13 @@ Current implementation covers the canonical tabular deep-learning toolkit: spars
 ### Future Enhancements
 
 #### P0 -- Critical Algorithmic Coverage
-- [ ] Trainable backward passes (currently inference / forward only); explicit gradients for TabNet / SAINT / FT-Transformer / NODE
-- [ ] Joint categorical + continuous tabular pipeline with mixed-type encoders end-to-end
-- [ ] Self-supervised pretraining objectives for tabular data (denoising / contrastive)
+- [x] Trainable backward passes (explicit analytic gradients) for all four attention/tree tabular models, each verified by a central finite-difference gradient check:
+  - [x] `transformer/ft_transformer_grad.rs` -- `FtTransformer::backward` (softmax-Jacobian MHSA, QKV/Wo projections, GELU FFN, both LayerNorms, CLS head, tokenizer); `FtGradients`; FD rel-tol `< 3.5e-2` (params) / `< 2e-2` (input) on a tiny model
+  - [x] `attention/tabnet_grad.rs` -- `TabNetLayer::backward` (recurrent prior-scale chain `P_{i+1}=P_i⊙(γ−M_i)`, sparsemax support-Jacobian, BN γ/β, shared+step GLU/FC, mean-pool head); `TabNetGradients`; FD rel-tol `< 5e-2`
+  - [x] `attention/saint_grad.rs` -- `SaintLayer::backward` (per-sample row MHSA + per-feature inter-sample MHSA via shared `mhsa_backward`, all 4 LayerNorms incl. post-LN on FFN output, GELU FFN, mean-pool head); `SaintGradients`; FD rel-tol `< 4e-2` (abs/rel combined for tiny-gradient entries)
+  - [x] `tree/node_grad.rs` -- `NodeTree::backward` / `NodeEnsemble::backward` (entmax-1.5 Jacobian `∂p_i/∂z_j = 2 s_i(δ_ij − s_j/Σs)`, sigmoid-smoothed splits, leaf-product routing, ensemble mean); `NodeTreeGradients`; FD rel-tol `< 5e-2`
+- [x] Joint categorical + continuous tabular pipeline with mixed-type encoders end-to-end (`transformer/unified_encoder.rs` -- `JointTokenizer` jointly embeds continuous rank-1 affine tokens `x_j·w_j+b_j` AND per-category lookup embeddings into one merged sequence; `UnifiedEncoder` prepends optional CLS + Pre-LN MHSA blocks; `tokenize` / `forward` / `pooled`; verified token-count/shape, independent continuous & categorical contributions, finite + deterministic forward, cont-only / cat-only configs)
+- [x] Self-supervised pretraining objectives for tabular data (denoising / contrastive) (`preprocess/ssl_pretrain.rs` -- VIME (Yoon et al. 2020): mask-estimation BCE + feature-reconstruction MSE over empirical-marginal corruption; SCARF (Bahri et al. 2022): InfoNCE contrastive loss over feature-resampling corruption)
 - [x] CutMix / Mixup augmentation primitives for tabular learning
 
 #### P1 -- Important Features
@@ -62,22 +66,22 @@ Current implementation covers the canonical tabular deep-learning toolkit: spars
 - [x] DCN v2 (Wang et al. 2021) -- deep + cross network with low-rank factorisation
 - [x] DANets -- deep abstract network with abstract layers (danet.rs -- Chen 2022; abstract layer with sparsemax sparse feature-group masks + affine aggregation, stacked with shortcuts)
 - [x] DeepGBM -- gradient-boosting + neural hybrid (deepgbm.rs -- Ke 2019; GBDT2NN leaf-index-embedding MLP + CatNN FM over categorical features, combined → CTR; forward-only with provided leaf assignments)
-- [ ] TabPFN-style transformer-based prior-fit network (small-dataset specialist)
+- [x] TabPFN-style transformer-based prior-fit network (small-dataset specialist) (`transformer/tabpfn.rs` -- Hollmann et al. 2023; in-context classifier: shared feature encoder + per-class label embeddings, support/query in one sequence, causal-style in-context attention mask (support never attends to queries), softmax head over query tokens; forward / prior-fit inference)
 - [x] Calibration metrics (ECE, MCE, reliability diagrams) (`metrics/calibration.rs` -- Guo et al. 2017 temperature scaling + Naeini et al. 2015 reliability binning; ECE/MCE, equal-width/equal-mass bins, multi-class Brier, Newton-fit `TemperatureScaler`)
 - [x] PR-AUC (precision-recall area under curve) and log-loss / Brier score metrics
 
 #### P2 -- Advanced / Research
-- [ ] FT-Transformer with attention-bias / RoPE
+- [x] FT-Transformer with attention-bias / RoPE (`transformer/ft_rope.rs` -- RoPE rotary Q/K (Su et al. 2021 RoFormer) + T5-style learnable per-head relative attention-bias table (Raffel et al. 2020), Pre-LN blocks + CLS head)
 - [ ] NODE with TabRecord / VarOblivious variants
 - [x] Diffusion models for tabular generation (TabDDPM)
-- [ ] GANs for tabular data (CTGAN / TVAE) generators
+- [x] GANs for tabular data (CTGAN / TVAE) generators (CTGAN in `gan/ctgan.rs` -- Xu 2019; mode-specific normalisation, conditional sampler, PacGAN discriminator. TVAE in `vae/tvae.rs` -- Xu 2019; mode-normalised VAE with KL + reconstruction ELBO)
 - [x] Conformal prediction wrappers for distribution-free uncertainty (`conformal/split_conformal.rs` -- Vovk 2005 / Lei et al. 2018 split conformal, Romano et al. 2019 CQR, Romano et al. 2020 APS + Sadinle et al. 2019 LAC; finite-sample `(n+1)` empirical quantile)
-- [ ] Federated tabular learning primitives (split / vertical / horizontal)
+- [x] Federated tabular learning primitives (split / vertical / horizontal) (`federated.rs` -- horizontal_split (row partition) + vertical_split (column partition); FedAvg sample-weighted aggregation (McMahan 2017); FedProx proximal penalty + gradient (Li 2020); `SecureAggregator` pairwise-cancelling additive masks (Bonawitz 2017, simplified))
 - [x] Concept-drift detection for streaming tabular features
-- [ ] Differentiable feature selection / importance attribution
-- [ ] `transformer/node.rs` — NODE (Neural Oblivious Decision Ensembles, Popov 2019): differentiable oblivious trees with entmax-split threshold learning + ensemble averaging; `NodeTree { depth, n_trees, choice_fn: EntmaxBisect }`
+- [x] Differentiable feature selection / importance attribution (`feature_select/stg.rs` -- STG stochastic gates, Yamada et al. 2020; L0-surrogate regulariser + per-feature learned `importances()` + `selected_features` thresholding)
+- [x] `transformer/node.rs` — NODE (Neural Oblivious Decision Ensembles, Popov 2019): differentiable oblivious trees with entmax-split threshold learning + ensemble averaging — ALREADY EXISTS as `tree/node_oblivious.rs` (`ObliviousTree`, `NodeObliviousLayer`, `entmax_alpha_f64` / `entmoid_alpha_f64`, `EnsembleReduction`)
 - [x] `diffusion/tabddpm.rs` — TabDDPM (Kotelnikov 2023): Gaussian DDPM for continuous + multinomial diffusion for categorical features; denoising UNet with timestep embedding; generation + anomaly scoring via ELBO
-- [ ] `gan/ctgan.rs` — CTGAN (Xu 2019): conditional GAN with mode-specific normalisation for imbalanced categoricals; PacGAN discriminator packing; training-by-sampling from conditional distributions; `CtGan { pac: usize }`
+- [x] `gan/ctgan.rs` — CTGAN (Xu 2019): conditional GAN with mode-specific normalisation for imbalanced categoricals; PacGAN discriminator packing; training-by-sampling from conditional distributions; `CtGan { pac: usize }` — IMPLEMENTED in `gan/ctgan.rs` (`CtGan`, `ConditionalSampler`, `ModeNormalizer`, `ColumnModes`, discriminator/generator steps)
 - [x] `preprocess/target_encode.rs` — Target encoding with regularisation (Micci-Barreca 2001): replace categorical level c with E[y|x=c] smoothed by global prior; smoothing factor k; leave-one-out for train/test; `TargetEncoder { k: f32, min_count: usize }`
 - [x] `preprocess/quantile_feat.rs` — Quantile feature transformation (scikit-learn QuantileTransformer): map each feature to empirical quantile → Gaussian or uniform output; `QuantileTransformer { n_quantiles: usize, output_dist: QuantileDist }`
 - [x] `conformal/aps_conformal.rs` — APS (Adaptive Prediction Set, Romano 2020): conformity score for multi-class: include classes in decreasing probability order until cumulative mass ≥ α; `ApsConformal { alpha: f32 }` — complement to existing split conformal
@@ -92,11 +96,11 @@ Current implementation covers the canonical tabular deep-learning toolkit: spars
 
 ## Quality Status
 
-- Tests: 466 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 538 passing (14 e2e in lib.rs + module unit tests, incl. 21 new backward / unified-encoder gradient-check tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
-- Files: 49 source `.rs` files, all under 2000 lines
+- Files: 58 source `.rs` files, all under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS compiles but returns `UnsupportedPlatform` at runtime
 
@@ -120,9 +124,9 @@ Target: forward latency comparable to PyTorch + pytorch-tabular reference for FT
 
 | Metric | Description | Actual |
 |--------|-------------|--------|
-| Files | source `.rs` files under `src/` | 49 |
-| SLoC | code lines (tokei) | ~15,823 |
-| Tests | e2e + unit | 466 |
+| Files | source `.rs` files under `src/` | 58 |
+| SLoC | code lines (tokei) | ~23,573 |
+| Tests | e2e + unit | 538 |
 | Coverage | tabular DL models | 4 (TabNet, SAINT, FT-Transformer, NODE) |
 | Coverage | normalizers | 3 (Quantile, Standard, MinMax) |
 
@@ -134,19 +138,19 @@ The current implementation provides a compact reference covering the four most-c
 
 ### Turing (sm_75)
 - [x] PTX kernels generated for all 7 entry points on `sm_75`
-- [ ] Warp-shuffled top-k for TabNet sparsemax verified on Turing
+- [ ] Warp-shuffled top-k for TabNet sparsemax verified on Turing (requires GPU hardware)
 
 ### Ampere (sm_80) / Ada (sm_89)
 - [x] PTX kernels generated for `sm_80`, `sm_86`
-- [ ] `cp.async`-staged feature embeddings for large categorical vocabularies
-- [ ] Tensor Core path for SAINT / FT-Transformer MHSA (16x16x16 / 16x8x16 tiles) on hidden multiples of 16
-- [ ] Bank-conflict-free NODE leaf table lookup
+- [ ] `cp.async`-staged feature embeddings for large categorical vocabularies (requires GPU hardware)
+- [ ] Tensor Core path for SAINT / FT-Transformer MHSA (16x16x16 / 16x8x16 tiles) on hidden multiples of 16 (requires GPU hardware)
+- [ ] Bank-conflict-free NODE leaf table lookup (requires GPU hardware)
 
 ### Hopper (sm_90) / Blackwell (sm_100, sm_120)
 - [x] PTX kernels generated for `sm_90`, `sm_100`, `sm_120`
-- [ ] `wgmma`-based FT-Transformer block for large `embed_dim`
-- [ ] TMA-based categorical lookup for very large vocab sizes
-- [ ] Distributed shared-memory cluster reduction for AUC-ROC across large prediction batches
+- [ ] `wgmma`-based FT-Transformer block for large `embed_dim` (requires GPU hardware)
+- [ ] TMA-based categorical lookup for very large vocab sizes (requires GPU hardware)
+- [ ] Distributed shared-memory cluster reduction for AUC-ROC across large prediction batches (requires GPU hardware)
 
 ---
 
@@ -161,18 +165,18 @@ The current implementation provides a compact reference covering the four most-c
 - [x] AUC-ROC = 1.0 for perfect predictor (well-separated scores)
 - [x] QuantileNormalizer output lies in `[0, 1]` for in-distribution data
 - [x] PTX entry points validated for `.version`, `.address_size 64`, `.visible .entry`, kernel name, and SM target across all 6 SM versions
-- [ ] End-to-end OpenML / UCI benchmark accuracy reproduction (TabNet / SAINT / FT-Transformer / NODE papers)
-- [ ] TabNet GPU kernel correctness vs CPU simulation on `sm_80+`
+- [ ] End-to-end OpenML / UCI benchmark accuracy reproduction (TabNet / SAINT / FT-Transformer / NODE papers) (requires real datasets + full training infrastructure)
+- [ ] TabNet GPU kernel correctness vs CPU simulation on `sm_80+` (requires GPU hardware)
 
 ### Implementation Deepening
 - [x] TabNet attention masks are non-negative (verified by `e2e_tabnet_attention_valid`)
 - [x] FT-Transformer produces finite logits with correct output shape for arbitrary mixed continuous + categorical input
 - [x] NODE ensemble forward returns correct `output_dim` shape for any tree count + depth
 - [x] FeatureTokenizer produces `(n_cont + n_cat) * embed_dim` tokens
-- [ ] Trainable backward passes for TabNet step-wise attention prior scales
-- [ ] Mixed-precision (FP16 attention + FP32 master parameters) for memory-bound large vocabularies
+- [x] Trainable backward passes for TabNet step-wise attention prior scales (`attention/tabnet_grad.rs` -- the recurrent `P_{i+1}=P_i⊙(γ−M_i)` chain is differentiated exactly; the prior gradient of a late step flows back into every earlier step's prior, FD-verified via `bn_gamma` / `bn_beta` / `att_w` checks)
+- [ ] Mixed-precision (FP16 attention + FP32 master parameters) for memory-bound large vocabularies (requires GPU hardware)
 - [x] Calibration metrics (ECE / MCE) and reliability diagrams (`metrics/calibration.rs` -- Guo et al. 2017 / Naeini et al. 2015; duplicate of the P1 calibration item, implemented once)
-- [ ] PR-AUC and log-loss / Brier score for class-imbalanced tabular problems
+- [x] PR-AUC and log-loss / Brier score for class-imbalanced tabular problems (`metrics/pr_metrics.rs` -- `pr_auc`, `average_precision`, `log_loss` / `multiclass_log_loss`, `brier_score`, full `precision_recall_curve`)
 
 ## Notes
 

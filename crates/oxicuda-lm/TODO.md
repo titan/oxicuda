@@ -81,9 +81,14 @@ and GPU kernel PTX string generators for 6 SM versions (75/80/86/90/100/120).
 - [x] RmsNorm + LayerNorm reference implementations (`layer/norm.rs`)
 - [x] SwiGLU + GELU FFN variants (`layer/ffn.rs`)
 - [x] HuggingFace weight loader convention (`model/weights.rs`)
-- [ ] (P2) Mixtral-style MoE block (deferred -- integrates with `oxicuda-dist-infer` expert parallelism)
+- [ ] (P2) Mixtral-style MoE block (deferred -- the MoE block math (router top-k gating + expert dispatch + weighted combine) already has a dedicated home in the `oxicuda-moe` crate (`oxicuda-moe::moe::mixtral`), and expert-parallel sharding lives in `oxicuda-dist-infer::expert_parallel`; re-implementing it here would duplicate those crates)
 - [x] (P2) Long-context RoPE scaling (NTK-aware / YaRN) (`layer/rope_scaling.rs`; Peng et al. 2023 YaRN, Chen 2023 PI, bloc97 NTK-aware)
 - [x] (P2) Flash-Attention CPU reference (`layer/flash_attention.rs`; Dao et al. 2022 FlashAttention -- tiled online-softmax, equivalence-checked vs naive)
+
+#### P2 -- Tokenizer Families (subword algorithms beyond byte-level BPE)
+- [x] WordPiece tokenizer (`tokenizer/wordpiece.rs`) -- BERT-family greedy longest-match-first with `##` continuation marker, `[UNK]` whole-word fallback, char-length cap, basic whitespace+punctuation pre-tokeniser (Wu et al. 2016)
+- [x] Unigram-LM tokenizer (`tokenizer/unigram.rs`) -- SentencePiece "unigram" model: exact Viterbi maximum-likelihood segmentation over a log-prob subword lattice with single-char `<unk>` fallback (Kudo 2018)
+- [x] N-gram statistical LM + perplexity (`ngram.rs`) -- count-based n-gram model with add-k (Laplace/Lidstone) and Jelinek-Mercer interpolation smoothing; BOS/EOS padding; cross-entropy (nats/token) and perplexity over held-out corpora
 
 ## Dependencies
 
@@ -96,7 +101,7 @@ and GPU kernel PTX string generators for 6 SM versions (75/80/86/90/100/120).
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 226 passing (root TODO.md count)
+- Tests: 270 passing (was 226; +44 from WordPiece / Unigram / n-gram modules)
 - unwrap() calls: 0 (production code; tests use `.expect()` with descriptive messages)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference paths work natively
@@ -156,13 +161,14 @@ and GPU kernel PTX string generators for 6 SM versions (75/80/86/90/100/120).
 - [x] `MultiHeadAttention` handles GQA with `kv_h = q_h / (n_heads / n_kv_heads)`
 - [x] `PastKvCache` is a multi-layer container; each layer holds its own `LayerKvCache`
 - [x] Weight loaders for both packed-QKV (GPT-2) and separate-QKV (LLaMA) conventions
-- [ ] Speculative decoding draft model selection helper (integrates with `oxicuda-infer::speculative_verify`)
-- [ ] Quantized weight loading (INT8 / NF4) via `oxicuda-quant` codecs
+- [ ] Speculative decoding draft model selection helper (integrates with `oxicuda-infer::speculative_verify`) -- the rejection-sampling **verify** step already lives in `oxicuda-infer::sampling::speculative::speculative_verify`; full draft/target model pairing is an `oxicuda-infer` orchestration concern, not an `oxicuda-lm` primitive
+- [ ] Quantized weight loading (INT8 / NF4) via `oxicuda-quant` codecs (requires `oxicuda-quant` dependency -- out of scope for this thiserror-only crate)
 - [x] Long-context (>4k token) RoPE scaling (NTK-aware / YaRN) (`layer/rope_scaling.rs`; Peng et al. 2023 YaRN, Chen 2023 PI, bloc97 NTK-aware)
 
 ## Notes
 
 - All forward passes are pure-Rust CPU reference implementations -- GPU acceleration is provided by the PTX kernel strings (see `ptx_kernels.rs`) once a CUDA driver is available at runtime via `oxicuda-driver` / `oxicuda-launch`.
-- The `Gpt2Model` and `LlamaModel` `next_token()` paths are deterministic greedy decode -- richer sampling (top-k / top-p / beam) is provided by `oxicuda-infer::sampling`.
+- The `Gpt2Model` and `LlamaModel` `next_token()` paths are deterministic greedy decode -- richer **sampling/decoding** (greedy / top-k / top-p / typical / epsilon / mirostat / beam-search / contrastive / speculative / medusa / logits-processor / JSON-constrained / watermark) is centralised in `oxicuda-infer::sampling` and intentionally **not** duplicated here.
+- **Tokenizer families**: byte-level BPE (`tokenizer/bpe.rs`), WordPiece (`tokenizer/wordpiece.rs`) and Unigram-LM/Viterbi (`tokenizer/unigram.rs`) are all pure-Rust CPU references. An n-gram statistical LM with perplexity evaluation lives in `ngram.rs` for intrinsic tokenizer/corpus scoring.
 - Benchmarks live in `benches/lm_inference.rs` (Criterion harness) -- CPU forward-pass timing only; GPU benchmarking awaits Linux+NVIDIA hardware.
 - Future integration with `oxicuda-infer::ModelRunner` trait will expose `Gpt2Model` and `LlamaModel` as production-grade runners for the continuous batcher.

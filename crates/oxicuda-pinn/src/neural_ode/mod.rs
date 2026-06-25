@@ -7,7 +7,15 @@ pub mod hamiltonian;
 pub mod latent_ode;
 pub mod neural_sde;
 pub mod solvers;
+pub mod solvers_batch;
+pub mod stiff;
 pub mod symplectic;
+
+// Re-exports for stiff ODE solvers.
+pub use stiff::{
+    StiffConfig, StiffRhsFn, backward_euler_step, integrate_backward_euler, integrate_bdf,
+    integrate_rosenbrock2, rosenbrock2_step,
+};
 
 // Re-exports for HNN / LNN.
 pub use hamiltonian::{

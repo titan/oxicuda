@@ -15,9 +15,16 @@
 //! - [`flops`] — analytic FLOP / parameter accountant per `OpKind`
 //! - [`latency`] — LUT and small-MLP latency surrogates
 //! - [`accuracy`] — kNN / RBF accuracy regressor over architecture features
+//! - [`bayesian_gp`] — Gaussian-Process accuracy regressor with closed-form
+//!   posterior mean + variance (Cholesky solve) and an Expected-Improvement /
+//!   UCB acquisition function for sample-efficient Bayesian-optimisation search
+//! - [`gnn_predictor`] — BANANAS path-encoded MLP and NPENAS message-passing
+//!   GNN accuracy predictors over the cell DAG
 //! - [`predictor_io`] — feature extraction shared by all predictors
 
 pub mod accuracy;
+pub mod bayesian_gp;
 pub mod flops;
+pub mod gnn_predictor;
 pub mod latency;
 pub mod predictor_io;

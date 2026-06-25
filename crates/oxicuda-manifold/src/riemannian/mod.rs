@@ -5,13 +5,18 @@
 //! - [`spd`]                  Symmetric Positive-Definite cone SPD(n) with affine-invariant metric.
 //! - [`spd_bures`]            Bures-Wasserstein geometry on SPD(n) (optimal transport metric).
 //! - [`mod@spd_kmeans`]       Fréchet mean and Riemannian k-means on SPD(n).
-//! - [`hyperbolic_poincare`]  Poincaré ball model of hyperbolic space.
+//! - [`hyperbolic_poincare`]  Poincaré ball model of hyperbolic space (fixed unit curvature).
+//! - [`hyperbolic_ball`]      Curvature-parametrised Poincaré ball ([`PoincareBall`]) with exp/log/transport.
 //! - [`hyperbolic_lorentz`]   Lorentz (hyperboloid) model of hyperbolic space.
 //! - [`so_n`]                 Special Orthogonal Group SO(n) with matrix-exponential retraction.
 //! - [`mod@riemannian_median`] Riemannian (geometric) median on SPD(d) via Weiszfeld/IRLS.
 //! - [`wrapped_normal`]       Wrapped Normal distribution on the Poincaré ball (Nagano 2019).
+//! - [`mod@geodesic_regression`] Geodesic regression on SPD(d) (Fletcher 2013) — least-squares
+//!   fitting of a geodesic `γ(t) = Exp_p(t·v)` under the affine-invariant metric.
 
+pub mod geodesic_regression;
 pub mod grassmann;
+pub mod hyperbolic_ball;
 pub mod hyperbolic_lorentz;
 pub mod hyperbolic_poincare;
 pub mod riemannian_median;
@@ -22,7 +27,12 @@ pub mod spd_kmeans;
 pub mod stiefel;
 pub mod wrapped_normal;
 
+pub use geodesic_regression::{
+    GeodesicRegressionConfig, GeodesicRegressionFit, geodesic_regression_fit,
+    geodesic_regression_predict, geodesic_regression_sse,
+};
 pub use grassmann::{grassmann_distance, grassmann_project_tangent, grassmann_retract};
+pub use hyperbolic_ball::{PoincareBall, poincare_frechet_mean};
 pub use hyperbolic_lorentz::{
     lorentz_distance, lorentz_exp, lorentz_from_poincare, lorentz_inner, lorentz_log,
     lorentz_mobius_add, lorentz_norm_sq, lorentz_origin, lorentz_project_tangent,

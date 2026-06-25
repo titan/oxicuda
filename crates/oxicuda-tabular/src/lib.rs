@@ -14,6 +14,7 @@ pub mod deepgbm;
 pub mod diffusion;
 pub mod error;
 pub mod feature_select;
+pub mod federated;
 pub mod gan;
 pub mod handle;
 pub mod metrics;
@@ -40,6 +41,10 @@ pub mod prelude {
     pub use crate::diffusion::tabddpm::{TabDdpm, TabDdpmConfig};
     pub use crate::error::{TabularError, TabularResult};
     pub use crate::feature_select::stg::{StgConfig, StgModel};
+    pub use crate::federated::{
+        SecureAggregator, Shard, fed_avg, fed_avg_uniform, fedprox_gradient, fedprox_proximal,
+        horizontal_split, vertical_split,
+    };
     pub use crate::gan::ctgan::{
         ColumnModes, ConditionalSampler, CtGan, CtganConfig, ModeNormalizer,
     };
@@ -62,18 +67,27 @@ pub mod prelude {
     pub use crate::preprocess::quantile_feat::{
         QuantileDist, QuantileTransformer, probit, std_normal_cdf,
     };
+    pub use crate::preprocess::ssl_pretrain::{
+        ScarfConfig, ScarfModel, VimeConfig, VimeModel, VimeSample,
+    };
     pub use crate::preprocess::target_encode::{TargetEncoder, TargetEncoderConfig};
     pub use crate::preprocess::woe::{WoeEncoder, information_value};
     pub use crate::ptx_kernels::{
         auc_roc_ptx, f32_hex, feature_tokenize_ptx, intersample_attn_ptx, node_tree_eval_ptx,
         quantile_norm_ptx, sparsemax_ptx, tabnet_step_attn_ptx,
     };
+    pub use crate::transformer::ft_rope::{FtRopeConfig, FtRopeTransformer};
     pub use crate::transformer::ft_transformer::{FeatureTokenizer, FtConfig, FtTransformer};
     pub use crate::transformer::ft_transformer_v2::{
         FtTransformer as FtTransformerV2, FtTransformerConfig as FtTransformerV2Config,
     };
+    pub use crate::transformer::tabpfn::{TabPfn, TabPfnConfig};
     pub use crate::tree::extra_trees::{ExtraTrees, ExtraTreesConfig};
     pub use crate::tree::node::{NodeConfig, NodeEnsemble, NodeTree};
+    pub use crate::tree::node_oblivious::{
+        EnsembleReduction, NodeObliviousConfig, NodeObliviousLayer, ObliviousTree,
+        entmax_alpha_f64, entmoid_alpha_f64, sparsemax_f64,
+    };
     pub use crate::tree::random_forest::{ForestTask, RandomForest, RandomForestConfig};
     pub use crate::vae::tvae::{Tvae, TvaeConfig, kl_divergence_standard};
 }

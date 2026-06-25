@@ -4,6 +4,7 @@ pub mod numeric_svt;
 pub mod private_histogram;
 pub mod private_tuning;
 pub mod sparse_vector;
+pub mod svt_multistream;
 
 pub use adaptive_svt::{AdaptiveSvt, AdaptiveSvtConfig, AdaptiveSvtState};
 pub use numeric_svt::{NumericSvt, NumericSvtConfig, NumericSvtResponse};
@@ -12,3 +13,4 @@ pub use private_tuning::{
     PrivateTuningConfig, PrivateTuningOutput, StoppingRule, private_tuning, tuning_delta,
     tuning_epsilon,
 };
+pub use svt_multistream::{MultiStreamSvt, SvtCompositionMode};
