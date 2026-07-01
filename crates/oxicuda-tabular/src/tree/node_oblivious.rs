@@ -57,8 +57,12 @@ fn next_f64_unit(rng: &mut LcgRng) -> f64 {
 }
 
 /// Draw a single `N(0, std_dev)` sample (Box–Muller) in `f64`.
+///
+/// `pub(crate)` so the sibling [`crate::tree::var_oblivious`] module can reuse the
+/// identical initialiser/sampler stream (behaviour of this fixed-depth module is
+/// unchanged — visibility only).
 #[inline]
-fn next_normal_f64(rng: &mut LcgRng, std_dev: f64) -> f64 {
+pub(crate) fn next_normal_f64(rng: &mut LcgRng, std_dev: f64) -> f64 {
     // Guard the log argument away from exactly zero.
     let u1 = (next_f64_unit(rng) + 1e-12).min(1.0 - 1e-12);
     let u2 = next_f64_unit(rng);
@@ -68,7 +72,10 @@ fn next_normal_f64(rng: &mut LcgRng, std_dev: f64) -> f64 {
 }
 
 /// Fill `buf` with `N(0, std_dev)` samples in `f64`.
-fn fill_normal_f64(rng: &mut LcgRng, buf: &mut [f64], std_dev: f64) {
+///
+/// `pub(crate)` so [`crate::tree::var_oblivious`] can reuse the exact init scheme
+/// (visibility only; fixed-depth behaviour unchanged).
+pub(crate) fn fill_normal_f64(rng: &mut LcgRng, buf: &mut [f64], std_dev: f64) {
     for slot in buf.iter_mut() {
         *slot = next_normal_f64(rng, std_dev);
     }

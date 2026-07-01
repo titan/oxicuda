@@ -50,6 +50,13 @@ pub struct DeviceBuffer<T: Copy> {
     ptr: CUdeviceptr,
     /// Number of `T` elements (not bytes).
     len: usize,
+    /// Whether this buffer owns its allocation and must free it on drop.
+    ///
+    /// `true` for buffers created via [`DeviceBuffer::alloc`],
+    /// [`DeviceBuffer::zeroed`], or [`DeviceBuffer::from_host`]; `false` for
+    /// non-owning views created via [`DeviceBuffer::from_raw`], which borrow an
+    /// externally-owned device pointer and must NOT free it on drop.
+    owned: bool,
     /// Marker to tie the generic parameter `T` to this struct.
     _phantom: PhantomData<T>,
 }
@@ -83,6 +90,7 @@ impl<T: Copy> DeviceBuffer<T> {
         Ok(Self {
             ptr,
             len: n,
+            owned: true,
             _phantom: PhantomData,
         })
     }
@@ -116,6 +124,70 @@ impl<T: Copy> DeviceBuffer<T> {
         let mut buf = Self::alloc(data.len())?;
         buf.copy_from_host(data)?;
         Ok(buf)
+    }
+
+    /// Wraps an externally-owned device pointer in a non-owning
+    /// [`DeviceBuffer`] view **without allocating**.
+    ///
+    /// The returned buffer points at the *existing* allocation described by
+    /// `ptr` and `len`, and exposes the full [`DeviceBuffer`] API (copies,
+    /// slicing, [`as_device_ptr`](Self::as_device_ptr), and use as a matrix
+    /// operand in `oxicuda-blas`) over that memory.  Because the view does not
+    /// own the allocation, its [`Drop`] is a no-op: it will **not** call
+    /// `cuMemFree_v2`.  Ownership and the lifetime of the underlying memory
+    /// remain entirely with the original owner (e.g. another CUDA library,
+    /// `cudarc`, or a foreign allocator).
+    ///
+    /// This enables zero-copy interop: a consumer that already holds a
+    /// resident device allocation can wrap it here and run OxiCUDA operations
+    /// in place, with no host round-trip and no extra device allocation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee all of the following:
+    ///
+    /// * `ptr` is a valid CUDA device pointer into an allocation of at least
+    ///   `len * size_of::<T>()` bytes, correctly aligned for `T`, and
+    ///   associated with the CUDA context that subsequent OxiCUDA operations
+    ///   run under.
+    /// * The pointed-to memory contains a valid, initialised `[T; len]` (or is
+    ///   only used as a write target before being read).
+    /// * The underlying allocation **outlives** this `DeviceBuffer` view: the
+    ///   original owner must not free, reallocate, or invalidate `ptr` while
+    ///   this view (or any [`DeviceSlice`] borrowed from it) is alive.
+    /// * No other live `DeviceBuffer` owns the same `ptr` (to avoid a
+    ///   double-free) and aliasing rules are respected when the view is used
+    ///   mutably (e.g. as a [`MatrixDescMut`](../oxicuda_blas/struct.MatrixDescMut.html)
+    ///   output operand).
+    ///
+    /// A zero `len` is permitted (unlike [`alloc`](Self::alloc)) since no
+    /// allocation is performed; a `ptr` of `0` is also permitted for a
+    /// zero-length view, but pointer/length validity is the caller's
+    /// responsibility.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use oxicuda_memory::DeviceBuffer;
+    /// # use oxicuda_driver::ffi::CUdeviceptr;
+    /// // `raw` is a device pointer owned elsewhere (e.g. obtained from another
+    /// // CUDA library) pointing at `n` resident `f32` elements.
+    /// # let raw: CUdeviceptr = 0;
+    /// # let n: usize = 1024;
+    /// // SAFETY: `raw` is valid for `n` f32s and outlives `view`.
+    /// let view = unsafe { DeviceBuffer::<f32>::from_raw(raw, n) };
+    /// // `view` can now be used with oxicuda-blas / copies; dropping it does
+    /// // NOT free `raw`.
+    /// assert_eq!(view.len(), n);
+    /// ```
+    #[must_use]
+    pub unsafe fn from_raw(ptr: CUdeviceptr, len: usize) -> Self {
+        Self {
+            ptr,
+            len,
+            owned: false,
+            _phantom: PhantomData,
+        }
     }
 
     /// Copies data from a host slice into this device buffer (synchronous).
@@ -295,6 +367,11 @@ impl<T: Copy> DeviceBuffer<T> {
 
 impl<T: Copy> Drop for DeviceBuffer<T> {
     fn drop(&mut self) {
+        // Non-owning views (created via `from_raw`) borrow an externally-owned
+        // allocation and must never free it.
+        if !self.owned {
+            return;
+        }
         if let Ok(api) = try_driver() {
             // SAFETY: `self.ptr` was allocated by `cu_mem_alloc_v2` and has
             // not yet been freed.
@@ -356,5 +433,81 @@ impl<T: Copy> DeviceSlice<'_, T> {
     #[inline]
     pub fn as_device_ptr(&self) -> CUdeviceptr {
         self.ptr
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `from_raw` view must be marked non-owning so that `Drop` skips the
+    /// `cuMemFree_v2` call. We construct over a dummy sentinel pointer; because
+    /// the view is non-owning, dropping it performs no driver call and is safe
+    /// even without a CUDA device present.
+    #[test]
+    fn from_raw_is_non_owning() {
+        let sentinel: CUdeviceptr = 0xDEAD_BEEF;
+        // SAFETY: this view is never dereferenced; we only inspect metadata and
+        // rely on the non-owning Drop being a no-op.
+        let view = unsafe { DeviceBuffer::<f32>::from_raw(sentinel, 16) };
+        assert!(!view.owned, "from_raw must produce a non-owning buffer");
+        assert_eq!(view.len(), 16);
+        assert_eq!(view.as_device_ptr(), sentinel);
+        assert_eq!(view.byte_size(), 16 * std::mem::size_of::<f32>());
+        // Dropping a non-owning view must NOT touch the driver / free memory.
+        // Reaching the end of scope here exercises that path without a GPU.
+        drop(view);
+    }
+
+    /// A zero-length `from_raw` view is permitted (no allocation occurs) and is
+    /// reported as empty.
+    #[test]
+    fn from_raw_zero_len_is_empty() {
+        // SAFETY: zero-length, pointer never dereferenced; Drop is a no-op.
+        let view = unsafe { DeviceBuffer::<u8>::from_raw(0, 0) };
+        assert!(!view.owned);
+        assert!(view.is_empty());
+        assert_eq!(view.len(), 0);
+        assert_eq!(view.byte_size(), 0);
+    }
+
+    /// Two non-owning views may share the same pointer without risking a
+    /// double-free, because neither frees on drop. This models a consumer
+    /// re-wrapping the same resident allocation.
+    #[test]
+    fn from_raw_aliasing_views_do_not_double_free() {
+        let ptr: CUdeviceptr = 0x1000;
+        // SAFETY: non-owning aliases, never dereferenced; both Drops are no-ops.
+        let a = unsafe { DeviceBuffer::<f64>::from_raw(ptr, 8) };
+        let b = unsafe { DeviceBuffer::<f64>::from_raw(ptr, 8) };
+        assert!(!a.owned);
+        assert!(!b.owned);
+        assert_eq!(a.as_device_ptr(), b.as_device_ptr());
+        drop(a);
+        drop(b);
+    }
+
+    /// A real owning allocation created via `alloc` is marked `owned` so that
+    /// its memory is freed on drop. This requires a CUDA device, so it is gated
+    /// behind a runtime driver check and skipped (passing) when no GPU/driver
+    /// is available — keeping the test green on macOS while still proving the
+    /// owned-flag wiring on real hardware.
+    #[test]
+    fn alloc_is_owning_when_driver_available() {
+        match DeviceBuffer::<f32>::alloc(32) {
+            Ok(buf) => {
+                assert!(buf.owned, "alloc must produce an owning buffer");
+                assert_eq!(buf.len(), 32);
+                // `buf` is dropped here and frees its allocation via the driver.
+            }
+            Err(_) => {
+                // No CUDA driver/device on this host (e.g. macOS CI): the
+                // owned-flag logic is covered by the non-GPU tests above.
+            }
+        }
     }
 }

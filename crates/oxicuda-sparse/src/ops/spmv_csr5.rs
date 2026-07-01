@@ -26,8 +26,8 @@ use crate::error::{SparseError, SparseResult};
 use crate::format::csr5::Csr5Matrix;
 use crate::handle::SparseHandle;
 use crate::ptx_helpers::{
-    add_float, load_float_imm, load_global_float, mul_float, reinterpret_bits_to_float,
-    store_global_float,
+    add_float, emit_shfl_float, load_float_imm, load_global_float, mul_float,
+    reinterpret_bits_to_float, store_global_float,
 };
 
 /// Block size for CSR5 tile kernel (should be a multiple of 32).
@@ -140,7 +140,6 @@ fn emit_csr5_tile_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
     let elem_bytes = T::size_u32();
     let is_f64 = T::SIZE == 8;
     let mov_suffix = if is_f64 { "f64" } else { "f32" };
-    let bit_width = if is_f64 { "b64" } else { "b32" };
 
     KernelBuilder::new("csr5_tile")
         .target(sm)
@@ -198,9 +197,11 @@ fn emit_csr5_tile_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let elem_idx = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("add.u32 {elem_idx}, {tile_start}, {lane};"));
 
-                // Check bounds: elem_idx < nnz
-                let in_bounds = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {in_bounds}, {elem_idx}, {nnz_reg};"));
+                // Check bounds: skip the load when elem_idx >= nnz. Inverted
+                // skip-branch (`setp.lo` -> `setp.hs`) via the structured
+                // `branch_if` so the target matches the `$`-prefixed label.
+                let oob = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.hs.u32 {oob}, {elem_idx}, {nnz_reg};"));
 
                 // Load value and column, compute product (zero if out of bounds)
                 let product = load_float_imm::<T>(b, 0.0);
@@ -208,7 +209,7 @@ fn emit_csr5_tile_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let compute_label = b.fresh_label("csr5_compute");
                 let after_compute = b.fresh_label("csr5_after_compute");
 
-                b.raw_ptx(&format!("@!{in_bounds} bra {after_compute};"));
+                b.branch_if(oob, &after_compute);
                 b.label(&compute_label);
 
                 // Load col_idx[elem_idx]
@@ -278,10 +279,11 @@ fn emit_csr5_tile_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 b.raw_ptx(&format!("mov.{mov_suffix} {acc}, {product};"));
 
                 for offset in [1u32, 2, 4, 8, 16] {
-                    let shuffled = b.alloc_reg(T::PTX_TYPE);
-                    b.raw_ptx(&format!(
-                        "shfl.sync.up.{bit_width} {shuffled}, {acc}, {offset}, 0, 0xFFFFFFFF;"
-                    ));
+                    // Segmented up-shuffle. `emit_shfl_float` handles the f64
+                    // unpack/repack so no `.b64` shfl (rejected by ptxas) is
+                    // emitted; for f32 it is a single `.b32` shuffle.
+                    let shuffled =
+                        emit_shfl_float::<T>(b, "up", acc.clone(), &offset.to_string(), "0");
                     // Only add if source lane (lane - offset) is in the same row
                     let src_lane = b.alloc_reg(PtxType::U32);
                     b.raw_ptx(&format!("sub.u32 {src_lane}, {lane}, {offset};"));
@@ -352,18 +354,22 @@ fn emit_csr5_tile_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 ));
 
                 // Write result if this lane is the last for its row
+                // Only the last lane of each row segment writes. Branch past the
+                // write when this lane is not the last (inverted: `is_last`'s
+                // complement). We invert by testing `is_last == false` directly.
+                let not_last = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("not.pred {not_last}, {is_last};"));
                 let write_label = b.fresh_label("csr5_write");
                 let skip_write = b.fresh_label("csr5_skip_write");
-                b.raw_ptx(&format!("@!{is_last} bra {skip_write};"));
+                b.branch_if(not_last, &skip_write);
                 b.label(&write_label);
 
-                // Check row is valid (my_row < num_rows)
-                let row_valid = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!(
-                    "setp.lo.u32 {row_valid}, {my_row}, {num_rows_reg};"
-                ));
+                // Check row is valid: skip the write when my_row >= num_rows
+                // (inverted `setp.lo` -> `setp.hs`).
+                let row_oob = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.hs.u32 {row_oob}, {my_row}, {num_rows_reg};"));
                 let row_skip = b.fresh_label("csr5_row_skip");
-                b.raw_ptx(&format!("@!{row_valid} bra {row_skip};"));
+                b.branch_if(row_oob, &row_skip);
 
                 // For the first tile (tile_id == 0) and the row that starts at
                 // the tile boundary, we can write directly to y with beta scaling.
@@ -459,6 +465,35 @@ fn emit_csr5_calibrate_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+
+    /// The CSR5 tile + calibrate kernels must assemble for sm_86 in both
+    /// precisions. The f64 tile kernel exercises the segmented warp up-shuffle:
+    /// it must split into `.b32` halves (no `shfl.sync.up.b64`).
+    #[test]
+    fn csr5_tile_calibrate_f32_f64_assemble_sm86() {
+        let tile_f32 = emit_csr5_tile_kernel::<f32>(SmVersion::Sm86).expect("f32 tile");
+        assert_assembles_and_clean("csr5_tile_f32", &tile_f32);
+        let tile_f64 = emit_csr5_tile_kernel::<f64>(SmVersion::Sm86).expect("f64 tile");
+        assert_assembles_and_clean("csr5_tile_f64", &tile_f64);
+        assert!(
+            !tile_f64.contains("shfl.sync.up.b64"),
+            "f64 CSR5 tile kernel must not emit shfl.sync.up.b64:\n{tile_f64}"
+        );
+        assert!(
+            tile_f64.contains("shfl.sync.up.b32"),
+            "f64 CSR5 tile kernel must reduce via paired b32 up-shuffles:\n{tile_f64}"
+        );
+        assert!(
+            !tile_f64.contains("0F00000000"),
+            "f64 CSR5 tile kernel must not materialize an f32 0.0 immediate:\n{tile_f64}"
+        );
+
+        let cal_f32 = emit_csr5_calibrate_kernel::<f32>(SmVersion::Sm86).expect("f32 cal");
+        assert_assembles_and_clean("csr5_calibrate_f32", &cal_f32);
+        let cal_f64 = emit_csr5_calibrate_kernel::<f64>(SmVersion::Sm86).expect("f64 cal");
+        assert_assembles_and_clean("csr5_calibrate_f64", &cal_f64);
+    }
 
     #[test]
     fn csr5_tile_ptx_generates_f32() {

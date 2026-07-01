@@ -7,6 +7,8 @@ pub mod node;
 pub mod node_grad;
 pub mod node_oblivious;
 pub mod random_forest;
+pub mod tab_record;
+pub mod var_oblivious;
 
 pub use extra_trees::{ExtraNode, ExtraTree, ExtraTrees, ExtraTreesConfig};
 pub use gbdt::{
@@ -18,3 +20,5 @@ pub use node_oblivious::{
     entmoid_alpha_f64, sparsemax_f64,
 };
 pub use random_forest::{ForestNode, ForestTask, ForestTree, RandomForest, RandomForestConfig};
+pub use tab_record::{TabRecordConfig, TabRecordContext, TabRecordLayer};
+pub use var_oblivious::{VarObliviousConfig, VarObliviousLayer, VarObliviousTree};

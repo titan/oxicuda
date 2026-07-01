@@ -37,7 +37,10 @@ fn poisson_postprocess_kernel_name() -> &'static str {
     POISSON_POSTPROCESS_KERNEL_F32
 }
 
-fn generate_log_normal_exp_ptx(precision: PtxType, sm: SmVersion) -> Result<String, PtxGenError> {
+pub(crate) fn generate_log_normal_exp_ptx(
+    precision: PtxType,
+    sm: SmVersion,
+) -> Result<String, PtxGenError> {
     let kernel_name = log_normal_exp_kernel_name(precision);
     let stride_bytes = precision.size_bytes() as u32;
 
@@ -66,15 +69,22 @@ fn generate_log_normal_exp_ptx(precision: PtxType, sm: SmVersion) -> Result<Stri
                         b.store_global_f32(addr, result);
                     }
                     PtxType::F64 => {
+                        // NOTE: the f32 working registers are allocated as `B32`
+                        // (the `%r` 32-bit class) rather than `F32`. The PTX
+                        // register allocator shares a single `%f` prefix for both
+                        // F32 and F64 and declares the whole range at one width,
+                        // so mixing F32 and F64 in one kernel would mis-declare
+                        // the f32 regs as `.b64` and ptxas would reject every f32
+                        // instruction. `.b32` registers are accepted by f32 ops.
                         let normal_val = b.load_global_f64(addr.clone());
-                        let narrow = b.alloc_reg(PtxType::F32);
+                        let narrow = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("cvt.rn.f32.f64 {narrow}, {normal_val};"));
 
-                        let log2e = b.alloc_reg(PtxType::F32);
+                        let log2e = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {log2e}, 0f3FB8AA3B;"));
-                        let scaled = b.alloc_reg(PtxType::F32);
+                        let scaled = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {scaled}, {narrow}, {log2e};"));
-                        let exp_f32 = b.alloc_reg(PtxType::F32);
+                        let exp_f32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("ex2.approx.f32 {exp_f32}, {scaled};"));
 
                         let result = b.alloc_reg(PtxType::F64);
@@ -90,7 +100,7 @@ fn generate_log_normal_exp_ptx(precision: PtxType, sm: SmVersion) -> Result<Stri
         .build()
 }
 
-fn generate_poisson_postprocess_f32_ptx(sm: SmVersion) -> Result<String, PtxGenError> {
+pub(crate) fn generate_poisson_postprocess_f32_ptx(sm: SmVersion) -> Result<String, PtxGenError> {
     let kernel_name = poisson_postprocess_kernel_name();
 
     KernelBuilder::new(kernel_name)

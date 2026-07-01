@@ -6,7 +6,7 @@ Neural Radiance Fields and neural rendering primitives (NeRF, Instant-NGP, Mip-N
 
 ## Implementation Status
 
-**Actual: ~18,552 SLoC (49 source files + 1 benches file) -- Coverage: NeRF / Instant-NGP / Mip-NeRF / TensoRF reference pipeline + trainable hash grid, HumanNeRF/InstantAvatar, Block-NeRF/Mega-NeRF, Zip-NeRF, Neuralangelo, 3DGS (+ deformable), EmerNeRF, Ref-NeRF, pi-GAN, marching cubes, Plenoxel, K-Planes, NeRF-W, NSVF octree**
+**Actual: ~14,404 SLoC (49 source files + 1 benches file) -- Coverage: NeRF / Instant-NGP / Mip-NeRF / TensoRF reference pipeline + trainable hash grid, HumanNeRF/InstantAvatar, Block-NeRF/Mega-NeRF, Zip-NeRF, Neuralangelo, 3DGS (+ deformable), EmerNeRF, Ref-NeRF, pi-GAN, marching cubes, Plenoxel, K-Planes, NeRF-W, NSVF octree**
 
 Current implementation covers NeRF positional encoding (sin/cos with L frequency levels, configurable include_input), Instant-NGP multi-resolution hash grid (L levels, T buckets, F features per entry, spatial hashing with primes pi2=2654435761, pi3=805459861, trilinear interpolation over 8 corners), Mip-NeRF integrated positional encoding (Gaussian attenuation `exp(-omega^2 * sigma^2 / 2)` for anti-aliasing), TensoRF CP decomposition (rank-R factored density and color field with 1D axis interpolation), volume rendering (alpha compositing `alpha_i = 1 - exp(-sigma_i * delta_i)`, transmittance, early termination at `T < 1e-4`), stratified sampling, importance resampling (inverse-CDF), pinhole camera ray generation (c2w 3x4 matrix), occupancy-grid acceleration, and PSNR/MSE image-quality metrics.
 
@@ -96,7 +96,7 @@ Current implementation covers NeRF positional encoding (sin/cos with L frequency
 
 ## Quality Status
 
-- Tests: 388 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 395 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0 (verified with `-D warnings`)
 - `missing_docs` warnings: 0

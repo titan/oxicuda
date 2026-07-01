@@ -7,7 +7,7 @@ to cuBLAS. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.3).
 
 ## Implementation Status
 
-- **Actual SLoC:** 28,379 (92 files)
+- **Actual SLoC:** 29,765 (92 files)
 - **Estimated SLoC (estimation.md):** 324K--604K (median 464K)
 - **Ratio:** ~3.4% of median estimate -- compact foundation covering all major API surfaces
 
@@ -138,7 +138,7 @@ to cuBLAS. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.3).
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 799 passing
+- Tests: 791 passing
 - unwrap() calls: 0 (production code)
 
 ## Performance Targets
@@ -162,7 +162,7 @@ Relaxed targets: 80% for small matrices (M,N < 64), 85% for skinny matrices, 90%
 
 | Metric | Estimated (estimation.md) | Actual |
 |--------|---------------------------|--------|
-| SLoC | 324K--604K (median 464K) | 28,379 |
+| SLoC | 324K--604K (median 464K) | 29,765 |
 | Files | ~30+ subcomponents listed | 92 |
 | Development time | 13--22 days | Completed in Vol.1+2+3 batch |
 | AI generation ratio | 65% | -- |

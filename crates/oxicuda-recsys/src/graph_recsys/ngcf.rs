@@ -199,3 +199,145 @@ impl Ngcf {
         u_emb.iter().zip(i_emb.iter()).map(|(&a, &b)| a * b).sum()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    fn make_rng() -> LcgRng {
+        LcgRng::new(42)
+    }
+
+    fn small_model(rng: &mut LcgRng) -> Ngcf {
+        Ngcf::new(5, 10, 4, 2, rng).expect("model construction should succeed")
+    }
+
+    #[test]
+    fn construction_succeeds() {
+        let mut rng = make_rng();
+        let model = small_model(&mut rng);
+        assert_eq!(model.n_users, 5);
+        assert_eq!(model.n_items, 10);
+        assert_eq!(model.emb_dim, 4);
+        assert_eq!(model.n_layers, 2);
+        assert_eq!(model.user_emb.len(), 5 * 4);
+        assert_eq!(model.item_emb.len(), 10 * 4);
+        assert_eq!(model.weights.len(), 2);
+        for (w1, w2) in &model.weights {
+            assert_eq!(w1.len(), 4 * 4);
+            assert_eq!(w2.len(), 4 * 4);
+        }
+    }
+
+    #[test]
+    fn err_n_users_zero() {
+        let mut rng = make_rng();
+        assert!(matches!(
+            Ngcf::new(0, 10, 4, 1, &mut rng),
+            Err(RecsysError::InvalidNumUsers { .. })
+        ));
+    }
+
+    #[test]
+    fn err_n_items_zero() {
+        let mut rng = make_rng();
+        assert!(matches!(
+            Ngcf::new(5, 0, 4, 1, &mut rng),
+            Err(RecsysError::InvalidNumItems { .. })
+        ));
+    }
+
+    #[test]
+    fn err_emb_dim_zero() {
+        let mut rng = make_rng();
+        assert!(matches!(
+            Ngcf::new(5, 10, 0, 1, &mut rng),
+            Err(RecsysError::InvalidEmbeddingDim { .. })
+        ));
+    }
+
+    #[test]
+    fn err_propagate_empty_edges() {
+        let mut rng = make_rng();
+        let mut model = small_model(&mut rng);
+        assert!(matches!(
+            model.propagate(&[]),
+            Err(RecsysError::EmptyInteraction)
+        ));
+    }
+
+    #[test]
+    fn propagate_output_shape() {
+        // After n_layers=2 propagation the concatenated final vectors must
+        // have exactly n_users * emb_dim * (n_layers + 1) entries.
+        let mut rng = make_rng();
+        let mut model = Ngcf::new(3, 5, 4, 2, &mut rng).expect("model construction should succeed");
+        let edges = vec![(0, 0), (0, 1), (1, 2), (2, 3)];
+        model.propagate(&edges).expect("propagate should succeed");
+        assert_eq!(model.user_final.len(), 3 * 4 * (2 + 1));
+        assert_eq!(model.item_final.len(), 5 * 4 * (2 + 1));
+    }
+
+    #[test]
+    fn propagate_identity_weights_closed_form() {
+        // Single user, single item, 1 layer, identity W1 = W2 = I₂.
+        // user_emb = [1, 2], item_emb = [3, 4], edge (0, 0).
+        //
+        // deg_u[0]=1, deg_i[0]=1  →  norm_u = norm_i = 1.
+        // agg_user = item_emb = [3, 4]
+        // agg_item = user_emb = [1, 2]
+        // hadamard_user = [1·3, 2·4] = [3, 8]
+        // hadamard_item = [3·1, 4·2] = [3, 8]
+        //
+        // next_user[k] = leaky_relu(I·agg[k] + I·hadamard[k])
+        //   k=0 → leaky_relu(3 + 3) = 6
+        //   k=1 → leaky_relu(4 + 8) = 12
+        //
+        // next_item[k] = leaky_relu(I·agg_item[k] + I·hadamard_item[k])
+        //   k=0 → leaky_relu(1 + 3) = 4
+        //   k=1 → leaky_relu(2 + 8) = 10
+        //
+        // user_final = [1, 2, 6, 12]   (concat layer0 || layer1)
+        // item_final = [3, 4, 4, 10]
+        // score(0,0) = 1·3 + 2·4 + 6·4 + 12·10 = 3 + 8 + 24 + 120 = 155
+        let mut rng = make_rng();
+        let mut model = Ngcf::new(1, 1, 2, 1, &mut rng).expect("model construction should succeed");
+        model.user_emb = vec![1.0_f32, 2.0];
+        model.item_emb = vec![3.0_f32, 4.0];
+        // 2×2 identity matrices, stored row-major
+        model.weights = vec![(vec![1.0_f32, 0.0, 0.0, 1.0], vec![1.0_f32, 0.0, 0.0, 1.0])];
+        model
+            .propagate(&[(0, 0)])
+            .expect("propagate should succeed");
+
+        let eps = 1e-5_f32;
+        let expected_user_final = [1.0_f32, 2.0, 6.0, 12.0];
+        let expected_item_final = [3.0_f32, 4.0, 4.0, 10.0];
+        for (got, exp) in model.user_final.iter().zip(expected_user_final.iter()) {
+            assert!(
+                (got - exp).abs() < eps,
+                "user_final mismatch: got {got}, expected {exp}"
+            );
+        }
+        for (got, exp) in model.item_final.iter().zip(expected_item_final.iter()) {
+            assert!(
+                (got - exp).abs() < eps,
+                "item_final mismatch: got {got}, expected {exp}"
+            );
+        }
+        let score = model.score(0, 0);
+        assert!(
+            (score - 155.0_f32).abs() < eps,
+            "score mismatch: got {score}, expected 155.0"
+        );
+    }
+
+    #[test]
+    fn score_oob_returns_zero() {
+        let mut rng = make_rng();
+        let model = small_model(&mut rng);
+        assert_eq!(model.score(model.n_users, 0), 0.0_f32);
+        assert_eq!(model.score(0, model.n_items), 0.0_f32);
+    }
+}

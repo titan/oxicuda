@@ -271,43 +271,49 @@ pub fn generate_philox_normal_ptx(
                         let mean_reg = b.load_param_f64("mean");
                         let stddev_reg = b.load_param_f64("stddev");
 
-                        // Convert c0 -> u1 (use single precision approx for
-                        // transcendentals, then widen)
-                        let u1_f32 = b.alloc_reg(PtxType::F32);
+                        // NOTE: the f32 Box-Muller scratch registers are
+                        // allocated as `B32` (the 32-bit `%r` class) rather than
+                        // `F32`. The PTX allocator shares one `%f` prefix for F32
+                        // and F64 and declares the whole range at a single width,
+                        // so mixing F32 and F64 in one kernel mis-declares the f32
+                        // regs as `.b64` and ptxas rejects every f32 instruction.
+                        // `.b32` registers are valid operands for f32 ops.
+                        let u1_f32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("cvt.rn.f32.u32 {u1_f32}, {c0};"));
-                        let scale32 = b.alloc_reg(PtxType::F32);
+                        let scale32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {scale32}, 0f2F800000;"));
-                        let u1_32 = b.alloc_reg(PtxType::F32);
+                        let u1_32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {u1_32}, {u1_f32}, {scale32};"));
-                        let eps32 = b.alloc_reg(PtxType::F32);
+                        let eps32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {eps32}, 0f33800000;"));
-                        let u1_safe_32 = b.max_f32(u1_32, eps32);
+                        let u1_safe_32 = b.alloc_reg(PtxType::B32);
+                        b.raw_ptx(&format!("max.f32 {u1_safe_32}, {u1_32}, {eps32};"));
 
-                        let u2_f32 = b.alloc_reg(PtxType::F32);
+                        let u2_f32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("cvt.rn.f32.u32 {u2_f32}, {c1};"));
-                        let u2_32 = b.alloc_reg(PtxType::F32);
+                        let u2_32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {u2_32}, {u2_f32}, {scale32};"));
 
                         // Box-Muller in f32 then convert to f64
-                        let lg2_u1 = b.alloc_reg(PtxType::F32);
+                        let lg2_u1 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("lg2.approx.f32 {lg2_u1}, {u1_safe_32};"));
-                        let ln2 = b.alloc_reg(PtxType::F32);
+                        let ln2 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {ln2}, 0f3F317218;"));
-                        let ln_u1 = b.alloc_reg(PtxType::F32);
+                        let ln_u1 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {ln_u1}, {lg2_u1}, {ln2};"));
-                        let neg2 = b.alloc_reg(PtxType::F32);
+                        let neg2 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {neg2}, 0fC0000000;"));
-                        let neg2ln = b.alloc_reg(PtxType::F32);
+                        let neg2ln = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {neg2ln}, {neg2}, {ln_u1};"));
-                        let radius32 = b.alloc_reg(PtxType::F32);
+                        let radius32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("sqrt.approx.f32 {radius32}, {neg2ln};"));
-                        let two_pi = b.alloc_reg(PtxType::F32);
+                        let two_pi = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {two_pi}, 0f40C90FDB;"));
-                        let angle = b.alloc_reg(PtxType::F32);
+                        let angle = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {angle}, {two_pi}, {u2_32};"));
-                        let cos_val = b.alloc_reg(PtxType::F32);
+                        let cos_val = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("cos.approx.f32 {cos_val}, {angle};"));
-                        let z32 = b.alloc_reg(PtxType::F32);
+                        let z32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {z32}, {radius32}, {cos_val};"));
 
                         // Widen to f64

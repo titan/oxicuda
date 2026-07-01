@@ -6,7 +6,7 @@ Large language model inference primitives: BPE tokenizer, transformer layer buil
 
 ## Implementation Status
 
-**Actual: 5,781 SLoC across 22 files (includes Markdown doc-comments) / 4,470 pure Rust SLoC**
+**Actual: 7,252 SLoC across 22 files (includes Markdown doc-comments) / 4,470 pure Rust SLoC**
 
 Model-layer abstractions for LLM inference: BPE tokenizer, transformer layer building blocks
 with KV-cache for incremental decode, complete GPT-2 and LLaMA-2/3 model implementations,
@@ -101,7 +101,7 @@ and GPU kernel PTX string generators for 6 SM versions (75/80/86/90/100/120).
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 270 passing (was 226; +44 from WordPiece / Unigram / n-gram modules)
+- Tests: 275 passing (was 226; +44 from WordPiece / Unigram / n-gram modules)
 - unwrap() calls: 0 (production code; tests use `.expect()` with descriptive messages)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference paths work natively

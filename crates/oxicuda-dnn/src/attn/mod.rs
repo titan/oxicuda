@@ -7,6 +7,7 @@
 //! | [`mha`]             | Naive multi-head attention (reference / small seqs)  |
 //! | [`flash_attn`]      | FlashAttention-2 forward, backward, paged, decode   |
 //! | [`rope`]            | Rotary Positional Embedding (RoPE)                   |
+//! | [`rope_neox`]       | GPT-NeoX half-split partial-rotary RoPE (matches trustformers) |
 //! | [`fused_rope_attn`] | Fused RoPE + attention (single kernel, less BW)      |
 //! | [`block_sparse`]    | Block-sparse attention for long-context transformers |
 //! | [`ring_attention`]  | Ring attention for sequence parallelism (multi-GPU)  |
@@ -21,6 +22,7 @@ pub mod kv_cache;
 pub mod mha;
 pub mod ring_attention;
 pub mod rope;
+pub mod rope_neox;
 pub mod sliding_window;
 pub mod speculative_decode;
 
@@ -39,6 +41,7 @@ pub use ring_attention::{
     RingStep,
 };
 pub use rope::apply_rope;
+pub use rope_neox::rope_neox_half_split_f32;
 pub use sliding_window::{SlidingWindowConfig, sliding_window_attention};
 // ---------------------------------------------------------------------------
 // Tcgen05AttentionConfig

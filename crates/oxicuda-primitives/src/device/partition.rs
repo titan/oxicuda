@@ -200,19 +200,24 @@ impl DevicePartitionTemplate {
         .map_err(ferr)?;
         writeln!(out, "{{").map_err(ferr)?;
         if is_flagarr {
-            writeln!(out, "    .reg .u32    %flag_u32, %out_flag, %tid, %bid;").map_err(ferr)?;
+            writeln!(out, "    .reg .u32    %flag_u32, %out_flag, %ltid, %bid;").map_err(ferr)?;
         } else {
             writeln!(out, "    .reg .{ty}   %val;").map_err(ferr)?;
-            writeln!(out, "    .reg .u32    %out_flag, %tid, %bid;").map_err(ferr)?;
+            writeln!(out, "    .reg .u32    %out_flag, %ltid, %bid;").map_err(ferr)?;
         }
         writeln!(out, "    .reg .u64    %n, %gid, %ptr_in, %ptr_out, %addr;").map_err(ferr)?;
         writeln!(out, "    .reg .pred   %p, %match_pred;").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_out, [param_flags];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(ferr)?;
         writeln!(out, "    @%p ret;").map_err(ferr)?;
         if is_flagarr {
@@ -252,7 +257,7 @@ impl DevicePartitionTemplate {
         .map_err(ferr)?;
         writeln!(out, "{{").map_err(ferr)?;
         writeln!(out, "    .reg .{ty}   %val;").map_err(ferr)?;
-        writeln!(out, "    .reg .u32    %flag, %tid, %bid;").map_err(ferr)?;
+        writeln!(out, "    .reg .u32    %flag, %ltid, %bid;").map_err(ferr)?;
         writeln!(out, "    .reg .u64    %n, %gid, %rank, %pos_b, %addr;").map_err(ferr)?;
         writeln!(
             out,
@@ -267,9 +272,14 @@ impl DevicePartitionTemplate {
         writeln!(out, "    ld.param.u64 %ptr_flags, [param_flags];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_rank,  [param_rank_a];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,          [param_n];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(ferr)?;
         writeln!(out, "    @%p ret;").map_err(ferr)?;
 
@@ -389,7 +399,7 @@ impl DeviceSelectUniqueTemplate {
         .map_err(ferr)?;
         writeln!(out, "{{").map_err(ferr)?;
         writeln!(out, "    .reg .{ty}   %cur, %prev;").map_err(ferr)?;
-        writeln!(out, "    .reg .u32    %head, %tid, %bid;").map_err(ferr)?;
+        writeln!(out, "    .reg .u32    %head, %ltid, %bid;").map_err(ferr)?;
         writeln!(
             out,
             "    .reg .u64    %n, %gid, %ptr_in, %ptr_out, %addr, %prev_idx;"
@@ -399,9 +409,14 @@ impl DeviceSelectUniqueTemplate {
         writeln!(out, "    ld.param.u64 %ptr_out, [param_heads];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(ferr)?;
         writeln!(out, "    @%oob ret;").map_err(ferr)?;
         writeln!(out, "    setp.eq.u64  %is_first, %gid, 0;").map_err(ferr)?;
@@ -444,7 +459,7 @@ impl DeviceSelectUniqueTemplate {
         .map_err(ferr)?;
         writeln!(out, "{{").map_err(ferr)?;
         writeln!(out, "    .reg .{ty}   %val;").map_err(ferr)?;
-        writeln!(out, "    .reg .u32    %head, %tid, %bid;").map_err(ferr)?;
+        writeln!(out, "    .reg .u32    %head, %ltid, %bid;").map_err(ferr)?;
         writeln!(out, "    .reg .u64    %n, %gid, %oidx, %addr;").map_err(ferr)?;
         writeln!(
             out,
@@ -457,9 +472,14 @@ impl DeviceSelectUniqueTemplate {
         writeln!(out, "    ld.param.u64 %ptr_head, [param_heads];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_oidx, [param_out_idx];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,         [param_n];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(ferr)?;
         writeln!(out, "    @%oob ret;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %addr, %gid, 4, %ptr_head;").map_err(ferr)?;

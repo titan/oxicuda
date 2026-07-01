@@ -20,6 +20,7 @@ use std::fmt::Write as FmtWrite;
 use oxicuda_ptx::arch::SmVersion;
 use oxicuda_ptx::ir::PtxType;
 
+use super::precision;
 use crate::error::{BlasError, BlasResult};
 
 // ---------------------------------------------------------------------------
@@ -391,10 +392,19 @@ pub fn generate_bandwidth_gemm_ptx(config: &BandwidthGemmConfig) -> BlasResult<S
 
     let tiles = select_bandwidth_tiles(config);
     let prec = config.precision;
-    let ty = prec.ptx_type().as_ptx_str();
-    let acc_ty = prec.accumulator_type().as_ptx_str();
+    let in_type = prec.ptx_type();
+    let acc_type = prec.accumulator_type();
+    let ty = in_type.as_ptx_str();
+    let acc_ty = acc_type.as_ptx_str();
     let byte_size = prec.elem_bytes();
     let strategy = config.resolved_strategy();
+    // Separate the input-element and accumulator precisions: when they differ
+    // (half inputs with an f32 accumulator) loaded elements live in the `%fin`
+    // bank and are converted with `cvt`.
+    let needs_cvt = in_type != acc_type;
+    let mem_ty = precision::mem_type(in_type);
+    let needs_scratch = precision::needs_f32_scratch(in_type, acc_type);
+    let acc_zero = acc_type.zero_literal();
 
     let strat_label = match strategy {
         BandwidthStrategy::ShallowK => "shallowk",
@@ -435,10 +445,18 @@ pub fn generate_bandwidth_gemm_ptx(config: &BandwidthGemmConfig) -> BlasResult<S
     wl(&mut ptx, ")")?;
     wl(&mut ptx, "{")?;
 
-    // Registers — generous allocation for vector loads
+    // Registers — generous allocation for vector loads. The value bank `%f`
+    // uses the accumulator precision so its type matches every `mov`/`fma.rn`/
+    // `mul`/`ld.param` that `ptxas` validates.
     wl(&mut ptx, "    .reg .b32 %r<48>;")?;
     wl(&mut ptx, "    .reg .b64 %rd<32>;")?;
-    wl(&mut ptx, "    .reg .f32 %f<32>;")?;
+    wl(&mut ptx, &format!("    .reg {acc_ty} %f<32>;"))?;
+    if needs_cvt {
+        wl(&mut ptx, &format!("    .reg {mem_ty} %fin<8>;"))?;
+    }
+    if needs_scratch {
+        wl(&mut ptx, "    .reg .f32 %fc<8>;")?;
+    }
     wl(&mut ptx, "    .reg .pred %p<8>;")?;
     wl(&mut ptx, "")?;
 
@@ -483,7 +501,7 @@ pub fn generate_bandwidth_gemm_ptx(config: &BandwidthGemmConfig) -> BlasResult<S
     // Accumulator init
     wl(
         &mut ptx,
-        &format!("    mov{acc_ty} %f0, 0f00000000;  // accumulator"),
+        &format!("    mov{acc_ty} %f0, {acc_zero};  // accumulator"),
     )?;
     wl(&mut ptx, "    mov.u32 %r11, 0;  // k_iter")?;
     wl(&mut ptx, "")?;
@@ -508,10 +526,9 @@ pub fn generate_bandwidth_gemm_ptx(config: &BandwidthGemmConfig) -> BlasResult<S
             &format!("    mul.lo.u64 %rd20, %rd20, {byte_size};"),
         )?;
         wl(&mut ptx, "    add.u64 %rd21, %rd0, %rd20;")?;
-        wl(
-            &mut ptx,
-            &format!("    prefetch.global.L2 [%rd21], {byte_size};"),
-        )?;
+        // `prefetch` addresses a cache line and takes no size operand; a size
+        // argument is rejected by `ptxas` with an "arguments mismatch" error.
+        wl(&mut ptx, "    prefetch.global.L2 [%rd21];")?;
         wl(&mut ptx, "")?;
     }
 
@@ -538,7 +555,15 @@ pub fn generate_bandwidth_gemm_ptx(config: &BandwidthGemmConfig) -> BlasResult<S
         &format!("    mul.lo.u64 %rd3, %rd3, {byte_size};"),
     )?;
     wl(&mut ptx, "    add.u64 %rd4, %rd0, %rd3;")?;
-    wl(&mut ptx, &format!("    ld.global{ty} %f1, [%rd4];"))?;
+    if needs_cvt {
+        wl(&mut ptx, &format!("    ld.global{mem_ty} %fin1, [%rd4];"))?;
+        wl(
+            &mut ptx,
+            &precision::convert_to_acc(in_type, acc_type, "%fin1", "%fc1", "%f1"),
+        )?;
+    } else {
+        wl(&mut ptx, &format!("    ld.global{ty} %f1, [%rd4];"))?;
+    }
 
     // B[k, col] (NoTrans): index = k * N + col
     wl(
@@ -551,7 +576,15 @@ pub fn generate_bandwidth_gemm_ptx(config: &BandwidthGemmConfig) -> BlasResult<S
         &format!("    mul.lo.u64 %rd5, %rd5, {byte_size};"),
     )?;
     wl(&mut ptx, "    add.u64 %rd6, %rd1, %rd5;")?;
-    wl(&mut ptx, &format!("    ld.global{ty} %f2, [%rd6];"))?;
+    if needs_cvt {
+        wl(&mut ptx, &format!("    ld.global{mem_ty} %fin2, [%rd6];"))?;
+        wl(
+            &mut ptx,
+            &precision::convert_to_acc(in_type, acc_type, "%fin2", "%fc2", "%f2"),
+        )?;
+    } else {
+        wl(&mut ptx, &format!("    ld.global{ty} %f2, [%rd6];"))?;
+    }
 
     // FMA
     wl(&mut ptx, &format!("    fma.rn{acc_ty} %f0, %f1, %f2, %f0;"))?;
@@ -572,10 +605,26 @@ pub fn generate_bandwidth_gemm_ptx(config: &BandwidthGemmConfig) -> BlasResult<S
         &format!("    mul.lo.u64 %rd7, %rd7, {byte_size};"),
     )?;
     wl(&mut ptx, "    add.u64 %rd8, %rd2, %rd7;")?;
-    wl(&mut ptx, &format!("    ld.global{ty} %f3, [%rd8];"))?;
+    if needs_cvt {
+        wl(&mut ptx, &format!("    ld.global{mem_ty} %fin3, [%rd8];"))?;
+        wl(
+            &mut ptx,
+            &precision::convert_to_acc(in_type, acc_type, "%fin3", "%fc3", "%f3"),
+        )?;
+    } else {
+        wl(&mut ptx, &format!("    ld.global{ty} %f3, [%rd8];"))?;
+    }
     wl(&mut ptx, &format!("    mul{acc_ty} %f0, %f0, %f8;"))?;
     wl(&mut ptx, &format!("    fma.rn{acc_ty} %f0, %f9, %f3, %f0;"))?;
-    wl(&mut ptx, &format!("    st.global{ty} [%rd8], %f0;"))?;
+    if needs_cvt {
+        wl(
+            &mut ptx,
+            &precision::convert_from_acc(in_type, acc_type, "%f0", "%fc0", "%fin0"),
+        )?;
+        wl(&mut ptx, &format!("    st.global{mem_ty} [%rd8], %fin0;"))?;
+    } else {
+        wl(&mut ptx, &format!("    st.global{ty} [%rd8], %f0;"))?;
+    }
     wl(&mut ptx, "")?;
 
     wl(&mut ptx, "$BW_DONE:")?;

@@ -6,7 +6,7 @@ GPU-accelerated reinforcement learning primitives: experience replay buffers, po
 
 ## Implementation Status
 
-**Actual: 11,280 SLoC across 50 files (includes Markdown doc-comments) / 4,652 pure Rust SLoC**
+**Actual: 12,473 SLoC across 52 files (includes Markdown doc-comments) / 4,652 pure Rust SLoC**
 
 First-class GPU-ready RL library implementing every major modern algorithm from DQN to SAC/TD3/PPO,
 including prioritized experience replay (PER), n-step returns, GAE, V-trace, Retrace,
@@ -119,7 +119,7 @@ observation/reward normalization, and a vectorized environment abstraction.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![warn(missing_docs)]`)
-- Tests: 425 passing (root TODO.md count)
+- Tests: 453 passing (root TODO.md count)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime

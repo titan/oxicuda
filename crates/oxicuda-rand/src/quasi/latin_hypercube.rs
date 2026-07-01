@@ -176,14 +176,14 @@ impl LatinHypercubeSampler {
                         let mix1 = b.alloc_reg(PtxType::U32);
                         b.raw_ptx(&format!(
                             "xor.b32 {mix1}, {gid}, {};",
-                            seed_lo.wrapping_add(d as u32 * 0x9E3779B9)
+                            seed_lo.wrapping_add((d as u32).wrapping_mul(0x9E3779B9))
                         ));
                         let mix2 = b.alloc_reg(PtxType::U32);
                         b.raw_ptx(&format!("mul.lo.u32 {mix2}, {mix1}, {};", 0x45D9F3B_u32));
                         let mix3 = b.alloc_reg(PtxType::U32);
                         b.raw_ptx(&format!(
                             "xor.b32 {mix3}, {mix2}, {};",
-                            seed_hi.wrapping_add(d as u32 * 0x85EBCA6B)
+                            seed_hi.wrapping_add((d as u32).wrapping_mul(0x85EBCA6B))
                         ));
                         let mix4 = b.alloc_reg(PtxType::U32);
                         b.raw_ptx(&format!("mul.lo.u32 {mix4}, {mix3}, {};", 0xC2B2AE35_u32));

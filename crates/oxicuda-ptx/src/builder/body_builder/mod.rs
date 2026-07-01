@@ -1767,6 +1767,9 @@ pub(super) mod body_builder_ext;
 // Extended tensor core builder: WMMA, MMA (TF32/BF16/FP8/INT8), WGMMA.
 pub(super) mod tensor_core_ops;
 
+// f64 math primitives + synthesized transcendentals (exp/log/erf/tanh).
+pub(super) mod math_f64;
+
 #[cfg(test)]
 #[path = "body_builder_tests.rs"]
 mod tests;

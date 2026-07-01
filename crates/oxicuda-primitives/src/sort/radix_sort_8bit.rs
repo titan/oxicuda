@@ -176,7 +176,7 @@ impl RadixSort8Template {
         writeln!(out, "    .reg .{ty}   %key;").map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %bid, %shift, %digit, %old, %i, %flat_idx;"
+            "    .reg .u32    %ltid, %bid, %shift, %digit, %old, %i, %flat_idx;"
         )
         .map_err(ferr)?;
         writeln!(
@@ -193,17 +193,22 @@ impl RadixSort8Template {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(ferr)?;
         writeln!(out, "    ld.param.u32 %shift,    [param_shift];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    mov.u64      %smem_base, cnt_hist;").map_err(ferr)?;
 
         // Init 256 bins: each thread strides by block_size until all bins zeroed.
-        writeln!(out, "    mov.u32      %i, %tid;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %i, %ltid;").map_err(ferr)?;
         writeln!(out, "CNT8_INIT:").map_err(ferr)?;
         writeln!(out, "    setp.ge.u32  %init_p, %i, {RADIX_SIZE_8};").map_err(ferr)?;
         writeln!(out, "    @%init_p bra CNT8_INIT_DONE;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %i, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %i, 4, %smem_base;").map_err(ferr)?;
         writeln!(out, "    st.shared.u32 [%hist_addr], 0;").map_err(ferr)?;
         writeln!(out, "    add.u32      %i, %i, {bs};").map_err(ferr)?;
         writeln!(out, "    bra CNT8_INIT;").map_err(ferr)?;
@@ -222,19 +227,19 @@ impl RadixSort8Template {
             writeln!(out, "    shr.u32      %digit, %key, %shift;").map_err(ferr)?;
         }
         writeln!(out, "    and.b32      %digit, %digit, 0xFF;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %digit, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %digit, 4, %smem_base;").map_err(ferr)?;
         writeln!(out, "    atom.shared.add.u32 %old, [%hist_addr], 1;").map_err(ferr)?;
 
         // Flush all 256 bins to global counts[bid * 256 + bin].
         writeln!(out, "CNT8_FLUSH:").map_err(ferr)?;
         writeln!(out, "    bar.sync 0;").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %i, %tid;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %i, %ltid;").map_err(ferr)?;
         writeln!(out, "CNT8_FLUSH_LOOP:").map_err(ferr)?;
         writeln!(out, "    setp.ge.u32  %init_p, %i, {RADIX_SIZE_8};").map_err(ferr)?;
         writeln!(out, "    @%init_p ret;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u32   %flat_idx, %bid, {RADIX_SIZE_8}, %i;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %flat_idx, 4, %ptr_cnt;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %i, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_idx, 4, %ptr_cnt;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %i, 4, %smem_base;").map_err(ferr)?;
         writeln!(out, "    ld.shared.u32 %old, [%hist_addr];").map_err(ferr)?;
         writeln!(out, "    st.global.u32 [%addr], %old;").map_err(ferr)?;
         writeln!(out, "    add.u32      %i, %i, {bs};").map_err(ferr)?;
@@ -249,6 +254,14 @@ impl RadixSort8Template {
 
         let mut out = ptx_header(sm);
         // Launch with 1 block × 256 threads: thread d scans digit d over blocks.
+        //
+        // As in the 4-bit sort, the output offset for digit `d` in block `b` is
+        // `digit_base[d] + (count of digit d in blocks < b)`. The earlier version
+        // omitted `digit_base` (the start of digit `d` in the sorted output), so
+        // all 256 buckets overlapped — radix sort was broken. Compute per-digit
+        // totals into shared memory, an exclusive scan across digits, then the
+        // cross-block exclusive scan seeded with `digit_base`.
+        writeln!(out, ".shared .align 4 .u32 radix8_totals[{RADIX_SIZE_8}];").map_err(ferr)?;
         writeln!(
             out,
             ".visible .entry {name}(\n    \
@@ -259,21 +272,62 @@ impl RadixSort8Template {
         writeln!(out, "{{").map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %nb, %b, %cnt, %prefix, %flat_idx;"
+            "    .reg .u32    %ltid, %nb, %b, %d, %cnt, %prefix, %base, %total, %flat_idx;"
         )
         .map_err(ferr)?;
-        writeln!(out, "    .reg .u64    %ptr, %addr;").map_err(ferr)?;
+        writeln!(out, "    .reg .u64    %ptr, %addr, %smem_base, %smem_addr;").map_err(ferr)?;
         writeln!(out, "    .reg .pred   %p;").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr, [param_counts];").map_err(ferr)?;
         writeln!(out, "    ld.param.u32 %nb,  [param_num_blocks];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %prefix, 0;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u64      %smem_base, radix8_totals;").map_err(ferr)?;
+
+        // Pass 1: total occurrences of this digit across all blocks.
+        writeln!(out, "    mov.u32      %total, 0;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %b, 0;").map_err(ferr)?;
+        writeln!(out, "SCAN8_TOTAL:").map_err(ferr)?;
+        writeln!(out, "    setp.ge.u32  %p, %b, %nb;").map_err(ferr)?;
+        writeln!(out, "    @%p bra SCAN8_TOTAL_DONE;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    mad.lo.u32   %flat_idx, %b, {RADIX_SIZE_8}, %ltid;"
+        )
+        .map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_idx, 4, %ptr;").map_err(ferr)?;
+        writeln!(out, "    ld.global.u32 %cnt, [%addr];").map_err(ferr)?;
+        writeln!(out, "    add.u32      %total, %total, %cnt;").map_err(ferr)?;
+        writeln!(out, "    add.u32      %b, %b, 1;").map_err(ferr)?;
+        writeln!(out, "    bra SCAN8_TOTAL;").map_err(ferr)?;
+        writeln!(out, "SCAN8_TOTAL_DONE:").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %ltid, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    st.shared.u32 [%smem_addr], %total;").map_err(ferr)?;
+        writeln!(out, "    bar.sync 0;").map_err(ferr)?;
+
+        // Pass 2: digit_base = exclusive prefix of totals over digits < tid.
+        writeln!(out, "    mov.u32      %base, 0;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %d, 0;").map_err(ferr)?;
+        writeln!(out, "SCAN8_BASE:").map_err(ferr)?;
+        writeln!(out, "    setp.ge.u32  %p, %d, %ltid;").map_err(ferr)?;
+        writeln!(out, "    @%p bra SCAN8_BASE_DONE;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %d, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    ld.shared.u32 %cnt, [%smem_addr];").map_err(ferr)?;
+        writeln!(out, "    add.u32      %base, %base, %cnt;").map_err(ferr)?;
+        writeln!(out, "    add.u32      %d, %d, 1;").map_err(ferr)?;
+        writeln!(out, "    bra SCAN8_BASE;").map_err(ferr)?;
+        writeln!(out, "SCAN8_BASE_DONE:").map_err(ferr)?;
+
+        // Pass 3: cross-block exclusive scan seeded with digit_base.
+        writeln!(out, "    mov.u32      %prefix, %base;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %b, 0;").map_err(ferr)?;
         writeln!(out, "SCAN8_LOOP:").map_err(ferr)?;
         writeln!(out, "    setp.ge.u32  %p, %b, %nb;").map_err(ferr)?;
         writeln!(out, "    @%p bra SCAN8_DONE;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u32   %flat_idx, %b, {RADIX_SIZE_8}, %tid;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %flat_idx, 4, %ptr;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    mad.lo.u32   %flat_idx, %b, {RADIX_SIZE_8}, %ltid;"
+        )
+        .map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_idx, 4, %ptr;").map_err(ferr)?;
         writeln!(out, "    ld.global.u32 %cnt, [%addr];").map_err(ferr)?;
         writeln!(out, "    st.global.u32 [%addr], %prefix;").map_err(ferr)?;
         writeln!(out, "    add.u32      %prefix, %prefix, %cnt;").map_err(ferr)?;
@@ -295,6 +349,7 @@ impl RadixSort8Template {
 
         let mut out = ptx_header(sm);
         writeln!(out, ".shared .align 4 .u32 block_offs[{RADIX_SIZE_8}];").map_err(ferr)?;
+        writeln!(out, ".shared .align 4 .u32 sct8_digits[{bs}];").map_err(ferr)?;
         writeln!(
             out,
             ".visible .entry {name}(\n    \
@@ -309,7 +364,7 @@ impl RadixSort8Template {
         writeln!(out, "    .reg .{ty}   %key;").map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %bid, %shift, %digit, %out_pos, %i, %flat_init, %off_val;"
+            "    .reg .u32    %ltid, %bid, %shift, %digit, %out_pos, %i, %flat_init, %off_val, %rank, %tp, %other, %boff;"
         )
         .map_err(ferr)?;
         writeln!(
@@ -319,10 +374,10 @@ impl RadixSort8Template {
         .map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u64    %addr, %smem_base, %smem_addr, %out64;"
+            "    .reg .u64    %addr, %smem_base, %dsmem_base, %smem_addr, %out64;"
         )
         .map_err(ferr)?;
-        writeln!(out, "    .reg .pred   %p, %init_p;").map_err(ferr)?;
+        writeln!(out, "    .reg .pred   %p, %init_p, %oob, %eq;").map_err(ferr)?;
         if is64 {
             writeln!(out, "    .reg .u64    %shift64, %key_shifted;").map_err(ferr)?;
         }
@@ -332,13 +387,19 @@ impl RadixSort8Template {
         writeln!(out, "    ld.param.u64 %ptr_off, [param_offsets];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(ferr)?;
         writeln!(out, "    ld.param.u32 %shift,    [param_shift];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    mov.u64      %smem_base, block_offs;").map_err(ferr)?;
+        writeln!(out, "    mov.u64      %dsmem_base, sct8_digits;").map_err(ferr)?;
 
         // Load this block's 256 pre-scanned offsets into shared (strided).
-        writeln!(out, "    mov.u32      %i, %tid;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %i, %ltid;").map_err(ferr)?;
         writeln!(out, "SCT8_LOAD:").map_err(ferr)?;
         writeln!(out, "    setp.ge.u32  %init_p, %i, {RADIX_SIZE_8};").map_err(ferr)?;
         writeln!(out, "    @%init_p bra SCT8_LOAD_DONE;").map_err(ferr)?;
@@ -347,17 +408,19 @@ impl RadixSort8Template {
             "    mad.lo.u32   %flat_init, %bid, {RADIX_SIZE_8}, %i;"
         )
         .map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %flat_init, 4, %ptr_off;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_init, 4, %ptr_off;").map_err(ferr)?;
         writeln!(out, "    ld.global.u32 %off_val, [%addr];").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %smem_addr, %i, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %i, 4, %smem_base;").map_err(ferr)?;
         writeln!(out, "    st.shared.u32 [%smem_addr], %off_val;").map_err(ferr)?;
         writeln!(out, "    add.u32      %i, %i, {bs};").map_err(ferr)?;
         writeln!(out, "    bra SCT8_LOAD;").map_err(ferr)?;
         writeln!(out, "SCT8_LOAD_DONE:").map_err(ferr)?;
-        writeln!(out, "    bar.sync 0;").map_err(ferr)?;
 
-        writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(ferr)?;
-        writeln!(out, "    @%p ret;").map_err(ferr)?;
+        // Cache each thread's digit (sentinel if OOB) for a STABLE within-block
+        // rank. The earlier `atom.shared.add` gave arbitrary order and broke the
+        // stability LSD radix requires.
+        writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(ferr)?;
+        writeln!(out, "    @%oob bra SCT8_DIG_OOB;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %addr, %gid, {eb}, %ptr_in;").map_err(ferr)?;
         writeln!(out, "    ld.global.{ty} %key, [%addr];").map_err(ferr)?;
         if is64 {
@@ -368,8 +431,33 @@ impl RadixSort8Template {
             writeln!(out, "    shr.u32      %digit, %key, %shift;").map_err(ferr)?;
         }
         writeln!(out, "    and.b32      %digit, %digit, 0xFF;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %smem_addr, %digit, 4, %smem_base;").map_err(ferr)?;
-        writeln!(out, "    atom.shared.add.u32 %out_pos, [%smem_addr], 1;").map_err(ferr)?;
+        writeln!(out, "    bra SCT8_DIG_STORE;").map_err(ferr)?;
+        writeln!(out, "SCT8_DIG_OOB:").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %digit, 0xFFFFFFFF;").map_err(ferr)?;
+        writeln!(out, "SCT8_DIG_STORE:").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %ltid, 4, %dsmem_base;").map_err(ferr)?;
+        writeln!(out, "    st.shared.u32 [%smem_addr], %digit;").map_err(ferr)?;
+        writeln!(out, "    bar.sync 0;").map_err(ferr)?;
+
+        // OOB threads are done; in-range threads compute a stable rank.
+        writeln!(out, "    @%oob ret;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %rank, 0;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %tp, 0;").map_err(ferr)?;
+        writeln!(out, "SCT8_RANK:").map_err(ferr)?;
+        writeln!(out, "    setp.ge.u32  %p, %tp, %ltid;").map_err(ferr)?;
+        writeln!(out, "    @%p bra SCT8_RANK_DONE;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %tp, 4, %dsmem_base;").map_err(ferr)?;
+        writeln!(out, "    ld.shared.u32 %other, [%smem_addr];").map_err(ferr)?;
+        writeln!(out, "    setp.eq.u32  %eq, %other, %digit;").map_err(ferr)?;
+        writeln!(out, "    @%eq add.u32 %rank, %rank, 1;").map_err(ferr)?;
+        writeln!(out, "    add.u32      %tp, %tp, 1;").map_err(ferr)?;
+        writeln!(out, "    bra SCT8_RANK;").map_err(ferr)?;
+        writeln!(out, "SCT8_RANK_DONE:").map_err(ferr)?;
+
+        // out_pos = block_offs[digit] + rank.
+        writeln!(out, "    mad.wide.u32   %smem_addr, %digit, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    ld.shared.u32 %boff, [%smem_addr];").map_err(ferr)?;
+        writeln!(out, "    add.u32      %out_pos, %boff, %rank;").map_err(ferr)?;
         writeln!(out, "    cvt.u64.u32  %out64, %out_pos;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %addr, %out64, {eb}, %ptr_out;").map_err(ferr)?;
         writeln!(out, "    st.global.{ty} [%addr], %key;").map_err(ferr)?;
@@ -469,7 +557,7 @@ mod tests {
         let (_, scan, _) = RadixSort8Template::new(c)
             .generate(SmVersion::Sm80)
             .expect("PTX generation should succeed in test");
-        assert!(scan.contains("256, %tid"), "PTX: {scan}");
+        assert!(scan.contains("256, %ltid"), "PTX: {scan}");
         assert!(scan.contains("SCAN8_LOOP"), "PTX: {scan}");
     }
 

@@ -100,3 +100,161 @@ pub fn compute_alignment_metrics(
         rejected_reward_mean: rejected_mean,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── win_rate ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn win_rate_perfect_alignment() {
+        // Every chosen > rejected → win rate must equal 1.0.
+        let chosen = [2.0_f32, 3.0, 5.0];
+        let rejected = [1.0_f32, 1.5, 4.0];
+        let wr = win_rate(&chosen, &rejected).expect("valid inputs");
+        assert!(
+            (wr - 1.0).abs() < 1e-6,
+            "perfect alignment must give win_rate=1.0, got {wr}"
+        );
+    }
+
+    #[test]
+    fn win_rate_zero_alignment() {
+        // Every chosen < rejected → win rate must equal 0.0.
+        let chosen = [0.0_f32, 1.0, 2.0];
+        let rejected = [1.0_f32, 2.0, 3.0];
+        let wr = win_rate(&chosen, &rejected).expect("valid inputs");
+        assert!(
+            wr.abs() < 1e-6,
+            "fully inverted alignment must give win_rate=0.0, got {wr}"
+        );
+    }
+
+    #[test]
+    fn win_rate_partial_analytic() {
+        // Pairs: (3>2) ✓, (1<2) ✗, (5>4) ✓  → 2/3.
+        let chosen = [3.0_f32, 1.0, 5.0];
+        let rejected = [2.0_f32, 2.0, 4.0];
+        let wr = win_rate(&chosen, &rejected).expect("valid inputs");
+        let expected = 2.0_f32 / 3.0;
+        assert!(
+            (wr - expected).abs() < 1e-6,
+            "expected win_rate={expected}, got {wr}"
+        );
+    }
+
+    #[test]
+    fn win_rate_empty_returns_error() {
+        let err = win_rate(&[], &[]).expect_err("empty input must error");
+        assert!(
+            matches!(err, RlhfError::EmptyInput),
+            "expected EmptyInput, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn win_rate_length_mismatch_returns_error() {
+        let err = win_rate(&[1.0], &[1.0, 2.0]).expect_err("mismatched lengths must error");
+        assert!(
+            matches!(err, RlhfError::MismatchedPairLength { .. }),
+            "expected MismatchedPairLength, got {err:?}"
+        );
+    }
+
+    // ── reward_gap ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn reward_gap_analytic() {
+        // chosen=[2.0, 3.0], rejected=[1.0, 2.0]
+        // differences = [1.0, 1.0], mean = 1.0.
+        let chosen = [2.0_f32, 3.0];
+        let rejected = [1.0_f32, 2.0];
+        let gap = reward_gap(&chosen, &rejected).expect("valid inputs");
+        assert!(
+            (gap - 1.0).abs() < 1e-6,
+            "expected reward_gap=1.0, got {gap}"
+        );
+    }
+
+    // ── kl_from_ref ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn kl_from_ref_equal_distributions_is_zero() {
+        // KL(P ‖ P) = Σ p_i · (log p_i − log p_i) = 0 for any P.
+        let lp = [-1.0_f32, -2.0, -3.0];
+        let ref_lp = [-1.0_f32, -2.0, -3.0];
+        let kl = kl_from_ref(&lp, &ref_lp).expect("valid inputs");
+        assert!(
+            kl.abs() < 1e-6,
+            "KL of identical distributions must be 0, got {kl}"
+        );
+    }
+
+    #[test]
+    fn kl_from_ref_nonneg_for_proper_distribution() {
+        // KL(P ‖ Q) ≥ 0 by Gibbs inequality.
+        // P = [0.8, 0.2], Q = [0.5, 0.5] → KL ≈ 0.193.
+        let lp = [0.8_f32.ln(), 0.2_f32.ln()];
+        let ref_lp = [0.5_f32.ln(), 0.5_f32.ln()];
+        let kl = kl_from_ref(&lp, &ref_lp).expect("valid inputs");
+        assert!(kl >= 0.0, "KL divergence must be non-negative, got {kl}");
+        assert!(
+            kl.is_finite(),
+            "KL must be finite for valid distributions, got {kl}"
+        );
+    }
+
+    // ── perplexity ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn perplexity_analytic_exact() {
+        // All log-probs = −1 → mean_lp = −1 → ppl = exp(1) = e.
+        let lp = [-1.0_f32, -1.0, -1.0];
+        let ppl = perplexity(&lp).expect("valid inputs");
+        let expected = 1.0_f32.exp();
+        assert!(
+            (ppl - expected).abs() < 1e-5,
+            "expected perplexity=exp(1)={expected:.6}, got {ppl}"
+        );
+    }
+
+    // ── compute_alignment_metrics ─────────────────────────────────────────────
+
+    #[test]
+    fn compute_alignment_metrics_integration() {
+        // chosen=[3.0, 2.0], rejected=[1.0, 1.0]: both chosen > rejected.
+        // win_rate = 1.0, reward_gap = mean([2.0, 1.0]) = 1.5,
+        // kl = 0 (equal log-probs), chosen_mean = 2.5, rejected_mean = 1.0.
+        let chosen = [3.0_f32, 2.0];
+        let rejected = [1.0_f32, 1.0];
+        let lp = [-0.5_f32, -0.5];
+        let ref_lp = [-0.5_f32, -0.5];
+        let m = compute_alignment_metrics(&chosen, &rejected, &lp, &ref_lp).expect("valid inputs");
+        assert!(
+            (m.win_rate - 1.0).abs() < 1e-6,
+            "win_rate: expected 1.0, got {}",
+            m.win_rate
+        );
+        assert!(
+            (m.reward_gap - 1.5).abs() < 1e-6,
+            "reward_gap: expected 1.5, got {}",
+            m.reward_gap
+        );
+        assert!(
+            m.kl_from_ref.abs() < 1e-6,
+            "kl_from_ref: expected 0.0 for equal log-probs, got {}",
+            m.kl_from_ref
+        );
+        assert!(
+            (m.chosen_reward_mean - 2.5).abs() < 1e-6,
+            "chosen_reward_mean: expected 2.5, got {}",
+            m.chosen_reward_mean
+        );
+        assert!(
+            (m.rejected_reward_mean - 1.0).abs() < 1e-6,
+            "rejected_reward_mean: expected 1.0, got {}",
+            m.rejected_reward_mean
+        );
+    }
+}

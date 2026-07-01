@@ -10,7 +10,7 @@ privacy mechanisms with RDP / Moments accountants, secure aggregation
 
 ## Implementation Status
 
-- **Actual SLoC:** 10,530 (44 files)
+- **Actual SLoC:** 12,084 (44 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
@@ -109,7 +109,7 @@ privacy mechanisms with RDP / Moments accountants, secure aggregation
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 10 E2E in `lib.rs` + module unit tests (see root TODO.md Vol.24 reference for the workspace-wide count)
+- Tests: 502 passing (10 E2E in `lib.rs` + module unit tests)
 - `unwrap()` calls: 0 in library code
 - macOS: compiles, returns `UnsupportedPlatform` from any actual GPU launch
 - PTX targets covered: sm_75 / sm_80 / sm_86 / sm_90 / sm_100 / sm_120

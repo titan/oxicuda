@@ -11,7 +11,7 @@ captioning, and VQA head. Part of [OxiCUDA](https://github.com/cool-japan/oxicud
 
 ## Implementation Status
 
-**Actual: 12,356 SLoC (43 files)** -- 380 unit tests + 12 E2E integration tests
+**Actual: 15,297 SLoC (43 files)** -- 380 unit tests + 12 E2E integration tests
 
 The crate covers the complete vision-language-audio-video pipeline used by
 modern multi-modal foundation models. Encoders are simulation-grade for CPU
@@ -215,7 +215,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `-D warnings`, lib + tests + benches)
-- Tests: 461 unit + 12 E2E = 473 passing
+- Tests: 468 unit + 12 E2E = 480 passing
 - unwrap() calls: 0 (production code)
 - `#![allow(clippy::needless_range_loop)]` at crate root for kernel-style loops
 - All public APIs return `MmResult<T>` or `Result<T, MultiModalError>`

@@ -190,7 +190,7 @@ pub fn boundary_reduce_ptx(sm: u32) -> String {
     {\n\
         .reg .u64  %rd<6>;\n\
         .reg .u32  %r<10>;\n\
-        .reg .s32  %sr<4>;\n\
+        .reg .s32  %sr<2>;\n\
         .reg .pred %p0;\n\
     \n\
         ld.param.u64  %rd0, [p_pivot_col];\n\
@@ -215,12 +215,14 @@ pub fn boundary_reduce_ptx(sm: u32) -> String {
         setp.eq.s32   %p0, %sr0, %sr1;\n\
         @%p0 bra $BR_DONE;\n\
     \n\
-        // Convert pivot row to address and write column index\n\
+        // Convert pivot row to address and write column index.\n\
+        // NOTE: atom.exch only supports bit types (.b32/.b64), never .s32; the\n\
+        // stored value is tid (%r4, a non-negative column index) and the old\n\
+        // value goes to the discarded %r6.\n\
         cvt.u32.s32   %r5, %sr0;\n\
         mul.wide.u32  %rd4, %r5, 4;\n\
         add.u64       %rd5, %rd0, %rd4;\n\
-        cvt.s32.u32   %sr2, %r4;\n\
-        atom.global.exch.s32 %sr3, [%rd5], %sr2;\n\
+        atom.global.exch.b32 %r6, [%rd5], %r4;\n\
     \n\
     $BR_DONE:\n\
         ret;\n\

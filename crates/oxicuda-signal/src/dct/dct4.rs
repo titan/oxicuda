@@ -142,6 +142,11 @@ pub fn emit_postscale_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
         SignalPrecision::F32 => 4u64,
         SignalPrecision::F64 => 8u64,
     };
+    // 2.0 as a precision-correct IEEE-754 immediate.
+    let two_imm = match prec {
+        SignalPrecision::F32 => "0f40000000".to_owned(),
+        SignalPrecision::F64 => "0d4000000000000000".to_owned(),
+    };
     let header = ptx_header(sm);
     format!(
         r"{header}
@@ -175,8 +180,8 @@ pub fn emit_postscale_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     add.u64         %addr, %tw_base, %off;
     ld.global.{ty}  %tw, [%addr];
 
-    // two = 2.0 (encoded as IEEE 754)
-    mov.{ty}        %two, 0f40000000;  // 2.0 in f32; f64 uses 4000000000000000
+    // two = 2.0 (precision-correct IEEE-754 immediate)
+    mov.{ty}        %two, {two_imm};
     mul.{ty}        %res, %tw, %two;
     mul.{ty}        %res, %res, %u;
 
@@ -190,6 +195,7 @@ done_postscale4:
         header = header,
         ty = ty,
         bytes = bytes,
+        two_imm = two_imm,
         tid_preamble = global_tid_1d(),
         bounds = bounds_check("%tid64", "%n", "done_postscale4"),
     )

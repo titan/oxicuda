@@ -180,7 +180,7 @@ fn gauss_jordan(a: &[f32], b: &[f32], d: usize) -> RecsysResult<Vec<f32>> {
                 msg: "no pivot row".into(),
             })?;
 
-        aug.swap(col * (d + 1), pivot_row * (d + 1)); // swap full rows
+        // Swap full rows col and pivot_row in the augmented matrix.
         for k in 0..=(d) {
             let tmp_col = aug[col * (d + 1) + k];
             let tmp_piv = aug[pivot_row * (d + 1) + k];
@@ -213,4 +213,157 @@ fn gauss_jordan(a: &[f32], b: &[f32], d: usize) -> RecsysResult<Vec<f32>> {
     }
 
     Ok((0..d).map(|row| aug[row * (d + 1) + d]).collect())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WMF objective: Σ_{observed} c*(1-u·v)² + λ(||U||²+||V||²).
+    /// Each ALS alternating step solves its subproblem exactly, so this must
+    /// be non-increasing across iterations.
+    fn wmf_obj(model: &Als, interactions: &[(usize, usize, f32)]) -> f32 {
+        const ALPHA: f32 = 40.0;
+        let d = model.dim;
+        let mut obj = 0.0_f32;
+        for &(u, i, r) in interactions {
+            let c = 1.0 + ALPHA * r;
+            let pred = model.score(u, i).expect("score ok");
+            obj += c * (1.0 - pred).powi(2);
+        }
+        for chunk in model.user_emb.chunks(d) {
+            obj += model.lambda * chunk.iter().map(|&v| v * v).sum::<f32>();
+        }
+        for chunk in model.item_emb.chunks(d) {
+            obj += model.lambda * chunk.iter().map(|&v| v * v).sum::<f32>();
+        }
+        obj
+    }
+
+    #[test]
+    fn new_valid_params_succeeds() {
+        let mut rng = LcgRng::new(42);
+        let model = Als::new(4, 6, 8, 0.01, &mut rng).expect("new should succeed");
+        assert_eq!(model.user_emb.len(), 4 * 8);
+        assert_eq!(model.item_emb.len(), 6 * 8);
+        assert_eq!(model.n_users, 4);
+        assert_eq!(model.n_items, 6);
+    }
+
+    #[test]
+    fn new_zero_dim_returns_err() {
+        let mut rng = LcgRng::new(1);
+        assert!(matches!(
+            Als::new(4, 6, 0, 0.01, &mut rng),
+            Err(RecsysError::InvalidEmbeddingDim { .. })
+        ));
+    }
+
+    #[test]
+    fn new_zero_users_returns_err() {
+        let mut rng = LcgRng::new(1);
+        assert!(matches!(
+            Als::new(0, 6, 4, 0.01, &mut rng),
+            Err(RecsysError::InvalidNumUsers { .. })
+        ));
+    }
+
+    #[test]
+    fn fit_empty_interactions_returns_err() {
+        let mut rng = LcgRng::new(2);
+        let mut model = Als::new(4, 6, 4, 0.01, &mut rng).expect("new should succeed");
+        assert!(matches!(
+            model.fit(&[], 1),
+            Err(RecsysError::EmptyInteraction)
+        ));
+    }
+
+    #[test]
+    fn score_out_of_bounds_returns_err() {
+        let mut rng = LcgRng::new(3);
+        let model = Als::new(3, 5, 4, 0.01, &mut rng).expect("new should succeed");
+        assert!(matches!(
+            model.score(3, 0),
+            Err(RecsysError::UnknownUser { .. })
+        ));
+        assert!(matches!(
+            model.score(0, 5),
+            Err(RecsysError::UnknownItem { .. })
+        ));
+    }
+
+    #[test]
+    fn wmf_objective_non_increasing_across_als_steps() {
+        // ALS exactly solves each subproblem so the global objective must
+        // be non-increasing per alternating step.
+        let interactions: Vec<(usize, usize, f32)> = vec![
+            (0, 0, 1.0),
+            (0, 1, 0.5),
+            (1, 0, 0.3),
+            (1, 2, 1.0),
+            (2, 1, 0.8),
+            (2, 3, 0.6),
+        ];
+        let mut rng = LcgRng::new(2024);
+        let mut model = Als::new(3, 4, 3, 0.01, &mut rng).expect("new should succeed");
+        let mut prev = wmf_obj(&model, &interactions);
+        for step in 1..=10usize {
+            model.fit(&interactions, 1).expect("fit should succeed");
+            let obj = wmf_obj(&model, &interactions);
+            assert!(
+                obj <= prev + 1e-3,
+                "WMF objective increased at step {step}: {prev:.6} -> {obj:.6}"
+            );
+            prev = obj;
+        }
+    }
+
+    #[test]
+    fn interacted_items_score_higher_than_unobserved_after_convergence() {
+        // User 0 sees items {0,1}; user 1 sees items {2,3}.
+        // After convergence, interacted items must outscore unobserved ones.
+        let interactions: Vec<(usize, usize, f32)> =
+            vec![(0, 0, 1.0), (0, 1, 1.0), (1, 2, 1.0), (1, 3, 1.0)];
+        let mut rng = LcgRng::new(99);
+        let mut model = Als::new(2, 4, 2, 0.001, &mut rng).expect("new should succeed");
+        model.fit(&interactions, 30).expect("fit should succeed");
+
+        let s00 = model.score(0, 0).expect("score ok");
+        let s01 = model.score(0, 1).expect("score ok");
+        let s02 = model.score(0, 2).expect("score ok");
+        let s03 = model.score(0, 3).expect("score ok");
+        let obs_avg = (s00 + s01) / 2.0;
+        let unobs_avg = (s02 + s03) / 2.0;
+        assert!(
+            obs_avg > unobs_avg,
+            "observed avg {obs_avg:.4} should exceed unobserved avg {unobs_avg:.4}"
+        );
+    }
+
+    #[test]
+    fn top_k_length_and_descending_order() {
+        let mut rng = LcgRng::new(55);
+        let interactions: Vec<(usize, usize, f32)> = vec![(0, 0, 1.0), (0, 2, 0.5), (1, 1, 1.0)];
+        let mut model = Als::new(2, 4, 4, 0.01, &mut rng).expect("new should succeed");
+        model.fit(&interactions, 3).expect("fit should succeed");
+        let top = model.top_k(0, 3).expect("top_k should succeed");
+        assert_eq!(top.len(), 3);
+        for &id in &top {
+            assert!(id < 4, "item id {id} out of bounds");
+        }
+        let scores: Vec<f32> = top
+            .iter()
+            .map(|&i| model.score(0, i).expect("score ok"))
+            .collect();
+        for w in scores.windows(2) {
+            assert!(
+                w[0] >= w[1] - 1e-6,
+                "top_k not sorted descending: {} < {}",
+                w[0],
+                w[1]
+            );
+        }
+    }
 }

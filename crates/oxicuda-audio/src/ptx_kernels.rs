@@ -285,9 +285,11 @@ pub fn ctc_alpha_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     let neg_inf = f32_hex(f32::NEG_INFINITY);
     format!(
-        r#"{hdr}// CTC forward alpha: log-domain DP.
-// log_sum_exp(a,b) = max(a,b) + lg2(1 + 2^(min-max)) converted to log-base-e
-// We use ex2.approx + lg2.approx for the stable LSE step.
+        r#"{hdr}// CTC forward alpha: log-domain DP (natural log / base-e).
+// log_sum_exp(a,b) = max(a,b) + ln(1 + e^(min-max)).
+// ex2.approx/lg2.approx are base-2, so the exponent is pre-scaled by log2(e)
+// and the lg2 result post-scaled by ln(2); the min-max term is clamped to <= 0
+// so that lse(-inf, -inf) = -inf (the (-inf)-(-inf)=NaN case folds to 0 → -inf).
 // Blank label index = 0.
 .visible .entry ctc_alpha_kernel(
     .param .u64 p_log_probs,
@@ -298,7 +300,7 @@ pub fn ctc_alpha_ptx(sm: u32) -> String {
     .param .u32 S
 )
 {{
-    .reg .u64  %rd<16>;
+    .reg .u64  %rd<24>;
     .reg .u32  %r<24>;
     .reg .f32  %f<20>;
     .reg .pred %p0, %p1, %p2, %p3, %p4;
@@ -344,14 +346,19 @@ $CTC_T_LOOP:
     @%p1 add.u64  %rd6, %rd1, %rd5;
     @%p1 ld.global.f32 %f1, [%rd6];       // f1 = alpha[s-1, t-1]
 
-    // log_sum_exp(f0, f1) → f2
+    // log_sum_exp(f0, f1) → f2 in BASE-e (max + ln(1 + e^(min-max))).
+    // `ex2`/`lg2` are base-2, so the exponent must be scaled by log2(e) before
+    // `ex2` and the `lg2` output by ln(2) after — otherwise the result is the
+    // wrong (base-2) mixture and silently ~10-50% off in log space.
     max.f32       %f4,  %f0,  %f1;
     min.f32       %f5,  %f0,  %f1;
-    sub.f32       %f6,  %f5,  %f4;        // min - max  (<= 0)
-    ex2.approx.f32 %f7, %f6;              // 2^(min-max)
+    sub.f32       %f6,  %f5,  %f4;        // d = min - max  (<= 0; NaN if both -inf)
+    min.f32       %f6,  %f6,  {ZERO};     // both -inf → NaN → clamp to 0 (=> lse=-inf)
+    mul.f32       %f6,  %f6,  {LOG2E};    // d * log2(e)  (base-e exponent for ex2)
+    ex2.approx.f32 %f7, %f6;              // e^(min-max)
     add.f32       %f7,  %f7,  {ONE_F};
     lg2.approx.f32 %f7, %f7;
-    mul.f32       %f7,  %f7,  {LN2};      // * ln(2) → natural log
+    mul.f32       %f7,  %f7,  {LN2};      // log2(1+e^d) * ln(2) = ln(1+e^d)
     add.f32       %f2,  %f4,  %f7;        // f2 = lse(alpha[s], alpha[s-1])
 
     // Optionally add alpha[s-2, t-1] if s >= 2 and ext_target[s] != blank
@@ -383,10 +390,12 @@ $CTC_T_LOOP:
     add.u64       %rd12, %rd1, %rd11;
     ld.global.f32 %f8,  [%rd12];          // f8 = alpha[s-2, t-1]
 
-    // log_sum_exp(f2, f8) → f2
+    // log_sum_exp(f2, f8) → f2 in BASE-e (same base-2→base-e correction).
     max.f32       %f9,  %f2, %f8;
     min.f32       %f10, %f2, %f8;
     sub.f32       %f11, %f10, %f9;
+    min.f32       %f11, %f11, {ZERO};
+    mul.f32       %f11, %f11, {LOG2E};
     ex2.approx.f32 %f12, %f11;
     add.f32       %f12, %f12, {ONE_F};
     lg2.approx.f32 %f12, %f12;
@@ -427,8 +436,10 @@ $CTC_DONE:
 }}
 "#,
         NEG_INF = neg_inf,
+        ZERO = f32_hex(0.0_f32),
         ONE_F = f32_hex(1.0_f32),
-        LN2 = f32_hex(core::f32::consts::LN_2)
+        LN2 = f32_hex(core::f32::consts::LN_2),
+        LOG2E = f32_hex(core::f32::consts::LOG2_E)
     )
 }
 
@@ -638,6 +649,7 @@ pub fn rel_pos_bias_ptx(sm: u32) -> String {
 {{
     .reg .u64  %rd<10>;
     .reg .u32  %r<24>;
+    .reg .s32  %s0, %s1, %s2;
     .reg .f32  %f<4>;
     .reg .pred %p0;
 
@@ -663,38 +675,24 @@ pub fn rel_pos_bias_ptx(sm: u32) -> String {
     div.u32       %r8,  %r6, %r1;          // r8 = q
     rem.u32       %r9,  %r6, %r1;          // r9 = k
 
-    // table index = (k - q) + max_len - 1
-    // k - q can be negative, compute as signed then clamp to [0, 2*max_len-2]
-    // Use add with possible borrow: idx_signed = (int)k - (int)q + max_len - 1
-    // All u32 arithmetic with wrap-around; then clamp via min/max.
-    sub.u32       %r10, %r9, %r8;          // k - q  (wraps if negative, u32)
-    add.u32       %r10, %r10, %r2;         // + max_len
-    sub.u32       %r10, %r10, 1;           // + max_len - 1  = idx (may wrap)
-
-    // table has 2*max_len-1 entries; clamp idx to [0, 2*max_len-2]
-    sub.u32       %r11, %r2, 1;            // max_len - 1
-    add.u32       %r11, %r11, %r2;         // 2*max_len - 1 - 1 = 2*max_len-2 + ... fix:
-    // r11 = 2*max_len - 2
-    sub.u32       %r11, %r11, 1;           // actually: 2*max_len-1-1 = 2*(max_len-1)
-    // simplify: upper_bound = 2*max_len - 2
-    mul.lo.u32    %r12, %r2, 2;            // 2 * max_len
-    sub.u32       %r12, %r12, 2;           // r12 = 2*max_len - 2 (upper bound, inclusive)
-
-    min.u32       %r10, %r10, %r12;        // clamp upper
-    // lower clamp: since idx can wrap to a very large u32 when (k-q) < 0,
-    // a wrap gives u32 > 2*max_len-2, so min.u32 above already clamps it.
-    // But when idx wraps to e.g. 0xFFFFFFF0, min.u32 keeps %r12.
-    // We need to also handle the case where the subtraction didn't actually
-    // produce a wrap in the valid range.  The correct approach: if the
-    // raw unsigned result k - q + max_len - 1 is within [0, 2*max_len-2],
-    // it stays; if k < q we get a huge number which min.u32 clips to
-    // the upper bound.  But we actually want to clamp to 0 in that case.
-    // Detection: if (k - q) wrapped (k < q), the u32 difference will be
-    // >= 2^31 (>> 2*max_len for reasonable inputs), which means after
-    // adding max_len - 1 it stays huge → min clips correctly to upper end.
-    // This matches the behaviour "k < q → use table[2*max_len-2]".
-    // Alternatively use max.u32 to clamp at 0:
-    max.u32       %r10, %r10, 0;           // clamp lower (no-op for u32, keeps 0 semantics)
+    // table index = clamp((k - q) + (max_len - 1), 0, 2*max_len-2).
+    // This MUST be evaluated in signed arithmetic: when k < q the displacement
+    // is negative and maps to a SMALL positive index, and an under-range
+    // displacement clamps to 0 (the most-negative entry). A u32-modular
+    // computation instead wraps negatives to a huge value that clamps to the
+    // *maximum* entry — the wrong boundary.
+    cvt.s32.u32   %s0, %r9;                // (s32)k
+    cvt.s32.u32   %s1, %r8;                // (s32)q
+    sub.s32       %s0, %s0, %s1;           // k - q  (signed)
+    cvt.s32.u32   %s1, %r2;                // (s32)max_len
+    add.s32       %s0, %s0, %s1;           // k - q + max_len
+    sub.s32       %s0, %s0, 1;             // k - q + max_len - 1 = idx
+    // upper bound = 2*max_len - 2
+    add.s32       %s2, %s1, %s1;           // 2*max_len
+    sub.s32       %s2, %s2, 2;             // 2*max_len - 2
+    max.s32       %s0, %s0, 0;             // clamp lower to 0
+    min.s32       %s0, %s0, %s2;           // clamp upper to 2*max_len-2
+    cvt.u32.s32   %r10, %s0;               // back to u32 index (now in [0, 2*max_len-2])
 
     // Load table[idx]
     mul.wide.u32  %rd2, %r10, 4;
@@ -847,9 +845,13 @@ $SP_SMEM_RED_LOOP:
     add.u32       %r10, %r10, 1;
     bra           $SP_SMEM_RED_LOOP;
 $SP_SMEM_RED_END:
-    // f2 = total sum; mean = f2 / T
+    // f2 = total sum; mean = f2 / T   (only lane 0 holds the complete sum).
     cvt.rn.f32.u32 %f3, %r0;             // f3 = (f32)T
     div.rn.f32     %f4, %f2, %f3;        // f4 = mean
+    // Only lane 0 stores: the other warp-0 lanes hold partial garbage, so an
+    // unguarded store here races on mean_out[c] / smem[0].
+    setp.ne.u32   %p1, %r4, 0;
+    @%p1 bra      $SP_SMEM_SKIP1;
     // Store mean_out[c]
     mul.wide.u32  %rd7, %r2, 4;
     add.u64       %rd8, %rd1, %rd7;
@@ -917,11 +919,14 @@ $SP_SMEM_RED2_LOOP:
     add.u32       %r10, %r10, 1;
     bra           $SP_SMEM_RED2_LOOP;
 $SP_SMEM_RED2_END:
-    // variance = f2 / T; std = sqrt(variance + eps)
+    // variance = f2 / T; std = sqrt(variance + eps)   (lane 0 holds full sum).
     cvt.rn.f32.u32 %f3, %r0;
-    div.rn.f32     %f2, %f2, %f3;        // f2 = variance
+    div.rn.f32     %f2, %f2, %f3;        // f2 = variance (population, /T)
     add.f32        %f2, %f2, {EPS};      // + epsilon
     sqrt.approx.f32 %f2, %f2;            // std
+    // Only lane 0 stores: avoids a data race on std_out[c].
+    setp.ne.u32   %p1, %r4, 0;
+    @%p1 bra      $SP_SMEM_SKIP2;
     // Store std_out[c]
     mul.wide.u32  %rd7, %r2, 4;
     add.u64       %rd9, %rd2, %rd7;
@@ -1163,8 +1168,10 @@ mod tests {
 
     #[test]
     fn rel_pos_bias_has_min_max() {
+        // The relative-position index is clamped in SIGNED arithmetic so that
+        // negative displacements (k < q) map to the correct low table indices.
         let p = rel_pos_bias_ptx(80);
-        assert!(p.contains("min.u32") && p.contains("max.u32"));
+        assert!(p.contains("min.s32") && p.contains("max.s32"));
     }
 
     #[test]

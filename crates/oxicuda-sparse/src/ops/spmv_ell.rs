@@ -150,9 +150,12 @@ fn emit_spmv_ell<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let skip_label = b.fresh_label("ell_skip");
 
                 b.label(&loop_label);
+                // Exit when k >= max_nnz. Inverted skip-branch (`setp.lo` ->
+                // `setp.hs`) routed through the structured `branch_if` so the
+                // target carries the `$`-prefix matching the `b.label` definition.
                 let pred_k = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred_k}, {k}, {max_nnz};"));
-                b.raw_ptx(&format!("@!{pred_k} bra {done_label};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred_k}, {k}, {max_nnz};"));
+                b.branch_if(pred_k, &done_label);
 
                 // Compute index = k * num_rows + row (column-major ELL layout)
                 let ell_idx = b.alloc_reg(PtxType::U32);
@@ -165,9 +168,11 @@ fn emit_spmv_ell<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let col = b.load_global_i32(ci_addr);
 
                 // Check sentinel: if col < 0 (i.e. col == -1), skip
-                let is_valid = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.ge.s32 {is_valid}, {col}, 0;"));
-                b.raw_ptx(&format!("@!{is_valid} bra {skip_label};"));
+                // Skip sentinel columns (col < 0). Inverted skip-branch
+                // (`setp.ge` -> `setp.lt`) via the structured `branch_if`.
+                let is_invalid = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.lt.s32 {is_invalid}, {col}, 0;"));
+                b.branch_if(is_invalid, &skip_label);
 
                 let col_u32 = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("mov.b32 {col_u32}, {col};"));
@@ -212,6 +217,22 @@ fn emit_spmv_ell<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+
+    /// The ELL SpMV kernel must assemble for sm_86 in both precisions with
+    /// `$`-prefixed branch targets and no `.b64` shuffle.
+    #[test]
+    fn spmv_ell_f32_f64_assemble_sm86() {
+        let f32_ptx = emit_spmv_ell::<f32>(SmVersion::Sm86).expect("f32 ELL PTX");
+        assert_assembles_and_clean("spmv_ell_f32", &f32_ptx);
+
+        let f64_ptx = emit_spmv_ell::<f64>(SmVersion::Sm86).expect("f64 ELL PTX");
+        assert_assembles_and_clean("spmv_ell_f64", &f64_ptx);
+        assert!(
+            !f64_ptx.contains("0F00000000"),
+            "f64 ELL kernel must not materialize an f32 0.0 immediate:\n{f64_ptx}"
+        );
+    }
 
     #[test]
     fn spmv_ell_ptx_generates_f32() {
@@ -234,8 +255,10 @@ mod tests {
     fn spmv_ell_ptx_contains_sentinel_check() {
         let ptx = emit_spmv_ell::<f32>(SmVersion::Sm80);
         let ptx_text = ptx.expect("test: PTX gen should succeed");
-        // The kernel should contain a signed comparison to detect -1 sentinel
-        assert!(ptx_text.contains("setp.ge.s32"));
+        // The kernel should contain a signed comparison to detect the -1
+        // sentinel. The structured skip-branch tests `col < 0` (`setp.lt.s32`)
+        // and branches to the skip label when true.
+        assert!(ptx_text.contains("setp.lt.s32"));
     }
 
     #[test]

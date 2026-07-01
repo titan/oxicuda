@@ -7,9 +7,9 @@ NetworkX / SNAP / igraph-style toolkits. Part of [OxiCUDA](https://github.com/co
 
 ## Implementation Status
 
-- **Actual SLoC:** 11,913 (98 files, tokei measurement)
+- **Actual SLoC:** 13,259 (98 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 7,043
-- **Tests:** 351 passing
+- **Tests:** 358 passing
 - **Vol.59 scope:** Complete classical graph-algorithm coverage (traversal, shortest
   paths, MST, max-flow, matching, connectivity, centrality, community detection,
   graph coloring, TSP, isomorphism). Complements oxicuda-graph (GNN-oriented) by
@@ -168,7 +168,7 @@ implemented natively.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 351 passing (unit + 33 e2e cross-module)
+- Tests: 358 passing (unit + 33 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns

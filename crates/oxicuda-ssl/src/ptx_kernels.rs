@@ -382,8 +382,7 @@ $RM_LOOP:
 
     cvt.rn.f32.u32 %f1, %r8;
     mov.f32        %f2, 0F4F000000;       // 2^31 as float
-    div.rn.f32     %f3, %f1, %f2;
-    mul.f32        %f3, %f3, 0F3F000000;  // *0.5 → in [0,1)
+    div.rn.f32     %f3, %f1, %f2;         // 31-bit value / 2^31 → uniform in [0,1)
 
     setp.lt.f32    %p1, %f3, %f0;
     selp.f32       %f4, {ZERO}, {ONE}, %p1;

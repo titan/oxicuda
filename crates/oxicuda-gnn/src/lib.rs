@@ -94,6 +94,15 @@ pub mod prelude {
     pub use crate::sampling::graphsaint::{GraphSaint, SaintNorm, SaintSampler, SaintSubgraph};
 }
 
+// ─── On-device GPU validation ────────────────────────────────────────────────
+
+/// On-device GPU validation tests (feature-gated): JIT-compile each hand-written
+/// PTX kernel, launch it on a real CUDA device, and assert numerical equivalence
+/// to the matching CPU reference. Compiled only under `--features gpu-tests` and
+/// only in test builds; every test skips gracefully if no GPU is available.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Integration tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]

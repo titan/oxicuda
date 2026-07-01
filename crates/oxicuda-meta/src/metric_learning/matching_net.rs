@@ -91,3 +91,126 @@ pub fn matching_net_predict(
 
     Ok(preds)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{cosine_similarity, matching_net_attention, matching_net_predict};
+    use crate::error::MetaError;
+
+    // ── cosine_similarity: analytic identities ───────────────────────────────
+
+    #[test]
+    fn cosine_similarity_identical_vectors_is_one() {
+        // cos(v, v) = ||v||² / (||v||² + ε). With unit vector, denominator rounds
+        // to 1.0 in f32 (ε=1e-8 < f32 machine epsilon ≈ 1.19e-7), so result is 1.0.
+        let v = vec![1.0_f32, 0.0, 0.0];
+        let sim = cosine_similarity(&v, &v).expect("cosine_similarity must succeed");
+        assert!(
+            (sim - 1.0_f32).abs() < 1e-5,
+            "cos(v,v) must be ~1.0, got {sim}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal_vectors_is_zero() {
+        // cos([1,0], [0,1]) = 0 / (1·1 + ε) = 0.
+        let a = vec![1.0_f32, 0.0];
+        let b = vec![0.0_f32, 1.0];
+        let sim = cosine_similarity(&a, &b).expect("cosine_similarity must succeed");
+        assert!(
+            sim.abs() < 1e-6,
+            "cos of orthogonal vectors must be 0, got {sim}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_dim_mismatch_returns_error() {
+        let a = vec![1.0_f32, 0.0];
+        let b = vec![0.0_f32, 1.0, 0.0];
+        let result = cosine_similarity(&a, &b);
+        assert!(
+            matches!(result, Err(MetaError::DimensionMismatch { .. })),
+            "dimension mismatch must return DimensionMismatch, got {result:?}"
+        );
+    }
+
+    // ── matching_net_attention: distribution properties ──────────────────────
+
+    #[test]
+    fn attention_class_probs_sum_to_one() {
+        // With all support labels valid (< n_way), the blended class probs must sum to 1.
+        // Support: class 0 → [1,0], class 1 → [0,1].
+        let support_feats = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let support_y = vec![0_u32, 1];
+        let query = vec![0.5_f32, 0.5];
+        let class_probs = matching_net_attention(&query, &support_feats, &support_y, 2, 1.0)
+            .expect("matching_net_attention must succeed");
+        let total: f32 = class_probs.iter().sum();
+        assert!(
+            (total - 1.0_f32).abs() < 1e-5,
+            "class probs must sum to 1.0, got {total}"
+        );
+    }
+
+    #[test]
+    fn attention_class_probs_nonneg() {
+        // Softmax outputs are always non-negative.
+        let support_feats = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let support_y = vec![0_u32, 1];
+        let query = vec![0.3_f32, 0.7];
+        let class_probs = matching_net_attention(&query, &support_feats, &support_y, 2, 1.0)
+            .expect("matching_net_attention must succeed");
+        for (i, &p) in class_probs.iter().enumerate() {
+            assert!(p >= 0.0, "class_probs[{i}] must be non-negative, got {p}");
+        }
+    }
+
+    #[test]
+    fn identical_query_yields_highest_attention_on_its_class() {
+        // Support: class 0 → [1,0], class 1 → [0,1].
+        // Query = [1,0] is identical to the class-0 support example.
+        // cos(query, s0) = 1.0, cos(query, s1) = 0.0; after softmax class_probs[0] > class_probs[1].
+        let support_feats = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let support_y = vec![0_u32, 1];
+        let query = vec![1.0_f32, 0.0];
+        let class_probs = matching_net_attention(&query, &support_feats, &support_y, 2, 1.0)
+            .expect("matching_net_attention must succeed");
+        assert!(
+            class_probs[0] > class_probs[1],
+            "class 0 must receive higher attention than class 1 when query matches class-0 support \
+             (probs: {:?})",
+            class_probs
+        );
+    }
+
+    // ── matching_net_predict: end-to-end classification ──────────────────────
+
+    #[test]
+    fn predict_assigns_query_to_nearest_class() {
+        // Support: class 0 → [1,0], class 1 → [0,1].
+        // Query [1,0] is identical to class-0 support → must predict class 0.
+        let support_feats = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let support_y = vec![0_u32, 1];
+        let query_feats = vec![1.0_f32, 0.0];
+        let preds = matching_net_predict(&query_feats, &support_feats, &support_y, 2, 2, 1.0)
+            .expect("matching_net_predict must succeed");
+        assert_eq!(
+            preds,
+            vec![0_u32],
+            "query matching class-0 support must predict class 0"
+        );
+    }
+
+    #[test]
+    fn predict_deterministic_for_same_input() {
+        // Same support and query must yield the same predictions on every call.
+        let support_feats = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let support_y = vec![0_u32, 1];
+        let query_feats = vec![0.9_f32, 0.1, 0.1, 0.9];
+        let p1 = matching_net_predict(&query_feats, &support_feats, &support_y, 2, 2, 1.0)
+            .expect("first predict must succeed");
+        let p2 = matching_net_predict(&query_feats, &support_feats, &support_y, 2, 2, 1.0)
+            .expect("second predict must succeed");
+        assert_eq!(p1, p2, "predictions must be deterministic");
+    }
+}

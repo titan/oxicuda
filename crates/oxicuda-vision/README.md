@@ -64,7 +64,7 @@ assert_eq!(logits.len(), 10);
 
 | Item | Value |
 |------|-------|
-| Version | 0.3.0 |
+| Version | 0.4.0 |
 | Release date | 2026-06-25 |
 | Default features | Pure Rust (`thiserror` only) |
 | `unwrap()` | 0 in production code |

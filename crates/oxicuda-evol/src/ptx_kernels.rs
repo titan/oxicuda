@@ -175,9 +175,11 @@ $TS_DONE:\n\
 /// where `z ~ N(0,1)` is produced by the **Box–Muller transform**
 /// `z = sqrt(-2·ln u1) · cos(2π·u2)` from two independent uniforms `u1, u2 ∈ [0,1)`.
 ///
-/// PTX f64 has no `sin.approx`/`cos.approx`, so the transcendentals are evaluated
-/// in software:
-///   * `ln u1 = lg2.approx.f64(u1) · ln 2` (`u1` clamped to `2^-53` to avoid `ln(0)`),
+/// PTX has no `sin.approx`/`cos.approx`/`lg2.approx` for `.f64`, so the
+/// transcendentals are evaluated in software:
+///   * `ln u1 = lg2.approx.f32(u1) · ln 2` (`u1` clamped to `2^-53` to avoid
+///     `ln(0)`; the log base-2 is taken in `f32`, whose ~2^-23 relative error is
+///     ample for mutation noise, then widened back to `f64`),
 ///   * `cos(a)` via Cody–Waite octant reduction `k = round(a·2/π)`,
 ///     `x = a − k·(π/2) ∈ [-π/4, π/4]`, evaluating degree-10 cos / degree-11 sin
 ///     Taylor series on the reduced argument and selecting the result from
@@ -201,6 +203,7 @@ pub fn gaussian_mutate_ptx(sm: u32) -> String {
 {\n\
     .reg .u64  %rd<16>;\n\
     .reg .u32  %r<8>;\n\
+    .reg .f32  %f<4>;\n\
     .reg .f64  %fd<48>;\n\
     .reg .s64  %sd<4>;\n\
     .reg .pred %p0, %p1, %p2, %p3;\n\
@@ -249,8 +252,11 @@ pub fn gaussian_mutate_ptx(sm: u32) -> String {
     // --- Box-Muller radius: r = sqrt(-2 * ln u1) ------------------------------\n\
     // clamp u1 away from 0 so ln(u1) is finite (eps = 2^-53)\n\
     max.f64       %fd6, %fd4, %fd3;\n\
-    // ln(u1) = lg2(u1) * ln(2)\n\
-    lg2.approx.f64 %fd7, %fd6;\n\
+    // ln(u1) = lg2(u1) * ln(2). PTX has no lg2.approx.f64, so take the log\n\
+    // base-2 in f32 (ample precision for mutation noise) then widen to f64.\n\
+    cvt.rn.f32.f64 %f0, %fd6;\n\
+    lg2.approx.f32 %f1, %f0;\n\
+    cvt.f64.f32   %fd7, %f1;\n\
     mov.f64       %fd8, 0d3FE62E42FEFA39EF;\n\
     mul.rn.f64    %fd9, %fd7, %fd8;\n\
     // -2 * ln(u1)\n\
@@ -763,9 +769,9 @@ mod tests {
         // The mutation kernel must perform a real Box-Muller transform:
         //   r = sqrt(-2 * ln u1),  z = r * cos(2 pi u2),  delta = sigma * z.
         let ptx = gaussian_mutate_ptx(80);
-        // ln u1 via lg2.approx.f64 (PTX f64 has no native log).
+        // ln u1 via lg2.approx.f32 then widen (PTX has no lg2.approx.f64).
         assert!(
-            ptx.contains("lg2.approx.f64"),
+            ptx.contains("lg2.approx.f32"),
             "Box-Muller log step missing"
         );
         // radius via sqrt of -2 ln u1.

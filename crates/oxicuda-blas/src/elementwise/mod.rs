@@ -8,12 +8,14 @@
 //! `oxicuda-ptx`, loads the resulting module, and launches the kernel on the
 //! handle's stream.
 
+mod bias_add;
 mod binary;
 mod broadcast;
 mod fill;
 mod ops;
 mod unary;
 
+pub use bias_add::bias_add;
 pub use binary::{
     add, cmp_eq, cmp_ge, cmp_gt, cmp_le, cmp_lt, cmp_ne, div, fused_add_relu, fused_scale_add, max,
     min, mul, nand, nor, or_max, or_prob_sum, pow, sub, xor,

@@ -362,6 +362,11 @@ $DONE:
 /// One thread per node. Launch with `grid = ceil(n_nodes / 256)`, `block = 256`.
 pub fn softmax_edge_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
+    // log2(e): the SFU only provides `ex2.approx` (base-2), so `exp(x)` must be
+    // computed as `2^(x * log2(e))`. Omitting this factor would silently yield a
+    // base-2 softmax (a different, hotter distribution), which is why the scale
+    // is applied before every `ex2.approx.f32` below — mirroring `topk_score`.
+    let log2e = f32_hex(std::f32::consts::LOG2_E);
     format!(
         r#"{hdr}.visible .entry softmax_edge(
     .param .u64 p_score,
@@ -379,6 +384,9 @@ pub fn softmax_edge_ptx(sm: u32) -> String {
     ld.param.u64  %rd1, [p_row_ptr];
     ld.param.u64  %rd2, [p_alpha];
     ld.param.u32  %r0,  [n_nodes];
+
+    // log2(e) constant for the base-2 → base-e exp conversion.
+    mov.f32       %f5, {log2e};
 
     // tid = node_id
     mov.u32       %r1, %ntid.x;
@@ -432,7 +440,8 @@ $SUMLOOP:
     add.u64       %rd5, %rd0, %rd5;
     ld.global.f32 %f3, [%rd5];
     sub.f32       %f3, %f3, %f0;         // score - max
-    ex2.approx.f32 %f3, %f3;             // 2^x approximation for exp
+    mul.f32       %f3, %f3, %f5;         // (score - max) * log2(e)
+    ex2.approx.f32 %f3, %f3;             // exp(score - max) = 2^((score-max)*log2e)
     add.f32       %f2, %f2, %f3;
     add.u32       %r7, %r7, 1;
     bra           $SUMLOOP;
@@ -449,7 +458,8 @@ $NORMLOOP:
     add.u64       %rd5, %rd0, %rd5;
     ld.global.f32 %f4, [%rd5];
     sub.f32       %f4, %f4, %f0;
-    ex2.approx.f32 %f4, %f4;
+    mul.f32       %f4, %f4, %f5;         // (score - max) * log2(e)
+    ex2.approx.f32 %f4, %f4;             // exp(score - max)
     div.approx.f32 %f4, %f4, %f2;
 
     mul.wide.u32  %rd6, %r7, 4;
@@ -885,6 +895,26 @@ mod tests {
         let ptx = softmax_edge_ptx(80);
         assert!(ptx.contains("ex2.approx.f32"));
         assert!(ptx.contains("div.approx.f32"));
+    }
+
+    #[test]
+    fn softmax_edge_ptx_scales_by_log2e_for_base_e_exp() {
+        // Regression guard: the SFU `ex2.approx.f32` is base-2, so a correct
+        // base-e softmax must scale `(score - max)` by log2(e) before `ex2`.
+        // Without it the kernel silently computes a base-2 softmax.
+        let ptx = softmax_edge_ptx(86);
+        let log2e = f32_hex(std::f32::consts::LOG2_E);
+        assert!(
+            ptx.contains(&log2e),
+            "softmax_edge must embed the log2(e) constant {log2e}"
+        );
+        // Two ex2 sites (sum loop + normalise loop), the scale loaded once into
+        // %f5 and multiplied in at both sites (mov + 2 muls ⇒ ≥ 3 uses of %f5).
+        assert_eq!(ptx.matches("ex2.approx.f32").count(), 2);
+        assert!(
+            ptx.matches("%f5").count() >= 3,
+            "log2(e) scale must feed both ex2 sites"
+        );
     }
 
     #[test]

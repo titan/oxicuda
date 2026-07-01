@@ -95,3 +95,146 @@ impl WideDeep {
         Ok(sigmoid(wide_val + deep_val))
     }
 }
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    fn make_rng(seed: u64) -> LcgRng {
+        LcgRng::new(seed)
+    }
+
+    fn tiny_model(rng: &mut LcgRng) -> WideDeep {
+        WideDeep::new(8, &[16, 8], rng).expect("must build")
+    }
+
+    #[test]
+    fn output_in_unit_interval() {
+        let mut rng = make_rng(1);
+        let model = tiny_model(&mut rng);
+        let x: Vec<f32> = (1..=8).map(|i| i as f32 * 0.1).collect();
+        let p = model.forward(&x).expect("forward must succeed");
+        assert!((0.0..=1.0).contains(&p), "output {p} not in [0,1]");
+    }
+
+    #[test]
+    fn deterministic_same_seed() {
+        let mut rng = make_rng(2);
+        let model = tiny_model(&mut rng);
+        let x = vec![0.5_f32; 8];
+        let p1 = model.forward(&x).expect("must succeed");
+        let p2 = model.forward(&x).expect("must succeed");
+        assert_eq!(p1, p2, "same input must yield identical output");
+    }
+
+    #[test]
+    fn finite_output() {
+        let mut rng = make_rng(3);
+        let model = tiny_model(&mut rng);
+        let x: Vec<f32> = (0..8).map(|_| rng.next_f32()).collect();
+        let p = model.forward(&x).expect("forward must succeed");
+        assert!(p.is_finite(), "output must be finite, got {p}");
+    }
+
+    /// The wide part is a pure dot product, so it contributes linearly to the logit.
+    /// With the deep weights zeroed (deep_val = 0), the logit equals wide_val = x·wide_w.
+    /// Doubling x therefore doubles the logit: logit(2x) = 2·logit(x).
+    /// Verify by recovering logits via inv_sigmoid(p) = ln(p/(1-p)).
+    #[test]
+    fn wide_linearity_doubling_input_doubles_logit() {
+        let mut rng = make_rng(20);
+        let mut model = WideDeep::new(4, &[8, 4], &mut rng).expect("must build");
+
+        // Zero all deep weights so deep_val = 0 for any input.
+        for (w, b) in &mut model.deep_layers {
+            for v in w.iter_mut() {
+                *v = 0.0;
+            }
+            for v in b.iter_mut() {
+                *v = 0.0;
+            }
+        }
+        // Set known wide weights.
+        model.wide_w = vec![1.0, 0.5, 0.25, 0.125];
+
+        let x1 = vec![0.2_f32, 0.4, 0.6, 0.8];
+        let x2: Vec<f32> = x1.iter().map(|&v| 2.0 * v).collect();
+
+        let p1 = model.forward(&x1).expect("forward must succeed");
+        let p2 = model.forward(&x2).expect("forward must succeed");
+
+        // wide_val_1 = 1·0.2 + 0.5·0.4 + 0.25·0.6 + 0.125·0.8 = 0.65
+        // wide_val_2 = 2·0.65 = 1.30  → logit(2x) = 2·logit(x)
+        let logit1 = (p1 / (1.0 - p1)).ln();
+        let logit2 = (p2 / (1.0 - p2)).ln();
+        assert!(
+            (logit2 - 2.0 * logit1).abs() < 1e-4,
+            "wide linearity: logit(2x)={logit2}, 2·logit(x)={:.6}",
+            2.0 * logit1
+        );
+    }
+
+    /// The Wide&Deep logit is wide_val + deep_val (before sigmoid). Therefore,
+    /// the three logits of the full model, wide-only (deep zeroed), and deep-only
+    /// (wide zeroed) must satisfy: logit_full = logit_wide + logit_deep.
+    /// All three models are built from the same seed so their weights are identical.
+    #[test]
+    fn additive_combination_logit_equals_wide_plus_deep() {
+        let seed = 30_u64;
+        let x = vec![0.1_f32, 0.2, 0.3, 0.4];
+
+        let mut rng_full = LcgRng::new(seed);
+        let model_full = WideDeep::new(4, &[8], &mut rng_full).expect("must build");
+        let p_full = model_full.forward(&x).expect("forward must succeed");
+
+        // Same weights, deep zeroed → logit = wide_val
+        let mut rng_wide = LcgRng::new(seed);
+        let mut model_wide = WideDeep::new(4, &[8], &mut rng_wide).expect("must build");
+        for (w, b) in &mut model_wide.deep_layers {
+            for v in w.iter_mut() {
+                *v = 0.0;
+            }
+            for v in b.iter_mut() {
+                *v = 0.0;
+            }
+        }
+        let p_wide = model_wide.forward(&x).expect("forward must succeed");
+
+        // Same weights, wide zeroed → logit = deep_val
+        let mut rng_deep = LcgRng::new(seed);
+        let mut model_deep = WideDeep::new(4, &[8], &mut rng_deep).expect("must build");
+        for v in &mut model_deep.wide_w {
+            *v = 0.0;
+        }
+        let p_deep = model_deep.forward(&x).expect("forward must succeed");
+
+        // Recover logits via inv_sigmoid = ln(p / (1-p)).
+        let logit_full = (p_full / (1.0 - p_full)).ln();
+        let logit_wide = (p_wide / (1.0 - p_wide)).ln();
+        let logit_deep = (p_deep / (1.0 - p_deep)).ln();
+
+        assert!(
+            (logit_full - logit_wide - logit_deep).abs() < 1e-4,
+            "additive: full={logit_full:.6}, wide={logit_wide:.6}, deep={logit_deep:.6}"
+        );
+    }
+
+    #[test]
+    fn wrong_input_length_errors() {
+        let mut rng = make_rng(4);
+        let model = tiny_model(&mut rng); // input_dim = 8
+        let x = vec![0.0_f32; 5]; // 5 ≠ 8 → mismatch
+        let err = model.forward(&x);
+        assert!(matches!(err, Err(RecsysError::DimensionMismatch { .. })));
+    }
+
+    #[test]
+    fn zero_input_dim_rejected() {
+        let mut rng = make_rng(5);
+        let err = WideDeep::new(0, &[8], &mut rng);
+        assert!(matches!(err, Err(RecsysError::InvalidEmbeddingDim { .. })));
+    }
+}

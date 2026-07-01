@@ -89,6 +89,9 @@ pub mod ptx_kernels;
 pub mod quantization;
 pub mod sampling;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // Re-export the most commonly used types.
 pub use batch::{
     BatcherConfig, ChunkPlanner, ChunkedPrefillPlan, ContinuousBatcher, FinishReason,

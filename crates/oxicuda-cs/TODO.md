@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.58).
 
 ## Implementation Status
 
-- **Actual SLoC:** ~11.1K (74 files, tokei measurement)
-- **Tests:** 279 passing
+- **Actual SLoC:** ~12.5K (74 files, tokei measurement)
+- **Tests:** 291 passing
 - **Vol.58 scope:** Compressed sensing & sparse recovery primitives that complement
   oxicuda-blas / oxicuda-solver by providing L1/L0/nuclear-norm minimisation paths
   not covered by classical dense BLAS/LAPACK semantics.
@@ -166,7 +166,7 @@ routines are implemented privately under `linalg/`.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 279 passing (unit + 27 e2e cross-module + 14 architecture-specialised PTX)
+- Tests: 291 passing (unit + 27 e2e cross-module + 14 architecture-specialised PTX)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns

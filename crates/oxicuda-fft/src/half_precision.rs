@@ -511,6 +511,15 @@ pub fn generate_fp16_butterfly_ptx(
                 "FP16 Cooley-Tukey radix-{radix} butterfly, mode={mode_suffix}"
             ));
 
+            // The IR register allocator routes F16, F32 and F64 to a single
+            // `%f` prefix and declares the whole pool with the first-used
+            // type, so mixing F16 and F32 (as this kernel must) would declare
+            // the f32 values as `.b16` and ptxas rejects every `cvt`/`ld`.
+            // Carry the half-precision values in a dedicated, manually
+            // declared `.b16 %h` bank instead, keeping the allocator's `%f`
+            // pool pure-f32. This `.reg` is emitted before any instruction.
+            b.raw_ptx(".reg .b16 %h<16>;");
+
             // Load thread index for work distribution
             let tid = b.thread_id_x();
             let bid = b.block_id_x();
@@ -560,36 +569,38 @@ pub fn generate_fp16_butterfly_ptx(
             b.raw_ptx(&format!("add.u64 {addr_a}, {data_ptr}, {offset_a};"));
             b.raw_ptx(&format!("add.u64 {addr_b}, {data_ptr}, {offset_b};"));
 
-            // Load FP16 complex values (re, im packed as 2x f16)
-            let a_re_f16 = b.alloc_reg(PtxType::F16);
-            let a_im_f16 = b.alloc_reg(PtxType::F16);
-            let b_re_f16 = b.alloc_reg(PtxType::F16);
-            let b_im_f16 = b.alloc_reg(PtxType::F16);
-            b.raw_ptx(&format!("ld.global.f16 {a_re_f16}, [{addr_a}];"));
-            b.raw_ptx(&format!("ld.global.f16 {a_im_f16}, [{addr_a}+2];"));
-            b.raw_ptx(&format!("ld.global.f16 {b_re_f16}, [{addr_b}];"));
-            b.raw_ptx(&format!("ld.global.f16 {b_im_f16}, [{addr_b}+2];"));
+            // Load FP16 complex values (re, im packed as 2x f16) into the
+            // dedicated `%h` bank: %h0=a_re %h1=a_im %h2=b_re %h3=b_im.
+            b.raw_ptx(&format!("ld.global.b16 %h0, [{addr_a}];"));
+            b.raw_ptx(&format!("ld.global.b16 %h1, [{addr_a}+2];"));
+            b.raw_ptx(&format!("ld.global.b16 %h2, [{addr_b}];"));
+            b.raw_ptx(&format!("ld.global.b16 %h3, [{addr_b}+2];"));
 
-            // Load twiddle factor (stored as FP16 complex)
+            // Load twiddle factor (stored as FP16 complex): %h4=tw_re %h5=tw_im.
             let tw_offset = b.alloc_reg(PtxType::U64);
             b.raw_ptx(&format!("mul.lo.u64 {tw_offset}, {idx_a_64}, 4;"));
             let tw_addr = b.alloc_reg(PtxType::U64);
             b.raw_ptx(&format!("add.u64 {tw_addr}, {twiddle_ptr}, {tw_offset};"));
-            let tw_re_f16 = b.alloc_reg(PtxType::F16);
-            let tw_im_f16 = b.alloc_reg(PtxType::F16);
-            b.raw_ptx(&format!("ld.global.f16 {tw_re_f16}, [{tw_addr}];"));
-            b.raw_ptx(&format!("ld.global.f16 {tw_im_f16}, [{tw_addr}+2];"));
+            b.raw_ptx(&format!("ld.global.b16 %h4, [{tw_addr}];"));
+            b.raw_ptx(&format!("ld.global.b16 %h5, [{tw_addr}+2];"));
+
+            // Convert one `%h` half register to a freshly allocated f32 reg.
+            let cvt_h_to_f32 = |b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, h: &str| {
+                let r = b.alloc_reg(PtxType::F32);
+                b.raw_ptx(&format!("cvt.f32.f16 {r}, {h};"));
+                r
+            };
 
             match mode {
                 AccumulationMode::Fp32 => {
                     b.comment("FP32 accumulation: convert all to f32, compute, convert back");
                     // Convert inputs to FP32
-                    let a_re = b.cvt_f16_to_f32(a_re_f16);
-                    let a_im = b.cvt_f16_to_f32(a_im_f16);
-                    let b_re = b.cvt_f16_to_f32(b_re_f16);
-                    let b_im = b.cvt_f16_to_f32(b_im_f16);
-                    let tw_re = b.cvt_f16_to_f32(tw_re_f16);
-                    let tw_im = b.cvt_f16_to_f32(tw_im_f16);
+                    let a_re = cvt_h_to_f32(b, "%h0");
+                    let a_im = cvt_h_to_f32(b, "%h1");
+                    let b_re = cvt_h_to_f32(b, "%h2");
+                    let b_im = cvt_h_to_f32(b, "%h3");
+                    let tw_re = cvt_h_to_f32(b, "%h4");
+                    let tw_im = cvt_h_to_f32(b, "%h5");
 
                     // Complex multiply: W * B
                     // wb_re = tw_re * b_re - tw_im * b_im
@@ -610,23 +621,23 @@ pub fn generate_fp16_butterfly_ptx(
                     let out_b_re = b.sub_f32(a_re, wb_re);
                     let out_b_im = b.sub_f32(a_im, wb_im);
 
-                    // Convert back to FP16 and store
-                    let out_a_re_f16 = b.cvt_f32_to_f16(out_a_re);
-                    let out_a_im_f16 = b.cvt_f32_to_f16(out_a_im);
-                    let out_b_re_f16 = b.cvt_f32_to_f16(out_b_re);
-                    let out_b_im_f16 = b.cvt_f32_to_f16(out_b_im);
-                    b.raw_ptx(&format!("st.global.f16 [{addr_a}], {out_a_re_f16};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_a}+2], {out_a_im_f16};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_b}], {out_b_re_f16};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_b}+2], {out_b_im_f16};"));
+                    // Convert back to FP16 (`%h` bank) and store.
+                    b.raw_ptx(&format!("cvt.rn.f16.f32 %h6, {out_a_re};"));
+                    b.raw_ptx(&format!("cvt.rn.f16.f32 %h7, {out_a_im};"));
+                    b.raw_ptx(&format!("cvt.rn.f16.f32 %h8, {out_b_re};"));
+                    b.raw_ptx(&format!("cvt.rn.f16.f32 %h9, {out_b_im};"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_a}], %h6;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_a}+2], %h7;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_b}], %h8;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_b}+2], %h9;"));
                 }
                 AccumulationMode::Mixed => {
                     b.comment("Mixed mode: FP16 butterfly, FP32 twiddle multiply");
                     // Twiddle multiply in FP32
-                    let b_re = b.cvt_f16_to_f32(b_re_f16);
-                    let b_im = b.cvt_f16_to_f32(b_im_f16);
-                    let tw_re = b.cvt_f16_to_f32(tw_re_f16);
-                    let tw_im = b.cvt_f16_to_f32(tw_im_f16);
+                    let b_re = cvt_h_to_f32(b, "%h2");
+                    let b_im = cvt_h_to_f32(b, "%h3");
+                    let tw_re = cvt_h_to_f32(b, "%h4");
+                    let tw_im = cvt_h_to_f32(b, "%h5");
 
                     let wb_re_partial = b.alloc_reg(PtxType::F32);
                     b.raw_ptx(&format!("mul.rn.f32 {wb_re_partial}, {tw_re}, {b_re};"));
@@ -638,64 +649,41 @@ pub fn generate_fp16_butterfly_ptx(
                     b.raw_ptx(&format!("mul.rn.f32 {wb_im_partial}, {tw_re}, {b_im};"));
                     let wb_im_f32 = b.fma_f32(tw_im, b_re, wb_im_partial);
 
-                    // Convert W*B back to FP16 for butterfly
-                    let wb_re = b.cvt_f32_to_f16(wb_re_f32);
-                    let wb_im = b.cvt_f32_to_f16(wb_im_f32);
+                    // Convert W*B back to FP16 (%h10=wb_re %h11=wb_im) for butterfly.
+                    b.raw_ptx(&format!("cvt.rn.f16.f32 %h10, {wb_re_f32};"));
+                    b.raw_ptx(&format!("cvt.rn.f16.f32 %h11, {wb_im_f32};"));
 
-                    // Butterfly in FP16
-                    let out_a_re = b.alloc_reg(PtxType::F16);
-                    let out_a_im = b.alloc_reg(PtxType::F16);
-                    let out_b_re = b.alloc_reg(PtxType::F16);
-                    let out_b_im = b.alloc_reg(PtxType::F16);
-                    b.raw_ptx(&format!("add.f16 {out_a_re}, {a_re_f16}, {wb_re};"));
-                    b.raw_ptx(&format!("add.f16 {out_a_im}, {a_im_f16}, {wb_im};"));
-                    b.raw_ptx(&format!("sub.f16 {out_b_re}, {a_re_f16}, {wb_re};"));
-                    b.raw_ptx(&format!("sub.f16 {out_b_im}, {a_im_f16}, {wb_im};"));
+                    // Butterfly in FP16: A'=A+W*B, B'=A-W*B.
+                    b.raw_ptx("add.rn.f16 %h6, %h0, %h10;");
+                    b.raw_ptx("add.rn.f16 %h7, %h1, %h11;");
+                    b.raw_ptx("sub.rn.f16 %h8, %h0, %h10;");
+                    b.raw_ptx("sub.rn.f16 %h9, %h1, %h11;");
 
-                    // Store FP16 results
-                    b.raw_ptx(&format!("st.global.f16 [{addr_a}], {out_a_re};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_a}+2], {out_a_im};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_b}], {out_b_re};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_b}+2], {out_b_im};"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_a}], %h6;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_a}+2], %h7;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_b}], %h8;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_b}+2], %h9;"));
                 }
                 AccumulationMode::Pure => {
                     b.comment("Pure FP16: all operations in half precision");
-                    // Complex multiply W * B in FP16
-                    let wb_re_partial = b.alloc_reg(PtxType::F16);
-                    b.raw_ptx(&format!(
-                        "mul.f16 {wb_re_partial}, {tw_re_f16}, {b_re_f16};"
-                    ));
-                    let neg_tw_im = b.alloc_reg(PtxType::F16);
-                    b.raw_ptx(&format!("neg.f16 {neg_tw_im}, {tw_im_f16};"));
-                    let wb_re = b.alloc_reg(PtxType::F16);
-                    b.raw_ptx(&format!(
-                        "fma.rn.f16 {wb_re}, {neg_tw_im}, {b_im_f16}, {wb_re_partial};"
-                    ));
+                    // Complex multiply W * B in FP16 (%h4=tw_re %h5=tw_im
+                    // %h2=b_re %h3=b_im). %h10=wb_re %h11=wb_im.
+                    b.raw_ptx("mul.rn.f16 %h12, %h4, %h2;"); // tw_re*b_re
+                    b.raw_ptx("neg.f16 %h13, %h5;"); // -tw_im
+                    b.raw_ptx("fma.rn.f16 %h10, %h13, %h3, %h12;"); // -tw_im*b_im + ..
+                    b.raw_ptx("mul.rn.f16 %h14, %h4, %h3;"); // tw_re*b_im
+                    b.raw_ptx("fma.rn.f16 %h11, %h5, %h2, %h14;"); // tw_im*b_re + ..
 
-                    let wb_im_partial = b.alloc_reg(PtxType::F16);
-                    b.raw_ptx(&format!(
-                        "mul.f16 {wb_im_partial}, {tw_re_f16}, {b_im_f16};"
-                    ));
-                    let wb_im = b.alloc_reg(PtxType::F16);
-                    b.raw_ptx(&format!(
-                        "fma.rn.f16 {wb_im}, {tw_im_f16}, {b_re_f16}, {wb_im_partial};"
-                    ));
+                    // Butterfly in FP16: A'=A+W*B, B'=A-W*B.
+                    b.raw_ptx("add.rn.f16 %h6, %h0, %h10;");
+                    b.raw_ptx("add.rn.f16 %h7, %h1, %h11;");
+                    b.raw_ptx("sub.rn.f16 %h8, %h0, %h10;");
+                    b.raw_ptx("sub.rn.f16 %h9, %h1, %h11;");
 
-                    // Butterfly in FP16
-                    let out_a_re = b.alloc_reg(PtxType::F16);
-                    let out_a_im = b.alloc_reg(PtxType::F16);
-                    let out_b_re = b.alloc_reg(PtxType::F16);
-                    let out_b_im = b.alloc_reg(PtxType::F16);
-                    b.raw_ptx(&format!("add.f16 {out_a_re}, {a_re_f16}, {wb_re};"));
-                    b.raw_ptx(&format!("add.f16 {out_a_im}, {a_im_f16}, {wb_im};"));
-                    b.raw_ptx(&format!("sub.f16 {out_b_re}, {a_re_f16}, {wb_re};"));
-                    b.raw_ptx(&format!("sub.f16 {out_b_im}, {a_im_f16}, {wb_im};"));
-
-                    // Store
-                    b.raw_ptx(&format!("st.global.f16 [{addr_a}], {out_a_re};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_a}+2], {out_a_im};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_b}], {out_b_re};"));
-                    b.raw_ptx(&format!("st.global.f16 [{addr_b}+2], {out_b_im};"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_a}], %h6;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_a}+2], %h7;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_b}], %h8;"));
+                    b.raw_ptx(&format!("st.global.b16 [{addr_b}+2], %h9;"));
                 }
             }
 
@@ -746,6 +734,11 @@ pub fn generate_fp16_twiddle_ptx(n: usize, sm: SmVersion) -> Result<String, PtxG
         .body(move |b| {
             b.comment(&format!("FP16 twiddle factor application, N={n}"));
 
+            // Dedicated half-precision register bank (see the butterfly kernel
+            // for why F16 cannot share the allocator's `%f` pool). Declared
+            // before the first instruction.
+            b.raw_ptx(".reg .b16 %h<4>;");
+
             let tid = b.thread_id_x();
             let bid = b.block_id_x();
             let block_dim = b.alloc_reg(PtxType::U32);
@@ -773,27 +766,27 @@ pub fn generate_fp16_twiddle_ptx(n: usize, sm: SmVersion) -> Result<String, PtxG
             let byte_offset = b.alloc_reg(PtxType::U64);
             b.raw_ptx(&format!("mul.lo.u64 {byte_offset}, {idx_64}, 4;"));
 
-            // Load data element
+            // Load data element into the half bank: %h0=x_re %h1=x_im.
             let data_addr = b.alloc_reg(PtxType::U64);
             b.raw_ptx(&format!("add.u64 {data_addr}, {data_ptr}, {byte_offset};"));
-            let x_re = b.alloc_reg(PtxType::F16);
-            let x_im = b.alloc_reg(PtxType::F16);
-            b.raw_ptx(&format!("ld.global.f16 {x_re}, [{data_addr}];"));
-            b.raw_ptx(&format!("ld.global.f16 {x_im}, [{data_addr}+2];"));
+            b.raw_ptx(&format!("ld.global.b16 %h0, [{data_addr}];"));
+            b.raw_ptx(&format!("ld.global.b16 %h1, [{data_addr}+2];"));
 
-            // Load twiddle factor
+            // Load twiddle factor: %h2=tw_re %h3=tw_im.
             let tw_addr = b.alloc_reg(PtxType::U64);
             b.raw_ptx(&format!("add.u64 {tw_addr}, {twiddle_ptr}, {byte_offset};"));
-            let tw_re = b.alloc_reg(PtxType::F16);
-            let tw_im = b.alloc_reg(PtxType::F16);
-            b.raw_ptx(&format!("ld.global.f16 {tw_re}, [{tw_addr}];"));
-            b.raw_ptx(&format!("ld.global.f16 {tw_im}, [{tw_addr}+2];"));
+            b.raw_ptx(&format!("ld.global.b16 %h2, [{tw_addr}];"));
+            b.raw_ptx(&format!("ld.global.b16 %h3, [{tw_addr}+2];"));
 
-            // Complex multiply in FP32 for accuracy, then store as FP16
-            let x_re_f32 = b.cvt_f16_to_f32(x_re);
-            let x_im_f32 = b.cvt_f16_to_f32(x_im);
-            let tw_re_f32 = b.cvt_f16_to_f32(tw_re);
-            let tw_im_f32 = b.cvt_f16_to_f32(tw_im);
+            // Complex multiply in FP32 for accuracy, then store as FP16.
+            let x_re_f32 = b.alloc_reg(PtxType::F32);
+            b.raw_ptx(&format!("cvt.f32.f16 {x_re_f32}, %h0;"));
+            let x_im_f32 = b.alloc_reg(PtxType::F32);
+            b.raw_ptx(&format!("cvt.f32.f16 {x_im_f32}, %h1;"));
+            let tw_re_f32 = b.alloc_reg(PtxType::F32);
+            b.raw_ptx(&format!("cvt.f32.f16 {tw_re_f32}, %h2;"));
+            let tw_im_f32 = b.alloc_reg(PtxType::F32);
+            b.raw_ptx(&format!("cvt.f32.f16 {tw_im_f32}, %h3;"));
 
             // out_re = x_re * tw_re - x_im * tw_im
             let out_re_partial = b.alloc_reg(PtxType::F32);
@@ -811,11 +804,11 @@ pub fn generate_fp16_twiddle_ptx(n: usize, sm: SmVersion) -> Result<String, PtxG
             ));
             let out_im_f32 = b.fma_f32(x_im_f32, tw_re_f32, out_im_partial);
 
-            // Convert back to FP16 and store
-            let out_re_f16 = b.cvt_f32_to_f16(out_re_f32);
-            let out_im_f16 = b.cvt_f32_to_f16(out_im_f32);
-            b.raw_ptx(&format!("st.global.f16 [{data_addr}], {out_re_f16};"));
-            b.raw_ptx(&format!("st.global.f16 [{data_addr}+2], {out_im_f16};"));
+            // Convert back to FP16 (%h0/%h1) and store.
+            b.raw_ptx(&format!("cvt.rn.f16.f32 %h0, {out_re_f32};"));
+            b.raw_ptx(&format!("cvt.rn.f16.f32 %h1, {out_im_f32};"));
+            b.raw_ptx(&format!("st.global.b16 [{data_addr}], %h0;"));
+            b.raw_ptx(&format!("st.global.b16 [{data_addr}+2], %h1;"));
 
             b.raw_ptx("$L_tw_exit:");
             b.comment("End of twiddle application kernel");
@@ -1002,11 +995,11 @@ mod tests {
             assert!(ptx.contains("fft_fp16_butterfly_r2_fp32acc"));
             assert!(ptx.contains(".target sm_80"));
             // Should contain FP16 load instructions
-            assert!(ptx.contains("ld.global.f16"));
+            assert!(ptx.contains("ld.global.b16"));
             // Should contain FP32 accumulation
             assert!(ptx.contains("mul.rn.f32"));
             // Should contain FP16 store instructions
-            assert!(ptx.contains("st.global.f16"));
+            assert!(ptx.contains("st.global.b16"));
         }
     }
 
@@ -1070,7 +1063,7 @@ mod tests {
         assert!(ptx.is_some());
         if let Some(ptx) = ptx {
             assert!(ptx.contains("fft_fp16_twiddle_n256"));
-            assert!(ptx.contains("ld.global.f16"));
+            assert!(ptx.contains("ld.global.b16"));
             assert!(ptx.contains("cvt"));
         }
     }

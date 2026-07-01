@@ -190,6 +190,7 @@ pub fn expert_dispatch_ptx(sm: u32) -> String {
 {{
     .reg .u64  %rd<10>;
     .reg .u32  %r<16>;
+    .reg .f32  %f<1>;
     .reg .pred %p0, %p1;
 
     ld.param.u64 %rd0, [param_expert_ids];
@@ -329,12 +330,12 @@ $FFN_OUTER:
     mul.f32 %f11, %f10, %f1;        // gelu_cubic * x^3
     add.f32 %f12, %f8, %f11;        // x + gelu_cubic*x^3
     mul.f32 %f13, %f12, %f0;        // gelu_coeff * (...)
-    // tanh via ex2: tanh(z) = (ex2(2z/log2e) - 1) / (ex2(2z/log2e) + 1)
-    // simplified: use tanh via 2*sigmoid(2z)-1
+    // tanh(z) = (e^(2z) - 1) / (e^(2z) + 1); e^(2z) = ex2(2z * log2e).
     mov.f32 %f14, {LOG2E};
-    mul.f32 %f15, %f13, %f14;
-    ex2.approx.f32 %f16, %f15;   // 2^(gelu_arg * log2e)  ≈ e^gelu_arg = e^x for tanh approx
-    // tanh(x) ≈ (e^x - 1) / (e^x + 1) via ex2
+    mul.f32 %f15, %f13, %f14;    // z * log2e
+    add.f32 %f15, %f15, %f15;    // 2z * log2e  (the *2 is required: tanh needs e^(2z))
+    ex2.approx.f32 %f16, %f15;   // 2^(2z * log2e) = e^(2z)
+    // tanh(z) = (e^(2z) - 1) / (e^(2z) + 1)
     sub.f32 %f17, %f16, %f3;
     add.f32 %f18, %f16, %f3;
     div.rn.f32 %f19, %f17, %f18;  // tanh approx
@@ -662,11 +663,20 @@ $RZ_DONE:
 }
 
 /// PTX kernel: soft MoE slot-weighted dispatch `D[t,s] = softmax(x·Φ/sqrt(d))`.
+///
+/// Mirrors [`crate::routing::soft_moe::SoftMoeRouter::dispatch_weights`]:
+/// for every token `t` it forms the full slot logit row
+/// `logit[t,s] = scale * Σ_d x[t,d]·Φ[s,d]` (Φ laid out as `[n_slots, input_dim]`,
+/// `Φ[s,d] = phi[s*input_dim + d]`), then a numerically-stable softmax over the
+/// slot dimension. The token's output row `out[t*n_slots .. ]` doubles as scratch
+/// across the three passes (scores → exp → normalize), so the kernel needs no
+/// shared memory and stays a pure grid-stride token loop.
 #[must_use]
 pub fn soft_moe_dispatch_ptx(sm: u32) -> String {
     let header = ptx_header(sm);
     let zero = f32_hex(0.0_f32);
     let eps = f32_hex(1e-12_f32);
+    let neg_inf = f32_hex(f32::NEG_INFINITY);
     format!(
         r#"{header}.visible .entry soft_moe_dispatch_kernel(
     .param .u64 param_x,
@@ -678,10 +688,10 @@ pub fn soft_moe_dispatch_ptx(sm: u32) -> String {
     .param .f32 param_scale
 )
 {{
-    .reg .u64  %rd<10>;
-    .reg .u32  %r<14>;
-    .reg .f32  %f<14>;
-    .reg .pred %p0, %p1;
+    .reg .u64  %rd<16>;
+    .reg .u32  %r<20>;
+    .reg .f32  %f<20>;
+    .reg .pred %p<4>;
 
     ld.param.u64 %rd0, [param_x];
     ld.param.u64 %rd1, [param_phi];
@@ -691,6 +701,7 @@ pub fn soft_moe_dispatch_ptx(sm: u32) -> String {
     ld.param.u32 %r2,  [param_input_dim];
     ld.param.f32 %f0,  [param_scale];
 
+    // token_idx = blockIdx.x * blockDim.x + threadIdx.x ; stride = gridDim.x * blockDim.x
     mov.u32 %r3, %ntid.x;
     mov.u32 %r4, %ctaid.x;
     mov.u32 %r5, %tid.x;
@@ -703,53 +714,98 @@ $SOFT_OUTER:
     setp.ge.u32 %p0, %r9, %r0;
     @%p0 bra $SOFT_DONE;
 
-    // Compute dot product x[token] · phi[0] (first slot) and write scaled score
-    mul.lo.u32 %r10, %r9, %r2;
-    mul.wide.u32 %rd3, %r10, 4;
-    add.u64 %rd4, %rd0, %rd3;
+    // x row base address: x + token*input_dim*4
+    mul.lo.u32 %r12, %r9, %r2;
+    mul.wide.u32 %rd9, %r12, 4;
+    add.u64 %rd4, %rd0, %rd9;
 
-    ld.global.f32 %f1, [%rd4];       // x[token * input_dim + 0]
-    ld.global.f32 %f2, [%rd1];       // phi[0]
-    mul.f32 %f3, %f1, %f2;
-    mul.f32 %f4, %f3, %f0;           // scale by 1/sqrt(d)
+    // out row base address: out + token*n_slots*4 (used as softmax scratch)
+    mul.lo.u32 %r14, %r9, %r1;
+    mul.wide.u32 %rd9, %r14, 4;
+    add.u64 %rd3, %rd2, %rd9;
 
-    // exp(score) for softmax numerator
-    mov.f32 %f5, {LOG2E};
-    mul.f32 %f6, %f4, %f5;
-    ex2.approx.f32 %f7, %f6;
+    // ---- Pass 1: logit[s] = scale * dot(x_row, phi_row[s]); track running max ----
+    mov.f32 %f1, {NEG_INF};          // running max
+    mov.u32 %r10, 0;                 // slot index s
+$SOFT_SCORE_LOOP:
+    setp.ge.u32 %p1, %r10, %r1;
+    @%p1 bra $SOFT_SCORE_DONE;
 
-    // Write pre-softmax exp to output[token * n_slots + 0]
-    mul.lo.u32 %r11, %r9, %r1;
-    mul.wide.u32 %rd5, %r11, 4;
-    add.u64 %rd6, %rd2, %rd5;
-    st.global.f32 [%rd6], %f7;
+    // phi row base address: phi + s*input_dim*4
+    mul.lo.u32 %r13, %r10, %r2;
+    mul.wide.u32 %rd9, %r13, 4;
+    add.u64 %rd5, %rd1, %rd9;
 
-    // Accumulate softmax denominator (sum over slots)
-    // For simplicity: sum first-slot exp plus eps
-    mov.f32 %f8, {EPS};
-    add.f32 %f9, %f7, %f8;
+    mov.f32 %f2, {ZERO};             // dot accumulator
+    mov.u32 %r11, 0;                 // dim index d
+$SOFT_DOT_LOOP:
+    setp.ge.u32 %p2, %r11, %r2;
+    @%p2 bra $SOFT_DOT_DONE;
+    mul.wide.u32 %rd9, %r11, 4;
+    add.u64 %rd6, %rd4, %rd9;
+    ld.global.f32 %f3, [%rd6];       // x[t, d]
+    add.u64 %rd7, %rd5, %rd9;
+    ld.global.f32 %f4, [%rd7];       // phi[s, d]
+    fma.rn.f32 %f2, %f3, %f4, %f2;
+    add.u32 %r11, %r11, 1;
+    bra $SOFT_DOT_LOOP;
+$SOFT_DOT_DONE:
 
-    // Normalize the written value
-    div.rn.f32 %f10, %f7, %f9;
-    st.global.f32 [%rd6], %f10;
+    mul.f32 %f5, %f2, %f0;           // score = dot * scale
+    mul.wide.u32 %rd9, %r10, 4;
+    add.u64 %rd8, %rd3, %rd9;
+    st.global.f32 [%rd8], %f5;       // out[t, s] = score (scratch)
+    max.f32 %f1, %f1, %f5;
+
+    add.u32 %r10, %r10, 1;
+    bra $SOFT_SCORE_LOOP;
+$SOFT_SCORE_DONE:
+
+    // ---- Pass 2: e = exp((score - max)); sum += e ----
+    mov.f32 %f6, {LOG2E};
+    mov.f32 %f7, {ZERO};             // sum accumulator
+    mov.u32 %r10, 0;
+$SOFT_EXP_LOOP:
+    setp.ge.u32 %p1, %r10, %r1;
+    @%p1 bra $SOFT_EXP_DONE;
+    mul.wide.u32 %rd9, %r10, 4;
+    add.u64 %rd8, %rd3, %rd9;
+    ld.global.f32 %f8, [%rd8];
+    sub.f32 %f9, %f8, %f1;           // score - max
+    mul.f32 %f10, %f9, %f6;          // * log2(e)
+    ex2.approx.f32 %f11, %f10;       // exp(score - max)
+    st.global.f32 [%rd8], %f11;
+    add.f32 %f7, %f7, %f11;
+    add.u32 %r10, %r10, 1;
+    bra $SOFT_EXP_LOOP;
+$SOFT_EXP_DONE:
+
+    // ---- Pass 3: out[t, s] = e / (sum + eps) ----
+    mov.f32 %f12, {EPS};
+    add.f32 %f7, %f7, %f12;          // sum + eps (matches CPU stable_softmax)
+    mov.u32 %r10, 0;
+$SOFT_NORM_LOOP:
+    setp.ge.u32 %p1, %r10, %r1;
+    @%p1 bra $SOFT_NORM_DONE;
+    mul.wide.u32 %rd9, %r10, 4;
+    add.u64 %rd8, %rd3, %rd9;
+    ld.global.f32 %f13, [%rd8];
+    div.rn.f32 %f13, %f13, %f7;
+    st.global.f32 [%rd8], %f13;
+    add.u32 %r10, %r10, 1;
+    bra $SOFT_NORM_LOOP;
+$SOFT_NORM_DONE:
 
     add.u32 %r9, %r9, %r8;
     bra $SOFT_OUTER;
 
 $SOFT_DONE:
-    mov.u32 %r12, 0;
-    mov.u32 %r13, 0;
-    mov.f32 %f11, {ZERO};
-    mov.f32 %f12, {ZERO};
-    mov.f32 %f13, {ZERO};
-    mov.u64 %rd7, 0;
-    mov.u64 %rd8, 0;
-    mov.u64 %rd9, 0;
     ret;
 }}
 "#,
         ZERO = zero,
         EPS = eps,
+        NEG_INF = neg_inf,
         LOG2E = f32_hex(std::f32::consts::LOG2_E),
     )
 }

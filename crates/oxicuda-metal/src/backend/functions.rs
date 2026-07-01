@@ -781,6 +781,228 @@ mod tests {
         b.free(bh).expect("free");
         b.free(ch).expect("free");
     }
+
+    /// Zero-copy import: register pre-existing external `metal::Buffer`s and run
+    /// `gemm` directly on them (no host round-trip), then verify the result
+    /// matches a CPU triple-loop and that freeing/dropping the backend does NOT
+    /// deallocate the caller-owned buffers.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn import_external_gemm_zero_copy() {
+        let Some(backend) = try_init() else { return };
+        let Some(device) = metal::Device::system_default() else {
+            return;
+        };
+
+        // Row-major operands: A is 3x2, B is 2x3, C is 3x3.
+        let m = 3usize;
+        let k = 2usize;
+        let n = 3usize;
+        let a: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]; // 3x2
+        let bmat: Vec<f32> = vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0]; // 2x3
+        let a_bytes = f32_to_bytes(&a);
+        let b_bytes = f32_to_bytes(&bmat);
+        let c_len_bytes = m * n * std::mem::size_of::<f32>();
+
+        // Build EXTERNAL buffers the way a consumer's cache would: the test (not
+        // oxicuda) owns these `metal::Buffer`s for the whole function.
+        let a_buf = device.new_buffer_with_data(
+            a_bytes.as_ptr() as *const std::ffi::c_void,
+            a_bytes.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let b_buf = device.new_buffer_with_data(
+            b_bytes.as_ptr() as *const std::ffi::c_void,
+            b_bytes.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let c_buf = device.new_buffer(
+            c_len_bytes as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+
+        // Register the external buffers as zero-copy handles.
+        let a_h = backend
+            .register_external(&a_buf, a_bytes.len())
+            .expect("register external A");
+        let b_h = backend
+            .register_external(&b_buf, b_bytes.len())
+            .expect("register external B");
+        // Exercise the by-value convenience wrapper for the resident output C.
+        let c_h = backend
+            .import_buffer(c_buf.clone(), c_len_bytes)
+            .expect("import external C");
+
+        // All three handles must be flagged as imported (external).
+        assert_eq!(backend.is_imported(a_h), Ok(Some(true)));
+        assert_eq!(backend.is_imported(b_h), Ok(Some(true)));
+        assert_eq!(backend.is_imported(c_h), Ok(Some(true)));
+
+        // C(3x3) = 1.0 * A(3x2) * B(2x3) + 0.0 * C, all row-major.
+        backend
+            .gemm(
+                BackendTranspose::NoTrans,
+                BackendTranspose::NoTrans,
+                m,
+                n,
+                k,
+                1.0,
+                a_h,
+                k,
+                b_h,
+                n,
+                0.0,
+                c_h,
+                n,
+            )
+            .expect("gemm on imported handles");
+
+        // Read the result back via oxicuda and via the caller's own buffer
+        // pointer — both must agree (proves the GPU wrote the caller's memory).
+        let mut out = vec![0u8; c_len_bytes];
+        backend.copy_dtoh(&mut out, c_h).expect("dtoh C");
+        let got = bytes_to_f32(&out);
+
+        let direct = unsafe { std::slice::from_raw_parts(c_buf.contents() as *const f32, m * n) };
+
+        // CPU reference triple-loop.
+        let mut want = vec![0.0f32; m * n];
+        for i in 0..m {
+            for j in 0..n {
+                let mut acc = 0.0f32;
+                for p in 0..k {
+                    acc += a[i * k + p] * bmat[p * n + j];
+                }
+                want[i * n + j] = acc;
+            }
+        }
+
+        for idx in 0..(m * n) {
+            let tol = 1e-3 * want[idx].abs().max(1.0);
+            assert!(
+                (got[idx] - want[idx]).abs() <= tol,
+                "dtoh[{idx}]={} vs cpu {}",
+                got[idx],
+                want[idx]
+            );
+            assert!(
+                (direct[idx] - want[idx]).abs() <= tol,
+                "caller-buffer[{idx}]={} vs cpu {} (zero-copy write mismatch)",
+                direct[idx],
+                want[idx]
+            );
+        }
+
+        // Also exercise the mixed case: external A·B → oxicuda-OWNED output.
+        let owned_c = backend.alloc(c_len_bytes).expect("alloc owned C");
+        assert_eq!(backend.is_imported(owned_c), Ok(Some(false)));
+        backend
+            .gemm(
+                BackendTranspose::NoTrans,
+                BackendTranspose::NoTrans,
+                m,
+                n,
+                k,
+                1.0,
+                a_h,
+                k,
+                b_h,
+                n,
+                0.0,
+                owned_c,
+                n,
+            )
+            .expect("gemm external A,B -> owned C");
+        let mut owned_out = vec![0u8; c_len_bytes];
+        backend
+            .copy_dtoh(&mut owned_out, owned_c)
+            .expect("dtoh owned C");
+        let owned_got = bytes_to_f32(&owned_out);
+        for idx in 0..(m * n) {
+            let tol = 1e-3 * want[idx].abs().max(1.0);
+            assert!(
+                (owned_got[idx] - want[idx]).abs() <= tol,
+                "owned-out[{idx}]={} vs cpu {}",
+                owned_got[idx],
+                want[idx]
+            );
+        }
+
+        // Free everything. Imported handles must NOT deallocate the caller's
+        // buffers; the owned handle releases normally.
+        backend.free(a_h).expect("free imported A");
+        backend.free(b_h).expect("free imported B");
+        backend.free(c_h).expect("free imported C");
+        backend.free(owned_c).expect("free owned C");
+        // Handles are gone now.
+        assert_eq!(backend.is_imported(a_h), Ok(None));
+
+        // The external buffers are STILL alive and readable — the test owns
+        // them. Reading them after oxicuda freed its handles proves there was no
+        // double-free / premature deallocation.
+        let still_a =
+            unsafe { std::slice::from_raw_parts(a_buf.contents() as *const f32, a.len()) };
+        assert_eq!(still_a, a.as_slice(), "A survived oxicuda free");
+        let still_c = unsafe { std::slice::from_raw_parts(c_buf.contents() as *const f32, m * n) };
+        assert_eq!(still_c, want.as_slice(), "C result survived oxicuda free");
+
+        // Drop the backend explicitly while the external buffers are still held;
+        // backend drop must not touch them either.
+        drop(backend);
+        let after_drop =
+            unsafe { std::slice::from_raw_parts(b_buf.contents() as *const f32, bmat.len()) };
+        assert_eq!(after_drop, bmat.as_slice(), "B survived backend drop");
+
+        // a_buf / b_buf / c_buf drop here (the test's sole remaining retains).
+    }
+
+    /// Device-to-device copy with no host round-trip, mixing an oxicuda-owned
+    /// source with an imported external destination (the residency scenario:
+    /// land a resident result into a consumer's cached buffer).
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn copy_dtod_owned_to_external() {
+        let Some(backend) = try_init() else { return };
+        let Some(device) = metal::Device::system_default() else {
+            return;
+        };
+
+        let src_vals: Vec<f32> = vec![1.5, -2.0, 3.25, 4.0, 5.0, 6.5];
+        let src_bytes = f32_to_bytes(&src_vals);
+        let len = src_bytes.len();
+
+        // Owned source (filled from host once), external destination.
+        let src_h = match backend.alloc(len) {
+            Ok(h) => h,
+            Err(_) => return,
+        };
+        backend.copy_htod(src_h, &src_bytes).expect("htod src");
+
+        let dst_buf = device.new_buffer(len as u64, metal::MTLResourceOptions::StorageModeShared);
+        let dst_h = backend
+            .import_buffer(dst_buf.clone(), len)
+            .expect("import dst");
+
+        backend.copy_dtod(dst_h, src_h, len).expect("copy_dtod");
+
+        // Verify via the caller's own buffer pointer (zero-copy landed there).
+        let landed =
+            unsafe { std::slice::from_raw_parts(dst_buf.contents() as *const f32, src_vals.len()) };
+        for (i, (&g, &w)) in landed.iter().zip(src_vals.iter()).enumerate() {
+            assert!((g - w).abs() <= 1e-6, "dtod[{i}]={g} vs {w}");
+        }
+
+        // src == dst must be rejected.
+        assert!(matches!(
+            backend.copy_dtod(src_h, src_h, len),
+            Err(oxicuda_backend::BackendError::InvalidArgument(_))
+        ));
+
+        backend.free(src_h).expect("free src");
+        backend.free(dst_h).expect("free dst");
+        // dst_buf still owned by the test; drop here is safe.
+    }
+
     #[test]
     #[cfg(target_os = "macos")]
     fn metal_conv2d_identity_1x1() {

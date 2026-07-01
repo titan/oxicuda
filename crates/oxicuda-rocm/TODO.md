@@ -7,7 +7,7 @@ providing GPU-accelerated operations on AMD GPUs. Part of [OxiCUDA](https://gith
 
 ## Implementation Status
 
-- **Actual SLoC:** ~8,800 across 19 files
+- **Actual SLoC:** ~6,523 across 20 files
 - **Tests:** 213 passing (host-side / codegen; +109 over the 0.2.0 baseline)
 - **Status:** HIP kernel generators, hipBLAS/hipBLASLt/hipRTC runtime loaders, multi-GPU dispatcher,
   gfx-arch capability tables, host-side occupancy calculator, launch-config / stream / hipGraph

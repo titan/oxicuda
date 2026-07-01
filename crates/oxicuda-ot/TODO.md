@@ -6,7 +6,7 @@ Pure Rust Optimal Transport primitives covering entropic, exact, Wasserstein, Gr
 
 ## Implementation Status
 
-**Actual: 24,969 SLoC (74 files)**
+**Actual: 26,462 SLoC (74 files)**
 
 Current implementation covers the canonical OT algorithm spectrum: entropic OT (Sinkhorn-Knopp), exact OT (network simplex / EMD-1D), Wasserstein-1/2 and Sliced / Max-Sliced approximations, Gromov-Wasserstein and Fused-GW for unaligned domains, KL-relaxed Unbalanced OT, Wasserstein barycenters (free and fixed support), JKO gradient flow, Schrödinger Bridge (IPF), multi-marginal OT, Wasserstein k-means, and OT-based domain adaptation, plus diagnostic metrics.
 
@@ -119,7 +119,7 @@ Current implementation covers the canonical OT algorithm spectrum: entropic OT (
 
 ## Quality Status
 
-- Tests: 649 passing (unit + 19 e2e integration tests in `e2e_tests.rs`)
+- Tests: 657 passing (unit + 19 e2e integration tests in `e2e_tests.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches

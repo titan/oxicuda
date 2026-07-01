@@ -65,6 +65,11 @@ pub fn emit_pretwiddle_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
         SignalPrecision::F32 => 4u64,
         SignalPrecision::F64 => 8u64,
     };
+    // 0.5 as a precision-correct IEEE-754 immediate.
+    let half_imm = match prec {
+        SignalPrecision::F32 => "0f3F000000".to_owned(),
+        SignalPrecision::F64 => "0d3FE0000000000000".to_owned(),
+    };
     let header = ptx_header(sm);
     format!(
         r"{header}
@@ -81,7 +86,7 @@ pub fn emit_pretwiddle_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     {tid_preamble}
     .reg .u64 %x_base, %buf_base, %tw_base, %n;
     .reg .u64 %off1, %off2, %addr;
-    .reg .{ty} %xk, %cw, %sw, %re_out, %im_out, %half;
+    .reg .{ty} %xk, %cw, %sw, %re_out, %im_out;
     .reg .pred %p_oob, %p_k0;
 
     ld.param.u64    %x_base,   [x_ptr];
@@ -96,12 +101,9 @@ pub fn emit_pretwiddle_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     add.u64         %addr, %x_base, %off1;
     ld.global.{ty}  %xk, [%addr];
 
-    // Apply X[0] *= 0.5
+    // Apply X[0] *= 0.5  (PTX has no braced predication; predicate the mul).
     setp.eq.u64     %p_k0, %tid64, 0;
-    @%p_k0 {{
-        mul.{ty}    %half, %xk, 0f3F000000;  // 0.5 in f32
-        mov.{ty}    %xk, %half;
-    }}
+    @%p_k0 mul.{ty} %xk, %xk, {half_imm};
 
     // Load twiddle cos(πk/2N) and sin(πk/2N)
     mul.lo.u64      %off2, %tid64, {bytes2};
@@ -129,6 +131,7 @@ done_pretwiddle:
         ty = ty,
         bytes = bytes,
         bytes2 = bytes * 2,
+        half_imm = half_imm,
         tid_preamble = global_tid_1d(),
         bounds = bounds_check("%tid64", "%n", "done_pretwiddle"),
     )
@@ -189,12 +192,11 @@ pub fn emit_unpermute_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
 
     // even tid n: read from y[n/2] = y[half]
     // odd  tid n: read from y[(N-1-n)/2] = y[(N-1-tid)/2]
+    // PTX has no braced predication, so use per-instruction predication.
     @%p_even mov.u64 %in_idx, %half;
-    @!%p_even {{
-        sub.u64 %in_idx, %n, 1;
-        sub.u64 %in_idx, %in_idx, %tid64;
-        shr.u64 %in_idx, %in_idx, 1;
-    }}
+    @!%p_even sub.u64 %in_idx, %n, 1;
+    @!%p_even sub.u64 %in_idx, %in_idx, %tid64;
+    @!%p_even shr.u64 %in_idx, %in_idx, 1;
 
     // Load y[in_idx]  (real part only; IFFT interleaved → step by 2 scalars)
     // The caller stores the full real IFFT output as stride-2 from interleaved.

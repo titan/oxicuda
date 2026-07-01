@@ -11,6 +11,13 @@ authors.workspace = true
 keywords = ["gpu", "reinforcement", "cuda", "deep-learning", "rl"]
 categories = ["science", "algorithms"]
 
+[features]
+# Enables on-device GPU tests that JIT-compile the hand-written PTX kernels,
+# launch them on a real CUDA device, and assert numerical equivalence to the
+# crate's CPU references. The tests skip gracefully when no GPU is present, so
+# this feature is safe to enable on CPU-only machines.
+gpu-tests = []
+
 [dependencies]
 oxicuda-driver = { workspace = true }
 thiserror = { workspace = true }
@@ -19,6 +26,8 @@ num-traits = { workspace = true }
 
 [dev-dependencies]
 approx = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

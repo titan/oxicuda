@@ -12,7 +12,7 @@ KL penalty, adaptive KL controller, and masked SFT cross-entropy loss. Part of
 
 ## Implementation Status
 
-**Actual: ~15,700 SLoC (57 files)** -- compact implementation with 12 E2E
+**Actual: ~17,134 SLoC (58 files)** -- compact implementation with 12 E2E
 integration tests
 
 The crate is intentionally compact: every modern preference-alignment loss
@@ -208,7 +208,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `-D warnings` all-features all-targets)
-- Tests: 604 passing (focused, high-coverage; includes 12 E2E; +30 from wired
+- Tests: 667 passing (focused, high-coverage; includes 12 E2E; +30 from wired
   `loss/dpo_loss` + `loss/ppo_loss` + `utils/reward_norm` orphan modules; +31
   finite-difference gradient tests for DPO / IPO / KTO / SimPO / ORPO / PPO;
   +76 finite-difference gradient tests for the extended family BCO / DPOP / SLiC
@@ -286,7 +286,7 @@ SFT is dominated by softmax over vocabulary):
       (NOTE: gradient now implemented and finite-difference-verified against the
       crate's OWN forward -- loss/ppo_loss.rs::policy_grad, incl. zero-gradient
       in the clipped-and-binding region; external PyTorch parity still TODO)
-- [ ] Length-normalisation correctness of SimPO across mixed-length batches
+- [x] Length-normalisation correctness of SimPO across mixed-length batches
 
 ### Implementation Deepening
 - [x] All preference losses are batch-vectorised (no per-pair Python-style

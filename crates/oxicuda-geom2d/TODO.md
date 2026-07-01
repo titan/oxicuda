@@ -8,9 +8,9 @@ CGAL / Boost.Geometry / shapely-style 2D geometry libraries. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 10,028 (84 files, tokei measurement)
+- **Actual SLoC:** 11,159 (84 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 6,620
-- **Tests:** 294 passing
+- **Tests:** 301 passing
 - **Vol.61 scope:** Foundational 2D computational geometry (primitives, predicates,
   convex hulls, triangulation, Voronoi, polygon clipping, sweepline intersection,
   spatial indexing). Complements oxicuda-graph and oxicuda-numeric by providing the
@@ -205,7 +205,7 @@ clippings, and spatial indices are implemented natively.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 294 passing (unit + 20 e2e cross-module)
+- Tests: 301 passing (unit + 20 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns

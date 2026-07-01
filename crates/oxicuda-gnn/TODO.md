@@ -10,7 +10,7 @@ and hierarchical pooling, Set2Set readout. Part of
 ## Implementation Status
 
 - **Files:** 54 Rust source files in `src/`
-- **Tests:** 662 passing (#[test] count in src/)
+- **Tests:** 670 passing (#[test] count in src/)
 - **Crate:** `oxicuda-gnn` -- Vol.18 Graph Neural Network Primitives
 
 ### Completed [x]
@@ -133,7 +133,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 662 passing
+- Tests: 670 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)

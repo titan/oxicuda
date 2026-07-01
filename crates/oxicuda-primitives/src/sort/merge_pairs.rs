@@ -158,7 +158,7 @@ impl MergePairsTemplate {
         )
         .map_err(ferr)?;
         writeln!(out, "    .reg .u64    %two_ml, %out_addr, %src_idx;").map_err(ferr)?;
-        writeln!(out, "    .reg .u32    %tid, %bid;").map_err(ferr)?;
+        writeln!(out, "    .reg .u32    %ltid, %bid;").map_err(ferr)?;
         writeln!(
             out,
             "    .reg .pred   %p, %a_leq_b, %k_valid, %j_valid, %akm1_le_bj;"
@@ -171,9 +171,14 @@ impl MergePairsTemplate {
         writeln!(out, "    ld.param.u64 %ptr_vin,  [param_vals_in];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,         [param_n];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %merge_len, [param_merge_len];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(ferr)?;
         writeln!(out, "    @%p ret;").map_err(ferr)?;
 

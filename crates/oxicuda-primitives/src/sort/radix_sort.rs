@@ -161,7 +161,7 @@ impl RadixSortTemplate {
         .map_err(|e| e.to_string())?;
         writeln!(out, "{{").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .{ty}   %key;").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %tid, %bid, %shift, %digit, %old;")
+        writeln!(out, "    .reg .u32    %ltid, %bid, %shift, %digit, %old;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %n, %gid, %ptr_in, %ptr_cnt, %addr;")
             .map_err(|e| e.to_string())?;
@@ -175,15 +175,20 @@ impl RadixSortTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %shift,    [param_shift];").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u64      %smem_base, cnt_hist;").map_err(|e| e.to_string())?;
 
         // Phase 1: Init private histogram to zero (first 16 threads).
-        writeln!(out, "    setp.ge.u32  %p, %tid, {RADIX_SIZE};").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32  %p, %ltid, {RADIX_SIZE};").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p bra CNT_INIT_DONE;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %tid, 4, %smem_base;")
+        writeln!(out, "    mad.wide.u32   %hist_addr, %ltid, 4, %smem_base;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    st.shared.u32 [%hist_addr], 0;").map_err(|e| e.to_string())?;
         writeln!(out, "CNT_INIT_DONE:").map_err(|e| e.to_string())?;
@@ -206,7 +211,7 @@ impl RadixSortTemplate {
         }
         writeln!(out, "    and.b32      %digit, %digit, 0xF;").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    mad.lo.u64   %hist_addr, %digit, 4, %smem_base;")
+        writeln!(out, "    mad.wide.u32   %hist_addr, %digit, 4, %smem_base;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    atom.shared.add.u32 %old, [%hist_addr], 1;")
             .map_err(|e| e.to_string())?;
@@ -214,15 +219,18 @@ impl RadixSortTemplate {
         // Phase 3: Flush private histogram to global counts[bid][0..16].
         writeln!(out, "CNT_FLUSH:").map_err(|e| e.to_string())?;
         writeln!(out, "    bar.sync 0;").map_err(|e| e.to_string())?;
-        writeln!(out, "    setp.ge.u32  %p, %tid, {RADIX_SIZE};").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32  %p, %ltid, {RADIX_SIZE};").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p ret;").map_err(|e| e.to_string())?;
         // counts[bid * 16 + tid]
         writeln!(out, "    .reg .u32 %flat_idx;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u32   %flat_idx, %bid, {RADIX_SIZE}, %tid;")
+        writeln!(
+            out,
+            "    mad.lo.u32   %flat_idx, %bid, {RADIX_SIZE}, %ltid;"
+        )
+        .map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_idx, 4, %ptr_cnt;")
             .map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %addr, %flat_idx, 4, %ptr_cnt;")
-            .map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %tid, 4, %smem_base;")
+        writeln!(out, "    mad.wide.u32   %hist_addr, %ltid, 4, %smem_base;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    ld.shared.u32 %old, [%hist_addr];").map_err(|e| e.to_string())?;
         writeln!(out, "    st.global.u32 [%addr], %old;").map_err(|e| e.to_string())?;
@@ -239,6 +247,18 @@ impl RadixSortTemplate {
 
         let mut out = ptx_header(sm);
         // Launch with 1 block, RADIX_SIZE (16) threads: thread d scans digit d.
+        //
+        // The output offset for digit `d` in block `b` is the GLOBAL position
+        // where that (block, digit) bucket starts:
+        //   offset[b][d] = digit_base[d] + (count of digit d in blocks < b)
+        // where `digit_base[d] = Σ_{d' < d} total[d']` is the start of digit `d`
+        // in the sorted output. The previous version omitted `digit_base`, so the
+        // buckets all started near 0 and overwrote each other — radix sort was
+        // completely broken. We now compute it in three passes: per-digit totals
+        // into shared memory, an exclusive scan across digits for `digit_base`,
+        // then the cross-block exclusive scan seeded with `digit_base`.
+        writeln!(out, ".shared .align 4 .u32 radix_totals[{RADIX_SIZE}];")
+            .map_err(|e| e.to_string())?;
         writeln!(
             out,
             ".visible .entry {name}(\n    \
@@ -249,27 +269,64 @@ impl RadixSortTemplate {
         writeln!(out, "{{").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %nb, %b, %cnt, %prefix, %flat_idx;"
+            "    .reg .u32    %ltid, %nb, %b, %d, %cnt, %prefix, %base, %total, %flat_idx;"
         )
         .map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u64    %ptr, %addr;").map_err(|e| e.to_string())?;
+        writeln!(out, "    .reg .u64    %ptr, %addr, %smem_base, %smem_addr;")
+            .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .pred   %p;").map_err(|e| e.to_string())?;
 
         writeln!(out, "    ld.param.u64 %ptr, [param_counts];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %nb,  [param_num_blocks];").map_err(|e| e.to_string())?;
         // tid = digit index (0..15)
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %prefix, 0;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %b, 0;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u64      %smem_base, radix_totals;").map_err(|e| e.to_string())?;
 
-        // Sequential exclusive scan over blocks for this digit (thread = digit).
+        // Pass 1: total occurrences of this digit across all blocks.
+        writeln!(out, "    mov.u32      %total, 0;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %b, 0;").map_err(|e| e.to_string())?;
+        writeln!(out, "RADIX_SCAN_TOTAL:").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32  %p, %b, %nb;").map_err(|e| e.to_string())?;
+        writeln!(out, "    @%p bra RADIX_SCAN_TOTAL_DONE;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.lo.u32   %flat_idx, %b, {RADIX_SIZE}, %ltid;")
+            .map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_idx, 4, %ptr;")
+            .map_err(|e| e.to_string())?;
+        writeln!(out, "    ld.global.u32 %cnt, [%addr];").map_err(|e| e.to_string())?;
+        writeln!(out, "    add.u32      %total, %total, %cnt;").map_err(|e| e.to_string())?;
+        writeln!(out, "    add.u32      %b, %b, 1;").map_err(|e| e.to_string())?;
+        writeln!(out, "    bra RADIX_SCAN_TOTAL;").map_err(|e| e.to_string())?;
+        writeln!(out, "RADIX_SCAN_TOTAL_DONE:").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %ltid, 4, %smem_base;")
+            .map_err(|e| e.to_string())?;
+        writeln!(out, "    st.shared.u32 [%smem_addr], %total;").map_err(|e| e.to_string())?;
+        writeln!(out, "    bar.sync 0;").map_err(|e| e.to_string())?;
+
+        // Pass 2: digit_base = exclusive prefix of totals over digits < tid.
+        writeln!(out, "    mov.u32      %base, 0;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %d, 0;").map_err(|e| e.to_string())?;
+        writeln!(out, "RADIX_SCAN_BASE:").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32  %p, %d, %ltid;").map_err(|e| e.to_string())?;
+        writeln!(out, "    @%p bra RADIX_SCAN_BASE_DONE;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %d, 4, %smem_base;")
+            .map_err(|e| e.to_string())?;
+        writeln!(out, "    ld.shared.u32 %cnt, [%smem_addr];").map_err(|e| e.to_string())?;
+        writeln!(out, "    add.u32      %base, %base, %cnt;").map_err(|e| e.to_string())?;
+        writeln!(out, "    add.u32      %d, %d, 1;").map_err(|e| e.to_string())?;
+        writeln!(out, "    bra RADIX_SCAN_BASE;").map_err(|e| e.to_string())?;
+        writeln!(out, "RADIX_SCAN_BASE_DONE:").map_err(|e| e.to_string())?;
+
+        // Pass 3: cross-block exclusive scan seeded with digit_base.
+        writeln!(out, "    mov.u32      %prefix, %base;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %b, 0;").map_err(|e| e.to_string())?;
         writeln!(out, "SCAN_LOOP:").map_err(|e| e.to_string())?;
         writeln!(out, "    setp.ge.u32  %p, %b, %nb;").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p bra SCAN_DONE;").map_err(|e| e.to_string())?;
         // flat_idx = b * 16 + tid
-        writeln!(out, "    mad.lo.u32   %flat_idx, %b, {RADIX_SIZE}, %tid;")
+        writeln!(out, "    mad.lo.u32   %flat_idx, %b, {RADIX_SIZE}, %ltid;")
             .map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %addr, %flat_idx, 4, %ptr;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_idx, 4, %ptr;")
+            .map_err(|e| e.to_string())?;
         writeln!(out, "    ld.global.u32 %cnt, [%addr];").map_err(|e| e.to_string())?;
         writeln!(out, "    st.global.u32 [%addr], %prefix;").map_err(|e| e.to_string())?;
         writeln!(out, "    add.u32      %prefix, %prefix, %cnt;").map_err(|e| e.to_string())?;
@@ -296,10 +353,15 @@ impl RadixSortTemplate {
         let is64 = self.cfg.ty == PtxType::U64;
 
         let mut out = ptx_header(sm);
-        // block_offs[16] starts at global offset for each digit in this block.
-        // As threads scatter, atom.shared.add increments these counters.
+        // `block_offs[d]` = global output offset where this block's digit-`d`
+        // bucket starts (from the scan). `sct_digits[t]` caches each thread's
+        // digit so the scatter can assign a STABLE within-block rank: LSD radix
+        // is only correct if equal digits keep their input order across passes.
+        // The previous version used `atom.shared.add`, whose completion order is
+        // arbitrary, which destroyed stability and the sort.
         writeln!(out, ".shared .align 4 .u32 block_offs[{RADIX_SIZE}];")
             .map_err(|e| e.to_string())?;
+        writeln!(out, ".shared .align 4 .u32 sct_digits[{bs}];").map_err(|e| e.to_string())?;
         writeln!(
             out,
             ".visible .entry {name}(\n    \
@@ -314,7 +376,7 @@ impl RadixSortTemplate {
         writeln!(out, "    .reg .{ty}   %key;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %bid, %shift, %digit, %out_pos;"
+            "    .reg .u32    %ltid, %bid, %shift, %digit, %out_pos, %rank, %tp, %other, %boff, %flat_init, %off_val;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(
@@ -324,10 +386,10 @@ impl RadixSortTemplate {
         .map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    .reg .u64    %addr, %smem_base, %smem_addr, %out64;"
+            "    .reg .u64    %addr, %smem_base, %dsmem_base, %smem_addr, %out64;"
         )
         .map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .pred   %p;").map_err(|e| e.to_string())?;
+        writeln!(out, "    .reg .pred   %p, %oob, %eq;").map_err(|e| e.to_string())?;
         if is64 {
             writeln!(out, "    .reg .u64    %shift64, %key_shifted;").map_err(|e| e.to_string())?;
         }
@@ -337,38 +399,39 @@ impl RadixSortTemplate {
         writeln!(out, "    ld.param.u64 %ptr_off, [param_offsets];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %shift,    [param_shift];").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u64      %smem_base, block_offs;").map_err(|e| e.to_string())?;
-
-        // Phase 1: Load this block's pre-scanned offsets (first 16 threads).
-        writeln!(out, "    setp.ge.u32  %p, %tid, {RADIX_SIZE};").map_err(|e| e.to_string())?;
-        writeln!(out, "    @%p bra SCT_LOAD_DONE;").map_err(|e| e.to_string())?;
-        // flat_idx = bid * 16 + tid
-        writeln!(out, "    .reg .u32 %flat_init;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u32   %flat_init, %bid, {RADIX_SIZE}, %tid;"
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
         )
         .map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %addr, %flat_init, 4, %ptr_off;")
+        writeln!(out, "    mov.u64      %smem_base, block_offs;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u64      %dsmem_base, sct_digits;").map_err(|e| e.to_string())?;
+
+        // Phase 1a: Load this block's pre-scanned offsets (first 16 threads).
+        writeln!(out, "    setp.ge.u32  %p, %ltid, {RADIX_SIZE};").map_err(|e| e.to_string())?;
+        writeln!(out, "    @%p bra SCT_LOAD_DONE;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    mad.lo.u32   %flat_init, %bid, {RADIX_SIZE}, %ltid;"
+        )
+        .map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_init, 4, %ptr_off;")
             .map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32 %off_val;").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.global.u32 %off_val, [%addr];").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %smem_addr, %tid, 4, %smem_base;")
+        writeln!(out, "    mad.wide.u32   %smem_addr, %ltid, 4, %smem_base;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    st.shared.u32 [%smem_addr], %off_val;").map_err(|e| e.to_string())?;
         writeln!(out, "SCT_LOAD_DONE:").map_err(|e| e.to_string())?;
-        writeln!(out, "    bar.sync 0;").map_err(|e| e.to_string())?;
 
-        // Phase 2: Each thread claims a unique output slot via atomic increment.
-        writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(|e| e.to_string())?;
-        writeln!(out, "    @%p ret;").map_err(|e| e.to_string())?;
+        // Phase 1b: Every thread caches its digit (sentinel 0xFFFFFFFF if OOB so
+        // it never matches a real digit during ranking).
+        writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    @%oob bra SCT_DIG_OOB;").map_err(|e| e.to_string())?;
         writeln!(out, "    mad.lo.u64   %addr, %gid, {eb}, %ptr_in;").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.global.{ty} %key, [%addr];").map_err(|e| e.to_string())?;
-
-        // Extract 4-bit digit.
         if is64 {
             writeln!(out, "    cvt.u64.u32  %shift64, %shift;").map_err(|e| e.to_string())?;
             writeln!(out, "    shr.u64      %key_shifted, %key, %shift64;")
@@ -378,12 +441,37 @@ impl RadixSortTemplate {
             writeln!(out, "    shr.u32      %digit, %key, %shift;").map_err(|e| e.to_string())?;
         }
         writeln!(out, "    and.b32      %digit, %digit, 0xF;").map_err(|e| e.to_string())?;
+        writeln!(out, "    bra SCT_DIG_STORE;").map_err(|e| e.to_string())?;
+        writeln!(out, "SCT_DIG_OOB:").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %digit, 0xFFFFFFFF;").map_err(|e| e.to_string())?;
+        writeln!(out, "SCT_DIG_STORE:").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %ltid, 4, %dsmem_base;")
+            .map_err(|e| e.to_string())?;
+        writeln!(out, "    st.shared.u32 [%smem_addr], %digit;").map_err(|e| e.to_string())?;
+        writeln!(out, "    bar.sync 0;").map_err(|e| e.to_string())?;
 
-        // Atomic increment gives exclusive output position for this element.
-        writeln!(out, "    mad.lo.u64   %smem_addr, %digit, 4, %smem_base;")
+        // Phase 2: OOB threads are done; in-range threads compute a stable rank.
+        writeln!(out, "    @%oob ret;").map_err(|e| e.to_string())?;
+        // rank = #{ t' < ltid : sct_digits[t'] == digit }
+        writeln!(out, "    mov.u32      %rank, 0;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %tp, 0;").map_err(|e| e.to_string())?;
+        writeln!(out, "SCT_RANK_LOOP:").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32  %p, %tp, %ltid;").map_err(|e| e.to_string())?;
+        writeln!(out, "    @%p bra SCT_RANK_DONE;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %tp, 4, %dsmem_base;")
             .map_err(|e| e.to_string())?;
-        writeln!(out, "    atom.shared.add.u32 %out_pos, [%smem_addr], 1;")
+        writeln!(out, "    ld.shared.u32 %other, [%smem_addr];").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.eq.u32  %eq, %other, %digit;").map_err(|e| e.to_string())?;
+        writeln!(out, "    @%eq add.u32 %rank, %rank, 1;").map_err(|e| e.to_string())?;
+        writeln!(out, "    add.u32      %tp, %tp, 1;").map_err(|e| e.to_string())?;
+        writeln!(out, "    bra SCT_RANK_LOOP;").map_err(|e| e.to_string())?;
+        writeln!(out, "SCT_RANK_DONE:").map_err(|e| e.to_string())?;
+
+        // out_pos = block_offs[digit] + rank.
+        writeln!(out, "    mad.wide.u32   %smem_addr, %digit, 4, %smem_base;")
             .map_err(|e| e.to_string())?;
+        writeln!(out, "    ld.shared.u32 %boff, [%smem_addr];").map_err(|e| e.to_string())?;
+        writeln!(out, "    add.u32      %out_pos, %boff, %rank;").map_err(|e| e.to_string())?;
 
         // Write key to output[out_pos].
         writeln!(out, "    cvt.u64.u32  %out64, %out_pos;").map_err(|e| e.to_string())?;
@@ -481,13 +569,18 @@ mod tests {
     }
 
     #[test]
-    fn scatter_ptx_has_shared_offsets_and_atomic_ranking() {
+    fn scatter_ptx_has_shared_offsets_and_stable_ranking() {
         let t = RadixSortTemplate::new(cfg(PtxType::U32));
         let ptx = t
             .generate_scatter_kernel(SmVersion::Sm80)
             .expect("PTX generation should succeed in test");
         assert!(ptx.contains("block_offs"), "PTX: {ptx}");
-        assert!(ptx.contains("atom.shared.add.u32"), "PTX: {ptx}");
+        // Stable within-block rank (NOT atom.shared.add, which is unstable).
+        assert!(ptx.contains("sct_digits"), "PTX: {ptx}");
+        assert!(
+            !ptx.contains("atom.shared.add"),
+            "scatter must not use a non-deterministic atomic rank\nPTX: {ptx}"
+        );
         assert!(ptx.contains("ld.global.u32"), "PTX: {ptx}");
         assert!(ptx.contains("st.global.u32"), "PTX: {ptx}");
     }

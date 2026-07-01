@@ -68,7 +68,7 @@ pub fn mean_var_ptx(sm: u32) -> String {
     \n\
         // n_new = n_old + 1 (here we just count via %r5+1)\n\
         add.u32       %r6, %r5, 1;\n\
-        cvt.f32.u32   %f4, %r6;\n\
+        cvt.rn.f32.u32   %f4, %r6;\n\
     \n\
         // delta = x - mean\n\
         sub.f32       %f5, %f3, %f0;\n\
@@ -162,7 +162,7 @@ pub fn rank_assign_ptx(sm: u32) -> String {
         add.u32       %r9, %r5, 1;\n\
         add.u32       %r10, %r7, 1;\n\
         add.u32       %r11, %r9, %r10;\n\
-        cvt.f32.u32   %f2, %r11;\n\
+        cvt.rn.f32.u32   %f2, %r11;\n\
         mov.f32       %f3, 0f40000000;\n\
         div.rn.f32    %f4, %f2, %f3;\n\
     \n\

@@ -7,17 +7,25 @@ authors.workspace = true
 license.workspace = true
 homepage = "https://github.com/cool-japan/oxicuda"
 repository.workspace = true
+readme = "README.md"
 keywords = ["gpu", "mixture-of-experts", "moe", "transformer", "pure-rust"]
 categories = ["science", "algorithms"]
 
 [lints]
 workspace = true
 
+[features]
+# On-device GPU validation harness (src/gpu_tests.rs). Requires a CUDA device.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name = "moe_ops"

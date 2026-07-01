@@ -235,7 +235,7 @@ impl DeviceSelectTemplate {
             )
             .map_err(|e| e.to_string())?;
             writeln!(out, "{{").map_err(|e| e.to_string())?;
-            writeln!(out, "    .reg .u32    %flag_u32, %out_flag, %tid, %bid;")
+            writeln!(out, "    .reg .u32    %flag_u32, %out_flag, %ltid, %bid;")
                 .map_err(|e| e.to_string())?;
             writeln!(out, "    .reg .u64    %n, %gid, %ptr_in, %ptr_out, %addr;")
                 .map_err(|e| e.to_string())?;
@@ -245,9 +245,14 @@ impl DeviceSelectTemplate {
             writeln!(out, "    ld.param.u64 %ptr_in,  [param_in_flags];")
                 .map_err(|e| e.to_string())?;
             writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(|e| e.to_string())?;
-            writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+            writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
             writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-            writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
+            writeln!(
+                out,
+                "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+            )
+            .map_err(|e| e.to_string())?;
             writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(|e| e.to_string())?;
             writeln!(out, "    @%p ret;").map_err(|e| e.to_string())?;
             writeln!(out, "    mad.lo.u64   %addr, %gid, 4, %ptr_in;")
@@ -265,7 +270,7 @@ impl DeviceSelectTemplate {
             .map_err(|e| e.to_string())?;
             writeln!(out, "{{").map_err(|e| e.to_string())?;
             writeln!(out, "    .reg .{ty}   %val;").map_err(|e| e.to_string())?;
-            writeln!(out, "    .reg .u32    %out_flag, %tid, %bid;").map_err(|e| e.to_string())?;
+            writeln!(out, "    .reg .u32    %out_flag, %ltid, %bid;").map_err(|e| e.to_string())?;
             writeln!(out, "    .reg .u64    %n, %gid, %ptr_in, %ptr_out, %addr;")
                 .map_err(|e| e.to_string())?;
             writeln!(out, "    .reg .pred   %p, %select_pred;").map_err(|e| e.to_string())?;
@@ -274,9 +279,14 @@ impl DeviceSelectTemplate {
             writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];")
                 .map_err(|e| e.to_string())?;
             writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(|e| e.to_string())?;
-            writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+            writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
             writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-            writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
+            writeln!(
+                out,
+                "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+            )
+            .map_err(|e| e.to_string())?;
             writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(|e| e.to_string())?;
             writeln!(out, "    @%p ret;").map_err(|e| e.to_string())?;
             writeln!(out, "    mad.lo.u64   %addr, %gid, {eb}, %ptr_in;")
@@ -326,7 +336,7 @@ impl DeviceSelectTemplate {
         .map_err(|e| e.to_string())?;
         writeln!(out, "{{").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .{ty}   %val;").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %flag, %tid, %bid;").map_err(|e| e.to_string())?;
+        writeln!(out, "    .reg .u32    %flag, %ltid, %bid;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %n, %gid, %offset;").map_err(|e| e.to_string())?;
         writeln!(
             out,
@@ -341,9 +351,14 @@ impl DeviceSelectTemplate {
         writeln!(out, "    ld.param.u64 %ptr_off,   [param_offsets];")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u64 %n,          [param_n];").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(|e| e.to_string())?;
 
         // Out-of-bounds guard.
         writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(|e| e.to_string())?;

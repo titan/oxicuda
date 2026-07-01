@@ -6,6 +6,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
 keywords = ["gpu", "nerf", "radiance-fields", "3d", "pure-rust"]
 categories = ["science", "algorithms"]
 
@@ -15,8 +16,16 @@ workspace = true
 [dependencies]
 thiserror.workspace = true
 
+[features]
+# On-device GPU PTX validation harness (src/gpu_tests.rs). Off by default so the
+# crate builds without a CUDA toolkit; enable with `--features gpu-tests`.
+gpu-tests = []
+
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name = "nerf_ops"

@@ -9,7 +9,7 @@ calibration metrics and post-hoc recalibration. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** ~28,400 (61 files)
+- **Actual SLoC:** ~21,380 (61 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 

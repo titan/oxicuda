@@ -144,3 +144,181 @@ fn sigmoid_f32(x: f32) -> f32 {
         e / (1.0 + e)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    // -----------------------------------------------------------------------
+    // Test 1: with delta=0 (zero-initialised by construction), forward = base_w
+    // -----------------------------------------------------------------------
+    #[test]
+    fn zero_delta_forward_equals_base() {
+        let base = vec![1.0_f32, -2.0, 3.5, 0.0];
+        let mut rng_init = LcgRng::new(1);
+        // delta is zero-initialised in DiffPruner::new
+        let pruner = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng_init);
+        let mut rng_fwd = LcgRng::new(99);
+        let out = pruner.forward(&mut rng_fwd);
+        assert_eq!(out.len(), base.len());
+        for (i, (&b, &o)) in base.iter().zip(out.iter()).enumerate() {
+            assert!(
+                (o - b).abs() < 1e-6,
+                "index {i}: expected base {b}, got {o}"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 2: very large log_alpha forces mask → 1 and forward ≈ base + delta
+    // -----------------------------------------------------------------------
+    #[test]
+    fn large_log_alpha_mask_saturates_to_one() {
+        let base = vec![1.0_f32, 2.0, 3.0];
+        let delta = vec![0.5_f32, -1.0, 0.25];
+        let mut rng_init = LcgRng::new(2);
+        let mut pruner = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng_init);
+        // Force log_alpha to large positive: s ≈ 1, s_bar ≈ 1.1, clamp → 1.0
+        for v in pruner.log_alpha.iter_mut() {
+            *v = 100.0;
+        }
+        pruner.delta = delta.clone();
+
+        // Verify deterministic mask is exactly 1.0
+        let mask_det = pruner.compute_mask_deterministic();
+        for &m in mask_det.iter() {
+            assert!(
+                (m - 1.0).abs() < 1e-5,
+                "deterministic mask expected 1.0 with log_alpha=100, got {m}"
+            );
+        }
+
+        // Stochastic mask with any RNG also saturates to 1.0 when log_alpha=100
+        let mut rng_fwd = LcgRng::new(50);
+        let out = pruner.forward(&mut rng_fwd);
+        for (i, (&b, (&d, &o))) in base.iter().zip(delta.iter().zip(out.iter())).enumerate() {
+            let expected = b + d;
+            assert!(
+                (o - expected).abs() < 1e-5,
+                "index {i}: expected {expected}, got {o}"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 3: very negative log_alpha forces mask → 0 and forward ≈ base
+    // -----------------------------------------------------------------------
+    #[test]
+    fn negative_log_alpha_mask_saturates_to_zero() {
+        let base = vec![2.0_f32, -1.5, 0.5, 3.0];
+        let mut rng_init = LcgRng::new(3);
+        let mut pruner = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng_init);
+        for v in pruner.log_alpha.iter_mut() {
+            *v = -100.0;
+        }
+        // Large delta to make any non-zero mask conspicuous
+        pruner.delta = vec![10.0_f32, -10.0, 10.0, -10.0];
+
+        // Verify deterministic mask is exactly 0.0
+        let mask_det = pruner.compute_mask_deterministic();
+        for &m in mask_det.iter() {
+            assert!(
+                m.abs() < 1e-5,
+                "deterministic mask expected 0.0 with log_alpha=-100, got {m}"
+            );
+        }
+
+        let mut rng_fwd = LcgRng::new(60);
+        let out = pruner.forward(&mut rng_fwd);
+        for (i, (&b, &o)) in base.iter().zip(out.iter()).enumerate() {
+            assert!(
+                (o - b).abs() < 1e-5,
+                "index {i}: expected base {b}, got {o}"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 4: compute_mask_deterministic returns values in [0, 1]
+    // -----------------------------------------------------------------------
+    #[test]
+    fn deterministic_mask_in_unit_interval() {
+        let base = vec![0.1_f32; 20];
+        let mut rng = LcgRng::new(4);
+        let pruner = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng);
+        let mask = pruner.compute_mask_deterministic();
+        assert_eq!(mask.len(), 20);
+        for &m in mask.iter() {
+            assert!((0.0..=1.0).contains(&m), "mask value {m} not in [0, 1]");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 5: compute_mask_deterministic is reproducible (no RNG dependency)
+    // -----------------------------------------------------------------------
+    #[test]
+    fn deterministic_mask_is_reproducible() {
+        let base = vec![0.2_f32; 10];
+        let mut rng1 = LcgRng::new(5);
+        let mut rng2 = LcgRng::new(5);
+        let pruner1 = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng1);
+        let pruner2 = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng2);
+        // Same seed → same log_alpha → same deterministic mask
+        assert_eq!(
+            pruner1.compute_mask_deterministic(),
+            pruner2.compute_mask_deterministic()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 6: compute_mask_deterministic analytic value for log_alpha = 0
+    //
+    // Default config: beta=2/3, gamma=-0.1, zeta=1.1, stretch=1.2.
+    // s = sigmoid(0) = 0.5, s_bar = 0.5 * 1.2 - 0.1 = 0.5, clamp(0.5) = 0.5.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn deterministic_mask_analytic_for_zero_log_alpha() {
+        let base = vec![0.0_f32];
+        let mut rng = LcgRng::new(6);
+        let mut pruner = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng);
+        pruner.log_alpha = vec![0.0];
+        let mask = pruner.compute_mask_deterministic();
+        assert_eq!(mask.len(), 1);
+        assert!(
+            (mask[0] - 0.5).abs() < 1e-5,
+            "log_alpha=0 must give mask=0.5, got {}",
+            mask[0]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 7: l0_regularizer is finite and in [0, n]
+    // -----------------------------------------------------------------------
+    #[test]
+    fn l0_regularizer_in_valid_range() {
+        let n = 16_usize;
+        let base = vec![0.0_f32; n];
+        let mut rng = LcgRng::new(7);
+        let pruner = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng);
+        let l0 = pruner.l0_regularizer();
+        assert!(l0.is_finite(), "l0 must be finite, got {l0}");
+        assert!(l0 >= 0.0, "l0 must be non-negative, got {l0}");
+        assert!(l0 <= n as f32, "l0 must be ≤ n={n}, got {l0}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 8: forward outputs are all finite for random initialisation
+    // -----------------------------------------------------------------------
+    #[test]
+    fn forward_finite_outputs() {
+        let base: Vec<f32> = (0..8).map(|i| i as f32 * 0.5 - 2.0).collect();
+        let mut rng_init = LcgRng::new(8);
+        let mut pruner = DiffPruner::new(&base, DiffPrunerConfig::default(), &mut rng_init);
+        pruner.delta = base.iter().map(|&v| v * 0.1).collect();
+        let mut rng_fwd = LcgRng::new(9);
+        for &v in pruner.forward(&mut rng_fwd).iter() {
+            assert!(v.is_finite(), "output must be finite, got {v}");
+        }
+    }
+}

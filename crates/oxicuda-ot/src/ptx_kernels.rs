@@ -32,6 +32,8 @@ pub fn sinkhorn_step_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     let zero = f32_hex(0.0_f32);
     let neg_inf = f32_hex(f32::NEG_INFINITY);
+    let log2e = f32_hex(std::f32::consts::LOG2_E);
+    let ln2 = f32_hex(std::f32::consts::LN_2);
     format!(
         r#"{hdr}// sinkhorn_step_kernel: log-domain Sinkhorn row update.
 // c: [m*n] cost matrix
@@ -120,7 +122,8 @@ $SK_SUM_LOOP:
     sub.f32       %f4, %f3, %f2;
     div.rn.f32    %f4, %f4, %f0;
     sub.f32       %f4, %f4, %f1;
-    ex2.approx.f32 %f6, %f4;     // PTX has ex2; exp(x)=ex2(x*log2(e)) — approximation
+    mul.f32       %f4, %f4, {LOG2E};  // exp(x) = ex2(x*log2 e): base-e -> base-2 conversion
+    ex2.approx.f32 %f6, %f4;     // ex2((z_j-max)*log2 e) = exp(z_j - max)
     add.f32       %f5, %f5, %f6;
 
     add.u32       %r7, %r7, 1;
@@ -134,6 +137,7 @@ $SK_SUM_DONE:
     mul.f32       %f7, %f7, %f0;
 
     lg2.approx.f32 %f8, %f5;
+    mul.f32       %f8, %f8, {LN2};   // ln(sum) = log2(sum)*ln 2: base-2 -> base-e
     add.f32       %f8, %f8, %f1;
     mul.f32       %f8, %f8, %f0;
 
@@ -148,6 +152,8 @@ $SK_DONE:
 "#,
         ZERO = zero,
         NINF = neg_inf,
+        LOG2E = log2e,
+        LN2 = ln2,
     )
 }
 
@@ -514,6 +520,8 @@ pub fn unbalanced_step_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     let zero = f32_hex(0.0_f32);
     let neg_inf = f32_hex(f32::NEG_INFINITY);
+    let log2e = f32_hex(std::f32::consts::LOG2_E);
+    let ln2 = f32_hex(std::f32::consts::LN_2);
     format!(
         r#"{hdr}// unbalanced_step_kernel: KL-relaxed Sinkhorn step.
 .visible .entry unbalanced_step_kernel(
@@ -585,6 +593,7 @@ $UB_SUM:
     sub.f32       %f4, %f3, %f2;
     div.rn.f32    %f4, %f4, %f10;
     sub.f32       %f4, %f4, %f1;
+    mul.f32       %f4, %f4, {LOG2E};  // exp(x) = ex2(x*log2 e): base-e -> base-2 conversion
     ex2.approx.f32 %f6, %f4;
     add.f32       %f5, %f5, %f6;
     add.u32       %r7, %r7, 1;
@@ -597,6 +606,7 @@ $UB_SUM_DONE:
 
     // f = (tau/(tau+eps)) * (eps*log_a - eps*(max + log(sum)))
     lg2.approx.f32 %f8, %f5;
+    mul.f32       %f8, %f8, {LN2};   // ln(sum) = log2(sum)*ln 2: base-2 -> base-e
     add.f32       %f8, %f8, %f1;
     mul.f32       %f8, %f8, %f10;
     mul.f32       %f9, %f7, %f10;
@@ -614,7 +624,9 @@ $UB_DONE:
 }}
 "#,
         ZERO = zero,
-        NINF = neg_inf
+        NINF = neg_inf,
+        LOG2E = log2e,
+        LN2 = ln2
     )
 }
 

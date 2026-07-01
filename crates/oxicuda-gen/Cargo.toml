@@ -18,11 +18,21 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# Enables on-device GPU tests that JIT-compile the hand-written PTX kernels,
+# launch them on a real CUDA device, and assert numerical equivalence to the
+# crate's CPU references. The tests skip gracefully when no GPU is present, so
+# this feature is safe to enable on CPU-only machines.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name = "gen_ops"

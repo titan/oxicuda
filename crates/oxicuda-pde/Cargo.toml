@@ -12,8 +12,17 @@ readme = "README.md"
 [dependencies]
 thiserror.workspace = true
 
+[features]
+# On-device GPU validation of the hand-written PTX kernels. The harness skips
+# gracefully when no CUDA device is present, so this feature is safe to enable
+# on CPU-only machines.
+gpu-tests = []
+
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [lints]
 workspace = true

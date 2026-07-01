@@ -146,10 +146,10 @@ impl BlockScanTemplate {
             (ReduceOp::Sum, _) => "0",
             (ReduceOp::Product, PtxType::F32) => "0f3F800000",
             (ReduceOp::Product, _) => "1",
-            (ReduceOp::Min, PtxType::F32) => "0x7F800000",
+            (ReduceOp::Min, PtxType::F32) => "0f7F800000",
             (ReduceOp::Min, PtxType::U32) => "0xFFFFFFFF",
             (ReduceOp::Min, _) => "0x7FFFFFFF",
-            (ReduceOp::Max, PtxType::F32) => "0xFF800000",
+            (ReduceOp::Max, PtxType::F32) => "0fFF800000",
             (ReduceOp::Max, PtxType::U32) => "0",
             (ReduceOp::Max, _) => "0x80000000",
             (ReduceOp::And, _) => "0xFFFFFFFF",
@@ -173,10 +173,10 @@ impl BlockScanTemplate {
         .map_err(|e| e.to_string())?;
         writeln!(out, "{{").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    .reg .{ty}   %val, %left;").map_err(|e| e.to_string())?;
+        writeln!(out, "    .reg .{ty}   %val, %left, %orig;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %n, %stride, %left_idx, %right_idx;"
+            "    .reg .u32    %ltid, %n, %stride, %left_idx, %right_idx;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(
@@ -190,21 +190,24 @@ impl BlockScanTemplate {
         writeln!(out, "    ld.param.u64 %ptr_out,  [param_output];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u64 %ptr_in,   [param_input];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %n,         [param_n];").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %tid,       %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid,       %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u64      %smem_base, scan_smem;").map_err(|e| e.to_string())?;
 
         // Load input into shared memory (identity for out-of-bounds)
-        writeln!(out, "    setp.ge.u32 %p, %tid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32 %p, %ltid, %n;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u64  %elem_addr, %tid, {elem_bytes}, %ptr_in;"
+            "    mad.wide.u32  %elem_addr, %ltid, {elem_bytes}, %ptr_in;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    @!%p ld.global.{ty} %val, [%elem_addr];").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p  mov.{ty} %val, {identity};").map_err(|e| e.to_string())?;
+        // Keep the original element so an inclusive scan can add it back to the
+        // exclusive prefix produced by the Blelloch down-sweep.
+        writeln!(out, "    mov.{ty} %orig, %val;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u64  %elem_addr, %tid, {elem_bytes}, %smem_base;"
+            "    mad.wide.u32  %elem_addr, %ltid, {elem_bytes}, %smem_base;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    st.shared.{ty} [%elem_addr], %val;").map_err(|e| e.to_string())?;
@@ -217,7 +220,7 @@ impl BlockScanTemplate {
             writeln!(out, "    // stride={stride}").map_err(|e| e.to_string())?;
             writeln!(out, "    mov.u32 %stride, {stride};").map_err(|e| e.to_string())?;
             // right_idx = (tid+1) * 2*stride - 1
-            writeln!(out, "    add.u32  %right_idx, %tid, 1;").map_err(|e| e.to_string())?;
+            writeln!(out, "    add.u32  %right_idx, %ltid, 1;").map_err(|e| e.to_string())?;
             writeln!(
                 out,
                 "    mul.lo.u32 %right_idx, %right_idx, {};",
@@ -235,12 +238,12 @@ impl BlockScanTemplate {
 
             writeln!(
                 out,
-                "    mad.lo.u64 %left_addr,  %left_idx,  {elem_bytes}, %smem_base;"
+                "    mad.wide.u32 %left_addr, %left_idx, {elem_bytes}, %smem_base;"
             )
             .map_err(|e| e.to_string())?;
             writeln!(
                 out,
-                "    mad.lo.u64 %right_addr, %right_idx, {elem_bytes}, %smem_base;"
+                "    mad.wide.u32 %right_addr, %right_idx, {elem_bytes}, %smem_base;"
             )
             .map_err(|e| e.to_string())?;
             writeln!(out, "    ld.shared.{ty} %left,  [%left_addr];").map_err(|e| e.to_string())?;
@@ -254,11 +257,16 @@ impl BlockScanTemplate {
             stride *= 2;
         }
 
-        // ── Clear last element (exclusive) or keep (inclusive) ───────────────
-        if is_exclusive {
-            writeln!(out, "    // === Clear last element for exclusive scan ===")
-                .map_err(|e| e.to_string())?;
-            writeln!(out, "    setp.ne.u32 %p, %tid, 0;").map_err(|e| e.to_string())?;
+        // ── Clear last element, then down-sweep ──────────────────────────────
+        //
+        // The work-efficient (Blelloch) scan produces an EXCLUSIVE prefix in
+        // shared memory: clear the root (last element) to the identity, then run
+        // the down-sweep. An inclusive scan is then obtained by adding the
+        // original element back at write time. Both kinds therefore run the full
+        // up-sweep + clear-last + down-sweep; only the final write differs.
+        {
+            writeln!(out, "    // === Clear last (root) element ===").map_err(|e| e.to_string())?;
+            writeln!(out, "    setp.ne.u32 %p, %ltid, 0;").map_err(|e| e.to_string())?;
             writeln!(out, "    @%p bra DOWN_START_{name};").map_err(|e| e.to_string())?;
             writeln!(
                 out,
@@ -273,14 +281,13 @@ impl BlockScanTemplate {
         }
 
         // ── Down-sweep phase ─────────────────────────────────────────────────
-        if is_exclusive {
-            writeln!(out, "    // === Down-sweep phase (exclusive) ===")
-                .map_err(|e| e.to_string())?;
+        {
+            writeln!(out, "    // === Down-sweep phase ===").map_err(|e| e.to_string())?;
             stride = bs / 2;
             while stride >= 1 {
                 writeln!(out, "    // stride={stride}").map_err(|e| e.to_string())?;
                 writeln!(out, "    mov.u32 %stride, {stride};").map_err(|e| e.to_string())?;
-                writeln!(out, "    add.u32  %right_idx, %tid, 1;").map_err(|e| e.to_string())?;
+                writeln!(out, "    add.u32  %right_idx, %ltid, 1;").map_err(|e| e.to_string())?;
                 writeln!(
                     out,
                     "    mul.lo.u32 %right_idx, %right_idx, {};",
@@ -299,12 +306,12 @@ impl BlockScanTemplate {
 
                 writeln!(
                     out,
-                    "    mad.lo.u64 %left_addr,  %left_idx,  {elem_bytes}, %smem_base;"
+                    "    mad.wide.u32 %left_addr, %left_idx, {elem_bytes}, %smem_base;"
                 )
                 .map_err(|e| e.to_string())?;
                 writeln!(
                     out,
-                    "    mad.lo.u64 %right_addr, %right_idx, {elem_bytes}, %smem_base;"
+                    "    mad.wide.u32 %right_addr, %right_idx, {elem_bytes}, %smem_base;"
                 )
                 .map_err(|e| e.to_string())?;
                 // temp = smem[left]
@@ -330,16 +337,22 @@ impl BlockScanTemplate {
         }
 
         // ── Write output from shared memory ──────────────────────────────────
-        writeln!(out, "    setp.lt.u32 %p, %tid, %n;").map_err(|e| e.to_string())?;
+        // Shared memory now holds the EXCLUSIVE scan. For an inclusive scan, add
+        // the original per-thread element back (`inclusive[i] = exclusive[i] op
+        // input[i]`).
+        writeln!(out, "    setp.lt.u32 %p, %ltid, %n;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u64  %elem_addr, %tid, {elem_bytes}, %smem_base;"
+            "    mad.wide.u32  %elem_addr, %ltid, {elem_bytes}, %smem_base;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    @%p ld.shared.{ty} %val, [%elem_addr];").map_err(|e| e.to_string())?;
+        if !is_exclusive {
+            writeln!(out, "    @%p {op} %val, %val, %orig;").map_err(|e| e.to_string())?;
+        }
         writeln!(
             out,
-            "    mad.lo.u64  %elem_addr, %tid, {elem_bytes}, %ptr_out;"
+            "    mad.wide.u32  %elem_addr, %ltid, {elem_bytes}, %ptr_out;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    @%p st.global.{ty} [%elem_addr], %val;").map_err(|e| e.to_string())?;
@@ -443,15 +456,19 @@ mod tests {
     }
 
     #[test]
-    fn generate_inclusive_has_up_sweep_only() {
+    fn generate_inclusive_runs_full_blelloch() {
         let t = BlockScanTemplate::new(cfg(ReduceOp::Sum, PtxType::F32, 64, ScanKind::Inclusive));
         let ptx = t.generate(SmVersion::Sm80).expect("PTX gen");
-        // Up-sweep present
+        // The work-efficient scan needs BOTH sweeps for a correct inclusive
+        // result: up-sweep, then down-sweep, then add the original element back.
         assert!(ptx.contains("UP_NEXT"), "must have up-sweep labels\n{ptx}");
-        // Down-sweep absent for inclusive
         assert!(
-            !ptx.contains("DOWN_NEXT"),
-            "inclusive scan should not have down-sweep\n{ptx}"
+            ptx.contains("DOWN_NEXT"),
+            "inclusive scan must run the down-sweep\n{ptx}"
+        );
+        assert!(
+            ptx.contains("%orig"),
+            "inclusive scan must add the original element back\n{ptx}"
         );
     }
 

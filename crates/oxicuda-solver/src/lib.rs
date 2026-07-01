@@ -57,6 +57,9 @@ pub mod sparse;
 #[allow(dead_code)]
 pub(crate) mod ptx_helpers;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 pub use dense::{
     AdvectionEquation1D, BandMatrix, BatchAlgorithm, BatchConfig, BatchedResult, BatchedSolver,
     Bdf2Solver, BoundaryCondition, CpAlsConfig, CpDecomposition, DcSvdConfig, EigJob, EulerSolver,

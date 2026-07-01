@@ -168,3 +168,175 @@ impl RelationNet {
         Ok(total_loss / n_pairs as f32)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::RelationNet;
+    use crate::episode::types::{EpisodeConfig, FewShotEpisode};
+    use crate::error::MetaError;
+    use crate::handle::LcgRng;
+
+    fn make_net(feat_dim: usize, hidden_dim: usize, seed: u64) -> RelationNet {
+        let mut rng = LcgRng::new(seed);
+        RelationNet::new(feat_dim, hidden_dim, &mut rng)
+    }
+
+    fn make_episode(
+        n_way: usize,
+        k_shot: usize,
+        n_query: usize,
+        feat_dim: usize,
+        seed: u64,
+    ) -> FewShotEpisode {
+        let mut rng = LcgRng::new(seed);
+        let n_support = n_way * k_shot;
+        let n_q_total = n_way * n_query;
+        let support_x: Vec<f32> = (0..n_support * feat_dim).map(|_| rng.next_f32()).collect();
+        // Labels assigned round-robin per class (k_shot consecutive shots per class).
+        let support_y: Vec<u32> = (0..n_support).map(|i| (i / k_shot) as u32).collect();
+        let query_x: Vec<f32> = (0..n_q_total * feat_dim).map(|_| rng.next_f32()).collect();
+        let query_y: Vec<u32> = (0..n_q_total).map(|i| (i / n_query) as u32).collect();
+        FewShotEpisode {
+            config: EpisodeConfig {
+                n_way,
+                k_shot,
+                n_query,
+                feat_dim,
+            },
+            support_x,
+            support_y,
+            query_x,
+            query_y,
+        }
+    }
+
+    // ── relation_score: sigmoid range guarantee ──────────────────────────────
+
+    #[test]
+    fn score_always_in_unit_interval() {
+        // sigmoid(x) ∈ (0,1) for all finite x; we assert [0,1] to handle f32 extremes.
+        let net = make_net(4, 8, 42);
+        let mut rng = LcgRng::new(7);
+        for _ in 0..50 {
+            let q: Vec<f32> = (0..4).map(|_| rng.next_f32() * 4.0 - 2.0).collect();
+            let s: Vec<f32> = (0..4).map(|_| rng.next_f32() * 4.0 - 2.0).collect();
+            let score = net
+                .relation_score(&q, &s)
+                .expect("relation_score must succeed");
+            assert!(
+                (0.0..=1.0).contains(&score),
+                "sigmoid output must be in [0,1], got {score}"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_input_gives_exactly_half_score() {
+        // Analytic proof: b1=zeros, b2=[0], so for zero inputs every pre-ReLU activation
+        // is 0, h=zeros, pre_sigmoid=0, sigmoid(0)=0.5 regardless of W1,W2.
+        let net = make_net(6, 16, 99);
+        let zeros_q = vec![0.0_f32; 6];
+        let zeros_s = vec![0.0_f32; 6];
+        let score = net
+            .relation_score(&zeros_q, &zeros_s)
+            .expect("relation_score on zeros must succeed");
+        assert_eq!(
+            score, 0.5_f32,
+            "zero-input score must be exactly 0.5 (b1=b2=0 ⇒ sigmoid(0))"
+        );
+    }
+
+    #[test]
+    fn score_is_finite_for_random_inputs() {
+        // No NaN or infinity must arise from valid sized inputs.
+        let net = make_net(8, 12, 31);
+        let mut rng = LcgRng::new(13);
+        for _ in 0..100 {
+            let q: Vec<f32> = (0..8).map(|_| rng.next_f32()).collect();
+            let s: Vec<f32> = (0..8).map(|_| rng.next_f32()).collect();
+            let score = net
+                .relation_score(&q, &s)
+                .expect("relation_score must succeed");
+            assert!(score.is_finite(), "score must be finite, got {score}");
+        }
+    }
+
+    #[test]
+    fn score_deterministic_with_fixed_seed() {
+        // Two identically seeded networks must produce the same score for the same inputs.
+        let net_a = make_net(4, 8, 55);
+        let net_b = make_net(4, 8, 55);
+        let q = vec![0.1_f32, 0.2, 0.3, 0.4];
+        let s = vec![0.4_f32, 0.3, 0.2, 0.1];
+        let sa = net_a
+            .relation_score(&q, &s)
+            .expect("net_a score must succeed");
+        let sb = net_b
+            .relation_score(&q, &s)
+            .expect("net_b score must succeed");
+        assert_eq!(
+            sa, sb,
+            "identically seeded nets must yield identical scores"
+        );
+    }
+
+    // ── relation_loss: MSE bounds ────────────────────────────────────────────
+
+    #[test]
+    fn relation_loss_nonneg_and_bounded_by_one() {
+        // score ∈ [0,1], target ∈ {0,1}: (score-target)² ∈ [0,1]; mean ∈ [0,1].
+        let net = make_net(4, 8, 77);
+        let episode = make_episode(3, 2, 2, 4, 19);
+        let loss = net
+            .relation_loss(&episode)
+            .expect("relation_loss must succeed");
+        assert!(loss >= 0.0, "MSE loss must be non-negative, got {loss}");
+        assert!(
+            loss <= 1.0,
+            "MSE loss of sigmoid vs {{0,1}} targets must be ≤ 1, got {loss}"
+        );
+        assert!(loss.is_finite(), "loss must be finite, got {loss}");
+    }
+
+    // ── predict_episode: output shape and class validity ────────────────────
+
+    #[test]
+    fn predict_episode_correct_size_and_valid_class_indices() {
+        // Predictions must have length n_way*n_query and all indices < n_way.
+        let n_way = 3;
+        let n_query = 2;
+        let net = make_net(4, 8, 11);
+        let episode = make_episode(n_way, 2, n_query, 4, 23);
+        let preds = net
+            .predict_episode(&episode)
+            .expect("predict_episode must succeed");
+        assert_eq!(
+            preds.len(),
+            n_way * n_query,
+            "prediction count must equal n_way*n_query={}, got {}",
+            n_way * n_query,
+            preds.len()
+        );
+        for (i, &p) in preds.iter().enumerate() {
+            assert!(
+                (p as usize) < n_way,
+                "prediction[{i}]={p} must be a valid class index < n_way={n_way}"
+            );
+        }
+    }
+
+    // ── error variants ───────────────────────────────────────────────────────
+
+    #[test]
+    fn relation_score_dim_mismatch_returns_error() {
+        // Net expects feat_dim=4; passing size-3 query must return DimensionMismatch.
+        let net = make_net(4, 8, 1);
+        let q_wrong = vec![0.0_f32; 3];
+        let s_ok = vec![0.0_f32; 4];
+        let result = net.relation_score(&q_wrong, &s_ok);
+        assert!(
+            matches!(result, Err(MetaError::DimensionMismatch { .. })),
+            "wrong query size must return DimensionMismatch, got {result:?}"
+        );
+    }
+}

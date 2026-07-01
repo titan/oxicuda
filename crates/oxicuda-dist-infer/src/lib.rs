@@ -85,6 +85,11 @@ pub use pipeline_parallel::{
 pub use scheduler::{ContinuousBatcher, DisaggPdScheduler};
 pub use speculative::{DistInferRng, MedusaConfig, MedusaHeads};
 
+// On-device GPU PTX validation harness; only compiled under the `gpu-tests`
+// feature so the default build stays CUDA-free.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Integration Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]

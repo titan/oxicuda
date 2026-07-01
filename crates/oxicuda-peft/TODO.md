@@ -9,7 +9,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
 
 ## Implementation Status
 
-- **Actual SLoC:** 27,994 (86 files)
+- **Actual SLoC:** 23,516 (86 files)
 - **Coverage:** LoRA (low-rank adaptation with configurable r / α,
   Kaiming-uniform A, zero B); QLoRA (NF4 dequantization with 16-bucket lookup
   table, double-quantization absmax); AdaLoRA (SVD-parameterized ΔW = P · diag(Λ) · Q
@@ -120,7 +120,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.42).
   delta ≠ 0; max-abs recovery error < 1e-5)
 - [x] Benchmarks (`benches/peft_ops.rs`) — PTX bench group (`lora_matmul`,
   `nf4_dequant` × 4 SM) + LoRA forward algorithm bench
-- **Tests:** 690 passing
+- **Tests:** 790 passing
 
 ### Future Enhancements
 
@@ -204,7 +204,7 @@ layer.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 690 passing (LoRA zero-B, scale, merge / unmerge incl. non-zero-delta bound,
+- Tests: 790 passing (LoRA zero-B, scale, merge / unmerge incl. non-zero-delta bound,
   NF4 dequant range + bit-exact-to-table + codebook identity + spacing-bounded round-trip,
   AdaLoRA importance + prune + pruning-trajectory budget×dims accounting,
   TIES sign-consensus / trim / disjoint-mean hand-computed, DARE drop-and-rescale exact +
@@ -288,7 +288,7 @@ the Linux+NVIDIA verification run is executed.
 ### Verification Gaps
 - [ ] LoRA fine-tuning equivalence vs. PEFT reference on toy datasets
 - [ ] NF4 dequantization bit-exact match to bitsandbytes reference
-- [ ] AdaLoRA pruning-trajectory parameter count vs. paper formula
+- [x] AdaLoRA pruning-trajectory parameter count vs. paper formula
 - [ ] TIES sign-consensus + DARE rescale aggregate against published tables
 
 ### Implementation Deepening
@@ -303,9 +303,9 @@ the Linux+NVIDIA verification run is executed.
   the P1 AdapterFusion entry above)
 
 ### Numerical Accuracy
-- [ ] LoRA merge-unmerge roundtrip max-abs-error bounded by ε_machine × ||W||
+- [x] LoRA merge-unmerge roundtrip max-abs-error bounded by ε_machine × ||W||
 - [ ] NF4 quantization error vs. INT4 on standard transformer weight matrices
-- [ ] Houlsby zero-init residual property unit-tested for varying bottleneck dims
+- [x] Houlsby zero-init residual property unit-tested for varying bottleneck dims
 
 ## Performance Verification Harness Status (2026-05-16)
 

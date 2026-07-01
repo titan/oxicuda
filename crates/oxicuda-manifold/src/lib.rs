@@ -124,3 +124,6 @@ pub use umap::supervised::{
 
 #[cfg(test)]
 mod e2e_tests;
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;

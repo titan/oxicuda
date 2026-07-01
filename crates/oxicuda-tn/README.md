@@ -83,7 +83,7 @@ fn main() -> TnResult<()> {
 
 ## Status
 
-**Alpha** -- 25,583 SLoC, 501 passing tests. API may evolve before v1.0.
+**Alpha** -- 28,138 SLoC, 540 passing tests. API may evolve before v1.0.
 
 ## License
 

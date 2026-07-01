@@ -183,7 +183,7 @@ scratch.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `--all-features --all-targets -D warnings`)
-- Tests: 391 passing (host-side; incl. 2 worked-example reproductions — textbook two-circles
+- Tests: 398 passing (host-side; incl. 2 worked-example reproductions — textbook two-circles
   persistence and Mapper circular-topology recovery); PTX kernel strings validated per SM version
 - `unwrap()` calls in production code: 0
 - `unsafe` code: 0

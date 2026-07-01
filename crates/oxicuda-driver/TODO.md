@@ -6,7 +6,7 @@ Dynamic, safe Rust bindings for the NVIDIA CUDA Driver API via runtime `libloadi
 
 ## Implementation Status
 
-**Actual SLoC: 13,508** (35 files) (estimated 70K-112K for all Vol.1 combined)
+**Actual SLoC: 15,228** (35 files) (estimated 70K-112K for all Vol.1 combined)
 
 Vol.1 Foundation covers driver + memory + launch. The driver crate is the lowest-level crate in the OxiCUDA stack, providing FFI bindings, RAII wrappers, and library loading infrastructure.
 
@@ -56,7 +56,7 @@ Vol.1 Foundation covers driver + memory + launch. The driver crate is the lowest
 ## Quality Status
 
 - Warnings: 0
-- Tests: 467 passing (369 lib unit + 54 + 8 + 36 integration; +48 from fabric_handle / occupancy_register_count / cupti_stubs)
+- Tests: 379 passing (369 lib unit + 54 + 8 + 36 integration; +48 from fabric_handle / occupancy_register_count / cupti_stubs)
 - unwrap() calls: 0
 - Clippy: clean (pedantic + nursery)
 

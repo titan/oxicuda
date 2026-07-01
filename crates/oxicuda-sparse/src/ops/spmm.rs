@@ -203,12 +203,15 @@ fn emit_spmm_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 // We process 1 column (simplified approach for correctness)
                 // In production, we'd unroll tile_cols times
                 let col = col_start;
-                let col_bound = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {col_bound}, {col}, {n_param};"));
+                // Skip out-of-range columns (col >= n). Inverted skip-branch
+                // (`setp.lo` -> `setp.hs`) routed through the structured
+                // `branch_if` so the target matches the `$`-prefixed label.
+                let col_oob = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.hs.u32 {col_oob}, {col}, {n_param};"));
 
                 let do_col = b.fresh_label("spmm_do_col");
                 let skip_col = b.fresh_label("spmm_skip_col");
-                b.raw_ptx(&format!("@!{col_bound} bra {skip_col};"));
+                b.branch_if(col_oob, &skip_col);
                 b.label(&do_col);
 
                 // Accumulate: acc = sum(A[row,k] * B[k, col])
@@ -220,9 +223,10 @@ fn emit_spmm_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let done_label = b.fresh_label("spmm_done");
 
                 b.label(&loop_label);
+                // Exit when k >= row_end (inverted skip-branch via branch_if).
                 let pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred}, {k_reg}, {re};"));
-                b.raw_ptx(&format!("@!{pred} bra {done_label};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred}, {k_reg}, {re};"));
+                b.branch_if(pred, &done_label);
 
                 // Load A value and column
                 let ci_addr = b.byte_offset_addr(col_idx_base.clone(), k_reg.clone(), 4);
@@ -276,6 +280,22 @@ fn emit_spmm_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+
+    /// The SpMM kernel must assemble for sm_86 in both precisions with
+    /// `$`-prefixed branch targets and no `.b64` shuffle.
+    #[test]
+    fn spmm_f32_f64_assemble_sm86() {
+        let f32_ptx = emit_spmm_kernel::<f32>(SmVersion::Sm86).expect("f32 SpMM PTX");
+        assert_assembles_and_clean("spmm_f32", &f32_ptx);
+
+        let f64_ptx = emit_spmm_kernel::<f64>(SmVersion::Sm86).expect("f64 SpMM PTX");
+        assert_assembles_and_clean("spmm_f64", &f64_ptx);
+        assert!(
+            !f64_ptx.contains("0F00000000"),
+            "f64 SpMM kernel must not materialize an f32 0.0 immediate:\n{f64_ptx}"
+        );
+    }
 
     // ---------------------------------------------------------------------------
     // CPU reference SpMM for numerical accuracy verification

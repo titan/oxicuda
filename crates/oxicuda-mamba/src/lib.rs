@@ -50,6 +50,14 @@ pub mod s5;
 pub mod ssm;
 pub mod xlstm;
 
+/// On-device GPU validation tests (feature-gated): JIT-compile each hand-written
+/// PTX kernel, launch it on the real CUDA device, and assert numerical
+/// equivalence to the matching CPU reference. Compiled only under
+/// `--features gpu-tests` and only in test builds; every test skips gracefully
+/// when no GPU is available.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 /// Convenience re-exports for common Mamba types.
 pub mod prelude {
     pub use crate::bidirectional_ssm::{BiDirMode, BiDirSsm, BiDirSsmConfig};

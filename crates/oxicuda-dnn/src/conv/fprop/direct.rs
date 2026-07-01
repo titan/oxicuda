@@ -19,14 +19,15 @@ use oxicuda_blas::GpuFloat;
 use oxicuda_driver::Module;
 use oxicuda_launch::{Kernel, LaunchParams, grid_size_for};
 use oxicuda_ptx::arch::SmVersion;
-use oxicuda_ptx::builder::KernelBuilder;
-use oxicuda_ptx::ir::PtxType;
+use oxicuda_ptx::builder::{BodyBuilder, KernelBuilder};
+use oxicuda_ptx::ir::{PtxType, Register};
 
 use crate::error::{DnnError, DnnResult};
 use crate::handle::DnnHandle;
-use crate::types::{TensorDesc, TensorDescMut};
+use crate::types::{TensorDesc, TensorDescMut, TensorLayout};
 
 use super::super::descriptor::ConvProblem;
+use super::standard_conv::{emit_standard_conv_body, with_standard_conv_params};
 
 // ---------------------------------------------------------------------------
 // 1x1 Convolution (= GEMM)
@@ -40,7 +41,6 @@ use super::super::descriptor::ConvProblem;
 /// - C: output reshaped to `[N*H*W, K]`
 pub struct Conv1x1 {
     problem: ConvProblem,
-    #[allow(dead_code)]
     sm_version: SmVersion,
 }
 
@@ -62,15 +62,89 @@ impl Conv1x1 {
         })
     }
 
-    /// Executes the 1x1 convolution as a GEMM.
+    /// Returns the kernel name encoding precision and layout.
+    #[must_use]
+    pub fn kernel_name(&self) -> String {
+        let prec = self.problem.input_type.as_ptx_str().trim_start_matches('.');
+        let layout = if self.problem.layout.is_channels_last() {
+            "nhwc"
+        } else {
+            "nchw"
+        };
+        format!("conv1x1_{prec}_{layout}")
+    }
+
+    /// Generates the PTX for the 1x1 convolution kernel.
     ///
-    /// Dispatches through the BLAS handle:
-    /// `output[M, N] = input[M, K] * filter[K, N]`
-    /// where M = N_batch * H * W, K = C_in, N = C_out.
+    /// A 1x1 convolution is the `R = S = 1` special case of the standard
+    /// per-output-element cross-correlation: each output `(n, k, oh, ow)` is the
+    /// channel-reduced dot product `Σ_c in[n, c, oh, ow] * filter[k, c]`. It
+    /// shares the exact compute path with the general implicit-GEMM kernel.
     ///
     /// # Errors
     ///
-    /// Returns errors from the BLAS GEMM call.
+    /// Returns [`DnnError::PtxGeneration`] for an unsupported precision, a
+    /// non-2-D problem, or a layout other than NCHW/NHWC.
+    pub fn generate_ptx(&self) -> DnnResult<String> {
+        let elem_ty = self.problem.input_type;
+        if !matches!(elem_ty, PtxType::F32 | PtxType::F64) {
+            return Err(DnnError::PtxGeneration(format!(
+                "1x1 convolution kernel supports f32/f64 storage, got {elem_ty}"
+            )));
+        }
+        if self.problem.in_dims.len() != 2 || self.problem.filter_dims.len() != 2 {
+            return Err(DnnError::PtxGeneration(
+                "1x1 forward kernel supports 2-D convolution only".into(),
+            ));
+        }
+        if !matches!(self.problem.layout, TensorLayout::Nchw | TensorLayout::Nhwc) {
+            return Err(DnnError::PtxGeneration(format!(
+                "1x1 forward kernel supports NCHW/NHWC, got {:?}",
+                self.problem.layout
+            )));
+        }
+        if self.problem.groups == 0
+            || self.problem.in_channels % self.problem.groups != 0
+            || self.problem.out_channels % self.problem.groups != 0
+        {
+            return Err(DnnError::PtxGeneration(
+                "channels must be divisible by groups".into(),
+            ));
+        }
+
+        let channels_last = self.problem.layout.is_channels_last();
+        let in_ch_per_group = self.problem.in_channels / self.problem.groups;
+        let out_ch_per_group = self.problem.out_channels / self.problem.groups;
+
+        let kb = KernelBuilder::new(&self.kernel_name()).target(self.sm_version);
+        let ptx = with_standard_conv_params(kb)
+            .body(move |b| {
+                emit_standard_conv_body(
+                    b,
+                    elem_ty,
+                    channels_last,
+                    1,
+                    1,
+                    in_ch_per_group,
+                    out_ch_per_group,
+                );
+            })
+            .build()
+            .map_err(|e| DnnError::PtxGeneration(e.to_string()))?;
+
+        Ok(ptx)
+    }
+
+    /// Executes the 1x1 convolution.
+    ///
+    /// Launches one thread per output element; each computes the per-spatial
+    /// channel dot product `out[n, k, oh, ow] = Σ_c in[n, c, oh, ow]·filter[k, c]`
+    /// (cross-correlation, no kernel flip), honouring padding/groups exactly as
+    /// the descriptor specifies.
+    ///
+    /// # Errors
+    ///
+    /// Returns errors from PTX generation, module loading, or kernel launch.
     pub fn execute<T: GpuFloat>(
         &self,
         handle: &DnnHandle,
@@ -78,22 +152,52 @@ impl Conv1x1 {
         filter: &TensorDesc<T>,
         output: &mut TensorDescMut<T>,
     ) -> DnnResult<()> {
-        let (gemm_m, gemm_n, gemm_k) = self.problem.conv_to_gemm_dims()?;
+        let ptx = self.generate_ptx()?;
+        let module = Arc::new(Module::from_ptx(&ptx)?);
+        let kernel = Kernel::from_module(module, &self.kernel_name())?;
 
-        // Dispatch via Vol.3 BLAS GEMM.
-        // output = input * filter
-        //   input:  [M x K] (batch*H*W rows, C_in cols)
-        //   filter: [K x N] (C_in rows, C_out cols)
-        //   output: [M x N] (batch*H*W rows, C_out cols)
-        //
-        // The actual BLAS call will be:
-        //   gemm(NoTrans, NoTrans, M, N, K, 1.0, input, filter, 0.0, output)
-        let _ = (handle, input, filter, output, gemm_m, gemm_n, gemm_k);
+        let out_dims = self.problem.output_dims()?;
+        let out_h = out_dims.first().copied().unwrap_or(1);
+        let out_w = out_dims.get(1).copied().unwrap_or(1);
+        let total_outputs = self
+            .problem
+            .batch
+            .saturating_mul(self.problem.out_channels)
+            .saturating_mul(out_h)
+            .saturating_mul(out_w);
+
+        let block_size = 256u32;
+        let grid = grid_size_for(total_outputs, block_size);
+        let params = LaunchParams::new(grid, block_size);
+
+        let args = (
+            input.ptr,
+            filter.ptr,
+            output.ptr,
+            0u64, // bias: 1x1 forward has no bias term
+            self.problem.in_channels,
+            self.problem.out_channels,
+            self.problem.in_dims[0],
+            self.problem.in_dims.get(1).copied().unwrap_or(1),
+            out_h,
+            out_w,
+            self.problem.padding[0],
+            self.problem.padding.get(1).copied().unwrap_or(0),
+            self.problem.stride[0],
+            self.problem.stride.get(1).copied().unwrap_or(1),
+            self.problem.dilation[0],
+            self.problem.dilation.get(1).copied().unwrap_or(1),
+            total_outputs,
+        );
+
+        kernel
+            .launch(&params, handle.stream(), &args)
+            .map_err(|e| DnnError::LaunchFailed(e.to_string()))?;
 
         Ok(())
     }
 
-    /// Workspace required (zero for 1x1 GEMM).
+    /// Workspace required (zero for 1x1).
     #[must_use]
     pub fn workspace_bytes(&self) -> usize {
         0
@@ -147,6 +251,15 @@ impl DepthwiseConv {
     ///
     /// Returns [`DnnError::PtxGeneration`] on failure.
     pub fn generate_ptx(&self) -> DnnResult<String> {
+        let elem_ty = self.problem.input_type;
+        if !matches!(elem_ty, PtxType::F32 | PtxType::F64) {
+            return Err(DnnError::PtxGeneration(format!(
+                "depthwise convolution kernel supports f32/f64 storage, got {elem_ty}"
+            )));
+        }
+        let filter_h = self.problem.filter_dims.first().copied().unwrap_or(1);
+        let filter_w = self.problem.filter_dims.get(1).copied().unwrap_or(1);
+
         let ptx = KernelBuilder::new(&self.kernel_name())
             .target(self.sm_version)
             .param("input", PtxType::U64)
@@ -169,7 +282,7 @@ impl DepthwiseConv {
             .param("dilation_w", PtxType::U32)
             .param("total_outputs", PtxType::U32)
             .body(move |b| {
-                emit_depthwise_body(b);
+                emit_depthwise_body(b, filter_h, filter_w, elem_ty);
             })
             .build()
             .map_err(|e| DnnError::PtxGeneration(e.to_string()))?;
@@ -239,27 +352,188 @@ impl DepthwiseConv {
 }
 
 /// Standalone depthwise body emitter for the `'static` closure requirement.
-fn emit_depthwise_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>) {
-    b.comment("=== Depthwise Convolution ===");
+///
+/// Implements a real per-thread depthwise cross-correlation (the cuDNN
+/// convention — **no** 180° kernel flip): each thread owns one output pixel
+/// `(n, c, oh, ow)` and accumulates
+///
+/// ```text
+/// out[n, c, oh, ow] = Σ_r Σ_s in[n, c, ih, iw] * filter[c, r, s]
+/// ih = oh*stride_h - pad_h + r*dilation_h
+/// iw = ow*stride_w - pad_w + s*dilation_w
+/// ```
+///
+/// over the in-bounds `(ih, iw)` positions (out-of-range taps contribute
+/// zero, i.e. implicit zero padding). The filter spatial extent
+/// (`filter_h × filter_w`) is known at PTX-generation time, so the tap loops
+/// are unrolled here; all remaining geometry (dims, padding, stride,
+/// dilation) is read from kernel parameters so the padded / strided / dilated
+/// paths stay consistent with the pad=0 / stride=1 / dilation=1 case.
+fn emit_depthwise_body(b: &mut BodyBuilder<'_>, filter_h: u32, filter_w: u32, elem_ty: PtxType) {
+    b.comment("=== Depthwise Convolution (cross-correlation, forward) ===");
     b.comment("Each thread computes one output pixel for one channel.");
 
     let gid = b.global_thread_id_x();
     let total = b.load_param_u32("total_outputs");
-
-    b.if_lt_u32(gid, total, |b| {
-        b.comment("Decompose linear index -> (batch, channel, oh, ow)");
-        b.comment("Load filter weights into registers (small kernel)");
-        b.comment("Nested loop over filter dimensions:");
-        b.comment("  for r in 0..R:");
-        b.comment("    for s in 0..S:");
-        b.comment("      ih = oh * stride_h - pad_h + r * dilation_h");
-        b.comment("      iw = ow * stride_w - pad_w + s * dilation_w");
-        b.comment("      if 0 <= ih < H && 0 <= iw < W:");
-        b.comment("        acc += input[batch, channel, ih, iw] * filter[channel, r, s]");
-        b.comment("Store acc + bias to output[batch, channel, oh, ow]");
+    let gid_cmp = gid.clone();
+    b.if_lt_u32(gid_cmp, total, move |b| {
+        emit_depthwise_pixel(b, filter_h, filter_w, elem_ty, gid);
     });
 
     b.ret();
+}
+
+/// Emits the body executed by a single in-range depthwise thread.
+fn emit_depthwise_pixel(
+    b: &mut BodyBuilder<'_>,
+    filter_h: u32,
+    filter_w: u32,
+    elem_ty: PtxType,
+    gid: Register,
+) {
+    let elem_bytes = elem_ty.size_bytes() as u32;
+
+    // Tensor base pointers (bias is intentionally not consumed: conv_forward
+    // has no bias term; the parameter is retained for ABI stability).
+    let input_ptr = b.load_param_u64("input");
+    let filter_ptr = b.load_param_u64("filter");
+    let output_ptr = b.load_param_u64("output");
+
+    // Geometry parameters.
+    let channels = b.load_param_u32("channels");
+    let in_h = b.load_param_u32("in_h");
+    let in_w = b.load_param_u32("in_w");
+    let out_h = b.load_param_u32("out_h");
+    let out_w = b.load_param_u32("out_w");
+    let pad_h = b.load_param_u32("pad_h");
+    let pad_w = b.load_param_u32("pad_w");
+    let stride_h = b.load_param_u32("stride_h");
+    let stride_w = b.load_param_u32("stride_w");
+    let dil_h = b.load_param_u32("dilation_h");
+    let dil_w = b.load_param_u32("dilation_w");
+
+    // Decompose the linear output index (NCHW order) into (n, c, oh, ow):
+    //   gid = ((n*C + c)*P + oh)*Q + ow
+    b.comment("Decompose linear output index -> (n, c, oh, ow)");
+    let ow = b.alloc_reg(PtxType::U32);
+    let t1 = b.alloc_reg(PtxType::U32);
+    let oh = b.alloc_reg(PtxType::U32);
+    let t2 = b.alloc_reg(PtxType::U32);
+    let c = b.alloc_reg(PtxType::U32);
+    let n = b.alloc_reg(PtxType::U32);
+    b.raw_ptx(&format!("rem.u32 {ow}, {gid}, {out_w};"));
+    b.raw_ptx(&format!("div.u32 {t1}, {gid}, {out_w};"));
+    b.raw_ptx(&format!("rem.u32 {oh}, {t1}, {out_h};"));
+    b.raw_ptx(&format!("div.u32 {t2}, {t1}, {out_h};"));
+    b.raw_ptx(&format!("rem.u32 {c}, {t2}, {channels};"));
+    b.raw_ptx(&format!("div.u32 {n}, {t2}, {channels};"));
+
+    // nc = n*C + c : channel-major offset shared by every input tap.
+    let nc = b.mad_lo_u32(n, channels, c.clone());
+
+    // c_base = c * (R*S) : start of this channel's filter in [C, 1, R, S].
+    let rxs = filter_h.saturating_mul(filter_w);
+    let rxs_reg = b.mov_imm_u32(rxs);
+    let c_base = b.mul_lo_u32(c, rxs_reg);
+
+    // Accumulator and a reusable zero of the same float width (a single float
+    // type per kernel — F32 and F64 share the %f register class but differ in
+    // declared width, so they must never be mixed).
+    let mut acc = zero_float(b, elem_ty);
+    let fzero = zero_float(b, elem_ty);
+
+    b.comment("Unrolled cross-correlation over the filter window");
+    for r in 0..filter_h {
+        // ih = oh*stride_h - pad_h + r*dilation_h  (signed).
+        let r_reg = b.mov_imm_u32(r);
+        let rdil = b.mul_lo_u32(dil_h.clone(), r_reg);
+        let ih_pos = b.mad_lo_u32(oh.clone(), stride_h.clone(), rdil);
+        let ih = b.alloc_reg(PtxType::S32);
+        b.raw_ptx(&format!("sub.s32 {ih}, {ih_pos}, {pad_h};"));
+        // Unsigned compare doubles as a 0 <= ih < H bounds check: a negative
+        // ih reinterpreted as u32 is huge and fails the upper bound.
+        let p_ih = b.alloc_reg(PtxType::Pred);
+        b.raw_ptx(&format!("setp.lo.u32 {p_ih}, {ih}, {in_h};"));
+
+        for s in 0..filter_w {
+            let s_reg = b.mov_imm_u32(s);
+            let sdil = b.mul_lo_u32(dil_w.clone(), s_reg);
+            let iw_pos = b.mad_lo_u32(ow.clone(), stride_w.clone(), sdil);
+            let iw = b.alloc_reg(PtxType::S32);
+            b.raw_ptx(&format!("sub.s32 {iw}, {iw_pos}, {pad_w};"));
+            let p_iw = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.lo.u32 {p_iw}, {iw}, {in_w};"));
+            let p_valid = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("and.pred {p_valid}, {p_ih}, {p_iw};"));
+
+            // in_idx = (nc*H + ih)*W + iw, clamped to 0 when the tap is out of
+            // range so the load address is always valid; the value is masked.
+            let row = b.mad_lo_u32(nc.clone(), in_h.clone(), ih.clone());
+            let in_idx = b.mad_lo_u32(row, in_w.clone(), iw.clone());
+            let zero_idx = b.mov_imm_u32(0);
+            let safe_idx = b.selp(PtxType::U32, in_idx, zero_idx, p_valid.clone());
+            let in_addr = b.byte_offset_addr(input_ptr.clone(), safe_idx, elem_bytes);
+            let raw_val = load_float(b, elem_ty, in_addr);
+            let val = b.selp(elem_ty, raw_val, fzero.clone(), p_valid);
+
+            // filter index = c_base + r*S + s (always in range).
+            let f_off = r.saturating_mul(filter_w).saturating_add(s);
+            let f_off_reg = b.mov_imm_u32(f_off);
+            let filt_idx = b.add_u32(c_base.clone(), f_off_reg);
+            let filt_addr = b.byte_offset_addr(filter_ptr.clone(), filt_idx, elem_bytes);
+            let weight = load_float(b, elem_ty, filt_addr);
+
+            acc = fma_float(b, elem_ty, val, weight, acc);
+        }
+    }
+
+    // out[gid] = acc (the linear gid already addresses the NCHW output).
+    let out_addr = b.byte_offset_addr(output_ptr, gid, elem_bytes);
+    store_float(b, elem_ty, out_addr, acc);
+}
+
+/// Allocates a fresh `+0.0` register of the kernel's float width.
+fn zero_float(b: &mut BodyBuilder<'_>, elem_ty: PtxType) -> Register {
+    let z = b.alloc_reg(elem_ty);
+    if elem_ty == PtxType::F64 {
+        b.raw_ptx(&format!("mov.f64 {z}, 0d0000000000000000;"));
+    } else {
+        b.raw_ptx(&format!("mov.f32 {z}, 0f00000000;"));
+    }
+    z
+}
+
+/// Loads one scalar of the kernel's float width from global memory.
+fn load_float(b: &mut BodyBuilder<'_>, elem_ty: PtxType, addr: Register) -> Register {
+    if elem_ty == PtxType::F64 {
+        b.load_global_f64(addr)
+    } else {
+        b.load_global_f32(addr)
+    }
+}
+
+/// Stores one scalar of the kernel's float width to global memory.
+fn store_float(b: &mut BodyBuilder<'_>, elem_ty: PtxType, addr: Register, val: Register) {
+    if elem_ty == PtxType::F64 {
+        b.store_global_f64(addr, val);
+    } else {
+        b.store_global_f32(addr, val);
+    }
+}
+
+/// Fused multiply-add `acc + a*w` at the kernel's float width.
+fn fma_float(
+    b: &mut BodyBuilder<'_>,
+    elem_ty: PtxType,
+    a: Register,
+    w: Register,
+    acc: Register,
+) -> Register {
+    if elem_ty == PtxType::F64 {
+        b.fma_f64(a, w, acc)
+    } else {
+        b.fma_f32(a, w, acc)
+    }
 }
 
 #[cfg(test)]

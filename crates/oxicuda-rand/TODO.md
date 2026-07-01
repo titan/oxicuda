@@ -6,7 +6,7 @@ GPU-accelerated random number generation, serving as a pure Rust equivalent to N
 
 ## Implementation Status
 
-**Actual: 12,518 SLoC (37 files) -- Estimated: 15K-24K SLoC (estimation.md Vol.5 rand portion)**
+**Actual: 14,384 SLoC (38 files) -- Estimated: 15K-24K SLoC (estimation.md Vol.5 rand portion)**
 
 Current implementation covers three PRNG engines (Philox-4x32-10, XORWOW, MRG32k3a), four distributions (uniform, normal, log-normal, Poisson), and one quasi-random sequence (Sobol).
 
@@ -57,7 +57,7 @@ Current implementation covers three PRNG engines (Philox-4x32-10, XORWOW, MRG32k
 
 ## Quality Status
 
-- Tests: 404 passing (host_api.rs cuRAND host API wired: +23)
+- Tests: 433 passing (host_api.rs cuRAND host API wired: +23)
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`

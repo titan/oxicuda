@@ -195,13 +195,28 @@ impl Ple {
         let mut task_reprs: Vec<Vec<f32>> = (0..self.n_tasks).map(|_| x.to_vec()).collect();
 
         for layer in 0..self.n_layers {
-            let cur_in = if layer == 0 { x } else { &task_reprs[0] };
-            let _ = cur_in;
+            // Shared experts receive the original input at layer 0; at deeper layers they
+            // receive the mean of all task representations from the previous layer.  Using
+            // the per-task average preserves the expert_dim dimensionality expected by
+            // shared Expert networks at layer > 0 (in_dim = expert_dim there, not input_dim).
+            let shared_input: Vec<f32> = if layer == 0 {
+                x.to_vec()
+            } else {
+                let d = self.expert_dim;
+                let mut avg = vec![0.0_f32; d];
+                for tr in &task_reprs {
+                    for (a, &t) in avg.iter_mut().zip(tr.iter()) {
+                        *a += t;
+                    }
+                }
+                let n = task_reprs.len() as f32;
+                avg.iter_mut().for_each(|v| *v /= n);
+                avg
+            };
 
-            // Compute shared expert outputs (use x as input for layer 0, else use average task repr)
             let shared_out: Vec<Vec<f32>> = self.shared_experts[layer]
                 .iter()
-                .map(|e| e.forward(x))
+                .map(|e| e.forward(&shared_input))
                 .collect();
 
             let mut next_task_reprs = Vec::with_capacity(self.n_tasks);
@@ -254,5 +269,107 @@ impl Ple {
             .collect();
 
         Ok(outputs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    fn make_ple(seed: u64) -> Ple {
+        let mut rng = LcgRng::new(seed);
+        // 2 tasks, 2 shared experts, 2 task-specific experts, expert_dim=8, input_dim=4, 1 layer
+        Ple::new(2, 2, 2, 8, 4, 1, &mut rng).expect("new ok")
+    }
+
+    fn sample_input(seed: u64, n: usize) -> Vec<f32> {
+        let mut rng = LcgRng::new(seed);
+        (0..n).map(|_| rng.next_normal() * 0.5).collect()
+    }
+
+    #[test]
+    fn output_len_matches_n_tasks() {
+        let model = make_ple(1);
+        let x = sample_input(10, model.input_dim);
+        let out = model.forward(&x).expect("forward ok");
+        assert_eq!(out.len(), model.n_tasks);
+    }
+
+    #[test]
+    fn all_outputs_in_open_unit_interval() {
+        let model = make_ple(2);
+        let x = sample_input(11, model.input_dim);
+        let out = model.forward(&x).expect("forward ok");
+        for (i, &v) in out.iter().enumerate() {
+            assert!(v > 0.0 && v < 1.0, "task {i} output {v} not in (0,1)");
+        }
+    }
+
+    #[test]
+    fn outputs_are_finite() {
+        let model = make_ple(3);
+        let x = sample_input(12, model.input_dim);
+        let out = model.forward(&x).expect("forward ok");
+        for (i, &v) in out.iter().enumerate() {
+            assert!(v.is_finite(), "task {i} output {v} is not finite");
+        }
+    }
+
+    #[test]
+    fn determinism_same_seed_same_output() {
+        let x = sample_input(99, 4);
+        let out1 = make_ple(5).forward(&x).expect("fwd");
+        let out2 = make_ple(5).forward(&x).expect("fwd");
+        for (a, b) in out1.iter().zip(out2.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "outputs must be bit-exact");
+        }
+    }
+
+    #[test]
+    fn wrong_input_dim_returns_err() {
+        let model = make_ple(6);
+        let bad = vec![0.0_f32; model.input_dim + 3];
+        assert!(model.forward(&bad).is_err());
+    }
+
+    #[test]
+    fn invalid_n_tasks_returns_err() {
+        let mut rng = LcgRng::new(7);
+        assert!(Ple::new(0, 2, 2, 8, 4, 1, &mut rng).is_err());
+    }
+
+    #[test]
+    fn zero_input_gives_half_probability_for_all_tasks() {
+        // Analytical invariant: with zero input vector every expert outputs ReLU(W·0+0)=0,
+        // the gated mixture remains 0, and the final logit is 0 (zero bias), so
+        // sigmoid(0) = 0.5 exactly for every task.
+        let mut rng = LcgRng::new(13);
+        let model = Ple::new(3, 2, 2, 8, 4, 1, &mut rng).expect("new ok");
+        let zeros = vec![0.0_f32; model.input_dim];
+        let out = model.forward(&zeros).expect("fwd ok");
+        for (i, &v) in out.iter().enumerate() {
+            assert!(
+                (v - 0.5).abs() < 1e-6,
+                "task {i}: expected 0.5 on zero input, got {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn multi_layer_zero_input_also_gives_half() {
+        // Verifies the shared-expert fix for layer > 0: the average of zero task
+        // representations is still zero, so the zero-input → 0.5 invariant holds
+        // regardless of depth.
+        let mut rng = LcgRng::new(42);
+        let model = Ple::new(2, 2, 1, 8, 4, 3, &mut rng).expect("new ok");
+        let zeros = vec![0.0_f32; model.input_dim];
+        let out = model.forward(&zeros).expect("fwd ok");
+        for (i, &v) in out.iter().enumerate() {
+            assert!(
+                (v - 0.5).abs() < 1e-6,
+                "task {i}: expected 0.5 on zero input (3 layers), got {v}"
+            );
+        }
     }
 }

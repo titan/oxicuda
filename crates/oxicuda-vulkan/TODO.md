@@ -7,7 +7,7 @@ SPIR-V compute shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/
 
 ## Implementation Status
 
-- **Actual SLoC:** ~9,664 across 30 files
+- **Actual SLoC:** ~7,366 across 30 files
 - **Tests:** 150 passing (+ 1 doctest)
 - **Status:** Full memory + compute backend via in-house SPIR-V builder, multi-queue async, pipeline cache. Host-side planners (VMA-style sub-allocator, descriptor-buffer layout, push-descriptor/push-constant builders, performance-query pool) and advanced SPIR-V generators (cooperative-matrix MMA, atomic-float reduction, Vulkan-memory-model copy, subgroup-size-control spec-constant) are CPU-testable and complete; their on-device dispatch remains GPU-gated.
 - **Targets:** Vendor-agnostic (NVIDIA / AMD / Intel / Mesa lavapipe), Vulkan 1.2+

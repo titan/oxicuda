@@ -167,7 +167,7 @@ pub(crate) fn compute_direction_numbers(dimension: u32) -> RandResult<[u32; DIRE
 ///
 /// For simplicity, direction numbers are passed via a pointer to device memory.
 #[allow(dead_code)]
-fn generate_sobol_ptx(sm: SmVersion) -> Result<String, PtxGenError> {
+pub(crate) fn generate_sobol_ptx(sm: SmVersion) -> Result<String, PtxGenError> {
     KernelBuilder::new("sobol_generate")
         .target(sm)
         .param("out_ptr", PtxType::U64)

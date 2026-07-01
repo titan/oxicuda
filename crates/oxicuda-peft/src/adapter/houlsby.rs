@@ -115,3 +115,145 @@ pub(crate) fn gelu(x: f32) -> f32 {
     let inner = C0 * (x + C1 * x * x * x);
     0.5 * x * (1.0 + inner.tanh())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    /// Build a deterministic input vector in `[-1, 1)` of the given length.
+    fn make_input(len: usize, seed: u64) -> Vec<f32> {
+        let mut rng = LcgRng::new(seed);
+        (0..len).map(|_| rng.next_f32() * 2.0 - 1.0).collect()
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 1: output length == seq_len * in_dim (single token)
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn houlsby_output_shape_single_token() {
+        let mut rng = LcgRng::new(1);
+        let adapter = HoulsbyAdapter::new(8, 4, &mut rng);
+        let x = make_input(8, 2);
+        let out = adapter.forward(&x, 1);
+        assert_eq!(
+            out.len(),
+            8,
+            "output length must equal in_dim for seq_len=1"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 2: output length == seq_len * in_dim (multiple tokens)
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn houlsby_output_shape_multi_token() {
+        let mut rng = LcgRng::new(3);
+        let adapter = HoulsbyAdapter::new(16, 4, &mut rng);
+        let x = make_input(16 * 5, 4);
+        let out = adapter.forward(&x, 5);
+        assert_eq!(out.len(), 80, "output length must be seq_len * in_dim");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 3: with up_w=0 and up_b=0 (the init state), forward(x) == x exactly.
+    //
+    // Proof: acc_i = up_b[i] + Σ_j up_w[i*bn+j] * hidden[j] = 0 + 0 = 0
+    //        out[i] = acc_i + x[i] = x[i]
+    // This holds regardless of the LayerNorm / GELU path because those
+    // intermediates are only consumed by the up-projection which is zero.
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn houlsby_zero_up_w_is_identity() {
+        let mut rng = LcgRng::new(7);
+        let adapter = HoulsbyAdapter::new(8, 3, &mut rng);
+        assert!(
+            adapter.up_w.iter().all(|&v| v == 0.0),
+            "up_w must be zero-initialised"
+        );
+        assert!(
+            adapter.up_b.iter().all(|&v| v == 0.0),
+            "up_b must be zero-initialised"
+        );
+        let x = make_input(8, 9);
+        let out = adapter.forward(&x, 1);
+        for (i, (&got, &expected)) in out.iter().zip(x.iter()).enumerate() {
+            assert_eq!(
+                got, expected,
+                "forward(x)[{i}] must equal x[{i}] when up_w=0"
+            );
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 4: same seed → identical forward output (determinism)
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn houlsby_determinism_fixed_seed() {
+        let x = make_input(16, 99);
+        let mut rng_a = LcgRng::new(42);
+        let mut rng_b = LcgRng::new(42);
+        let adapter_a = HoulsbyAdapter::new(16, 4, &mut rng_a);
+        let adapter_b = HoulsbyAdapter::new(16, 4, &mut rng_b);
+        let out_a = adapter_a.forward(&x, 1);
+        let out_b = adapter_b.forward(&x, 1);
+        assert_eq!(
+            out_a, out_b,
+            "same seed must yield identical forward outputs"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 5: all output values are finite for random input
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn houlsby_finite_outputs() {
+        let mut rng = LcgRng::new(13);
+        let adapter = HoulsbyAdapter::new(8, 4, &mut rng);
+        let x = make_input(8 * 4, 17);
+        let out = adapter.forward(&x, 4);
+        assert!(
+            out.iter().all(|v| v.is_finite()),
+            "all outputs must be finite"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 6: setting up_w to non-zero makes the adapter branch active,
+    // so forward(x) != x.
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn houlsby_nonzero_up_w_breaks_identity() {
+        let mut rng = LcgRng::new(21);
+        let mut adapter = HoulsbyAdapter::new(8, 4, &mut rng);
+        let x = make_input(8, 23);
+        // Activate the up-projection so the adapter contributes to the output.
+        for v in adapter.up_w.iter_mut() {
+            *v = 1.0;
+        }
+        let out = adapter.forward(&x, 1);
+        assert_ne!(out, x, "non-zero up_w must produce output different from x");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 7: bottleneck_dim < in_dim → the adapter compresses (sanity check
+    // that the constructor accepts the configuration and sizes are correct).
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn houlsby_bottleneck_weight_sizes() {
+        let mut rng = LcgRng::new(55);
+        let in_dim = 12usize;
+        let bottleneck_dim = 3usize;
+        let adapter = HoulsbyAdapter::new(in_dim, bottleneck_dim, &mut rng);
+        assert_eq!(adapter.down_w.len(), bottleneck_dim * in_dim);
+        assert_eq!(adapter.up_w.len(), in_dim * bottleneck_dim);
+        assert_eq!(adapter.down_b.len(), bottleneck_dim);
+        assert_eq!(adapter.up_b.len(), in_dim);
+        assert_eq!(adapter.ln_w.len(), in_dim);
+        assert_eq!(adapter.ln_b.len(), in_dim);
+        assert!(
+            bottleneck_dim < in_dim,
+            "bottleneck_dim must be strictly less than in_dim for compression"
+        );
+    }
+}

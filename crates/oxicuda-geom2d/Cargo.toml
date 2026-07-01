@@ -14,6 +14,12 @@ thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
+
+[features]
+gpu-tests = []
 
 [lints]
 workspace = true

@@ -6,7 +6,7 @@ Pure Rust knowledge distillation primitives for teacher-student training, coveri
 
 ## Implementation Status
 
-**Actual: 18,716 SLoC (70 files)**
+**Actual: 14,820 SLoC (70 files)**
 
 Current implementation covers the canonical knowledge distillation taxonomy (logit / feature / relation / attention / online / born-again / data-free / metrics), with PTX kernel string templates emitted at runtime for SM 7.5 through SM 10.0.
 
@@ -107,7 +107,7 @@ Current implementation covers the canonical knowledge distillation taxonomy (log
 
 ## Quality Status
 
-- Tests: 523 passing (unit + 12 e2e integration tests in `lib.rs`)
+- Tests: 530 passing (unit + 12 e2e integration tests in `lib.rs`)
 - Warnings: 0 (clippy clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches

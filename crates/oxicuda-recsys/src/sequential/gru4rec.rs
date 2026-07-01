@@ -174,3 +174,140 @@ impl Gru4Rec {
         Ok(logits)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_model(seed: u64) -> Gru4Rec {
+        let mut rng = LcgRng::new(seed);
+        Gru4Rec::new(10, 8, 16, &mut rng).expect("construction ok")
+    }
+
+    #[test]
+    fn rejects_invalid_construction() {
+        let mut rng = LcgRng::new(1);
+        assert!(
+            Gru4Rec::new(0, 8, 16, &mut rng).is_err(),
+            "n_items=0 must fail"
+        );
+        assert!(
+            Gru4Rec::new(10, 0, 16, &mut rng).is_err(),
+            "emb_dim=0 must fail"
+        );
+        assert!(
+            Gru4Rec::new(10, 8, 0, &mut rng).is_err(),
+            "hidden_dim=0 must fail"
+        );
+    }
+
+    #[test]
+    fn output_shape_and_finiteness() {
+        let model = make_model(2);
+        let logits = model.forward(&[0, 1, 2]).expect("forward ok");
+        assert_eq!(
+            logits.len(),
+            10,
+            "forward must return exactly n_items=10 logits"
+        );
+        for (i, &v) in logits.iter().enumerate() {
+            assert!(v.is_finite(), "logit[{i}]={v} must be finite");
+        }
+    }
+
+    #[test]
+    fn forward_rejects_empty_and_oob() {
+        let model = make_model(3);
+        assert!(model.forward(&[]).is_err(), "empty input must fail");
+        assert!(
+            model.forward(&[10]).is_err(),
+            "id=10 >= n_items=10 must fail"
+        );
+        // Boundary: id=9 is the last valid item.
+        assert!(model.forward(&[9]).is_ok(), "id=9 must succeed");
+    }
+
+    #[test]
+    fn determinism() {
+        // Two models from the same seed must produce bit-identical outputs.
+        let model_a = make_model(5);
+        let model_b = make_model(5);
+        let seq = [0usize, 1, 2, 3, 4];
+        let out_a = model_a.forward(&seq).expect("fwd a");
+        let out_b = model_b.forward(&seq).expect("fwd b");
+        for (i, (&a, &b)) in out_a.iter().zip(out_b.iter()).enumerate() {
+            assert_eq!(
+                a, b,
+                "logit[{i}] must be bit-identical across same-seed models"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_embedding_gives_zero_logits() {
+        // Analytic fixed-point proof: if x=0 and h_0=0 then the GRU cell gives h'=0.
+        //
+        // With b_h=0, x=0, h=0:
+        //   z_pre[i] = 0  →  z[i] = sigmoid(0) = 0.5
+        //   r_pre[i] = 0  →  r[i] = sigmoid(0) = 0.5
+        //   n_pre[i] = 0 + 0.5 * 0 = 0  →  n[i] = tanh(0) = 0
+        //   h'[i] = (1 - 0.5)*0 + 0.5*0 = 0
+        //
+        // Therefore logits = output_w @ h' = 0.
+        let emb_dim = 4usize;
+        let hidden_dim = 6usize;
+        let mut rng = LcgRng::new(99);
+        let mut model = Gru4Rec::new(5, emb_dim, hidden_dim, &mut rng).expect("construction ok");
+        // Zero item 0's embedding so x=0 on the single GRU step.
+        for i in 0..emb_dim {
+            model.item_emb[i] = 0.0;
+        }
+        // Biases are already 0 by construction; zero them explicitly to document the
+        // assumption the analytic proof relies on.
+        for b in &mut model.b_h {
+            *b = 0.0;
+        }
+        let logits = model.forward(&[0]).expect("fwd");
+        for (i, &l) in logits.iter().enumerate() {
+            assert!(
+                l.abs() < 1e-6,
+                "logit[{i}]={l}: zero embedding + zero bias must give zero hidden state and zero logits"
+            );
+        }
+    }
+
+    #[test]
+    fn gru_updates_state_across_steps() {
+        // Processing the same item twice must yield a different hidden state than once:
+        // the second step takes the first step's non-zero h as the recurrent input,
+        // and the z gate blends it with the new candidate n, producing a different h'.
+        let model = make_model(6);
+        let out_once = model.forward(&[0]).expect("fwd [0]");
+        let out_twice = model.forward(&[0, 0]).expect("fwd [0, 0]");
+        let differs = out_once
+            .iter()
+            .zip(out_twice.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-6);
+        assert!(
+            differs,
+            "processing the same item twice must update the hidden state (GRU recurrence)"
+        );
+    }
+
+    #[test]
+    fn order_sensitivity() {
+        // GRU processes items strictly left-to-right; permuting the input changes
+        // the intermediate hidden states and therefore the final logit vector.
+        let model = make_model(7);
+        let out_01 = model.forward(&[0, 1]).expect("fwd [0,1]");
+        let out_10 = model.forward(&[1, 0]).expect("fwd [1,0]");
+        let differs = out_01
+            .iter()
+            .zip(out_10.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-6);
+        assert!(
+            differs,
+            "GRU must be order-sensitive: forward([0,1]) != forward([1,0])"
+        );
+    }
+}

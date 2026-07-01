@@ -76,7 +76,7 @@ let csr = CsrMatrix::new(3, 2, row_ptr, col_idx, values);
 | Metric | Value |
 |--------|-------|
 | Version | 0.3.0 |
-| Tests passing | 406 |
+| Tests passing | 417 |
 | Release date | 2026-06-25 |
 
 ## License

@@ -14,11 +14,20 @@ categories = ["science", "algorithms"]
 [lints]
 workspace = true
 
+[features]
+# On-device GPU validation harness for the hand-written PTX kernels.
+# Enables `src/gpu_tests.rs`, which JIT-loads each kernel on the live CUDA
+# device and compares results against CPU oracles.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name = "tda_ops"

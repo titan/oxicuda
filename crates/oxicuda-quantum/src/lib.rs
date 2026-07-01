@@ -59,6 +59,9 @@ pub use midcircuit::{
 };
 pub use mps::{MatrixProductState, MpsConfig};
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 #[cfg(test)]
 mod e2e_tests {
     use crate::channel::noise::{amplitude_damping_channel, depolarizing_channel};

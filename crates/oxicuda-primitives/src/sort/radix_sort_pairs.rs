@@ -208,7 +208,7 @@ impl RadixPairsTemplate {
         writeln!(out, "    .reg .{ty}   %key;").map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %bid, %shift, %digit, %old, %flat_idx;"
+            "    .reg .u32    %ltid, %bid, %shift, %digit, %old, %flat_idx;"
         )
         .map_err(ferr)?;
         writeln!(out, "    .reg .u64    %n, %gid, %ptr_in, %ptr_cnt, %addr;").map_err(ferr)?;
@@ -222,14 +222,19 @@ impl RadixPairsTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_keys];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(ferr)?;
         writeln!(out, "    ld.param.u32 %shift,    [param_shift];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    mov.u64      %smem_base, cnt_hist;").map_err(ferr)?;
 
-        writeln!(out, "    setp.ge.u32  %p, %tid, {RADIX_SIZE};").map_err(ferr)?;
+        writeln!(out, "    setp.ge.u32  %p, %ltid, {RADIX_SIZE};").map_err(ferr)?;
         writeln!(out, "    @%p bra CNT_INIT_DONE;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %tid, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %ltid, 4, %smem_base;").map_err(ferr)?;
         writeln!(out, "    st.shared.u32 [%hist_addr], 0;").map_err(ferr)?;
         writeln!(out, "CNT_INIT_DONE:").map_err(ferr)?;
         writeln!(out, "    bar.sync 0;").map_err(ferr)?;
@@ -250,16 +255,20 @@ impl RadixPairsTemplate {
             // Invert the digit so larger keys fall into lower buckets.
             writeln!(out, "    sub.u32      %digit, {}, %digit;", RADIX_SIZE - 1).map_err(ferr)?;
         }
-        writeln!(out, "    mad.lo.u64   %hist_addr, %digit, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %digit, 4, %smem_base;").map_err(ferr)?;
         writeln!(out, "    atom.shared.add.u32 %old, [%hist_addr], 1;").map_err(ferr)?;
 
         writeln!(out, "CNT_FLUSH:").map_err(ferr)?;
         writeln!(out, "    bar.sync 0;").map_err(ferr)?;
-        writeln!(out, "    setp.ge.u32  %p, %tid, {RADIX_SIZE};").map_err(ferr)?;
+        writeln!(out, "    setp.ge.u32  %p, %ltid, {RADIX_SIZE};").map_err(ferr)?;
         writeln!(out, "    @%p ret;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u32   %flat_idx, %bid, {RADIX_SIZE}, %tid;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %flat_idx, 4, %ptr_cnt;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %tid, 4, %smem_base;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    mad.lo.u32   %flat_idx, %bid, {RADIX_SIZE}, %ltid;"
+        )
+        .map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_idx, 4, %ptr_cnt;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %ltid, 4, %smem_base;").map_err(ferr)?;
         writeln!(out, "    ld.shared.u32 %old, [%hist_addr];").map_err(ferr)?;
         writeln!(out, "    st.global.u32 [%addr], %old;").map_err(ferr)?;
         writeln!(out, "    ret;").map_err(ferr)?;
@@ -282,6 +291,7 @@ impl RadixPairsTemplate {
 
         let mut out = ptx_header(sm);
         writeln!(out, ".shared .align 4 .u32 block_offs[{RADIX_SIZE}];").map_err(ferr)?;
+        writeln!(out, ".shared .align 4 .u32 sct_digits[{bs}];").map_err(ferr)?;
         writeln!(
             out,
             ".visible .entry {name}(\n    \
@@ -299,7 +309,7 @@ impl RadixPairsTemplate {
         writeln!(out, "    .reg .{vty}   %val;").map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %bid, %shift, %digit, %out_pos, %flat_init, %off_val;"
+            "    .reg .u32    %ltid, %bid, %shift, %digit, %out_pos, %flat_init, %off_val, %rank, %tp, %other, %boff;"
         )
         .map_err(ferr)?;
         writeln!(
@@ -309,10 +319,10 @@ impl RadixPairsTemplate {
         .map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u64    %addr, %smem_base, %smem_addr, %out64;"
+            "    .reg .u64    %addr, %smem_base, %dsmem_base, %smem_addr, %out64;"
         )
         .map_err(ferr)?;
-        writeln!(out, "    .reg .pred   %p;").map_err(ferr)?;
+        writeln!(out, "    .reg .pred   %p, %oob, %eq;").map_err(ferr)?;
         if is64 {
             writeln!(out, "    .reg .u64    %shift64, %key_shifted;").map_err(ferr)?;
         }
@@ -324,27 +334,36 @@ impl RadixPairsTemplate {
         writeln!(out, "    ld.param.u64 %ptr_off,  [param_offsets];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,         [param_n];").map_err(ferr)?;
         writeln!(out, "    ld.param.u32 %shift,     [param_shift];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    mov.u64      %smem_base, block_offs;").map_err(ferr)?;
+        writeln!(out, "    mov.u64      %dsmem_base, sct_digits;").map_err(ferr)?;
 
-        writeln!(out, "    setp.ge.u32  %p, %tid, {RADIX_SIZE};").map_err(ferr)?;
+        // Phase 1a: load this block's pre-scanned per-digit offsets.
+        writeln!(out, "    setp.ge.u32  %p, %ltid, {RADIX_SIZE};").map_err(ferr)?;
         writeln!(out, "    @%p bra SCT_LOAD_DONE;").map_err(ferr)?;
         writeln!(
             out,
-            "    mad.lo.u32   %flat_init, %bid, {RADIX_SIZE}, %tid;"
+            "    mad.lo.u32   %flat_init, %bid, {RADIX_SIZE}, %ltid;"
         )
         .map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %flat_init, 4, %ptr_off;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %flat_init, 4, %ptr_off;").map_err(ferr)?;
         writeln!(out, "    ld.global.u32 %off_val, [%addr];").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %smem_addr, %tid, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %ltid, 4, %smem_base;").map_err(ferr)?;
         writeln!(out, "    st.shared.u32 [%smem_addr], %off_val;").map_err(ferr)?;
         writeln!(out, "SCT_LOAD_DONE:").map_err(ferr)?;
-        writeln!(out, "    bar.sync 0;").map_err(ferr)?;
 
-        writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(ferr)?;
-        writeln!(out, "    @%p ret;").map_err(ferr)?;
+        // Phase 1b: cache each thread's (possibly digit-inverted) digit for a
+        // STABLE within-block rank — the previous `atom.shared.add` produced an
+        // arbitrary order, breaking the stability LSD radix needs.
+        writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(ferr)?;
+        writeln!(out, "    @%oob bra SCT_DIG_OOB;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %addr, %gid, {keb}, %ptr_kin;").map_err(ferr)?;
         writeln!(out, "    ld.global.{kty} %key, [%addr];").map_err(ferr)?;
         if is64 {
@@ -358,8 +377,31 @@ impl RadixPairsTemplate {
         if desc {
             writeln!(out, "    sub.u32      %digit, {}, %digit;", RADIX_SIZE - 1).map_err(ferr)?;
         }
-        writeln!(out, "    mad.lo.u64   %smem_addr, %digit, 4, %smem_base;").map_err(ferr)?;
-        writeln!(out, "    atom.shared.add.u32 %out_pos, [%smem_addr], 1;").map_err(ferr)?;
+        writeln!(out, "    bra SCT_DIG_STORE;").map_err(ferr)?;
+        writeln!(out, "SCT_DIG_OOB:").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %digit, 0xFFFFFFFF;").map_err(ferr)?;
+        writeln!(out, "SCT_DIG_STORE:").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %ltid, 4, %dsmem_base;").map_err(ferr)?;
+        writeln!(out, "    st.shared.u32 [%smem_addr], %digit;").map_err(ferr)?;
+        writeln!(out, "    bar.sync 0;").map_err(ferr)?;
+
+        // Phase 2: OOB done; in-range threads compute a stable rank and scatter.
+        writeln!(out, "    @%oob ret;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %rank, 0;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %tp, 0;").map_err(ferr)?;
+        writeln!(out, "SCT_RANK_LOOP:").map_err(ferr)?;
+        writeln!(out, "    setp.ge.u32  %p, %tp, %ltid;").map_err(ferr)?;
+        writeln!(out, "    @%p bra SCT_RANK_DONE;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %tp, 4, %dsmem_base;").map_err(ferr)?;
+        writeln!(out, "    ld.shared.u32 %other, [%smem_addr];").map_err(ferr)?;
+        writeln!(out, "    setp.eq.u32  %eq, %other, %digit;").map_err(ferr)?;
+        writeln!(out, "    @%eq add.u32 %rank, %rank, 1;").map_err(ferr)?;
+        writeln!(out, "    add.u32      %tp, %tp, 1;").map_err(ferr)?;
+        writeln!(out, "    bra SCT_RANK_LOOP;").map_err(ferr)?;
+        writeln!(out, "SCT_RANK_DONE:").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %smem_addr, %digit, 4, %smem_base;").map_err(ferr)?;
+        writeln!(out, "    ld.shared.u32 %boff, [%smem_addr];").map_err(ferr)?;
+        writeln!(out, "    add.u32      %out_pos, %boff, %rank;").map_err(ferr)?;
         writeln!(out, "    cvt.u64.u32  %out64, %out_pos;").map_err(ferr)?;
 
         // Write key.
@@ -497,14 +539,19 @@ impl FloatTwiddleTemplate {
         .map_err(ferr)?;
         writeln!(out, "{{").map_err(ferr)?;
         writeln!(out, "    .reg .{bty}   %x, %y, %notx, %masked;").map_err(ferr)?;
-        writeln!(out, "    .reg .u32    %tid, %bid;").map_err(ferr)?;
+        writeln!(out, "    .reg .u32    %ltid, %bid;").map_err(ferr)?;
         writeln!(out, "    .reg .u64    %n, %gid, %ptr, %addr;").map_err(ferr)?;
         writeln!(out, "    .reg .pred   %oob, %neg;").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr, [param_data];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,   [param_n];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(ferr)?;
         writeln!(out, "    @%oob ret;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %addr, %gid, {eb}, %ptr;").map_err(ferr)?;

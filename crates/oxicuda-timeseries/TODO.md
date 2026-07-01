@@ -9,8 +9,8 @@ NHiTS, PatchTST, TimesNet, iTransformer, RevIN, series decomposition. Time-major
 
 ## Implementation Status
 
-- **Actual SLoC:** 29,477 (79 files)
-- **Tests:** 704 passing (lib, `cargo test -p oxicuda-timeseries --all-features`)
+- **Actual SLoC:** 22,887 (79 files)
+- **Tests:** 711 passing (lib, `cargo test -p oxicuda-timeseries --all-features`)
 - **Crate:** `oxicuda-timeseries` -- Vol.22 Time-Series Forecasting Architectures
 
 ### Completed [x]
@@ -147,7 +147,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 704 passing
+- Tests: 711 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)

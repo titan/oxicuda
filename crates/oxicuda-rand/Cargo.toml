@@ -25,6 +25,10 @@ default = []
 full = ["f16", "serde"]
 f16 = ["dep:half"]
 serde = ["dep:serde"]
+# On-device PTX validation tests (require a live CUDA device). The infrastructure
+# crates (driver/memory/launch) are already normal dependencies, so this stays an
+# empty stub; tests skip gracefully when no GPU is present.
+gpu-tests = []
 
 [dev-dependencies]
 criterion = { workspace = true }

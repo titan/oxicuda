@@ -102,8 +102,11 @@ pub fn pairwise_dist_sq_ptx(sm: u32) -> String {
 /// Per-row top-k smallest neighbours of a precomputed distance matrix.
 ///
 /// Signature: `knn_topk_kernel(d, idx, dist_out, n, k)`
-/// Each thread processes one row; for each row we keep the running top-k minima
-/// using a simple insertion-sort scan (k is small).
+/// Each thread processes one row, maintaining an ascending-sorted top-k buffer
+/// (`dist_out[row, 0..k]`) and matching column indices (`idx[row, 0..k]`). A
+/// candidate `d[row, j]` (`j != row`) that beats the current worst (slot `k-1`)
+/// is written into the last slot and bubbled up while it is smaller than its
+/// predecessor — a genuine insertion sort (k is small).
 #[must_use]
 pub fn knn_topk_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
@@ -115,8 +118,8 @@ pub fn knn_topk_ptx(sm: u32) -> String {
         .param .u32 p_k\n\
     )\n\
     {\n\
-        .reg .u64  %rd<12>;\n\
-        .reg .u32  %r<24>;\n\
+        .reg .u64  %rd<20>;\n\
+        .reg .u32  %r<32>;\n\
         .reg .f32  %f<8>;\n\
         .reg .pred %p0;\n\
         .reg .pred %p1;\n\
@@ -135,13 +138,15 @@ pub fn knn_topk_ptx(sm: u32) -> String {
         setp.ge.u32   %p0, %r5, %r0;\n\
         @%p0 bra $KT_DONE;\n\
     \n\
+        // base = row * k  (start of this row's top-k block)\n\
+        mul.lo.u32    %r20, %r5, %r1;\n\
+    \n\
         // Initialise top-k buffer to +inf, indices to 0\n\
         mov.u32       %r6, 0;\n\
     $KT_INIT:\n\
         setp.ge.u32   %p0, %r6, %r1;\n\
         @%p0 bra $KT_SCAN;\n\
-        mul.lo.u32    %r7, %r5, %r1;\n\
-        add.u32       %r7, %r7, %r6;\n\
+        add.u32       %r7, %r20, %r6;\n\
         mul.wide.u32  %rd3, %r7, 4;\n\
         add.u64       %rd4, %rd2, %rd3;\n\
         mov.f32       %f0, 0f7F800000;\n\
@@ -167,10 +172,9 @@ pub fn knn_topk_ptx(sm: u32) -> String {
         add.u64       %rd7, %rd0, %rd6;\n\
         ld.global.f32 %f1, [%rd7];\n\
     \n\
-        // compare with worst (last) of top-k\n\
+        // worst = dist_out[row, k-1]\n\
         sub.u32       %r11, %r1, 1;\n\
-        mul.lo.u32    %r12, %r5, %r1;\n\
-        add.u32       %r12, %r12, %r11;\n\
+        add.u32       %r12, %r20, %r11;\n\
         mul.wide.u32  %rd8, %r12, 4;\n\
         add.u64       %rd9, %rd2, %rd8;\n\
         ld.global.f32 %f2, [%rd9];\n\
@@ -178,9 +182,39 @@ pub fn knn_topk_ptx(sm: u32) -> String {
         setp.ge.f32   %p1, %f1, %f2;\n\
         @%p1 bra $KT_NEXT;\n\
     \n\
+        // insert candidate into the last (worst) slot\n\
         st.global.f32 [%rd9], %f1;\n\
         add.u64       %rd10, %rd1, %rd8;\n\
         st.global.u32 [%rd10], %r9;\n\
+    \n\
+        // bubble up: p = k-1; while p>0 and dist[p] < dist[p-1] swap\n\
+        mov.u32       %r13, %r11;\n\
+    $KT_BUB:\n\
+        setp.eq.u32   %p0, %r13, 0;\n\
+        @%p0 bra $KT_NEXT;\n\
+        add.u32       %r14, %r20, %r13;\n\
+        sub.u32       %r15, %r13, 1;\n\
+        add.u32       %r16, %r20, %r15;\n\
+        mul.wide.u32  %rd11, %r14, 4;\n\
+        add.u64       %rd12, %rd2, %rd11;\n\
+        mul.wide.u32  %rd13, %r16, 4;\n\
+        add.u64       %rd14, %rd2, %rd13;\n\
+        ld.global.f32 %f3, [%rd12];\n\
+        ld.global.f32 %f4, [%rd14];\n\
+        setp.ge.f32   %p0, %f3, %f4;\n\
+        @%p0 bra $KT_NEXT;\n\
+        // swap distances\n\
+        st.global.f32 [%rd12], %f4;\n\
+        st.global.f32 [%rd14], %f3;\n\
+        // swap indices\n\
+        add.u64       %rd15, %rd1, %rd11;\n\
+        add.u64       %rd16, %rd1, %rd13;\n\
+        ld.global.u32 %r17, [%rd15];\n\
+        ld.global.u32 %r18, [%rd16];\n\
+        st.global.u32 [%rd15], %r18;\n\
+        st.global.u32 [%rd16], %r17;\n\
+        sub.u32       %r13, %r13, 1;\n\
+        bra $KT_BUB;\n\
     \n\
     $KT_NEXT:\n\
         add.u32       %r9, %r9, 1;\n\

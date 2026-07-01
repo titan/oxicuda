@@ -9,8 +9,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.56).
 
 ## Implementation Status
 
-- **Actual SLoC:** ~43,600 (see `wc -l src/**/*.rs`); far beyond the original 7,367 (includes Cox residual/influence diagnostics, Aalen-Johansen variance, frailty, joint models, copula, cure, SIS/CIF-SIS, RF, gradient-boosted Cox, RMST trapezoid quadrature, …)
-- **Tests:** 812 passing (lib + e2e_tests) via `cargo nextest run -p oxicuda-survival --all-features`
+- **Actual SLoC:** ~33,336 (see `wc -l src/**/*.rs`); far beyond the original 7,367 (includes Cox residual/influence diagnostics, Aalen-Johansen variance, frailty, joint models, copula, cure, SIS/CIF-SIS, RF, gradient-boosted Cox, RMST trapezoid quadrature, …)
+- **Tests:** 819 passing (lib + e2e_tests) via `cargo nextest run -p oxicuda-survival --all-features`
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -151,7 +151,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `-D warnings` all-targets)
-- Tests: 812 passing
+- Tests: 819 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features

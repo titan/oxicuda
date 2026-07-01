@@ -88,3 +88,120 @@ impl HnswGraph {
             .sum()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_graph_is_empty() {
+        let g = HnswGraph::new(4, 8, 200, 10);
+        assert_eq!(g.n_nodes(), 0);
+        assert_eq!(g.dim, 4);
+        assert_eq!(g.m, 8);
+        assert_eq!(g.m_max0, 16, "m_max0 must equal 2*m");
+        assert_eq!(g.ef_construction, 200);
+        assert_eq!(g.ef, 10);
+        assert!(g.entry_point.is_none());
+        assert_eq!(g.max_layer, 0);
+    }
+
+    #[test]
+    fn add_node_increments_count_and_returns_sequential_ids() {
+        let mut g = HnswGraph::new(2, 8, 200, 10);
+        let id0 = g.add_node(&[1.0_f32, 2.0], 1);
+        assert_eq!(id0, 0);
+        assert_eq!(g.n_nodes(), 1);
+
+        let id1 = g.add_node(&[3.0_f32, 4.0], 2);
+        assert_eq!(id1, 1);
+        assert_eq!(g.n_nodes(), 2);
+    }
+
+    #[test]
+    fn add_node_layer_slot_count_matches_n_layers() {
+        let mut g = HnswGraph::new(2, 8, 200, 10);
+        g.add_node(&[0.0_f32, 0.0], 3); // 3 layer slots: 0, 1, 2
+        g.add_node(&[1.0_f32, 0.0], 1); // 1 layer slot: 0 only
+
+        assert_eq!(g.layers[0].len(), 3, "node 0 should have 3 layer slots");
+        assert_eq!(g.layers[1].len(), 1, "node 1 should have 1 layer slot");
+    }
+
+    #[test]
+    fn get_vector_round_trips() {
+        let mut g = HnswGraph::new(3, 8, 200, 10);
+        let v = vec![1.5_f32, -2.3, 0.7];
+        g.add_node(&v, 1);
+        assert_eq!(
+            g.get_vector(0),
+            v.as_slice(),
+            "stored vector must round-trip"
+        );
+    }
+
+    #[test]
+    fn get_neighbors_returns_empty_for_out_of_range_layer() {
+        let mut g = HnswGraph::new(2, 8, 200, 10);
+        g.add_node(&[0.0_f32, 0.0], 1); // only layer 0 allocated
+        assert!(
+            g.get_neighbors(0, 5).is_empty(),
+            "out-of-range layer must return empty slice"
+        );
+    }
+
+    #[test]
+    fn get_neighbors_returns_empty_for_nonexistent_node() {
+        let g = HnswGraph::new(2, 8, 200, 10);
+        assert!(
+            g.get_neighbors(99, 0).is_empty(),
+            "nonexistent node must return empty slice"
+        );
+    }
+
+    #[test]
+    fn set_and_get_neighbors_round_trips() {
+        let mut g = HnswGraph::new(2, 8, 200, 10);
+        g.add_node(&[0.0_f32, 0.0], 2);
+        g.add_node(&[1.0_f32, 0.0], 2);
+        g.add_node(&[0.0_f32, 1.0], 2);
+
+        g.set_neighbors(0, 0, vec![1, 2]);
+        g.set_neighbors(0, 1, vec![1]);
+
+        assert_eq!(
+            g.get_neighbors(0, 0),
+            &[1u32, 2],
+            "layer-0 neighbors mismatch"
+        );
+        assert_eq!(g.get_neighbors(0, 1), &[1u32], "layer-1 neighbors mismatch");
+        assert!(
+            g.get_neighbors(0, 2).is_empty(),
+            "unset layer should return empty"
+        );
+    }
+
+    #[test]
+    fn l2_sq_known_value() {
+        let mut g = HnswGraph::new(2, 8, 200, 10);
+        g.add_node(&[0.0_f32, 0.0], 1);
+        g.add_node(&[3.0_f32, 4.0], 1);
+        // l2_sq([0,0],[3,4]) = 9 + 16 = 25
+        let d = g.l2_sq(0, 1);
+        assert!((d - 25.0_f32).abs() < 1e-5, "l2_sq expected 25 got {d}");
+    }
+
+    #[test]
+    fn l2_sq_query_matches_l2_sq() {
+        let mut g = HnswGraph::new(2, 8, 200, 10);
+        g.add_node(&[1.0_f32, 2.0], 1);
+        g.add_node(&[4.0_f32, 6.0], 1);
+        let query: Vec<f32> = g.get_vector(0).to_vec();
+        let from_stored = g.l2_sq(0, 1);
+        let from_query = g.l2_sq_query(&query, 1);
+        assert!(
+            (from_stored - from_query).abs() < 1e-6,
+            "l2_sq and l2_sq_query must agree: {from_stored} vs {from_query}"
+        );
+    }
+}

@@ -106,7 +106,7 @@ fn main() -> PdeResult<()> {
 
 ## Status
 
-**Alpha** -- 23,803 SLoC, 680 passing tests. API may evolve before v1.0.
+**Alpha** -- 26,515 SLoC, 725 passing tests. API may evolve before v1.0.
 
 ## License
 

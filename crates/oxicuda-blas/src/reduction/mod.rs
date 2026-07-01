@@ -7,6 +7,7 @@
 //! memory.
 
 pub mod axis;
+mod causal_softmax;
 mod max;
 mod mean;
 mod min;
@@ -16,6 +17,7 @@ mod sum;
 mod variance;
 
 pub use axis::reduce_axis;
+pub use causal_softmax::causal_softmax;
 pub use max::max;
 pub use mean::mean;
 pub use min::min;

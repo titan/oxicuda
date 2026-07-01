@@ -316,20 +316,35 @@ pub fn iht_step_cp_async_ptx(sm: u32) -> String {
         mad.lo.u32    %r4, %r1, %r2, %r3;\n\
     \n\
         setp.ge.u32   %p0, %r4, %r0;\n\
-        @%p0 bra $CA_DONE;\n\
     \n\
-        // Stage this thread's grad element global->shared via cp.async (4 bytes).\n\
+        // Shared destination for this thread's grad element. `tid` is always in\n\
+        // range for a launched thread, so this shared address is valid even when\n\
+        // the global index is out of range; the cp.async itself is skipped for\n\
+        // those threads below.\n\
         mov.u64       %rd2, grad_tile;\n\
         mul.wide.u32  %rd3, %r3, 4;\n\
         add.u64       %rd4, %rd2, %rd3;\n\
+    \n\
+        // Out-of-range global threads skip the async copy but STILL fall through\n\
+        // to the barrier, so a ragged launch (n % blockDim.x != 0) cannot\n\
+        // deadlock at `bar.sync` (the original kernel branched past the barrier).\n\
+        @%p0 bra $CA_NOLOAD;\n\
         mul.wide.u32  %rd5, %r4, 4;\n\
         add.u64       %rd6, %rd1, %rd5;\n\
-        cp.async.cg.shared.global [%rd4], [%rd6], 4;\n\
+        // A 4-byte cp.async must use the .ca qualifier: the .cg variant only\n\
+        // accepts a 16-byte copy and is rejected outright by ptxas for size 4.\n\
+        cp.async.ca.shared.global [%rd4], [%rd6], 4;\n\
+    \n\
+    $CA_NOLOAD:\n\
         cp.async.commit_group;\n\
         cp.async.wait_group 0;\n\
         bar.sync      0;\n\
     \n\
+        // Out-of-range threads are finished once they have joined the barrier.\n\
+        @%p0 bra $CA_DONE;\n\
+    \n\
         // x[i] += mu * grad_tile[tid]\n\
+        mul.wide.u32  %rd5, %r4, 4;\n\
         ld.shared.f32 %f2, [%rd4];\n\
         add.u64       %rd7, %rd0, %rd5;\n\
         ld.global.f32 %f1, [%rd7];\n\
@@ -693,7 +708,7 @@ mod tests {
                 "sm {sm}"
             );
             assert!(
-                s.contains("cp.async.cg.shared.global"),
+                s.contains("cp.async.ca.shared.global"),
                 "sm {sm} missing cp.async"
             );
             assert!(

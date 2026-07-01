@@ -44,6 +44,9 @@ pub mod window;
 #[cfg(test)]
 mod e2e_tests;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 pub use error::{SignalError, SignalResult};
 pub use handle::SignalHandle;
 pub use types::{

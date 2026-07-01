@@ -263,41 +263,48 @@ pub fn generate_xorwow_normal_ptx(
                         let mean_reg = b.load_param_f64("mean");
                         let stddev_reg = b.load_param_f64("stddev");
 
-                        let scale = b.alloc_reg(PtxType::F32);
+                        // NOTE: f32 Box-Muller scratch registers use the `B32`
+                        // 32-bit class, not `F32`. The PTX allocator shares one
+                        // `%f` prefix for F32/F64 and declares the range at a
+                        // single width, so mixing the two in a kernel mis-declares
+                        // the f32 regs as `.b64` and ptxas rejects the f32 ops.
+                        // `.b32` registers are valid operands for f32 instructions.
+                        let scale = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {scale}, 0f2F800000;"));
 
-                        let u1_f = b.alloc_reg(PtxType::F32);
+                        let u1_f = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("cvt.rn.f32.u32 {u1_f}, {u1_raw};"));
-                        let u1 = b.alloc_reg(PtxType::F32);
+                        let u1 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {u1}, {u1_f}, {scale};"));
-                        let eps = b.alloc_reg(PtxType::F32);
+                        let eps = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {eps}, 0f33800000;"));
-                        let u1_safe = b.max_f32(u1, eps);
+                        let u1_safe = b.alloc_reg(PtxType::B32);
+                        b.raw_ptx(&format!("max.f32 {u1_safe}, {u1}, {eps};"));
 
-                        let u2_f = b.alloc_reg(PtxType::F32);
+                        let u2_f = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("cvt.rn.f32.u32 {u2_f}, {u2_raw};"));
-                        let u2 = b.alloc_reg(PtxType::F32);
+                        let u2 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {u2}, {u2_f}, {scale};"));
 
-                        let lg2_u1 = b.alloc_reg(PtxType::F32);
+                        let lg2_u1 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("lg2.approx.f32 {lg2_u1}, {u1_safe};"));
-                        let ln2 = b.alloc_reg(PtxType::F32);
+                        let ln2 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {ln2}, 0f3F317218;"));
-                        let ln_u1 = b.alloc_reg(PtxType::F32);
+                        let ln_u1 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {ln_u1}, {lg2_u1}, {ln2};"));
-                        let neg2 = b.alloc_reg(PtxType::F32);
+                        let neg2 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {neg2}, 0fC0000000;"));
-                        let neg2ln = b.alloc_reg(PtxType::F32);
+                        let neg2ln = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {neg2ln}, {neg2}, {ln_u1};"));
-                        let radius = b.alloc_reg(PtxType::F32);
+                        let radius = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("sqrt.approx.f32 {radius}, {neg2ln};"));
-                        let two_pi = b.alloc_reg(PtxType::F32);
+                        let two_pi = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mov.f32 {two_pi}, 0f40C90FDB;"));
-                        let angle = b.alloc_reg(PtxType::F32);
+                        let angle = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {angle}, {two_pi}, {u2};"));
-                        let cos_val = b.alloc_reg(PtxType::F32);
+                        let cos_val = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("cos.approx.f32 {cos_val}, {angle};"));
-                        let z32 = b.alloc_reg(PtxType::F32);
+                        let z32 = b.alloc_reg(PtxType::B32);
                         b.raw_ptx(&format!("mul.rn.f32 {z32}, {radius}, {cos_val};"));
 
                         let z64 = b.cvt_f32_to_f64(z32);

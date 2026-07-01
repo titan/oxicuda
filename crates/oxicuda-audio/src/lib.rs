@@ -46,6 +46,12 @@ pub mod vocoder;
 pub use error::{AudioError, AudioResult};
 pub use handle::{AudioHandle, LcgRng, SmVersion};
 
+// On-device GPU validation for the hand-written PTX kernels. Compiled only when
+// the `gpu-tests` feature is enabled; each test skips gracefully on CPU-only
+// machines (no CUDA device present).
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 pub mod prelude {

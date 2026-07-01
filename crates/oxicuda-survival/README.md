@@ -77,7 +77,7 @@ fn main() -> SurvivalResult<()> {
 
 ## Status
 
-**Alpha** -- 31,530 SLoC, 785 passing tests. API may evolve before v1.0.
+**Alpha** -- 33,336 SLoC, 819 passing tests. API may evolve before v1.0.
 
 ## License
 

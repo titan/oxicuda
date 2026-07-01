@@ -21,7 +21,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxicuda-graph = "0.3.0"
+oxicuda-graph = "0.4.0"
 ```
 
 ```rust

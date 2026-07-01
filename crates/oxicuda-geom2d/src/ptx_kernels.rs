@@ -182,7 +182,6 @@ pub fn point_in_aabb_ptx(sm: u32) -> String {
         .reg .pred %p2;\n\
         .reg .pred %p3;\n\
         .reg .pred %p4;\n\
-        .reg .u32  %r5;\n\
     \n\
         ld.param.u64  %rd0, [p_px];\n\
         ld.param.u64  %rd1, [p_py];\n\

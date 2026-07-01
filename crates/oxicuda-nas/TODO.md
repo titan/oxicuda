@@ -10,7 +10,7 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 
 ## Implementation Status
 
-- **Actual SLoC:** 8,543 (43 files)
+- **Actual SLoC:** 12,155 (43 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
@@ -83,12 +83,12 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 
 #### P2 -- Nice-to-Have (Predictor & Evaluation Extensions)
 - [x] HAT hardware-aware transformer NAS (`search/hat.rs`) — Wang 2020 ACL: multi-objective search in a weight-shared transformer supernet using Pareto-front evolution with latency LUT for each target device; `HatSearcher` (search/hat.rs -- `HatSearcher` Pareto-front evolution over `TransformerSearchSpace`; per-device `BlockLatencyLut` (recorded measurements, never fabricated); crossover + per-axis mutation + environmental selection; caller-supplied accuracy `loss_proxy` closure; now declared in search/mod.rs + prelude, 9 tests)
-- [ ] Local search NAS (`search/local_search.rs`) — White 2021 ICLR: hill-climbing on architecture space with single-op perturbations + zero-cost proxy ranking to avoid supernet training; `LocalSearchNas`
+- [x] Local search NAS (`search/local_search.rs`) — White 2021 ICLR: hill-climbing on architecture space with single-op perturbations + zero-cost proxy ranking to avoid supernet training; `LocalSearchNas`
 - [x] Graph Neural Network architecture predictor -- replace MLP / RBF / k-NN predictors with a GNN over the DAG (`NPENAS`, `BANANAS`) (predictor/gnn_predictor.rs -- `GnnPredictor` message-passing GNN over the cell DAG (op-gated neighbour aggregation + per-layer linear update/ReLU + mean-pool readout, end-to-end reverse-mode SGD) and `PathEncodedPredictor` BANANAS truncated-path-encoding MLP; `CellTopology` + `PathEncoder`; now declared in predictor/mod.rs + prelude, 12 tests)
 - [x] Bayesian-optimisation accuracy predictor -- Gaussian Process with uncertainty for sample-efficient search (predictor/bayesian_gp.rs -- `GaussianProcess` exact GP regressor: RBF / Matérn-5/2 kernel, closed-form posterior mean + variance via Cholesky `L Lᵀ = K + σ_n² I` + forward/back triangular solves (no explicit inverse), target centring; `Acquisition::{Ucb, ExpectedImprovement}` with erf-based normal CDF; `propose()` acquisition argmax; 18 tests proving interpolation, ~0 variance at observed points / growth in gaps, EI/UCB peaking in the uncertain promising gap)
-- [ ] Multi-fidelity NAS -- early-stopping based on partial training (`Hyperband`, `BOHB`-style)
+- [x] Multi-fidelity NAS -- early-stopping based on partial training (`Hyperband`, `BOHB`-style)
 - [x] Zero-cost proxies (NASWOT, SNIP, GraSP) -- predictor-free architecture ranking via untrained-network signals (proxy/zero_cost.rs -- NASWOT logdet kernel + SNIP/GraSP/SynFlow saliencies)
-- [ ] Hardware-aware predictor calibration -- per-device LUT serialisation / deserialisation helpers
+- [x] Hardware-aware predictor calibration -- per-device LUT serialisation / deserialisation helpers
 
 #### GPU Launcher Wiring
 - [ ] Wire `ptx_kernels::*` strings through `oxicuda-launch::Kernel::from_module` for end-to-end GPU execution (currently only PTX strings are emitted)
@@ -108,7 +108,7 @@ one-shot supernets with weight-sharing, slimmable networks, and FLOP / latency
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `--all-features --all-targets -- -D warnings`)
-- Tests: 375 passing (`cargo nextest run -p oxicuda-nas --all-features`) -- 5 E2E in `lib.rs` + module unit tests, incl. 18 (bayesian_gp) + 14 (transformer_nas) + 12 (gnn_predictor) + 11 (nas_bench) + 10 (once_for_all) + 9 (hat)
+- Tests: 389 passing (`cargo nextest run -p oxicuda-nas --all-features`) -- 5 E2E in `lib.rs` + module unit tests, incl. 18 (bayesian_gp) + 14 (transformer_nas) + 12 (gnn_predictor) + 11 (nas_bench) + 10 (once_for_all) + 9 (hat)
 - `unwrap()` calls: 0 in library code
 - macOS: compiles, returns `UnsupportedPlatform` from any actual GPU launch
 - PTX targets covered: sm_75 / sm_80 / sm_86 / sm_90 / sm_100 / sm_120

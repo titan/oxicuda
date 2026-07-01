@@ -6,7 +6,10 @@ pub mod matvec;
 pub mod qr;
 pub mod solve;
 
-pub use cg::cg_solve;
+pub use cg::{
+    IdentityPrecond, JacobiPrecond, Preconditioner, cg_solve, cg_solve_counted, pcg_solve,
+    pcg_solve_counted,
+};
 pub use cholesky::{cholesky_factor, cholesky_solve};
 pub use matvec::{add_scaled, axpy, dot, gemv, mat_t_mat, mat_t_vec, mat_vec, norm2, scale};
 pub use qr::{householder_qr, qr_solve};

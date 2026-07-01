@@ -11,7 +11,7 @@ discontinuous Galerkin in 1D with Legendre-Gauss-Lobatto nodes. Part of
 
 ## Implementation Status
 
-**Actual: 33,535 SLoC (99 files)** — implements the standard PDE-solver
+**Actual: 26,515 SLoC (99 files)** — implements the standard PDE-solver
 pipeline in pure Rust with no external linear-algebra dependencies. Includes
 7 PTX kernels × 6 SM versions covering the GPU-bandwidth-critical kernels.
 
@@ -279,7 +279,7 @@ Chebyshev DFT-derivative are all implemented from scratch.
 ## Quality Status
 
 - Warnings: 0 (clippy clean with `-D warnings`; `#![forbid(unsafe_code)]`)
-- Tests: 717 passing (26 e2e host-side tests + module unit tests); PTX kernel strings validated per SM version
+- Tests: 725 passing (26 e2e host-side tests + module unit tests); PTX kernel strings validated per SM version
 - `unwrap()` / `expect()` calls in production code: 0 (`expect` confined to `#[cfg(test)]`)
 - `unsafe` code: forbidden at the crate level
 - macOS: compiles; GPU integration paths return `UnsupportedPlatform` at runtime

@@ -155,6 +155,7 @@ pub fn volume_render_ptx(sm: u32) -> String {
     let one = f32_hex(1.0_f32);
     let inf_delta = f32_hex(1e10_f32);
     let eps = f32_hex(1e-4_f32);
+    let log2e = f32_hex(std::f32::consts::LOG2_E);
     format!(
         r#"{hdr}// volume_render_kernel: one thread per ray, alpha compositing over N samples.
 // sigma: [n_rays * n_samples], color: [n_rays * n_samples * 3], t_vals: [n_rays * n_samples]
@@ -237,11 +238,11 @@ $VR_SAMPLE_LOOP:
     // alpha = 1 - exp(-max(0, sigma) * delta)
     max.f32       %f9, %f6, {ZERO};
     mul.f32       %f9, %f9, %f8;
-    neg.f32       %f9, %f9;
-    ex2.approx.f32 %f10, %f9;             // approx exp(-sigma*delta) via 2^(x*log2e)
-    // Note: using ex2.approx as approximation; actual: exp(x) = ex2(x * log2(e))
-    // Here we use 2^(-sigma*delta) as approximation (conservative)
-    sub.f32       %f10, {ONE}, %f10;      // alpha ≈ 1 - 2^(-sigma*delta)
+    neg.f32       %f9, %f9;               // x = -max(0, sigma) * delta
+    // exp(x) = ex2(x * log2(e)) — ex2 is base-2, so convert the exponent first.
+    mul.f32       %f9, %f9, {LOG2E};      // x * log2(e)
+    ex2.approx.f32 %f10, %f9;             // 2^(x*log2e) = exp(-sigma*delta)
+    sub.f32       %f10, {ONE}, %f10;      // alpha = 1 - exp(-sigma*delta)
 
     // weight = T * alpha
     mul.f32       %f11, %f0, %f10;
@@ -299,6 +300,7 @@ $VR_DONE:
         ONE = one,
         INF_DELTA = inf_delta,
         EPS = eps,
+        LOG2E = log2e,
     )
 }
 
@@ -550,7 +552,10 @@ $HG_DONE:
 pub fn ray_march_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     let zero = f32_hex(0.0_f32);
-    let inv_16m = f32_hex(1.0_f32 / 16_777_216.0_f32);
+    // 23-bit mantissa is extracted below, so the scale must be 2^-23 to map it
+    // onto the full unit interval [0, 1); using 2^-24 would only ever produce
+    // jitter in [0, 0.5) and bias every stratified sample toward its lower edge.
+    let inv_8m = f32_hex(1.0_f32 / 8_388_608.0_f32);
     format!(
         r#"{hdr}// ray_march_kernel: stratified sample generation along rays.
 // p_t_near, p_t_far: [n_rays] per-ray bounds
@@ -617,7 +622,7 @@ $RM_LOOP:
     cvt.u32.u64   %r12, %rd10;
     and.b32       %r12, %r12, 0x7FFFFF;    // 23-bit mantissa
     cvt.rn.f32.u32 %f3, %r12;
-    mov.f32       %f4, {INV_16M};
+    mov.f32       %f4, {INV_8M};           // 2^-23, maps 23-bit value onto [0, 1)
     mul.f32       %f3, %f3, %f4;           // jitter ∈ [0, 1)
 
     // t_i = t_near + (sample_idx + jitter) / n_samples * span
@@ -643,7 +648,7 @@ $RM_DONE:
 }}
 "#,
         ZERO = zero,
-        INV_16M = inv_16m,
+        INV_8M = inv_8m,
     )
 }
 

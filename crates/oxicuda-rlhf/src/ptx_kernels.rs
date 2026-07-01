@@ -61,6 +61,8 @@ $BT_LOOP:
     // diff = r_w - r_l; bt_loss = -log(sigma(diff)) = log(1 + exp(-diff))
     sub.f32 %f2, %f0, %f1;
     neg.f32 %f3, %f2;
+    // exp(-diff) = ex2(-diff * log2(e)); base-2 scale before ex2.approx
+    mul.f32 %f3, %f3, {LOG2E};
     ex2.approx.f32 %f4, %f3;
     // approx: log1p(exp(-diff)) via 1 + exp(-diff) then lg2 * ln2
     mov.f32 %f5, {ONE};
@@ -86,6 +88,7 @@ $BT_DONE:
         ZERO = zero,
         ONE = one,
         LN2 = f32_hex(std::f32::consts::LN_2),
+        LOG2E = f32_hex(std::f32::consts::LOG2_E),
     )
 }
 
@@ -107,7 +110,7 @@ pub fn dpo_loss_ptx(sm: u32) -> String {
 {{
     .reg .u64  %rd<10>;
     .reg .u32  %r<10>;
-    .reg .f32  %f<16>;
+    .reg .f32  %f<17>;
     .reg .pred %p0;
 
     ld.param.u64 %rd0, [param_chosen_lp];
@@ -149,6 +152,8 @@ $DPO_LOOP:
 
     // -log_sigmoid(logit) = log(1 + exp(-logit))
     neg.f32 %f9, %f8;
+    // exp(-logit) = ex2(-logit * log2(e)); base-2 scale before ex2.approx
+    mul.f32 %f9, %f9, {LOG2E};
     ex2.approx.f32 %f10, %f9;
     mov.f32 %f11, {ONE};
     add.f32 %f12, %f10, %f11;
@@ -156,7 +161,10 @@ $DPO_LOOP:
     mov.f32 %f14, {LN2};
     mul.f32 %f15, %f13, %f14;
 
-    atom.global.add.f32 %f0, [%rd4], %f15;
+    // Accumulate into a scratch reg (%f16), NOT %f0 — %f0 holds beta and is
+    // reused every grid-stride iteration; clobbering it corrupted multi-step
+    // accumulation.
+    atom.global.add.f32 %f16, [%rd4], %f15;
 
     add.u32 %r7, %r7, %r6;
     bra $DPO_LOOP;
@@ -171,6 +179,7 @@ $DPO_DONE:
         ZERO = zero,
         ONE = one,
         LN2 = f32_hex(std::f32::consts::LN_2),
+        LOG2E = f32_hex(std::f32::consts::LOG2_E),
     )
 }
 
@@ -311,6 +320,8 @@ $KTO_LOOP:
 
     // sigma(arg) = 1 / (1 + exp(-arg))
     neg.f32 %f7, %f6;
+    // exp(-arg) = ex2(-arg * log2(e)); base-2 scale before ex2.approx
+    mul.f32 %f7, %f7, {LOG2E};
     ex2.approx.f32 %f8, %f7;
     mov.f32 %f9, {ONE};
     add.f32 %f10, %f8, %f9;
@@ -337,6 +348,7 @@ $KTO_DONE:
         ZERO = zero,
         ONE = one,
         Z0 = z0,
+        LOG2E = f32_hex(std::f32::consts::LOG2_E),
     )
 }
 

@@ -49,8 +49,8 @@ fn max_fill_literal(ty: PtxType) -> &'static str {
         PtxType::S32 => "0x7FFFFFFF",
         PtxType::U64 => "0xFFFFFFFFFFFFFFFF",
         PtxType::S64 => "0x7FFFFFFFFFFFFFFF",
-        PtxType::F32 => "0x7F800000",
-        PtxType::F64 => "0x7FF0000000000000",
+        PtxType::F32 => "0f7F800000",
+        PtxType::F64 => "0d7FF0000000000000",
         _ => "0xFFFFFFFF",
     }
 }
@@ -148,10 +148,14 @@ impl SegmentedSortTemplate {
         )
         .map_err(ferr)?;
         writeln!(out, "{{").map_err(ferr)?;
-        writeln!(out, "    .reg .{ty}   %a, %b, %write_val;").map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %seg, %partner, %dir, %cmp_int, %swap_int, %seg_len;"
+            "    .reg .{ty}   %a, %b, %write_val, %min_val, %max_val;"
+        )
+        .map_err(ferr)?;
+        writeln!(
+            out,
+            "    .reg .u32    %ltid, %seg, %partner, %dir, %low_bit, %low_int, %want_int, %seg_len;"
         )
         .map_err(ferr)?;
         writeln!(
@@ -164,12 +168,16 @@ impl SegmentedSortTemplate {
             "    .reg .u64    %ptr, %ptr_off, %off_addr, %glob_addr, %len64;"
         )
         .map_err(ferr)?;
-        writeln!(out, "    .reg .pred   %p, %in_seg, %need_swap, %gt;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    .reg .pred   %p, %in_seg, %want_min, %gt, %is_low;"
+        )
+        .map_err(ferr)?;
 
         writeln!(out, "    ld.param.u64 %ptr,     [param_data];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_off, [param_offsets];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %nseg,    [param_num_segments];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %seg, %ctaid.x;").map_err(ferr)?;
         writeln!(out, "    cvt.u64.u32  %gidx, %seg;").map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %p, %gidx, %nseg;").map_err(ferr)?;
@@ -183,11 +191,15 @@ impl SegmentedSortTemplate {
         writeln!(out, "    cvt.u32.u64  %seg_len, %len64;").map_err(ferr)?;
 
         writeln!(out, "    mov.u64      %smem_base, segsort_smem;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %tid_addr, %tid, {eb}, %smem_base;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    mad.wide.u32   %tid_addr, %ltid, {eb}, %smem_base;"
+        )
+        .map_err(ferr)?;
 
         // Load this thread's element if within the segment, else pad with max.
-        writeln!(out, "    setp.lt.u32  %in_seg, %tid, %seg_len;").map_err(ferr)?;
-        writeln!(out, "    cvt.u64.u32  %glob_addr, %tid;").map_err(ferr)?;
+        writeln!(out, "    setp.lt.u32  %in_seg, %ltid, %seg_len;").map_err(ferr)?;
+        writeln!(out, "    cvt.u64.u32  %glob_addr, %ltid;").map_err(ferr)?;
         writeln!(out, "    add.u64      %glob_addr, %glob_addr, %seg_beg;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %glob_addr, %glob_addr, {eb}, %ptr;").map_err(ferr)?;
         writeln!(out, "    @%in_seg ld.global.{ty} %a, [%glob_addr];").map_err(ferr)?;
@@ -201,35 +213,51 @@ impl SegmentedSortTemplate {
             for sub in (0..stage).rev() {
                 let j: u32 = 1 << sub;
                 writeln!(out, "    bar.sync 0;").map_err(ferr)?;
-                writeln!(out, "    mad.lo.u64   %tid_addr, %tid, {eb}, %smem_base;")
-                    .map_err(ferr)?;
-                writeln!(out, "    xor.b32      %partner, %tid, {j};").map_err(ferr)?;
+                writeln!(
+                    out,
+                    "    mad.wide.u32   %tid_addr, %ltid, {eb}, %smem_base;"
+                )
+                .map_err(ferr)?;
+                writeln!(out, "    xor.b32      %partner, %ltid, {j};").map_err(ferr)?;
                 writeln!(out, "    .reg .u64 %par_addr_{stage}_{sub};").map_err(ferr)?;
                 writeln!(
                     out,
-                    "    mad.lo.u64   %par_addr_{stage}_{sub}, %partner, {eb}, %smem_base;"
+                    "    mad.wide.u32   %par_addr_{stage}_{sub}, %partner, {eb}, %smem_base;"
                 )
                 .map_err(ferr)?;
                 writeln!(out, "    ld.shared.{ty} %a, [%tid_addr];").map_err(ferr)?;
                 writeln!(out, "    ld.shared.{ty} %b, [%par_addr_{stage}_{sub}];").map_err(ferr)?;
                 writeln!(out, "    bar.sync 0;").map_err(ferr)?;
-                writeln!(out, "    shr.u32      %dir, %tid, {log2_k};").map_err(ferr)?;
+                writeln!(out, "    shr.u32      %dir, %ltid, {log2_k};").map_err(ferr)?;
                 writeln!(out, "    and.b32      %dir, %dir, 1;").map_err(ferr)?;
+                // Compare-exchange where each thread writes only its own slot:
+                // the low index of the pair (bit `j` of tid == 0) keeps the min
+                // for an ascending block and the max for a descending one. The
+                // previous code made both partners write the partner's value,
+                // collapsing the segment to a single repeated element.
                 writeln!(out, "    {cmp}        %gt, %b, %a;").map_err(ferr)?;
-                writeln!(out, "    cvt.u32.pred %cmp_int, %gt;").map_err(ferr)?;
-                writeln!(out, "    xor.b32      %swap_int, %cmp_int, %dir;").map_err(ferr)?;
-                writeln!(out, "    setp.ne.u32  %need_swap, %swap_int, 0;").map_err(ferr)?;
-                writeln!(out, "    selp.{ty}    %write_val, %b, %a, %need_swap;").map_err(ferr)?;
+                writeln!(out, "    selp.{ty}    %min_val, %b, %a, %gt;").map_err(ferr)?;
+                writeln!(out, "    selp.{ty}    %max_val, %a, %b, %gt;").map_err(ferr)?;
+                writeln!(out, "    and.b32      %low_bit, %ltid, {j};").map_err(ferr)?;
+                writeln!(out, "    setp.eq.u32  %is_low, %low_bit, 0;").map_err(ferr)?;
+                writeln!(out, "    selp.u32     %low_int, 1, 0, %is_low;").map_err(ferr)?;
+                writeln!(out, "    xor.b32      %want_int, %low_int, %dir;").map_err(ferr)?;
+                writeln!(out, "    setp.ne.u32  %want_min, %want_int, 0;").map_err(ferr)?;
+                writeln!(
+                    out,
+                    "    selp.{ty}    %write_val, %min_val, %max_val, %want_min;"
+                )
+                .map_err(ferr)?;
                 writeln!(out, "    st.shared.{ty} [%tid_addr], %write_val;").map_err(ferr)?;
             }
         }
 
         // Write back the first seg_len sorted elements.
         writeln!(out, "    bar.sync 0;").map_err(ferr)?;
-        writeln!(out, "    setp.lt.u32  %in_seg, %tid, %seg_len;").map_err(ferr)?;
+        writeln!(out, "    setp.lt.u32  %in_seg, %ltid, %seg_len;").map_err(ferr)?;
         writeln!(out, "    @!%in_seg ret;").map_err(ferr)?;
         writeln!(out, "    ld.shared.{ty} %a, [%tid_addr];").map_err(ferr)?;
-        writeln!(out, "    cvt.u64.u32  %glob_addr, %tid;").map_err(ferr)?;
+        writeln!(out, "    cvt.u64.u32  %glob_addr, %ltid;").map_err(ferr)?;
         writeln!(out, "    add.u64      %glob_addr, %glob_addr, %seg_beg;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %glob_addr, %glob_addr, {eb}, %ptr;").map_err(ferr)?;
         writeln!(out, "    st.global.{ty} [%glob_addr], %a;").map_err(ferr)?;
@@ -298,7 +326,8 @@ mod tests {
             .generate(SmVersion::Sm90)
             .expect("PTX generation should succeed in test");
         assert!(ptx.contains("ld.shared.f64"), "PTX: {ptx}");
-        assert!(ptx.contains("0x7FF0000000000000"), "PTX: {ptx}");
+        // f64 +inf must be a valid PTX double literal (`0d…`), not a hex int.
+        assert!(ptx.contains("0d7FF0000000000000"), "PTX: {ptx}");
     }
 
     #[test]

@@ -52,7 +52,7 @@ pub fn moving_average_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %in<2>, %out<2>;
-    .reg .u32 %n, %t, %T, %K, %tid, %bdim, %bid, %gid, %idx, %half_k;
+    .reg .u32 %n, %t, %T, %K, %tidx, %bdim, %bid, %gid, %idx, %half_k;
     .reg .u32 %k, %src_t, %src_idx, %n_off;
     .reg .f32 %acc, %val, %inv_k;
     .reg .pred %p;
@@ -62,10 +62,10 @@ pub fn moving_average_ptx(sm: u32) -> String {
     ld.param.u32 %T, [T];
     ld.param.u32 %K, [K];
 
-    mov.u32 %tid, %tid.x;
+    mov.u32 %tidx, %tid.x;
     mov.u32 %bdim, %ntid.x;
     mov.u32 %bid, %ctaid.x;
-    mad.lo.u32 %gid, %bid, %bdim, %tid;
+    mad.lo.u32 %gid, %bid, %bdim, %tidx;
 
     // gid = n * T + t
     div.u32 %n, %gid, %T;
@@ -156,7 +156,7 @@ pub fn patch_embed_1d_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %in<2>, %out<2>, %addr;
-    .reg .u32 %gid, %n, %rem, %p_idx, %l_idx;
+    .reg .u32 %gid, %n, %rem, %p_idx, %l_idx, %bdim, %bid;
     .reg .u32 %T, %pl, %stride, %np;
     .reg .u32 %t_start, %t_src, %src_flat, %out_flat;
     .reg .f32 %val;
@@ -170,7 +170,9 @@ pub fn patch_embed_1d_ptx(sm: u32) -> String {
     ld.param.u32 %np, [num_patches];
 
     mov.u32 %gid, %tid.x;
-    mad.lo.u32 %gid, %ctaid.x, %ntid.x, %gid;
+    mov.u32 %bdim, %ntid.x;
+    mov.u32 %bid, %ctaid.x;
+    mad.lo.u32 %gid, %bid, %bdim, %gid;
 
     // total = N * num_patches * patch_len
     .reg .u32 %N_reg, %total;
@@ -241,7 +243,7 @@ pub fn causal_temporal_conv_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %in0, %w0, %b0, %out0, %addr;
-    .reg .u32 %gid, %n, %c_out, %t, %rem;
+    .reg .u32 %gid, %n, %c_out, %t, %rem, %bdim, %bid;
     .reg .u32 %N, %C_in, %C_out, %T, %K, %d;
     .reg .u32 %c_in, %k, %t_src, %t_s32;
     .reg .u32 %src_idx, %w_idx;
@@ -261,7 +263,9 @@ pub fn causal_temporal_conv_ptx(sm: u32) -> String {
     ld.param.u32 %d, [dilation];
 
     mov.u32 %gid, %tid.x;
-    mad.lo.u32 %gid, %ctaid.x, %ntid.x, %gid;
+    mov.u32 %bdim, %ntid.x;
+    mov.u32 %bid, %ctaid.x;
+    mad.lo.u32 %gid, %bid, %bdim, %gid;
 
     // total = N * C_out * T
     .reg .u32 %total, %ct;
@@ -369,7 +373,7 @@ pub fn auto_correlation_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %re0, %im0, %out0, %addr;
-    .reg .u32 %gid;
+    .reg .u32 %gid, %bdim, %bid;
     .reg .f32 %re, %im, %mag2;
     .reg .pred %p;
 
@@ -379,7 +383,9 @@ pub fn auto_correlation_ptx(sm: u32) -> String {
     ld.param.u32 %gid, [total];   // reuse reg for total
 
     mov.u32 %gid, %tid.x;
-    mad.lo.u32 %gid, %ctaid.x, %ntid.x, %gid;
+    mov.u32 %bdim, %ntid.x;
+    mov.u32 %bid, %ctaid.x;
+    mad.lo.u32 %gid, %bid, %bdim, %gid;
 
     .reg .u32 %tot;
     ld.param.u32 %tot, [total];
@@ -440,7 +446,7 @@ pub fn revin_normalize_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %x0, %mu0, %sig0, %gam0, %bet0, %out0, %addr;
-    .reg .u32 %gid, %n, %c, %t, %rem, %nc_idx, %CT, %N, %C_reg, %T_reg;
+    .reg .u32 %gid, %n, %c, %t, %rem, %nc_idx, %CT, %N, %C_reg, %T_reg, %bdim, %bid;
     .reg .f32 %val, %mu, %sig, %gam, %bet, %norm;
     .reg .pred %p;
 
@@ -455,7 +461,9 @@ pub fn revin_normalize_ptx(sm: u32) -> String {
     ld.param.u32 %T_reg,[T];
 
     mov.u32 %gid, %tid.x;
-    mad.lo.u32 %gid, %ctaid.x, %ntid.x, %gid;
+    mov.u32 %bdim, %ntid.x;
+    mov.u32 %bid, %ctaid.x;
+    mad.lo.u32 %gid, %bid, %bdim, %gid;
 
     mul.lo.u32 %CT, %C_reg, %T_reg;
     .reg .u32 %total;
@@ -540,7 +548,7 @@ pub fn multirate_pool_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %in0, %out0, %addr;
-    .reg .u32 %gid, %n, %c, %t_out, %rem;
+    .reg .u32 %gid, %n, %c, %t_out, %rem, %bdim, %bid;
     .reg .u32 %N, %C_reg, %T, %ps, %T_out, %CT_out;
     .reg .u32 %k, %t_src, %src_idx;
     .reg .f32 %acc, %val, %inv_ps;
@@ -561,7 +569,9 @@ pub fn multirate_pool_ptx(sm: u32) -> String {
     mul.lo.u32 %total, %N, %CT_out;
 
     mov.u32 %gid, %tid.x;
-    mad.lo.u32 %gid, %ctaid.x, %ntid.x, %gid;
+    mov.u32 %bdim, %ntid.x;
+    mov.u32 %bid, %ctaid.x;
+    mad.lo.u32 %gid, %bid, %bdim, %gid;
     setp.ge.u32 %p, %gid, %total;
     @%p bra DONE;
 
@@ -635,7 +645,7 @@ pub fn period_detect_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %mag0, %out0, %addr;
-    .reg .u32 %f_idx, %nc, %src_idx;
+    .reg .u32 %f_idx, %nc, %src_idx, %bdim, %bid;
     .reg .u32 %NC, %F;
     .reg .f32 %acc, %val, %inv_nc;
     .reg .pred %p;
@@ -646,7 +656,9 @@ pub fn period_detect_ptx(sm: u32) -> String {
     ld.param.u32 %F, [F];
 
     mov.u32 %f_idx, %tid.x;
-    mad.lo.u32 %f_idx, %ctaid.x, %ntid.x, %f_idx;
+    mov.u32 %bdim, %ntid.x;
+    mov.u32 %bid, %ctaid.x;
+    mad.lo.u32 %f_idx, %bid, %bdim, %f_idx;
     setp.ge.u32 %p, %f_idx, %F;
     @%p bra DONE;
 

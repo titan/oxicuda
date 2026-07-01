@@ -6,7 +6,7 @@ GPU-accelerated signal, audio, and image processing primitives — pure-Rust rep
 
 ## Implementation Status
 
-**Actual: 12,276 SLoC across 55 files**
+**Actual: 14,381 SLoC across 61 files**
 
 Vol.6 covers DCT/DWT transforms, audio analysis (STFT, mel, MFCC, spectrogram metrics),
 window functions and their analysis metrics, FIR/IIR/Wiener filters, correlation
@@ -134,7 +134,7 @@ GPU-hardware verification.
 ## Quality Status
 
 - Warnings: 0 (clippy + rustdoc clean)
-- Tests: 491 passing (+1 doctest)
+- Tests: 508 passing (+1 doctest)
 - unwrap() calls: 0 (production code)
 - All public functions return `SignalResult<T>` for fallible paths
 - macOS: compiles, PTX-generation tests run; GPU-execution tests gated behind `feature = "gpu-tests"` and return `UnsupportedPlatform`

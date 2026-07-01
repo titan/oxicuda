@@ -34,3 +34,6 @@ mod e2e_tests;
 
 #[cfg(test)]
 mod worked_examples;
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;

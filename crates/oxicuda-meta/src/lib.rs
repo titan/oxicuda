@@ -93,6 +93,9 @@ pub mod prelude {
     };
 }
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 #[cfg(test)]
 mod e2e_tests {
     use crate::prelude::*;

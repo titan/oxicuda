@@ -12,8 +12,8 @@ transforms. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.30).
 
 ## Implementation Status
 
-**Actual: 20,639 SLoC (67 files)** -- 535 unit tests + 15 E2E integration tests
-(550 total in the lib test binary)
+**Actual: 18,546 SLoC (67 files)** -- 542 unit tests + 15 E2E integration tests
+(557 total in the lib test binary)
 
 The crate covers the full point-cloud + 3D Gaussian splatting + classical
 geometry pipeline. CPU paths are simulation-grade for unit testing; PTX
@@ -172,7 +172,7 @@ kernels target NVIDIA SM 7.5 through SM 12.0. The crate is `forbid(unsafe_code)`
       spatial hash, expanding-ring exact kNN + radius search)
 - [ ] FlashAttention-style block-sparse Point-Transformer attention with
       neighbour windows
-- [ ] Tile-based Gaussian rasteriser -- 16 x 16 pixel tiles with sorted
+- [x] Tile-based Gaussian rasteriser -- 16 x 16 pixel tiles with sorted
       Gaussian lists per tile (Inria 3DGS layout)
 - [x] Fused FPS + ball-query + gather for PointNet++ SetAbstraction
       (arch/pointnet_pp.rs:fps_ball_gather -- single-call composition of
@@ -200,13 +200,13 @@ kernels target NVIDIA SM 7.5 through SM 12.0. The crate is `forbid(unsafe_code)`
 - [x] Discrete differential-geometry curvature (mesh/curvature.rs -- Meyer 2003
       angle-defect Gaussian + cotangent-Laplacian mean + principal curvatures,
       mixed Voronoi area; icosphere oracle generator)
-- [ ] Open3D-compatible PLY / PCD readers (Pure Rust)
+- [x] Open3D-compatible PLY / PCD readers (Pure Rust)
 - [x] Range-image projection helpers for LiDAR data
       (transform/range_image.rs -- LiDAR-style azimuth×elevation spherical projection with per-pixel min-range; unproject inverse for round-trip)
 
 #### P2 -- Nice-to-Have (Advanced Features)
-- [ ] 2D Gaussian splatting (2DGS) primitives
-- [ ] Mip-Splatting anti-aliasing path
+- [x] 2D Gaussian splatting (2DGS) primitives
+- [x] Mip-Splatting anti-aliasing path
 - [x] Differentiable rasterisation gradients (de-rendering)
       (gaussian/raster_grad.rs -- `rasterize_forward_2d` smooth alpha-compositing
       forward (saves T_final + depth order) + `rasterize_backward_2d` analytic
@@ -231,8 +231,8 @@ kernels target NVIDIA SM 7.5 through SM 12.0. The crate is `forbid(unsafe_code)`
         is documented model STRUCTURE, NOT a learned shape. Generated-realism /
         Chamfer-to-dataset is not CPU-unit-verifiable and is deliberately not
         asserted.
-- [ ] SE(3)-equivariant network primitives (EGNN, e3nn-style)
-- [ ] BVH-based ray-Gaussian intersection
+- [x] SE(3)-equivariant network primitives (EGNN, e3nn-style)
+- [x] BVH-based ray-Gaussian intersection
 
 ## Dependencies
 
@@ -246,7 +246,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 535 unit + 15 E2E = 550 passing
+- Tests: 542 unit + 15 E2E = 557 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - All public APIs return `Geom3dResult<T>` or `Result<T, Geom3dError>`

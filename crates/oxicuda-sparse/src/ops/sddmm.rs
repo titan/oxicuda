@@ -192,9 +192,11 @@ fn emit_sddmm_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let nz_done = b.fresh_label("sddmm_nz_done");
 
                 b.label(&nz_loop);
+                // Exit when nz_idx >= row_end (inverted skip-branch via branch_if
+                // so the `$`-prefixed label target matches the `b.label` def).
                 let nz_pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {nz_pred}, {nz_idx}, {re};"));
-                b.raw_ptx(&format!("@!{nz_pred} bra {nz_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {nz_pred}, {nz_idx}, {re};"));
+                b.branch_if(nz_pred, &nz_done);
 
                 // Load column index
                 let ci_addr = b.byte_offset_addr(col_idx_base.clone(), nz_idx.clone(), 4);
@@ -212,9 +214,10 @@ fn emit_sddmm_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let k_done = b.fresh_label("sddmm_k_done");
 
                 b.label(&k_loop);
+                // Exit when kk >= k (inverted skip-branch via branch_if).
                 let k_pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {k_pred}, {kk}, {k_param};"));
-                b.raw_ptx(&format!("@!{k_pred} bra {k_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {k_pred}, {kk}, {k_param};"));
+                b.branch_if(k_pred, &k_done);
 
                 // A[row, kk] = a_ptr + (row * a_ld + kk) * elem_bytes
                 let a_row_off = b.alloc_reg(PtxType::U32);
@@ -265,6 +268,22 @@ fn emit_sddmm_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+
+    /// The SDDMM kernel must assemble for sm_86 in both precisions with
+    /// `$`-prefixed branch targets and no `.b64` shuffle.
+    #[test]
+    fn sddmm_f32_f64_assemble_sm86() {
+        let f32_ptx = emit_sddmm_kernel::<f32>(SmVersion::Sm86).expect("f32 SDDMM PTX");
+        assert_assembles_and_clean("sddmm_f32", &f32_ptx);
+
+        let f64_ptx = emit_sddmm_kernel::<f64>(SmVersion::Sm86).expect("f64 SDDMM PTX");
+        assert_assembles_and_clean("sddmm_f64", &f64_ptx);
+        assert!(
+            !f64_ptx.contains("0F00000000"),
+            "f64 SDDMM kernel must not materialize an f32 0.0 immediate:\n{f64_ptx}"
+        );
+    }
     use oxicuda_ptx::arch::SmVersion;
 
     #[test]

@@ -91,6 +91,11 @@ pub mod prelude {
     };
 }
 
+// ─── On-device GPU PTX validation ────────────────────────────────────────────
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── End-to-end integration tests ────────────────────────────────────────────
 
 #[cfg(test)]

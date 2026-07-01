@@ -57,7 +57,7 @@ pub fn td_error_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %r_addr, %nv_addr, %d_addr, %v_addr, %o_addr;
-    .reg .u32  %tid, %ntid, %cid, %ncid, %idx, %n, %stride;
+    .reg .u32  %t_idx, %blk_dim, %cid, %ncid, %idx, %n, %stride;
     .reg .f32  %rw, %nv, %dn, %vv, %gam, %tmp, %delta;
     .reg .pred %p;
     .reg .u64  %eaddr;
@@ -70,12 +70,12 @@ pub fn td_error_ptx(sm: u32) -> String {
     ld.param.u32  %n,       [n];
     ld.param.f32  %gam,     [gamma];
 
-    mov.u32 %tid,  %tid.x;
-    mov.u32 %ntid, %ntid.x;
+    mov.u32 %t_idx,  %tid.x;
+    mov.u32 %blk_dim, %ntid.x;
     mov.u32 %cid,  %ctaid.x;
     mov.u32 %ncid, %nctaid.x;
-    mad.lo.u32  %idx,    %cid, %ntid, %tid;
-    mul.lo.u32  %stride, %ncid, %ntid;
+    mad.lo.u32  %idx,    %cid, %blk_dim, %t_idx;
+    mul.lo.u32  %stride, %ncid, %blk_dim;
 
 LOOP:
     setp.ge.u32 %p, %idx, %n;
@@ -142,7 +142,7 @@ pub fn normalize_advantages_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %addr, %eaddr;
-    .reg .u32  %tid, %ntid, %cid, %ncid, %idx, %n, %stride;
+    .reg .u32  %t_idx, %blk_dim, %cid, %ncid, %idx, %n, %stride;
     .reg .f32  %val, %mu, %sig;
     .reg .pred %p;
 
@@ -151,12 +151,12 @@ pub fn normalize_advantages_ptx(sm: u32) -> String {
     ld.param.f32  %mu,      [mean];
     ld.param.f32  %sig,     [std_eps];
 
-    mov.u32 %tid,  %tid.x;
-    mov.u32 %ntid, %ntid.x;
+    mov.u32 %t_idx,  %tid.x;
+    mov.u32 %blk_dim, %ntid.x;
     mov.u32 %cid,  %ctaid.x;
     mov.u32 %ncid, %nctaid.x;
-    mad.lo.u32  %idx,    %cid, %ntid, %tid;
-    mul.lo.u32  %stride, %ncid, %ntid;
+    mad.lo.u32  %idx,    %cid, %blk_dim, %t_idx;
+    mul.lo.u32  %stride, %ncid, %blk_dim;
 
 LOOP:
     setp.ge.u32 %p, %idx, %n;
@@ -205,7 +205,7 @@ pub fn ppo_ratio_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %a0, %a1, %a2, %ar, %ao, %ea;
-    .reg .u32  %tid, %ntid, %cid, %ncid, %idx, %n, %stride;
+    .reg .u32  %t_idx, %blk_dim, %cid, %ncid, %idx, %n, %stride;
     .reg .f32  %lpn, %lpo, %adv, %ratio, %clip, %lo, %hi, %obj, %tmp;
     .reg .pred %p, %q;
 
@@ -221,12 +221,12 @@ pub fn ppo_ratio_ptx(sm: u32) -> String {
     sub.rn.f32 %lo, {one}, %tmp;
     add.rn.f32 %hi, {one}, %tmp;
 
-    mov.u32 %tid,  %tid.x;
-    mov.u32 %ntid, %ntid.x;
+    mov.u32 %t_idx,  %tid.x;
+    mov.u32 %blk_dim, %ntid.x;
     mov.u32 %cid,  %ctaid.x;
     mov.u32 %ncid, %nctaid.x;
-    mad.lo.u32  %idx,    %cid, %ntid, %tid;
-    mul.lo.u32  %stride, %ncid, %ntid;
+    mad.lo.u32  %idx,    %cid, %blk_dim, %t_idx;
+    mul.lo.u32  %stride, %ncid, %blk_dim;
 
 LOOP:
     setp.ge.u32 %p, %idx, %n;
@@ -309,7 +309,7 @@ pub fn sac_target_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %a0, %a1, %a2, %a3, %ao, %ea;
-    .reg .u32  %tid, %ntid, %cid, %ncid, %idx, %n, %stride;
+    .reg .u32  %t_idx, %blk_dim, %cid, %ncid, %idx, %n, %stride;
     .reg .f32  %rw, %dn, %mq, %lp, %gam, %alp, %msk, %tgt;
     .reg .pred %p;
 
@@ -322,12 +322,12 @@ pub fn sac_target_ptx(sm: u32) -> String {
     ld.param.f32 %gam,[gamma];
     ld.param.f32 %alp,[alpha];
 
-    mov.u32 %tid,  %tid.x;
-    mov.u32 %ntid, %ntid.x;
+    mov.u32 %t_idx,  %tid.x;
+    mov.u32 %blk_dim, %ntid.x;
     mov.u32 %cid,  %ctaid.x;
     mov.u32 %ncid, %nctaid.x;
-    mad.lo.u32 %idx,    %cid, %ntid, %tid;
-    mul.lo.u32 %stride, %ncid, %ntid;
+    mad.lo.u32 %idx,    %cid, %blk_dim, %t_idx;
+    mul.lo.u32 %stride, %ncid, %blk_dim;
 
 LOOP:
     setp.ge.u32 %p, %idx, %n;
@@ -391,7 +391,7 @@ pub fn per_is_weight_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %a_probs, %a_w, %ea;
-    .reg .u32  %tid, %ntid, %cid, %ncid, %idx, %nn, %stride;
+    .reg .u32  %t_idx, %blk_dim, %cid, %ncid, %idx, %nn, %stride;
     .reg .f32  %prob, %w, %n_f, %beta, %tmp;
     .reg .pred %p;
 
@@ -401,12 +401,12 @@ pub fn per_is_weight_ptx(sm: u32) -> String {
     ld.param.f32 %n_f,     [n_f];
     ld.param.f32 %beta,    [beta];
 
-    mov.u32 %tid,  %tid.x;
-    mov.u32 %ntid, %ntid.x;
+    mov.u32 %t_idx,  %tid.x;
+    mov.u32 %blk_dim, %ntid.x;
     mov.u32 %cid,  %ctaid.x;
     mov.u32 %ncid, %nctaid.x;
-    mad.lo.u32 %idx,    %cid, %ntid, %tid;
-    mul.lo.u32 %stride, %ncid, %ntid;
+    mad.lo.u32 %idx,    %cid, %blk_dim, %t_idx;
+    mul.lo.u32 %stride, %ncid, %blk_dim;
 
 LOOP:
     setp.ge.u32 %p, %idx, %nn;

@@ -94,6 +94,7 @@ pub fn forward_pass_ptx(sm: u32) -> String {
         ld.global.f32 %f2, [%rd7];\n\
         add.f32       %f3, %f1, %f2;\n\
         sub.f32       %f3, %f3, %f0;\n\
+        mul.f32       %f3, %f3, 0f3FB8AA3B;   // * log2(e): exp(x)=ex2(x*log2e)\n\
         ex2.approx.f32 %f3, %f3;\n\
         add.f32       %f4, %f4, %f3;\n\
         add.u32       %r5, %r5, 1;\n\
@@ -102,6 +103,7 @@ pub fn forward_pass_ptx(sm: u32) -> String {
     $FP_WRITE:\n\
         // result = max + log(sum) + log_b_o[j]\n\
         lg2.approx.f32 %f4, %f4;\n\
+        mul.f32       %f4, %f4, 0f3F317218;   // * ln(2): ln(x)=lg2(x)*ln2\n\
         add.f32       %f4, %f4, %f0;\n\
         mul.wide.u32  %rd4, %r4, 4;\n\
         add.u64       %rd5, %rd3, %rd4;\n\
@@ -669,7 +671,8 @@ pub fn mrf_gibbs_ptx(sm: u32) -> String {
         // p_up = 1 / (1 + exp(-2*field))\n\
         mov.f32       %f4, 0fC0000000;       // -2\n\
         mul.f32       %f5, %f4, %f3;\n\
-        ex2.approx.f32 %f5, %f5;             // exp2(...)\n\
+        mul.f32       %f5, %f5, 0f3FB8AA3B;  // * log2(e): exp(x)=ex2(x*log2e)\n\
+        ex2.approx.f32 %f5, %f5;             // exp(-2*field)\n\
         mov.f32       %f6, 0f3F800000;       // 1.0\n\
         add.f32       %f5, %f5, %f6;\n\
         div.rn.f32    %f7, %f6, %f5;\n\

@@ -271,3 +271,122 @@ fn matmul_rows(x: &[f32], w: &[f32], n: usize, d_in: usize, d_out: usize) -> Vec
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_model(seed: u64) -> SasRec {
+        let mut rng = LcgRng::new(seed);
+        SasRec::new(10, 8, 2, 2, 16, &mut rng).expect("construction ok")
+    }
+
+    #[test]
+    fn rejects_invalid_construction() {
+        let mut rng = LcgRng::new(1);
+        assert!(
+            SasRec::new(0, 8, 1, 1, 8, &mut rng).is_err(),
+            "n_items=0 must fail"
+        );
+        assert!(
+            SasRec::new(10, 0, 1, 1, 8, &mut rng).is_err(),
+            "emb_dim=0 must fail"
+        );
+    }
+
+    #[test]
+    fn output_shape_and_finiteness() {
+        let model = make_model(2);
+        let logits = model.forward(&[0, 1, 2]).expect("forward ok");
+        assert_eq!(
+            logits.len(),
+            10,
+            "forward must return exactly n_items=10 logits"
+        );
+        for (i, &v) in logits.iter().enumerate() {
+            assert!(v.is_finite(), "logit[{i}]={v} must be finite");
+        }
+    }
+
+    #[test]
+    fn forward_rejects_empty_and_oob() {
+        let model = make_model(3);
+        assert!(model.forward(&[]).is_err(), "empty input must fail");
+        assert!(
+            model.forward(&[10]).is_err(),
+            "id=10 >= n_items=10 must fail"
+        );
+        // Boundary: id=9 is valid (n_items=10 so 0..9 inclusive).
+        assert!(model.forward(&[9]).is_ok(), "id=9 must succeed");
+    }
+
+    #[test]
+    fn determinism() {
+        // Two models from the same seed must produce bit-identical outputs.
+        let model_a = make_model(5);
+        let model_b = make_model(5);
+        let seq = [0usize, 1, 2, 3, 4];
+        let out_a = model_a.forward(&seq).expect("fwd a");
+        let out_b = model_b.forward(&seq).expect("fwd b");
+        for (i, (&a, &b)) in out_a.iter().zip(out_b.iter()).enumerate() {
+            assert_eq!(
+                a, b,
+                "logit[{i}] must be bit-identical across same-seed models"
+            );
+        }
+    }
+
+    #[test]
+    fn single_item_sequence() {
+        // A length-1 sequence is valid: position 0 attends only to itself.
+        let model = make_model(6);
+        let logits = model.forward(&[0]).expect("single-item sequence ok");
+        assert_eq!(logits.len(), 10, "n_items logits expected");
+        assert!(
+            logits.iter().all(|v| v.is_finite()),
+            "all logits must be finite for a single-item sequence"
+        );
+    }
+
+    #[test]
+    fn order_sensitivity_permutation() {
+        // SASRec has positional encoding and causal attention; permuting items changes
+        // the final logits because the sequential order is baked into the representation.
+        let model = make_model(7);
+        let out_ab = model.forward(&[0, 1]).expect("fwd [0,1]");
+        let out_ba = model.forward(&[1, 0]).expect("fwd [1,0]");
+        let differs = out_ab
+            .iter()
+            .zip(out_ba.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-6);
+        assert!(
+            differs,
+            "permuting sequence items must change logits (order-sensitive causal model)"
+        );
+    }
+
+    #[test]
+    fn causal_prefix_change_propagates_to_final_output() {
+        // The causal mask lets position L-1 attend to ALL earlier positions 0..=L-1.
+        // Changing item at position 0 (prefix) in a length-3 sequence must therefore
+        // change the final logit (which comes from position 2 attending back to position 0).
+        let mut rng = LcgRng::new(100);
+        let mut model = SasRec::new(10, 8, 1, 1, 16, &mut rng).expect("construction ok");
+        // Zero positional embeddings so only item identity contributes to attention
+        // key/query vectors, isolating the causal propagation effect.
+        for v in &mut model.pos_emb {
+            *v = 0.0;
+        }
+        let out_012 = model.forward(&[0, 1, 2]).expect("fwd [0,1,2]");
+        // Change only position 0 (item 0 → item 3); positions 1 and 2 are unchanged.
+        let out_312 = model.forward(&[3, 1, 2]).expect("fwd [3,1,2]");
+        let differs = out_012
+            .iter()
+            .zip(out_312.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-6);
+        assert!(
+            differs,
+            "changing prefix item must propagate through causal attention chain to final output"
+        );
+    }
+}

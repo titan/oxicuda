@@ -42,6 +42,9 @@ pub mod scheme;
 /// PTX kernel source strings for GPU-side quantization operations.
 pub mod ptx_kernels;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Top-level re-exports ────────────────────────────────────────────────────
 
 pub use error::{QuantError, QuantResult};

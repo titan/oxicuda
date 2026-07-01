@@ -47,7 +47,10 @@ pub use dynamic_batch::{
 };
 pub use error::{DnnError, DnnResult};
 pub use handle::DnnHandle;
-pub use position::{AlibiBias, DnnRng, Rope, RopeConfig, alibi_slope};
+pub use position::{
+    AlibiBias, DnnRng, NeoXRopeConfig, Rope, RopeConfig, RopeStyle, alibi_slope,
+    apply_rope_neox_half_split,
+};
 pub use types::{
     Activation, ConvAlgorithm, ConvolutionDescriptor, TensorDesc, TensorDescMut, TensorLayout,
     pool_output_size,

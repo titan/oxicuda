@@ -100,7 +100,7 @@ fn main() {
 
 ## Status
 
-**Alpha** -- 19,975 SLoC, 643 passing tests. API may evolve before v1.0.
+**Alpha** -- 23,516 SLoC, 790 passing tests. API may evolve before v1.0.
 
 ## License
 

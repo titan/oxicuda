@@ -9,7 +9,7 @@ decompositions. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.50
 
 ## Implementation Status
 
-**Actual: 5,928 lines / 25,583 SLoC (73 files)** — implements a complete tensor-network
+**Actual: 5,928 lines / 28,138 SLoC (73 files)** — implements a complete tensor-network
 stack in pure Rust with no external linear-algebra dependencies. SVD, Lanczos, and
 eigendecomposition are written from scratch (one-sided Jacobi SVD, Gram-Schmidt
 Lanczos, symmetric tridiagonal Jacobi). Includes 7 PTX kernels × 6 SM versions.

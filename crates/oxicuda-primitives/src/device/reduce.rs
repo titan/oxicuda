@@ -152,10 +152,10 @@ impl DeviceReduceTemplate {
             (ReduceOp::Sum, _) => "0",
             (ReduceOp::Product, PtxType::F32) => "0f3F800000",
             (ReduceOp::Product, _) => "1",
-            (ReduceOp::Min, PtxType::F32) => "0x7F800000",
+            (ReduceOp::Min, PtxType::F32) => "0f7F800000",
             (ReduceOp::Min, PtxType::U32) => "0xFFFFFFFF",
             (ReduceOp::Min, _) => "0x7FFFFFFF",
-            (ReduceOp::Max, PtxType::F32) => "0xFF800000",
+            (ReduceOp::Max, PtxType::F32) => "0fFF800000",
             (ReduceOp::Max, PtxType::U32) => "0",
             (ReduceOp::Max, _) => "0x80000000",
             (ReduceOp::And, _) => "0xFFFFFFFF",
@@ -180,7 +180,7 @@ impl DeviceReduceTemplate {
         writeln!(out, "    .reg .{ty}   %val, %shfl;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %bid, %warpid, %laneid, %mask, %offset;"
+            "    .reg .u32    %ltid, %bid, %warpid, %laneid, %mask, %offset;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %n, %global_tid;").map_err(|e| e.to_string())?;
@@ -195,15 +195,19 @@ impl DeviceReduceTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    mov.u32 %tid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32 %ltid, %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32 %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    shr.u32 %warpid, %tid, 5;").map_err(|e| e.to_string())?;
-        writeln!(out, "    and.b32 %laneid, %tid, 31;").map_err(|e| e.to_string())?;
+        writeln!(out, "    shr.u32 %warpid, %ltid, 5;").map_err(|e| e.to_string())?;
+        writeln!(out, "    and.b32 %laneid, %ltid, 31;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32 %mask, 0xFFFFFFFF;").map_err(|e| e.to_string())?;
 
         // global thread index
-        writeln!(out, "    mad.lo.u64 %global_tid, %bid, {bs}, %tid;")
-            .map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    cvt.u64.u32 %global_tid, %ltid;
+    mad.wide.u32 %global_tid, %bid, {bs}, %global_tid;"
+        )
+        .map_err(|e| e.to_string())?;
 
         // Load with bounds check
         writeln!(out, "    setp.ge.u64 %p, %global_tid, %n;").map_err(|e| e.to_string())?;
@@ -311,7 +315,7 @@ impl DeviceReduceTemplate {
         // Lane 0 writes block partial to output
         writeln!(out, "    setp.ne.u32 %p, %laneid, 0;").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p bra PASS1_WARP0_SKIP_{name};").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64 %addr, %bid, {elem_bytes}, %ptr_out;")
+        writeln!(out, "    mad.wide.u32 %addr, %bid, {elem_bytes}, %ptr_out;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    st.global.{ty} [%addr], %val;").map_err(|e| e.to_string())?;
         writeln!(out, "PASS1_WARP0_SKIP_{name}:").map_err(|e| e.to_string())?;
@@ -337,10 +341,10 @@ impl DeviceReduceTemplate {
             (ReduceOp::Sum, _) => "0",
             (ReduceOp::Product, PtxType::F32) => "0f3F800000",
             (ReduceOp::Product, _) => "1",
-            (ReduceOp::Min, PtxType::F32) => "0x7F800000",
+            (ReduceOp::Min, PtxType::F32) => "0f7F800000",
             (ReduceOp::Min, PtxType::U32) => "0xFFFFFFFF",
             (ReduceOp::Min, _) => "0x7FFFFFFF",
-            (ReduceOp::Max, PtxType::F32) => "0xFF800000",
+            (ReduceOp::Max, PtxType::F32) => "0fFF800000",
             (ReduceOp::Max, PtxType::U32) => "0",
             (ReduceOp::Max, _) => "0x80000000",
             (ReduceOp::And, _) => "0xFFFFFFFF",
@@ -365,7 +369,7 @@ impl DeviceReduceTemplate {
         writeln!(out, "    .reg .{ty}   %val, %shfl;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %np, %warpid, %laneid, %mask, %offset;"
+            "    .reg .u32    %ltid, %np, %warpid, %laneid, %mask, %offset;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(
@@ -380,14 +384,17 @@ impl DeviceReduceTemplate {
         writeln!(out, "    ld.param.u32 %np,       [param_npartials];")
             .map_err(|e| e.to_string())?;
 
-        writeln!(out, "    mov.u32 %tid, %tid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    shr.u32 %warpid, %tid, 5;").map_err(|e| e.to_string())?;
-        writeln!(out, "    and.b32 %laneid, %tid, 31;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32 %ltid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    shr.u32 %warpid, %ltid, 5;").map_err(|e| e.to_string())?;
+        writeln!(out, "    and.b32 %laneid, %ltid, 31;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32 %mask, 0xFFFFFFFF;").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    setp.ge.u32 %p, %tid, %np;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64  %addr, %tid, {elem_bytes}, %ptr_in;")
-            .map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32 %p, %ltid, %np;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    mad.wide.u32  %addr, %ltid, {elem_bytes}, %ptr_in;"
+        )
+        .map_err(|e| e.to_string())?;
         writeln!(out, "    @!%p ld.global.{ty} %val, [%addr];").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p  mov.{ty} %val, {identity};").map_err(|e| e.to_string())?;
 

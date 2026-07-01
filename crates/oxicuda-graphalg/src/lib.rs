@@ -80,3 +80,6 @@ pub use handle::{GraphalgHandle, LcgRng, SmVersion};
 
 #[cfg(test)]
 mod e2e_tests;
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;

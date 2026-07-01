@@ -21,7 +21,7 @@ use crate::format::CsrMatrix;
 use crate::handle::SparseHandle;
 use crate::ptx_helpers::{
     add_float, emit_warp_reduce_sum, fma_float, load_float_imm, load_global_float, mul_float,
-    reinterpret_bits_to_float, store_global_float,
+    ptx_suffix, reinterpret_bits_to_float, store_global_float,
 };
 
 /// Algorithm selection for SpMV.
@@ -182,9 +182,7 @@ fn spmv_vector<T: GpuFloat>(
 
 /// Generates PTX for scalar SpMV (one thread per row).
 fn emit_spmv_scalar<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
-    let _ptx_ty = T::PTX_TYPE;
     let elem_bytes = T::size_u32();
-    let is_f64 = T::SIZE == 8;
 
     KernelBuilder::new("spmv_scalar")
         .target(sm)
@@ -240,9 +238,14 @@ fn emit_spmv_scalar<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 b.raw_ptx(&format!("mov.b32 {re_u32}, {row_end};"));
 
                 b.label(&loop_label);
+                // Exit the loop when k >= row_end. Use the structured `branch_if`
+                // so the branch target is emitted with the same `$`-prefix
+                // convention as `b.label`/`b.branch`; a raw `bra L__...` would not
+                // match the `$L__...:` label definition and `ptxas` would reject it
+                // ("Unknown symbol").
                 let pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred}, {k}, {re_u32};"));
-                b.raw_ptx(&format!("@!{pred} bra {done_label};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred}, {k}, {re_u32};"));
+                b.branch_if(pred, &done_label);
 
                 // Load col_idx[k] (i32 = 4 bytes)
                 let ci_addr = b.byte_offset_addr(col_idx_base.clone(), k.clone(), 4);
@@ -260,7 +263,7 @@ fn emit_spmv_scalar<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
 
                 // acc += val * x_val
                 let new_acc = fma_float::<T>(b, val, x_val, acc.clone());
-                let mov_suffix = if is_f64 { "f64" } else { "f32" };
+                let mov_suffix = ptx_suffix::<T>();
                 b.raw_ptx(&format!("mov.{mov_suffix} {acc}, {new_acc};"));
 
                 // k++
@@ -287,12 +290,7 @@ fn emit_spmv_scalar<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
 
 /// Generates PTX for vector SpMV (one warp per row).
 fn emit_spmv_vector<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
-    let ptx_ty = T::PTX_TYPE;
     let elem_bytes = T::size_u32();
-    let is_f64 = T::SIZE == 8;
-
-    // Suppress unused variable warnings for ptx_ty
-    let _ = ptx_ty;
 
     KernelBuilder::new("spmv_vector")
         .target(sm)
@@ -357,9 +355,11 @@ fn emit_spmv_vector<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let done_label = b.fresh_label("spmv_vdone");
 
                 b.label(&loop_label);
+                // Exit the loop when k >= row_end via the structured `branch_if`
+                // (see the scalar kernel for why a raw `bra` would be rejected).
                 let pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred}, {k}, {row_end};"));
-                b.raw_ptx(&format!("@!{pred} bra {done_label};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred}, {k}, {row_end};"));
+                b.branch_if(pred, &done_label);
 
                 // Load col and value
                 let ci_addr = b.byte_offset_addr(col_idx_base.clone(), k.clone(), 4);
@@ -374,7 +374,7 @@ fn emit_spmv_vector<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let x_val = load_global_float::<T>(b, x_addr);
 
                 let new_acc = fma_float::<T>(b, val, x_val, acc.clone());
-                let mov_suffix = if is_f64 { "f64" } else { "f32" };
+                let mov_suffix = ptx_suffix::<T>();
                 b.raw_ptx(&format!("mov.{mov_suffix} {acc}, {new_acc};"));
 
                 // k += 32 (warp width)
@@ -385,15 +385,14 @@ fn emit_spmv_vector<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 // Warp shuffle reduction
                 let reduced = emit_warp_reduce_sum::<T>(b, acc);
 
-                // Lane 0 writes the result
-                let is_lane_0 = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.eq.u32 {is_lane_0}, {lane}, 0;"));
-
-                let write_label = b.fresh_label("spmv_write");
+                // Only lane 0 writes the row result; every other lane skips ahead.
+                // Branch when lane != 0 using the structured `branch_if` so the
+                // target matches the `$`-prefixed label definition.
+                let not_lane_0 = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ne.u32 {not_lane_0}, {lane}, 0;"));
                 let skip_label = b.fresh_label("spmv_skip");
-                b.raw_ptx(&format!("@!{is_lane_0} bra {skip_label};"));
+                b.branch_if(not_lane_0, &skip_label);
 
-                b.label(&write_label);
                 let y_addr = b.byte_offset_addr(y_ptr, row, elem_bytes);
                 let y_old = load_global_float::<T>(b, y_addr.clone());
 
@@ -414,6 +413,111 @@ fn emit_spmv_vector<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `ptxas -arch=sm_86` on the given PTX, writing it through
+    /// [`std::env::temp_dir`]. Returns `Some(())` on success, `Some` error text
+    /// on assembler rejection, or `None` if `ptxas` is not on `PATH` (so callers
+    /// can skip gracefully on machines without the CUDA toolkit).
+    fn try_ptxas(name: &str, ptx: &str) -> Option<Result<(), String>> {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!("oxicuda_spmv_{name}.ptx"));
+        {
+            let mut f = std::fs::File::create(&path).expect("test: create temp PTX file");
+            f.write_all(ptx.as_bytes())
+                .expect("test: write temp PTX file");
+        }
+        match std::process::Command::new("ptxas")
+            .arg("-arch=sm_86")
+            .arg(&path)
+            .arg("-o")
+            .arg("/dev/null")
+            .output()
+        {
+            Ok(out) if out.status.success() => Some(Ok(())),
+            Ok(out) => Some(Err(String::from_utf8_lossy(&out.stderr).into_owned())),
+            // ptxas missing (no CUDA toolkit): skip gracefully.
+            Err(_) => None,
+        }
+    }
+
+    /// The f64 scalar and vector SpMV kernels must be well-formed double-precision
+    /// PTX: 64-bit value registers, `0D`-prefixed f64 immediates (never an f32
+    /// `0F00000000` zero), no illegal `shfl.sync.down.b64`, and — when `ptxas` is
+    /// available — they must assemble for `sm_86` (RTX A4000). Regression guard for
+    /// the "CUDA: invalid PTX" failure of `cuda_spmv_csr`.
+    #[test]
+    fn spmv_f64_ptx_well_formed_and_assembles() {
+        let scalar = emit_spmv_scalar::<f64>(SmVersion::Sm86).expect("f64 scalar PTX");
+        let vector = emit_spmv_vector::<f64>(SmVersion::Sm86).expect("f64 vector PTX");
+
+        for (name, ptx) in [("scalar", &scalar), ("vector", &vector)] {
+            // f64 value registers are declared 64-bit (`.b64` is the reg-class of f64).
+            assert!(
+                ptx.contains(".reg .b64 %f"),
+                "f64 {name} kernel must declare 64-bit %f value registers:\n{ptx}"
+            );
+            // No f32 zero immediate and no f32-typed float math may leak into the
+            // f64 value path (the GEMM-class antipattern this guards against).
+            assert!(
+                !ptx.contains("0F00000000"),
+                "f64 {name} kernel must not materialize an f32 0.0 immediate:\n{ptx}"
+            );
+            assert!(
+                !ptx.contains(".f32"),
+                "f64 {name} kernel must not contain any .f32-typed instruction:\n{ptx}"
+            );
+            // The f64 zero immediate uses the 16-hex-digit 0D form.
+            assert!(
+                ptx.contains("0D0000000000000000"),
+                "f64 {name} kernel must materialize the f64 0.0 immediate (0D…):\n{ptx}"
+            );
+            // shfl only supports b32; a b64 shuffle is rejected by ptxas.
+            assert!(
+                !ptx.contains("shfl.sync.down.b64"),
+                "f64 {name} kernel must not emit shfl.sync.down.b64:\n{ptx}"
+            );
+            // Genuine double-precision arithmetic must be present.
+            assert!(
+                ptx.contains("fma.rn.f64") && ptx.contains("ld.global.f64"),
+                "f64 {name} kernel must use f64 fma/load instructions:\n{ptx}"
+            );
+        }
+
+        // The vector kernel performs the warp reduction via paired b32 shuffles.
+        assert!(
+            vector.contains("shfl.sync.down.b32"),
+            "f64 vector kernel must reduce via b32 shuffles:\n{vector}"
+        );
+
+        // Assemble with ptxas when present; both kernels must be accepted by sm_86.
+        for (name, ptx) in [("scalar", &scalar), ("vector", &vector)] {
+            match try_ptxas(&format!("f64_{name}"), ptx) {
+                Some(Ok(())) => {}
+                Some(Err(stderr)) => {
+                    panic!("ptxas rejected the f64 {name} SpMV kernel:\n{stderr}\nPTX:\n{ptx}")
+                }
+                None => {
+                    // ptxas unavailable: textual well-formedness checks above stand in.
+                }
+            }
+        }
+    }
+
+    /// The f32 SpMV kernels must keep assembling too (the label fix is shared).
+    #[test]
+    fn spmv_f32_ptx_assembles() {
+        let scalar = emit_spmv_scalar::<f32>(SmVersion::Sm86).expect("f32 scalar PTX");
+        let vector = emit_spmv_vector::<f32>(SmVersion::Sm86).expect("f32 vector PTX");
+        for (name, ptx) in [("scalar", &scalar), ("vector", &vector)] {
+            assert!(
+                ptx.contains(".reg .b32 %f"),
+                "f32 {name} kernel must declare 32-bit %f value registers:\n{ptx}"
+            );
+            if let Some(Err(stderr)) = try_ptxas(&format!("f32_{name}"), ptx) {
+                panic!("ptxas rejected the f32 {name} SpMV kernel:\n{stderr}\nPTX:\n{ptx}");
+            }
+        }
+    }
 
     #[test]
     fn spmv_algo_auto_select() {

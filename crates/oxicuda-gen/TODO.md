@@ -10,7 +10,7 @@ LoRA adapters, and score-network building blocks. Part of
 ## Implementation Status
 
 - **Files:** 52 `.rs` files in src/
-- **Tests:** 590 passing (#[test] count in src/) + 1 doctest
+- **Tests:** 596 passing (#[test] count in src/) + 1 doctest
 - **Crate:** `oxicuda-gen` -- Vol.17 Generative AI Primitives
 
 ### Completed [x]
@@ -147,7 +147,7 @@ through the oxicuda-driver runtime loader (`libcuda.so` / `nvcuda.dll`).
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 590 passing
+- Tests: 596 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All (largest is `ptx_kernels.rs` at ~890 lines)
 - Pure-Rust default features: Yes (Pure Rust Policy)

@@ -9,8 +9,8 @@ alternatives to attention. Part of [OxiCUDA](https://github.com/cool-japan/oxicu
 
 ## Implementation Status
 
-- **Actual SLoC:** ~15,750 (50 files; +selective_scan_parallel.rs +selective_scan_mixed.rs)
-- **Tests:** 660 passing (#[test] count in src/)
+- **Actual SLoC:** ~16,613 (50 files; +selective_scan_parallel.rs +selective_scan_mixed.rs)
+- **Tests:** 678 passing (#[test] count in src/)
 - **Crate:** `oxicuda-mamba` -- Vol.19 State Space Model Primitives
 
 ### Completed [x]
@@ -162,7 +162,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 671 passing
+- Tests: 678 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)

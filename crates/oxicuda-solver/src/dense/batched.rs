@@ -456,7 +456,7 @@ fn batched_solve_name<T: GpuFloat>(n: usize, nrhs: usize) -> String {
 /// Each thread block processes one (or several small) matrices entirely in
 /// shared memory. The algorithm performs column-by-column LU with partial
 /// pivoting using warp shuffle for iamax.
-fn emit_batched_lu<T: GpuFloat>(sm: SmVersion, n: usize) -> SolverResult<String> {
+pub(crate) fn emit_batched_lu<T: GpuFloat>(sm: SmVersion, n: usize) -> SolverResult<String> {
     let name = batched_lu_name::<T>(n);
     let float_ty = T::PTX_TYPE;
 
@@ -515,7 +515,11 @@ fn emit_batched_lu<T: GpuFloat>(sm: SmVersion, n: usize) -> SolverResult<String>
 /// Each thread block handles one matrix. For each column, computes the
 /// Householder vector, stores tau, and applies the reflection to trailing
 /// columns in shared memory.
-fn emit_batched_qr<T: GpuFloat>(sm: SmVersion, m: usize, n: usize) -> SolverResult<String> {
+pub(crate) fn emit_batched_qr<T: GpuFloat>(
+    sm: SmVersion,
+    m: usize,
+    n: usize,
+) -> SolverResult<String> {
     let name = batched_qr_name::<T>(m, n);
     let float_ty = T::PTX_TYPE;
 
@@ -568,7 +572,7 @@ fn emit_batched_qr<T: GpuFloat>(sm: SmVersion, m: usize, n: usize) -> SolverResu
 ///
 /// Each thread block processes one SPD matrix in shared memory, computing
 /// the lower triangular Cholesky factor column by column.
-fn emit_batched_cholesky<T: GpuFloat>(sm: SmVersion, n: usize) -> SolverResult<String> {
+pub(crate) fn emit_batched_cholesky<T: GpuFloat>(sm: SmVersion, n: usize) -> SolverResult<String> {
     let name = batched_cholesky_name::<T>(n);
     let float_ty = T::PTX_TYPE;
 
@@ -611,7 +615,11 @@ fn emit_batched_cholesky<T: GpuFloat>(sm: SmVersion, n: usize) -> SolverResult<S
 ///
 /// Each thread block solves one system: applies pivots to B, then performs
 /// forward substitution (L) and backward substitution (U).
-fn emit_batched_solve<T: GpuFloat>(sm: SmVersion, n: usize, nrhs: usize) -> SolverResult<String> {
+pub(crate) fn emit_batched_solve<T: GpuFloat>(
+    sm: SmVersion,
+    n: usize,
+    nrhs: usize,
+) -> SolverResult<String> {
     let name = batched_solve_name::<T>(n, nrhs);
     let float_ty = T::PTX_TYPE;
 

@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.55).
 
 ## Implementation Status
 
-- **Actual SLoC:** ~20,082 (89 source files)
-- **Tests:** 576 passing (lib + e2e_tests)
+- **Actual SLoC:** ~15,893 (90 source files)
+- **Tests:** 583 passing (lib + e2e_tests)
 - **Pure Rust:** Zero external dependencies beyond `thiserror`
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -128,7 +128,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 576 passing
+- Tests: 583 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features

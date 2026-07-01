@@ -581,7 +581,7 @@ pub fn gaussian_project_ptx(sm: u32) -> String {
 {{
     .reg .u64  %rd<14>;
     .reg .u32  %r<10>;
-    .reg .f32  %f<40>;
+    .reg .f32  %f<80>;
     .reg .pred %p0, %p1;
 
     ld.param.u64  %rd0, [p_means];
@@ -671,10 +671,97 @@ pub fn gaussian_project_ptx(sm: u32) -> String {
     add.u64       %rd9, %rd6, %rd8;
     st.global.f32 [%rd9], %f5;
 
-    add.u64       %rd9, %rd7, %r4;
     cvt.u64.u32   %rd13, %r4;
     add.u64       %rd9, %rd7, %rd13;
     st.global.u8  [%rd9], %r5;
+
+    // ─── EWA 2D covariance: Σ_2d = W·Σ_3d·Wᵀ + 0.3·I,  W = J·R ───
+    rcp.rn.f32    %f40, %f5;             // inv_z = 1/Z
+    mul.f32       %f41, %f40, %f40;      // inv_z² = inv_z*inv_z
+
+    // Jacobian J (2×3): [[fx*inv_z, 0, -fx*X*inv_z²], [0, fy*inv_z, -fy*Y*inv_z²]]
+    mul.f32       %f42, %f20, %f40;      // j00 = fx*inv_z
+    mul.f32       %f43, %f20, %f3;       // fx*X
+    mul.f32       %f43, %f43, %f41;      // fx*X*inv_z²
+    neg.f32       %f44, %f43;            // j02 = -fx*X*inv_z²
+    mul.f32       %f45, %f21, %f40;      // j11 = fy*inv_z
+    mul.f32       %f46, %f21, %f4;       // fy*Y
+    mul.f32       %f46, %f46, %f41;      // fy*Y*inv_z²
+    neg.f32       %f47, %f46;            // j12 = -fy*Y*inv_z²
+
+    // W = J·R (2×3);  R rows: (f25,f26,f27),(f29,f30,f31),(f33,f34,f35)
+    // jac row0 = [j00, 0, j02], jac row1 = [0, j11, j12]
+    mul.f32       %f48, %f42, %f25;      // w00 = j00*r00
+    fma.rn.f32    %f48, %f44, %f33, %f48;//      + j02*r20
+    mul.f32       %f49, %f42, %f26;      // w01 = j00*r01
+    fma.rn.f32    %f49, %f44, %f34, %f49;//      + j02*r21
+    mul.f32       %f50, %f42, %f27;      // w02 = j00*r02
+    fma.rn.f32    %f50, %f44, %f35, %f50;//      + j02*r22
+    mul.f32       %f51, %f45, %f29;      // w10 = j11*r10
+    fma.rn.f32    %f51, %f47, %f33, %f51;//      + j12*r20
+    mul.f32       %f52, %f45, %f30;      // w11 = j11*r11
+    fma.rn.f32    %f52, %f47, %f34, %f52;//      + j12*r21
+    mul.f32       %f53, %f45, %f31;      // w12 = j11*r12
+    fma.rn.f32    %f53, %f47, %f35, %f53;//      + j12*r22
+
+    // Load Σ_3d (9 floats, row-major) from p_cov3d (%rd1) at r4*36
+    mul.wide.u32  %rd8, %r4, 36;
+    add.u64       %rd9, %rd1, %rd8;
+    ld.global.f32 %f54, [%rd9];          // s0 = Σ[0]
+    ld.global.f32 %f55, [%rd9+4];        // s1 = Σ[1]
+    ld.global.f32 %f56, [%rd9+8];        // s2 = Σ[2]
+    ld.global.f32 %f57, [%rd9+12];       // s3 = Σ[3]
+    ld.global.f32 %f58, [%rd9+16];       // s4 = Σ[4]
+    ld.global.f32 %f59, [%rd9+20];       // s5 = Σ[5]
+    ld.global.f32 %f60, [%rd9+24];       // s6 = Σ[6]
+    ld.global.f32 %f61, [%rd9+28];       // s7 = Σ[7]
+    ld.global.f32 %f62, [%rd9+32];       // s8 = Σ[8]
+
+    // WΣ = W·Σ (2×3):  ws[i][j] = Σ_k w[i][k]*Σ[k][j]
+    mul.f32       %f63, %f48, %f54;      // ws00 = w00*s0
+    fma.rn.f32    %f63, %f49, %f57, %f63;//        + w01*s3
+    fma.rn.f32    %f63, %f50, %f60, %f63;//        + w02*s6
+    mul.f32       %f64, %f48, %f55;      // ws01 = w00*s1
+    fma.rn.f32    %f64, %f49, %f58, %f64;//        + w01*s4
+    fma.rn.f32    %f64, %f50, %f61, %f64;//        + w02*s7
+    mul.f32       %f65, %f48, %f56;      // ws02 = w00*s2
+    fma.rn.f32    %f65, %f49, %f59, %f65;//        + w01*s5
+    fma.rn.f32    %f65, %f50, %f62, %f65;//        + w02*s8
+    mul.f32       %f66, %f51, %f54;      // ws10 = w10*s0
+    fma.rn.f32    %f66, %f52, %f57, %f66;//        + w11*s3
+    fma.rn.f32    %f66, %f53, %f60, %f66;//        + w12*s6
+    mul.f32       %f67, %f51, %f55;      // ws11 = w10*s1
+    fma.rn.f32    %f67, %f52, %f58, %f67;//        + w11*s4
+    fma.rn.f32    %f67, %f53, %f61, %f67;//        + w12*s7
+    mul.f32       %f68, %f51, %f56;      // ws12 = w10*s2
+    fma.rn.f32    %f68, %f52, %f59, %f68;//        + w11*s5
+    fma.rn.f32    %f68, %f53, %f62, %f68;//        + w12*s8
+
+    // cov2d = WΣ·Wᵀ (2×2):  c[i][j] = Σ_k ws[i][k]*w[j][k]
+    mul.f32       %f69, %f63, %f48;      // c00 = ws00*w00
+    fma.rn.f32    %f69, %f64, %f49, %f69;//       + ws01*w01
+    fma.rn.f32    %f69, %f65, %f50, %f69;//       + ws02*w02
+    mul.f32       %f70, %f63, %f51;      // c01 = ws00*w10
+    fma.rn.f32    %f70, %f64, %f52, %f70;//       + ws01*w11
+    fma.rn.f32    %f70, %f65, %f53, %f70;//       + ws02*w12
+    mul.f32       %f71, %f66, %f48;      // c10 = ws10*w00
+    fma.rn.f32    %f71, %f67, %f49, %f71;//       + ws11*w01
+    fma.rn.f32    %f71, %f68, %f50, %f71;//       + ws12*w02
+    mul.f32       %f72, %f66, %f51;      // c11 = ws10*w10
+    fma.rn.f32    %f72, %f67, %f52, %f72;//       + ws11*w11
+    fma.rn.f32    %f72, %f68, %f53, %f72;//       + ws12*w12
+
+    // + 0.3·I regularization on the diagonal
+    add.f32       %f69, %f69, {REG03};
+    add.f32       %f72, %f72, {REG03};
+
+    // Store cov2d (4 floats, row-major) to p_out_cov2d (%rd5) at r4*16
+    mul.wide.u32  %rd8, %r4, 16;
+    add.u64       %rd9, %rd5, %rd8;
+    st.global.f32 [%rd9], %f69;
+    st.global.f32 [%rd9+4], %f70;
+    st.global.f32 [%rd9+8], %f71;
+    st.global.f32 [%rd9+12], %f72;
 
 $PJ_DONE:
     mov.u32       %r6, 0;
@@ -699,15 +786,14 @@ $PJ_DONE:
 #[must_use]
 pub fn sh_eval_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
-    let zero = f32_hex(0.0_f32);
     // SH constants
     let y00 = f32_hex(0.282_094_8_f32);
     let y11 = f32_hex(0.488_602_5_f32);
     let y20 = f32_hex(0.315_391_6_f32);
     let y21a = f32_hex(1.092_548_4_f32);
     let y22a = f32_hex(0.546_274_2_f32);
-    let c05 = f32_hex(0.5_f32);
-    let c15 = f32_hex(1.5_f32);
+    let three = f32_hex(3.0_f32);
+    let neg_one = f32_hex(-1.0_f32);
     format!(
         r#"{hdr}// sh_eval_kernel: evaluate SH coefficients at direction (dx,dy,dz) for L=0..2.
 // p_sh: float[n * 27] (sh coefficients per gaussian, RGB interleaved: 9 per channel),
@@ -724,7 +810,7 @@ pub fn sh_eval_ptx(sm: u32) -> String {
 {{
     .reg .u64  %rd<14>;
     .reg .u32  %r<10>;
-    .reg .f32  %f<32>;
+    .reg .f32  %f<48>;
     .reg .pred %p0;
 
     ld.param.u64  %rd0, [p_sh];
@@ -746,8 +832,6 @@ pub fn sh_eval_ptx(sm: u32) -> String {
     mov.f32       %f22, {Y20};
     mov.f32       %f23, {Y21A};
     mov.f32       %f24, {Y22A};
-    mov.f32       %f25, {C05};
-    mov.f32       %f26, {C15};
 
     // Load direction
     mul.wide.u32  %rd3, %r4, 12;
@@ -758,82 +842,98 @@ pub fn sh_eval_ptx(sm: u32) -> String {
     add.u64       %rd6, %rd4, 8;
     ld.global.f32 %f2, [%rd6];           // dz
 
-    // Compute SH basis values
-    // L=0: Y00 (constant)
-    // L=1: Y11*x, Y11*y, Y11*z (but Y1-1=y, Y10=z, Y11=x in common convention)
-    // L=2: Y20*(3z²-1)/2 * C, Y21a*xz, Y21b*yz, Y22a*(x²-y²), Y22b*xy
+    // Precompute the 9 SH basis values once (shared across R/G/B channels):
+    //   B0=Y00, B1=Y11*dx, B2=Y11*dy, B3=Y11*dz, B4=Y20*(3dz²-1),
+    //   B5=Y21A*dx*dz, B6=Y21A*dy*dz, B7=Y22A*(dx²-dy²), B8=Y21A*dx*dy
+    mul.f32       %f3, %f21, %f0;        // B1 = Y11*dx
+    mul.f32       %f4, %f21, %f1;        // B2 = Y11*dy
+    mul.f32       %f5, %f21, %f2;        // B3 = Y11*dz
+    mul.f32       %f6, %f2, %f2;         // dz²
+    fma.rn.f32    %f7, %f6, {THREE}, {NEGONE}; // 3dz²-1
+    mul.f32       %f7, %f7, %f22;        // B4 = Y20*(3dz²-1)
+    mul.f32       %f8, %f0, %f2;         // dx*dz
+    mul.f32       %f8, %f8, %f23;        // B5 = Y21A*dx*dz
+    mul.f32       %f9, %f1, %f2;         // dy*dz
+    mul.f32       %f9, %f9, %f23;        // B6 = Y21A*dy*dz
+    mul.f32       %f10, %f0, %f0;        // dx²
+    mul.f32       %f11, %f1, %f1;        // dy²
+    sub.f32       %f13, %f10, %f11;      // dx²-dy²
+    mul.f32       %f13, %f13, %f24;      // B7 = Y22A*(dx²-dy²)
+    mul.f32       %f12, %f0, %f1;        // dx*dy
+    mul.f32       %f14, %f12, %f23;      // B8 = Y21A*dx*dy
 
-    // Load SH coefficients (27 per Gaussian: 9 per RGB channel)
-    mul.lo.u32    %r5, %r4, 27;
-    mul.wide.u32  %rd7, %r4, 108;        // r4 * 27 * 4
+    // sh coeff base: p_sh + r4*108  (27 floats per Gaussian)
+    mul.wide.u32  %rd7, %r4, 108;
     add.u64       %rd8, %rd0, %rd7;
 
-    // For R channel (offset 0), G (offset 9*4=36), B (offset 18*4=72)
-    // L=0 basis: Y00
-    // Result R:
-    ld.global.f32 %f3, [%rd8];           // sh_r[0] = L0 coeff
-    mul.f32       %f27, %f3, %f20;       // Y00 * c0
-
-    // L=1: c1*Y11*x, c2*Y11*y, c3*Y11*z
-    add.u64 %rd9, %rd8, 4;  ld.global.f32 %f4, [%rd9];
-    add.u64 %rd9, %rd8, 8;  ld.global.f32 %f5, [%rd9];
-    add.u64 %rd9, %rd8, 12; ld.global.f32 %f6, [%rd9];
-    fma.rn.f32    %f27, %f4, %f21, %f27;  // += c1 * Y11 * (using x approx)
-    mul.f32       %f28, %f5, %f21;
-    fma.rn.f32    %f27, %f28, %f1, %f27;  // += c2 * Y11 * dy
-    mul.f32       %f28, %f6, %f21;
-    fma.rn.f32    %f27, %f28, %f2, %f27;  // += c3 * Y11 * dz
-
-    // L=2 basis
-    mul.f32       %f29, %f2, %f2;          // dz^2
-    fma.rn.f32    %f29, %f29, %f26, {NEG_C05};// 3*dz^2 - 1 ... simplified
-    mul.f32       %f30, %f29, %f22;        // Y20 basis
-
-    add.u64 %rd9, %rd8, 16; ld.global.f32 %f7, [%rd9];
-    fma.rn.f32    %f27, %f7, %f30, %f27;  // += c4 * Y20_basis
-
-    // Store R output
+    // output base: p_out + r4*12
     mul.wide.u32  %rd10, %r4, 12;
     add.u64       %rd11, %rd2, %rd10;
+
+    // ---- R channel (coeffs at byte offset 0) ----
+    ld.global.f32 %f15, [%rd8];
+    mul.f32       %f27, %f15, %f20;      // sh0*Y00
+    ld.global.f32 %f15, [%rd8+4];
+    fma.rn.f32    %f27, %f15, %f3,  %f27;
+    ld.global.f32 %f15, [%rd8+8];
+    fma.rn.f32    %f27, %f15, %f4,  %f27;
+    ld.global.f32 %f15, [%rd8+12];
+    fma.rn.f32    %f27, %f15, %f5,  %f27;
+    ld.global.f32 %f15, [%rd8+16];
+    fma.rn.f32    %f27, %f15, %f7,  %f27;
+    ld.global.f32 %f15, [%rd8+20];
+    fma.rn.f32    %f27, %f15, %f8,  %f27;
+    ld.global.f32 %f15, [%rd8+24];
+    fma.rn.f32    %f27, %f15, %f9,  %f27;
+    ld.global.f32 %f15, [%rd8+28];
+    fma.rn.f32    %f27, %f15, %f13, %f27;
+    ld.global.f32 %f15, [%rd8+32];
+    fma.rn.f32    %f27, %f15, %f14, %f27;
     st.global.f32 [%rd11], %f27;
 
-    // G channel (offset 36 bytes = 9 * 4)
-    add.u64       %rd12, %rd8, 36;
-    ld.global.f32 %f8, [%rd12];
-    mul.f32       %f31, %f8, %f20;
+    // ---- G channel (coeffs at byte offset 36) ----
+    add.u64       %rd9, %rd8, 36;
+    ld.global.f32 %f15, [%rd9];
+    mul.f32       %f28, %f15, %f20;
+    ld.global.f32 %f15, [%rd9+4];
+    fma.rn.f32    %f28, %f15, %f3,  %f28;
+    ld.global.f32 %f15, [%rd9+8];
+    fma.rn.f32    %f28, %f15, %f4,  %f28;
+    ld.global.f32 %f15, [%rd9+12];
+    fma.rn.f32    %f28, %f15, %f5,  %f28;
+    ld.global.f32 %f15, [%rd9+16];
+    fma.rn.f32    %f28, %f15, %f7,  %f28;
+    ld.global.f32 %f15, [%rd9+20];
+    fma.rn.f32    %f28, %f15, %f8,  %f28;
+    ld.global.f32 %f15, [%rd9+24];
+    fma.rn.f32    %f28, %f15, %f9,  %f28;
+    ld.global.f32 %f15, [%rd9+28];
+    fma.rn.f32    %f28, %f15, %f13, %f28;
+    ld.global.f32 %f15, [%rd9+32];
+    fma.rn.f32    %f28, %f15, %f14, %f28;
+    st.global.f32 [%rd11+4], %f28;
 
-    add.u64 %rd9, %rd12, 4;  ld.global.f32 %f9,  [%rd9];
-    add.u64 %rd9, %rd12, 8;  ld.global.f32 %f10, [%rd9];
-    add.u64 %rd9, %rd12, 12; ld.global.f32 %f11, [%rd9];
-    fma.rn.f32    %f31, %f9,  %f21, %f31;
-    mul.f32       %f28, %f10, %f21;
-    fma.rn.f32    %f31, %f28, %f1, %f31;
-    mul.f32       %f28, %f11, %f21;
-    fma.rn.f32    %f31, %f28, %f2, %f31;
-    add.u64 %rd9, %rd12, 16; ld.global.f32 %f12, [%rd9];
-    fma.rn.f32    %f31, %f12, %f30, %f31;
-    add.u64 %rd13, %rd11, 4;
-    st.global.f32 [%rd13], %f31;
-
-    // B channel (offset 72 bytes = 18 * 4)
-    add.u64       %rd12, %rd8, 72;
-    ld.global.f32 %f13, [%rd12];
-    mul.f32       %f32, %f13, %f20;       // wait, need reg < 32 - reuse f27
-
-    mov.f32       %f27, {ZERO};
-    fma.rn.f32    %f27, %f13, %f20, %f27;
-    add.u64 %rd9, %rd12, 4;  ld.global.f32 %f14, [%rd9];
-    fma.rn.f32    %f27, %f14, %f21, %f27;
-    add.u64 %rd9, %rd12, 8;  ld.global.f32 %f15, [%rd9];
-    mul.f32       %f28, %f15, %f21;
-    fma.rn.f32    %f27, %f28, %f1, %f27;
-    add.u64 %rd9, %rd12, 12; ld.global.f32 %f16, [%rd9];
-    mul.f32       %f28, %f16, %f21;
-    fma.rn.f32    %f27, %f28, %f2, %f27;
-    add.u64 %rd9, %rd12, 16; ld.global.f32 %f17, [%rd9];
-    fma.rn.f32    %f27, %f17, %f30, %f27;
-    add.u64 %rd13, %rd11, 8;
-    st.global.f32 [%rd13], %f27;
+    // ---- B channel (coeffs at byte offset 72) ----
+    add.u64       %rd9, %rd8, 72;
+    ld.global.f32 %f15, [%rd9];
+    mul.f32       %f29, %f15, %f20;
+    ld.global.f32 %f15, [%rd9+4];
+    fma.rn.f32    %f29, %f15, %f3,  %f29;
+    ld.global.f32 %f15, [%rd9+8];
+    fma.rn.f32    %f29, %f15, %f4,  %f29;
+    ld.global.f32 %f15, [%rd9+12];
+    fma.rn.f32    %f29, %f15, %f5,  %f29;
+    ld.global.f32 %f15, [%rd9+16];
+    fma.rn.f32    %f29, %f15, %f7,  %f29;
+    ld.global.f32 %f15, [%rd9+20];
+    fma.rn.f32    %f29, %f15, %f8,  %f29;
+    ld.global.f32 %f15, [%rd9+24];
+    fma.rn.f32    %f29, %f15, %f9,  %f29;
+    ld.global.f32 %f15, [%rd9+28];
+    fma.rn.f32    %f29, %f15, %f13, %f29;
+    ld.global.f32 %f15, [%rd9+32];
+    fma.rn.f32    %f29, %f15, %f14, %f29;
+    st.global.f32 [%rd11+8], %f29;
 
 $SH_DONE:
     mov.u32       %r6, 0;
@@ -848,10 +948,8 @@ $SH_DONE:
         Y20 = y20,
         Y21A = y21a,
         Y22A = y22a,
-        C05 = c05,
-        C15 = c15,
-        ZERO = zero,
-        NEG_C05 = f32_hex(-0.5_f32),
+        THREE = three,
+        NEGONE = neg_one,
     )
 }
 

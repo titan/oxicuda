@@ -9,8 +9,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.21).
 
 ## Implementation Status
 
-- **Actual SLoC:** ~24,900 (68 files)
-- **Tests:** 845 passing (#[test] count in src/)
+- **Actual SLoC:** ~24,396 (68 files)
+- **Tests:** 853 passing (#[test] count in src/)
 - **Crate:** `oxicuda-audio` -- Vol.21 Audio/Speech ML Architectures
 
 ### Completed [x]
@@ -209,7 +209,7 @@ consumed via the `LogMelInput` adapter.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 845 passing
+- Tests: 853 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All
 - Pure-Rust default features: Yes (Pure Rust Policy)

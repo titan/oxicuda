@@ -179,3 +179,165 @@ fn matvec_batch(x: &[f32], w: &[f32], n: usize, d_in: usize, d_out: usize) -> Ve
     }
     out
 }
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    fn make_rng(seed: u64) -> LcgRng {
+        LcgRng::new(seed)
+    }
+
+    fn tiny_model(rng: &mut LcgRng) -> AutoInt {
+        AutoInt::new(vec![4, 5, 3], 4, 2, rng).expect("must build")
+    }
+
+    #[test]
+    fn output_in_unit_interval() {
+        let mut rng = make_rng(1);
+        let model = tiny_model(&mut rng);
+        let p = model.forward(&[1, 2, 0]).expect("forward must succeed");
+        assert!((0.0..=1.0).contains(&p), "output {p} not in [0,1]");
+    }
+
+    #[test]
+    fn deterministic_same_seed() {
+        let mut rng = make_rng(2);
+        let model = tiny_model(&mut rng);
+        let p1 = model.forward(&[0, 0, 0]).expect("must succeed");
+        let p2 = model.forward(&[0, 0, 0]).expect("must succeed");
+        assert_eq!(p1, p2, "same input must yield identical output");
+    }
+
+    #[test]
+    fn finite_output() {
+        let mut rng = make_rng(3);
+        let model = tiny_model(&mut rng);
+        let p = model.forward(&[3, 4, 2]).expect("forward must succeed");
+        assert!(p.is_finite(), "output must be finite, got {p}");
+    }
+
+    /// Set Wq=0, Wk=0 so all attention scores are 0 → softmax is uniform (1/n_fields per row).
+    /// Set Wv=I so V=X (embeddings unchanged). Compute the expected post-residual pooled
+    /// representation analytically and verify forward() matches to within 1e-5.
+    ///
+    /// This simultaneously tests:
+    ///   • softmax gives non-negative weights summing to 1 (uniform case)
+    ///   • residual: x_new[i] = (x[i] + attn_out[i]).max(0)
+    ///   • output dot product with output_w
+    #[test]
+    fn attention_uniform_qk_zero_identity_v_matches_analytic() {
+        let mut rng = make_rng(55);
+        let field_dims = vec![2, 2]; // 2 fields, cardinality 2 each
+        let emb_dim = 2;
+        let mut model = AutoInt::new(field_dims, emb_dim, 1, &mut rng).expect("must build");
+
+        // Known embeddings: field 0 val 0 → [1,2], field 1 val 0 → [3,4]
+        model.embeddings[0] = vec![1.0, 2.0, 0.0, 0.0];
+        model.embeddings[1] = vec![3.0, 4.0, 0.0, 0.0];
+
+        let d = emb_dim;
+        let zeros = vec![0.0_f32; d * d];
+        let mut identity = vec![0.0_f32; d * d];
+        for i in 0..d {
+            identity[i * d + i] = 1.0;
+        }
+
+        model.attn_layers[0].0 = zeros.clone(); // Wq = 0  → Q = 0
+        model.attn_layers[0].1 = zeros.clone(); // Wk = 0  → K = 0
+        model.attn_layers[0].2 = identity; //      Wv = I  → V = X
+
+        // Derivation (n_fields=2, d=2):
+        //   Q=K=0 ⟹ attn_score[i,j]=0 ∀i,j ⟹ softmax row = [0.5, 0.5]
+        //   V = X: v0=[1,2], v1=[3,4]
+        //   attn_out[0] = 0.5·v0 + 0.5·v1 = [2.0, 3.0]
+        //   attn_out[1] = 0.5·v0 + 0.5·v1 = [2.0, 3.0]
+        //   residual+ReLU:
+        //     x_new[0..2] = (x0 + attn_out[0]).max(0) = ([1+2,2+3]).max(0) = [3.0, 5.0]
+        //     x_new[2..4] = (x1 + attn_out[1]).max(0) = ([3+2,4+3]).max(0) = [5.0, 7.0]
+        let expected_pooled = [3.0_f32, 5.0, 5.0, 7.0];
+        let expected_logit = model.output_b
+            + expected_pooled
+                .iter()
+                .zip(model.output_w.iter())
+                .map(|(&xi, &wi)| xi * wi)
+                .sum::<f32>();
+        let expected_p = 1.0 / (1.0 + (-expected_logit).exp());
+
+        let p = model.forward(&[0, 0]).expect("forward must succeed");
+        assert!(
+            (p - expected_p).abs() < 1e-5,
+            "analytic attention+residual: got {p}, want {expected_p}"
+        );
+    }
+
+    /// Verify the residual connection is active: the output with residual (x + attn_out)
+    /// must differ from the output of pure attention only (attn_out alone, without adding x).
+    /// Uses the same zero-Wq/Wk, identity-Wv setup so the expected pure-attention pooled
+    /// representation can be computed analytically as [2,3,2,3].
+    #[test]
+    fn residual_changes_output_versus_attention_only() {
+        let mut rng = make_rng(56);
+        let field_dims = vec![2, 2];
+        let emb_dim = 2;
+        let mut model = AutoInt::new(field_dims, emb_dim, 1, &mut rng).expect("must build");
+
+        model.embeddings[0] = vec![1.0, 2.0, 0.0, 0.0];
+        model.embeddings[1] = vec![3.0, 4.0, 0.0, 0.0];
+
+        let d = emb_dim;
+        let zeros = vec![0.0_f32; d * d];
+        let mut identity = vec![0.0_f32; d * d];
+        for i in 0..d {
+            identity[i * d + i] = 1.0;
+        }
+        model.attn_layers[0].0 = zeros.clone();
+        model.attn_layers[0].1 = zeros.clone();
+        model.attn_layers[0].2 = identity;
+
+        let p_with_residual = model.forward(&[0, 0]).expect("forward must succeed");
+
+        // Without residual the pooled representation would be attn_out.max(0) = [2,3,2,3].
+        // (attn_out[i] = mean(X) = 0.5·[1,2]+0.5·[3,4] = [2,3] for both rows; all positive.)
+        let attn_only_pooled = [2.0_f32, 3.0, 2.0, 3.0];
+        let logit_no_residual = model.output_b
+            + attn_only_pooled
+                .iter()
+                .zip(model.output_w.iter())
+                .map(|(&xi, &wi)| xi * wi)
+                .sum::<f32>();
+        let p_no_residual = 1.0 / (1.0 + (-logit_no_residual).exp());
+
+        // The actual pooled is [3,5,5,7] (with residual) vs [2,3,2,3] (without).
+        // Unless output_w is exactly orthogonal to [1,2,3,4], they differ.
+        assert!(
+            (p_with_residual - p_no_residual).abs() > 1e-6,
+            "residual must change output: with={p_with_residual}, without={p_no_residual}"
+        );
+    }
+
+    #[test]
+    fn wrong_field_count_errors() {
+        let mut rng = make_rng(4);
+        let model = tiny_model(&mut rng); // 3 fields
+        let err = model.forward(&[0, 0]); // 2 fields given → mismatch
+        assert!(matches!(err, Err(RecsysError::DimensionMismatch { .. })));
+    }
+
+    #[test]
+    fn empty_field_dims_rejected() {
+        let mut rng = make_rng(5);
+        let err = AutoInt::new(vec![], 4, 2, &mut rng);
+        assert!(matches!(err, Err(RecsysError::EmptyInput)));
+    }
+
+    #[test]
+    fn zero_emb_dim_rejected() {
+        let mut rng = make_rng(6);
+        let err = AutoInt::new(vec![3, 3], 0, 2, &mut rng);
+        assert!(matches!(err, Err(RecsysError::InvalidEmbeddingDim { .. })));
+    }
+}

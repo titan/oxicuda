@@ -6,7 +6,7 @@ Anomaly detection primitives for OxiCUDA (DeepSVDD, autoencoder / VAE reconstruc
 
 ## Implementation Status
 
-**Actual: ~23,650 SLoC (69 source files + 1 benches file) -- Coverage: deep / distance / density / statistical / ensemble anomaly families**
+**Actual: ~25,527 SLoC (69 source files + 1 benches file) -- Coverage: deep / distance / density / statistical / ensemble anomaly families**
 
 Current implementation covers all canonical anomaly-detection families: DeepSVDD (Ruff et al. 2018, 3-layer MLP with hypersphere-collapse prevention via no-bias last layer); autoencoder + VAE reconstruction-based scoring; LOF (Breunig et al. 2000) brute-force k-NN local outlier factor; pure k-NN distance baseline; COPOD (Li et al. 2020) empirical-CDF copula-based scoring with optional skewness adjustment; Mahalanobis distance with Gauss-Jordan covariance inversion and ridge stabilisation; Isolation Scorer (random-projection path-length estimation with `c(n) = 2H(n - 1) - 2(n - 1) / n` adjustment); MAD (`MAD = 1.4826 * median|x_i - mu|`) and Z-score (Welford online) statistical detectors; ensemble combiner (Average / Maximum / Weighted with per-detector min-max normalisation); AUC-ROC / AUC-PR / F1@threshold metrics.
 
@@ -115,7 +115,7 @@ Current implementation covers all canonical anomaly-detection families: DeepSVDD
 
 ## Quality Status
 
-- Tests: 601 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 611 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
@@ -144,8 +144,8 @@ Target: scoring throughput comparable to PyOD CPU reference and (for deep detect
 | Metric | Description | Actual |
 |--------|-------------|--------|
 | Files | source `.rs` files under `src/` | 69 |
-| SLoC | code lines (tokei) | ~23,650 |
-| Tests | e2e + unit | 601 |
+| SLoC | code lines (tokei) | ~25,527 |
+| Tests | e2e + unit | 611 |
 | Coverage | detector families | 5 (deep, distance, density, isolation, statistical) |
 | Coverage | ensemble methods | 3 (Average, Maximum, Weighted) |
 

@@ -23,6 +23,10 @@ serde           = { workspace = true, features = ["derive"], optional = true }
 [features]
 default = []
 serialize = ["serde"]
+# On-device GPU validation harness (`src/gpu_tests.rs`). The driver / memory /
+# launch infra crates are already normal dependencies, so no extra dev-deps are
+# needed; this flag only gates the test module.
+gpu-tests = []
 
 [dev-dependencies]
 approx = { workspace = true }

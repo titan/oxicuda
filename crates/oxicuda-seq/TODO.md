@@ -10,7 +10,7 @@ propagation. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.51).
 
 ## Implementation Status
 
-**Actual: 6,021 lines / 20,887 SLoC (88 files)** — implements every major sequence /
+**Actual: 6,021 lines / 25,130 SLoC (96 files)** — implements every major sequence /
 structured-prediction algorithm in pure Rust with log-space numerics for stability,
 including L-BFGS for CRF training and Hirschberg O(min(m, n))-memory alignment.
 
@@ -204,7 +204,7 @@ implemented from scratch; L-BFGS is implemented from scratch with two-loop recur
   intentionally allowed crate-wide because numerical kernels index multiple parallel
   arrays per iteration body and rewriting them in iterator form would obscure the
   math)
-- Tests: 17 e2e tests passing (host-side); PTX kernel strings validated per SM version
+- Tests: 706 passing (host-side); PTX kernel strings validated per SM version
 - `unwrap()` calls in production code: 0
 - `unsafe` code: 0
 - macOS: compiles; GPU integration paths return `UnsupportedPlatform` at runtime

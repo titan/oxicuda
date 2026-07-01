@@ -29,6 +29,7 @@ pub fn als_step_ptx(sm: u32) -> String {
     .reg .u64 %rd<8>;
     .reg .u32 %r<8>;
     .reg .f32 %f<16>;
+    .reg .pred %p0;
 
     ld.param.u64 %rd0, [param_user_emb];
     ld.param.u64 %rd1, [param_item_emb];
@@ -65,7 +66,8 @@ als_done:
 pub fn bpr_grad_ptx(sm: u32) -> String {
     let ver = ptx_version(sm);
     let one_hex = format!("0F{:08X}", 1.0_f32.to_bits());
-    let neg_one_hex = format!("0F{:08X}", (-1.0_f32).to_bits());
+    // log2(e) = 1.4426950408..  — pre-scale for ex2.approx.f32 to evaluate exp().
+    let log2e_hex = format!("0F{:08X}", std::f32::consts::LOG2_E.to_bits());
     format!(
         r#".version {ver}
 .target sm_{sm}
@@ -80,9 +82,9 @@ pub fn bpr_grad_ptx(sm: u32) -> String {
     .param .f32 param_reg
 )
 {{
-    .reg .u64 %rd<6>;
-    .reg .u32 %r<6>;
-    .reg .f32 %f<12>;
+    .reg .u64 %rd<8>;
+    .reg .u32 %r<4>;
+    .reg .f32 %f<16>;
     .reg .pred %p0;
 
     ld.param.u64 %rd0, [param_user_emb];
@@ -92,25 +94,80 @@ pub fn bpr_grad_ptx(sm: u32) -> String {
     ld.param.f32 %f0, [param_lr];
     ld.param.f32 %f1, [param_reg];
 
-    mov.u32 %r1, %ctaid.x;
-    mov.u32 %r2, %ntid.x;
-    mov.u32 %r3, %tid.x;
-    mad.lo.u32 %r4, %r1, %r2, %r3;
+    // One thread, one pre-gathered (user, pos, neg) triplet.
+    // Pass 1: x_ui = dot(u, pos), x_uj = dot(u, neg).
+    mov.f32 %f2, 0F00000000;
+    mov.f32 %f3, 0F00000000;
+    mov.u64 %rd3, %rd0;
+    mov.u64 %rd4, %rd1;
+    mov.u64 %rd5, %rd2;
+    mov.u32 %r1, 0;
+bpr_dot_loop:
+    setp.ge.u32 %p0, %r1, %r0;
+    @%p0 bra bpr_dot_done;
+    ld.global.f32 %f4, [%rd3];
+    ld.global.f32 %f5, [%rd4];
+    ld.global.f32 %f6, [%rd5];
+    fma.rn.f32 %f2, %f4, %f5, %f2;
+    fma.rn.f32 %f3, %f4, %f6, %f3;
+    add.u64 %rd3, %rd3, 4;
+    add.u64 %rd4, %rd4, 4;
+    add.u64 %rd5, %rd5, 4;
+    add.u32 %r1, %r1, 1;
+    bra bpr_dot_loop;
+bpr_dot_done:
+    // sigma = 1 / (1 + exp(-x)),  x = x_ui - x_uj.
+    // exp(-x) = ex2.approx.f32((x_uj - x_ui) * log2(e)).
+    sub.f32 %f7, %f3, %f2;
+    mov.f32 %f8, {log2e_hex};
+    mul.f32 %f7, %f7, %f8;
+    ex2.approx.f32 %f7, %f7;
+    mov.f32 %f9, {one_hex};
+    add.f32 %f7, %f7, %f9;
+    rcp.rn.f32 %f7, %f7;
+    // g = 1 - sigma (BPR gradient factor).
+    sub.f32 %f10, %f9, %f7;
 
-    // x_uij = dot(u, i_pos) - dot(u, i_neg)
-    // sigmoid(x_uij) for gradient computation
-    mov.f32 %f2, {one_hex};
-    mov.f32 %f3, {neg_one_hex};
-
-    // grad_u = (1 - sigma(x_uij)) * (i_pos - i_neg)
-    // grad_i_pos = (1 - sigma(x_uij)) * u
-    // grad_i_neg = -(1 - sigma(x_uij)) * u
-    mov.u32 %r5, 0;
-bpr_loop:
-    setp.ge.u32 %p0, %r5, %r0;
+    // Pass 2: SGD update reading ORIGINAL u_k, p_k, n_k first, then storing.
+    mov.u64 %rd3, %rd0;
+    mov.u64 %rd4, %rd1;
+    mov.u64 %rd5, %rd2;
+    mov.u32 %r1, 0;
+bpr_upd_loop:
+    setp.ge.u32 %p0, %r1, %r0;
     @%p0 bra bpr_done;
-    add.u32 %r5, %r5, 1;
-    bra bpr_loop;
+    ld.global.f32 %f4, [%rd3];
+    ld.global.f32 %f5, [%rd4];
+    ld.global.f32 %f6, [%rd5];
+
+    // user[k] += lr * (g * (p_k - n_k) - reg * u_k)
+    sub.f32 %f11, %f5, %f6;
+    mul.f32 %f11, %f10, %f11;
+    mul.f32 %f12, %f1, %f4;
+    sub.f32 %f11, %f11, %f12;
+    fma.rn.f32 %f13, %f0, %f11, %f4;
+    st.global.f32 [%rd3], %f13;
+
+    // pos[k] += lr * (g * u_k - reg * p_k)
+    mul.f32 %f11, %f10, %f4;
+    mul.f32 %f12, %f1, %f5;
+    sub.f32 %f11, %f11, %f12;
+    fma.rn.f32 %f13, %f0, %f11, %f5;
+    st.global.f32 [%rd4], %f13;
+
+    // neg[k] += lr * (-g * u_k - reg * n_k)
+    mul.f32 %f11, %f10, %f4;
+    neg.f32 %f11, %f11;
+    mul.f32 %f12, %f1, %f6;
+    sub.f32 %f11, %f11, %f12;
+    fma.rn.f32 %f13, %f0, %f11, %f6;
+    st.global.f32 [%rd5], %f13;
+
+    add.u64 %rd3, %rd3, 4;
+    add.u64 %rd4, %rd4, 4;
+    add.u64 %rd5, %rd5, 4;
+    add.u32 %r1, %r1, 1;
+    bra bpr_upd_loop;
 bpr_done:
     ret;
 }}
@@ -134,8 +191,8 @@ pub fn embedding_lookup_ptx(sm: u32) -> String {
     .param .u32 param_n_lookups
 )
 {{
-    .reg .u64 %rd<8>;
-    .reg .u32 %r<8>;
+    .reg .u64 %rd<16>;
+    .reg .u32 %r<10>;
     .reg .f32 %f<4>;
     .reg .pred %p0;
 
@@ -153,21 +210,35 @@ pub fn embedding_lookup_ptx(sm: u32) -> String {
     setp.ge.u32 %p0, %r5, %r1;
     @%p0 bra emb_done;
 
-    // Load index, compute row offset, copy emb_dim floats to output
+    // index = indices[tid]
     cvt.u64.u32 %rd3, %r5;
     shl.b64 %rd4, %rd3, 2;
     add.u64 %rd5, %rd1, %rd4;
     ld.global.u32 %r6, [%rd5];
 
-    // output[tid * emb_dim : (tid+1)*emb_dim] = emb_table[index * emb_dim : ...]
-    cvt.u64.u32 %rd6, %r6;
-    mul.lo.u64 %rd7, %rd6, 4;
-    add.u64 %rd4, %rd0, %rd7;
+    // emb_dim as u64 (row stride in elements)
+    cvt.u64.u32 %rd7, %r0;
 
+    // src_row = emb_table + index * emb_dim * sizeof(f32)
+    cvt.u64.u32 %rd6, %r6;
+    mul.lo.u64 %rd8, %rd6, %rd7;
+    shl.b64 %rd9, %rd8, 2;
+    add.u64 %rd10, %rd0, %rd9;
+
+    // dst_row = output + tid * emb_dim * sizeof(f32)
+    mul.lo.u64 %rd11, %rd3, %rd7;
+    shl.b64 %rd12, %rd11, 2;
+    add.u64 %rd13, %rd2, %rd12;
+
+    // out[tid, 0..emb_dim] = emb_table[index, 0..emb_dim]
     mov.u32 %r7, 0;
 emb_loop:
     setp.ge.u32 %p0, %r7, %r0;
     @%p0 bra emb_done;
+    ld.global.f32 %f0, [%rd10];
+    st.global.f32 [%rd13], %f0;
+    add.u64 %rd10, %rd10, 4;
+    add.u64 %rd13, %rd13, 4;
     add.u32 %r7, %r7, 1;
     bra emb_loop;
 emb_done:
@@ -194,7 +265,7 @@ pub fn dot_score_ptx(sm: u32) -> String {
     .param .u32 param_n_items
 )
 {{
-    .reg .u64 %rd<8>;
+    .reg .u64 %rd<16>;
     .reg .u32 %r<8>;
     .reg .f32 %f<8>;
     .reg .pred %p0;
@@ -213,16 +284,32 @@ pub fn dot_score_ptx(sm: u32) -> String {
     setp.ge.u32 %p0, %r5, %r1;
     @%p0 bra score_done;
 
-    // dot = sum_d user_emb[d] * item_embs[item_id * dim + d]
+    // item_row = item_embs + i * dim * sizeof(f32); user_ptr = user_emb
+    cvt.u64.u32 %rd3, %r5;
+    cvt.u64.u32 %rd4, %r0;
+    mul.lo.u64 %rd5, %rd3, %rd4;
+    shl.b64 %rd6, %rd5, 2;
+    add.u64 %rd7, %rd1, %rd6;
+    mov.u64 %rd8, %rd0;
+
+    // dot = sum_d user_emb[d] * item_embs[i * dim + d]
     mov.f32 %f0, {zero_hex};
     mov.u32 %r6, 0;
 dot_loop:
     setp.ge.u32 %p0, %r6, %r0;
     @%p0 bra dot_accum;
+    ld.global.f32 %f1, [%rd8];
+    ld.global.f32 %f2, [%rd7];
+    fma.rn.f32 %f0, %f1, %f2, %f0;
+    add.u64 %rd8, %rd8, 4;
+    add.u64 %rd7, %rd7, 4;
     add.u32 %r6, %r6, 1;
     bra dot_loop;
 dot_accum:
-    // store score
+    // scores[i] = dot
+    shl.b64 %rd9, %rd3, 2;
+    add.u64 %rd10, %rd2, %rd9;
+    st.global.f32 [%rd10], %f0;
 score_done:
     ret;
 }}
@@ -361,7 +448,6 @@ neg_done:
 /// LightGCN propagation PTX kernel.
 pub fn lightgcn_propagate_ptx(sm: u32) -> String {
     let ver = ptx_version(sm);
-    let zero_hex = format!("0F{:08X}", 0.0_f32.to_bits());
     format!(
         r#".version {ver}
 .target sm_{sm}
@@ -379,8 +465,8 @@ pub fn lightgcn_propagate_ptx(sm: u32) -> String {
     .param .u32 param_emb_dim
 )
 {{
-    .reg .u64 %rd<12>;
-    .reg .u32 %r<8>;
+    .reg .u64 %rd<26>;
+    .reg .u32 %r<10>;
     .reg .f32 %f<8>;
     .reg .pred %p0;
 
@@ -402,15 +488,56 @@ pub fn lightgcn_propagate_ptx(sm: u32) -> String {
     setp.ge.u32 %p0, %r5, %r0;
     @%p0 bra lgcn_done;
 
-    // For each edge (u, i): weight = 1 / sqrt(deg_u * deg_i)
-    // out_user[u] += weight * item_emb[i]
-    // out_item[i] += weight * user_emb[u]
-    mov.f32 %f0, {zero_hex};
-    mov.u32 %r6, 0;
+    // edge e = tid; u = edges[2e], i = edges[2e+1].
+    cvt.u64.u32 %rd7, %r5;
+    shl.b64 %rd8, %rd7, 3;
+    add.u64 %rd9, %rd2, %rd8;
+    ld.global.u32 %r6, [%rd9];
+    ld.global.u32 %r7, [%rd9+4];
+
+    // w = rsqrt(deg_u[u] * deg_i[i]).
+    cvt.u64.u32 %rd10, %r6;
+    shl.b64 %rd10, %rd10, 2;
+    add.u64 %rd10, %rd3, %rd10;
+    ld.global.f32 %f1, [%rd10];
+    cvt.u64.u32 %rd11, %r7;
+    shl.b64 %rd11, %rd11, 2;
+    add.u64 %rd11, %rd4, %rd11;
+    ld.global.f32 %f2, [%rd11];
+    mul.f32 %f3, %f1, %f2;
+    rsqrt.approx.f32 %f3, %f3;
+
+    // Row byte offsets: u*emb_dim*4 and i*emb_dim*4.
+    cvt.u64.u32 %rd12, %r1;
+    cvt.u64.u32 %rd13, %r6;
+    mul.lo.u64 %rd14, %rd13, %rd12;
+    shl.b64 %rd15, %rd14, 2;
+    cvt.u64.u32 %rd16, %r7;
+    mul.lo.u64 %rd17, %rd16, %rd12;
+    shl.b64 %rd18, %rd17, 2;
+
+    // Running pointers for the four rows.
+    add.u64 %rd19, %rd0, %rd15;
+    add.u64 %rd20, %rd1, %rd18;
+    add.u64 %rd21, %rd5, %rd15;
+    add.u64 %rd22, %rd6, %rd18;
+
+    // out_user[u,k] += w * item_emb[i,k]; out_item[i,k] += w * user_emb[u,k].
+    mov.u32 %r8, 0;
 lgcn_loop:
-    setp.ge.u32 %p0, %r6, %r1;
+    setp.ge.u32 %p0, %r8, %r1;
     @%p0 bra lgcn_done;
-    add.u32 %r6, %r6, 1;
+    ld.global.f32 %f4, [%rd20];
+    mul.f32 %f6, %f3, %f4;
+    red.global.add.f32 [%rd21], %f6;
+    ld.global.f32 %f5, [%rd19];
+    mul.f32 %f6, %f3, %f5;
+    red.global.add.f32 [%rd22], %f6;
+    add.u64 %rd19, %rd19, 4;
+    add.u64 %rd20, %rd20, 4;
+    add.u64 %rd21, %rd21, 4;
+    add.u64 %rd22, %rd22, 4;
+    add.u32 %r8, %r8, 1;
     bra lgcn_loop;
 lgcn_done:
     ret;

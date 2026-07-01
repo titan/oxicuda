@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace      = true
 repository.workspace   = true
 authors.workspace      = true
+readme                 = "README.md"
 keywords   = ["gpu", "point-cloud", "geometry", "pointnet", "gaussian-splatting"]
 categories = ["science", "algorithms"]
 
@@ -17,11 +18,20 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# On-device GPU validation harness (JIT-loads the hand-written PTX kernels on a
+# real CUDA device and checks each against a CPU oracle). Off by default so the
+# crate builds and tests on CPU-only machines.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name    = "geom3d_ops"

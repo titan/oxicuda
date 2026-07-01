@@ -853,11 +853,14 @@ fn emit_dot_product_reduce_typed<T: oxicuda_blas::GpuFloat>(
             let lane = b.alloc_reg(PtxType::U32);
             b.raw_ptx(&format!("and.b32 {lane}, {gid_for_lane}, 31;"));
 
-            let is_lane_0 = b.alloc_reg(PtxType::Pred);
-            b.raw_ptx(&format!("setp.eq.u32 {is_lane_0}, {lane}, 0;"));
+            // Only lane 0 writes; every other lane skips ahead. Inverted
+            // skip-branch (`setp.eq` -> `setp.ne`) via the structured
+            // `branch_if` so the target matches the `$`-prefixed label.
+            let not_lane_0 = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ne.u32 {not_lane_0}, {lane}, 0;"));
 
             let skip_label = b.fresh_label("dot_skip");
-            b.raw_ptx(&format!("@!{is_lane_0} bra {skip_label};"));
+            b.branch_if(not_lane_0, &skip_label);
 
             let result_ptr = b.load_param_u64("result_ptr");
             crate::ptx_helpers::emit_atomic_add_float::<T>(b, result_ptr, reduced);
@@ -927,11 +930,14 @@ fn emit_norm_sq_reduce_typed<T: oxicuda_blas::GpuFloat>(kernel_name: &str) -> Sp
             let lane = b.alloc_reg(PtxType::U32);
             b.raw_ptx(&format!("and.b32 {lane}, {gid_for_lane}, 31;"));
 
-            let is_lane_0 = b.alloc_reg(PtxType::Pred);
-            b.raw_ptx(&format!("setp.eq.u32 {is_lane_0}, {lane}, 0;"));
+            // Only lane 0 writes; every other lane skips ahead. Inverted
+            // skip-branch (`setp.eq` -> `setp.ne`) via the structured
+            // `branch_if` so the target matches the `$`-prefixed label.
+            let not_lane_0 = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ne.u32 {not_lane_0}, {lane}, 0;"));
 
             let skip_label = b.fresh_label("norm_skip");
-            b.raw_ptx(&format!("@!{is_lane_0} bra {skip_label};"));
+            b.branch_if(not_lane_0, &skip_label);
 
             let result_ptr = b.load_param_u64("result_ptr");
             crate::ptx_helpers::emit_atomic_add_float::<T>(b, result_ptr, reduced);
@@ -997,6 +1003,27 @@ fn div_float<T: oxicuda_blas::GpuFloat>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+
+    /// The Krylov dot-product and norm-squared reduction kernels must assemble
+    /// for sm_86 in both precisions. The lane-0 write branch must use a
+    /// `$`-prefixed target and the f64 warp reduction must avoid `.b64` shuffles.
+    #[test]
+    fn krylov_reductions_f32_f64_assemble_sm86() {
+        let dot_f32 = emit_dot_product_reduce_f32(1024).expect("dot f32");
+        assert_assembles_and_clean("krylov_dot_f32", &dot_f32);
+        let dot_f64 = emit_dot_product_reduce_f64(1024).expect("dot f64");
+        assert_assembles_and_clean("krylov_dot_f64", &dot_f64);
+
+        let norm_f32 = emit_norm_sq_reduce_f32(1024).expect("norm f32");
+        assert_assembles_and_clean("krylov_norm_f32", &norm_f32);
+        let norm_f64 = emit_norm_sq_reduce_f64(1024).expect("norm f64");
+        assert_assembles_and_clean("krylov_norm_f64", &norm_f64);
+        assert!(
+            !dot_f64.contains("0F00000000") && !norm_f64.contains("0F00000000"),
+            "f64 Krylov reduction kernels must not materialize an f32 0.0 immediate"
+        );
+    }
 
     // -- Lanczos config validation tests --
 

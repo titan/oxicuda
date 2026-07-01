@@ -117,6 +117,14 @@ pub mod prelude {
     pub use crate::vit::{ViTConfig, ViTEncoder, ViTModel};
 }
 
+// ─── On-device GPU validation (feature-gated) ────────────────────────────────
+
+/// JIT-compiles each PTX kernel against the live GPU's SM version, launches it,
+/// and asserts numerical equivalence to the CPU reference. Requires a real CUDA
+/// device; tests skip gracefully when none is present.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── End-to-end integration tests ────────────────────────────────────────────
 
 #[cfg(test)]

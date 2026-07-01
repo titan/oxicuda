@@ -13,7 +13,7 @@ adaptive collocation sampling (residual-adaptive / LHS / Halton). Part of
 
 ## Implementation Status
 
-**Actual: 26,676 SLoC (65 files)** -- 696 unit tests + 16 E2E integration tests
+**Actual: 22,238 SLoC (65 files)** -- 711 unit tests + 16 E2E integration tests
 
 The crate is the densest single PINN / scientific-ML library in the OxiCUDA
 ecosystem: forward + reverse AD, four ODE solvers, four neural operator
@@ -173,7 +173,7 @@ families, five PDE templates, and three adaptive samplers. The crate is
 ### Future Enhancements [ ]
 
 #### P0 -- Critical (Performance-Sensitive Paths)
-- [ ] cuFFT-equivalent FFT path in FNO -- replace O(N^2) DFT with `oxicuda-fft`
+- [x] cuFFT-equivalent FFT path in FNO -- replace O(N^2) DFT with `oxicuda-fft`
       Stockham / Bluestein kernels for N >= 64
 - [ ] Tensor-Core path for branch / trunk MLPs in DeepONet
 - [ ] Fused Dopri45 step + error estimator + step controller in one PTX kernel
@@ -216,7 +216,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 696 unit + 16 E2E = 712 passing (+ 2 doctests)
+- Tests: 711 unit + 16 E2E = 727 passing (+ 2 doctests)
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - All public APIs return `PinnResult<T>` or `Result<T, PinnError>`
@@ -296,6 +296,6 @@ Reference shapes (FNO and ODE integration are the hot paths):
       and DeepONet
 - [x] Stiff-ODE solvers (Rosenbrock, BDF) for chemistry / circuits (neural_ode/stiff.rs -- Rosenbrock-W ROS2 (L-stable, γ=1-1/√2) + backward-Euler + variable-order BDF1/2 with Newton iteration on a central-difference Jacobian and LU-with-pivot solve; stiff 2D system (λ ratio≈100) stays bounded where explicit Euler diverges)
 - [x] Symplectic integrators (leapfrog, Stormer-Verlet) for Hamiltonian systems
-- [ ] Automatic differentiation of PDE residual w.r.t. inputs via `MultiDual`
+- [x] Automatic differentiation of PDE residual w.r.t. inputs via `MultiDual`
       (currently CPU-only via Tape)
 - [x] Periodic boundary helper in `BcType`

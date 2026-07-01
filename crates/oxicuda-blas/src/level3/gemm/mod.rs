@@ -15,6 +15,7 @@ pub mod cooperative;
 pub mod dispatch;
 pub mod epilogue;
 pub mod fusion;
+pub(crate) mod precision;
 pub mod simt;
 pub mod splitk;
 pub mod tensor_core;

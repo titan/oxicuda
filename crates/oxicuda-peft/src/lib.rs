@@ -36,6 +36,9 @@ pub mod prefix;
 pub mod ptx_kernels;
 pub mod quant;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 #[cfg(test)]
 mod e2e_tests {
     use super::*;

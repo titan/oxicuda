@@ -8,9 +8,9 @@ for QUADPACK / GSL / SciPy-style scientific computing utilities. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** 13,644 (99 files, tokei measurement)
+- **Actual SLoC:** 17,147 (99 files, tokei measurement)
 - **Total lines (incl. comments+blanks):** 6,787
-- **Tests:** 530 passing
+- **Tests:** 545 passing
 - **Vol.60 scope:** Root finding, numerical quadrature, special functions, ODE
   solvers, polynomial roots, numerical differentiation, interpolation, and
   multidimensional cubature. Complements oxicuda-blas / oxicuda-solver / oxicuda-fft
@@ -194,7 +194,7 @@ routines are implemented privately under `linalg/`.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 530 passing (unit + 38 e2e cross-module)
+- Tests: 545 passing (unit + 38 e2e cross-module)
 - `unwrap()` / `expect()` calls in production code: 0
 - Refactoring policy: all files under 2000 lines
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`; macOS returns

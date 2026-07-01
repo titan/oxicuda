@@ -137,12 +137,28 @@ pub fn generate_epilogue_ptx(acc_type: PtxType, op: EpilogueOp) -> BlasResult<St
 
     // Activation functions.
     if op.has_relu() {
-        // ReLU: result = max(0, result)
+        // ReLU: result = max(0, result). The zero immediate must match the
+        // operand width (`0f...` for f32, `0d...` for f64).
         write_line(
             &mut ptx,
-            &format!("    max{ty} %f_result, %f_result, 0f00000000;"),
+            &format!(
+                "    max{ty} %f_result, %f_result, {};",
+                acc_type.zero_literal()
+            ),
         )?;
     } else if op.has_gelu() {
+        // The fast GELU approximation below relies on single-precision-encoded
+        // polynomial constants (`0f3FDA6286`, `0f3FB8AA3B`, ...). A correct f64
+        // GELU would require double-precision (`0d...`) bit patterns, which are
+        // not provided here, so reject f64 rather than emit a type-mismatched
+        // (and `ptxas`-rejected) kernel.
+        if acc_type == PtxType::F64 {
+            return Err(BlasError::PtxGeneration(
+                "GELU epilogue is only implemented for f32 accumulators; \
+                 f64 GELU requires double-precision constants"
+                    .to_string(),
+            ));
+        }
         // GELU approximation: result = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
         // For GPU, we use the fast approximation: x * sigmoid(1.702 * x)
         // But in PTX we approximate with: result * 0.5 * (1 + tanh(0.7978845608 * (result + 0.044715 * result^3)))

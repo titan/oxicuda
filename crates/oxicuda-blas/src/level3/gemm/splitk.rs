@@ -101,6 +101,7 @@ pub fn generate_splitk_reduction_kernel(
     }
 
     let ty = acc_type.as_ptx_str();
+    let acc_zero = acc_type.zero_literal();
     let byte_size = acc_type.size_bytes();
     let kernel_name = format!(
         "splitk_reduce_{}_x{}",
@@ -125,9 +126,12 @@ pub fn generate_splitk_reduction_kernel(
     write_line(&mut ptx, ")")?;
     write_line(&mut ptx, "{")?;
 
+    // The value bank `%f` is declared in the accumulator precision so the f64
+    // reduction (`add.f64`/`fma.rn.f64`/`ld.global.f64`/`st.global.f64`) matches
+    // the register type that `ptxas` validates.
     write_line(&mut ptx, "    .reg .b32 %r<16>;")?;
     write_line(&mut ptx, "    .reg .b64 %rd<16>;")?;
-    write_line(&mut ptx, "    .reg .f32 %f<16>;")?;
+    write_line(&mut ptx, &format!("    .reg {ty} %f<16>;"))?;
     write_line(&mut ptx, "    .reg .pred %p<4>;")?;
     write_line(&mut ptx, "")?;
 
@@ -170,7 +174,7 @@ pub fn generate_splitk_reduction_kernel(
     write_line(&mut ptx, "")?;
 
     // Sum partitions: acc = sum of workspace[i * mn + idx] for i in 0..split_factor
-    write_line(&mut ptx, &format!("    mov{ty} %f0, 0f00000000;  // acc"))?;
+    write_line(&mut ptx, &format!("    mov{ty} %f0, {acc_zero};  // acc"))?;
     write_line(&mut ptx, "    add.u64 %rd4, %rd0, %rd2;  // ws + offset")?;
     for _ in 0..split_factor {
         write_line(&mut ptx, &format!("    ld.global{ty} %f1, [%rd4];"))?;

@@ -12,8 +12,16 @@ readme = "README.md"
 [dependencies]
 thiserror.workspace = true
 
+[features]
+# On-device GPU validation harness for the hand-written PTX kernels.
+# Enable with `--features gpu-tests` on a machine with a CUDA device.
+gpu-tests = []
+
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [lints]
 workspace = true

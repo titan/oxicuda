@@ -6,7 +6,7 @@ GPU-accelerated training engine providing fused optimizer update kernels, gradie
 
 ## Implementation Status
 
-**Actual: 8,106 SLoC across 32 files (includes Markdown doc-comments) / 5,984 pure Rust SLoC**
+**Actual: 11,901 SLoC across 32 files (includes Markdown doc-comments) / 5,984 pure Rust SLoC**
 
 Production-grade GPU-accelerated training utilities implementing the v1.2 roadmap items:
 fused optimizer kernels, gradient checkpointing, mixed-precision optimizer states, EMA,
@@ -124,7 +124,7 @@ and large-scale ZeRO-style distributed training.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![warn(missing_docs)]`)
-- Tests: 352 lib + 9 doc passing (`cargo test -p oxicuda-train --all-features`)
+- Tests: 362 lib + 9 doc passing (`cargo test -p oxicuda-train --all-features`)
 - unwrap() calls: 0 (production code; test code documented with `.expect()` messages)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime

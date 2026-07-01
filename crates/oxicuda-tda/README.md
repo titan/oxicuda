@@ -73,7 +73,7 @@ fn main() -> TdaResult<()> {
 
 ## Status
 
-**Alpha** -- 12,009 SLoC, 379 passing tests. API may evolve before v1.0.
+**Alpha** -- 13,342 SLoC, 398 passing tests. API may evolve before v1.0.
 
 ## License
 

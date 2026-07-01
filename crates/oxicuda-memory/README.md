@@ -94,7 +94,7 @@ gpu_buf.copy_to_host(&mut result)?;
 | Item       | Value              |
 |------------|--------------------|
 | Version    | 0.3.0 (2026-06-25) |
-| Tests      | 271 passing        |
+| Tests      | 275 passing        |
 | Warnings   | 0                  |
 | `unwrap()` | 0                  |
 

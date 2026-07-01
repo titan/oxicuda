@@ -9,11 +9,17 @@ repository.workspace = true
 authors.workspace = true
 readme = "README.md"
 
+[features]
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [lints]
 workspace = true

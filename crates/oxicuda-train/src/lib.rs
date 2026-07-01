@@ -145,6 +145,14 @@ pub mod prelude {
     pub use crate::zero::{ZeroConfig, ZeroOptimizer, ZeroStage};
 }
 
+// ─── On-device GPU validation ──────────────────────────────────────────────────
+
+/// JIT-loads each hand-written PTX kernel on a live CUDA device, launches it,
+/// and asserts numerical equivalence to a CPU oracle. Gated behind the
+/// `gpu-tests` feature so the default test build stays host-only.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Integration tests ────────────────────────────────────────────────────────
 
 #[cfg(test)]

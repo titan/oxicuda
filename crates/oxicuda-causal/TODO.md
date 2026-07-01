@@ -10,7 +10,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.41).
 
 ## Implementation Status
 
-- **Actual SLoC:** ~27,800 total lines (89 files; +9 `verification/` modules)
+- **Actual SLoC:** ~28,454 total lines (89 files; +9 `verification/` modules)
 - **Coverage:** DAG with cycle-safe add/remove and Kahn topological sort;
   d-separation via Bayes-ball with collider handling; NOTEARS linear SEM via
   augmented Lagrangian with Padé-(3,3) matrix-exponential acyclicity;
@@ -122,7 +122,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.41).
   correlation bench + DML residual bench
 - [x] 35 verification tests (`verification/*`) — matrix-exp accuracy, Fisher-Z
   calibration, NOTEARS / PC structure recovery, DML coverage, forest PEHE
-- **Tests:** 781 passing
+- **Tests:** 788 passing
 
 ### Future Enhancements
 
@@ -192,7 +192,7 @@ emitted as strings. No oxicuda-driver / -memory / -launch dependency at this lay
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 781 passing (DAG, d-sep, NOTEARS, PC, propensity, IPW, DML, DragonNet,
+- Tests: 788 passing (DAG, d-sep, NOTEARS, PC, propensity, IPW, DML, DragonNet,
   causal forest, backdoor, PTX × 6 SM, + 35 verification/numerical-accuracy,
   + 11 discrete-CI chi-square/G + PC on synthetic discrete networks)
 - unwrap() calls: 0 in production code

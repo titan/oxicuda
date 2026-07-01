@@ -95,3 +95,11 @@ pub use special::wright_omega::wright_omega;
 
 #[cfg(test)]
 mod e2e_tests;
+
+/// On-device GPU validation harness: JIT-compiles each hand-written
+/// [`ptx_kernels`] PTX kernel, launches it on a real CUDA device, and asserts
+/// numerical equivalence to an independent CPU oracle. Compiled only under
+/// `--features gpu-tests` and only in test builds; every test skips gracefully
+/// if no GPU is available.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;

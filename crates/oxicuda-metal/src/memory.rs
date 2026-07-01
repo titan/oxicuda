@@ -19,14 +19,38 @@ use crate::{
 
 // ─── Internal buffer record ──────────────────────────────────────────────────
 
-/// Bookkeeping entry for a single allocated Metal buffer.
+/// Provenance of a tracked Metal buffer — decides whether [`MetalMemoryManager::free`]
+/// (and manager drop) is allowed to release the underlying `MTLBuffer`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BufferOwnership {
+    /// Allocated by this manager via [`MetalMemoryManager::alloc`]. The manager
+    /// holds the sole retain and releases it on `free`/drop.
+    ///
+    /// Only constructed on macOS — on other platforms [`MetalMemoryManager::alloc`]
+    /// returns [`MetalError::UnsupportedPlatform`] instead of producing a buffer.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Owned,
+    /// Imported from an external caller (e.g. a consumer's buffer cache). The
+    /// manager holds its **own independent retain** (taken at import time) and
+    /// releases only *that* retain on `free`/drop — it never deallocates the
+    /// caller's buffer, which the caller keeps alive via its own retain.
+    External,
+}
+
+/// Bookkeeping entry for a single tracked Metal buffer.
 pub(crate) struct MetalBufferInfo {
-    /// The GPU-resident (shared-mode) buffer.
+    /// The GPU-resident buffer. For [`BufferOwnership::Owned`] entries this is a
+    /// freshly allocated shared-mode buffer; for [`BufferOwnership::External`]
+    /// entries it is an independent retain of a caller-provided buffer.
     #[cfg(target_os = "macos")]
     pub(crate) buffer: metal::Buffer,
-    /// Byte size of the allocation.
+    /// Byte size of the allocation (the imported logical length for external
+    /// buffers, which bounds `copy_to_device` / `copy_from_device`).
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) size: u64,
+    /// Whether this manager owns the allocation (and may release it) or is only
+    /// borrowing an external buffer via its own retain.
+    pub(crate) ownership: BufferOwnership,
 }
 
 // ─── Memory manager ──────────────────────────────────────────────────────────
@@ -87,6 +111,7 @@ impl MetalMemoryManager {
                     MetalBufferInfo {
                         buffer,
                         size: bytes as u64,
+                        ownership: BufferOwnership::Owned,
                     },
                 );
             Ok(handle)
@@ -98,15 +123,100 @@ impl MetalMemoryManager {
         }
     }
 
-    /// Release the buffer associated with `handle`.
+    /// Import an **externally owned** `metal::Buffer` and return a handle usable
+    /// by every compute op (`gemm`, `copy_*`, …) without copying through the host.
     ///
-    /// Unknown handles are silently ignored (idempotent free).
-    pub fn free(&self, handle: u64) -> MetalResult<()> {
+    /// The manager takes its **own** retain on `buffer` (so the buffer stays
+    /// alive while the handle is live) but is flagged
+    /// `BufferOwnership::External`: [`free`](Self::free) and manager drop
+    /// release only the manager's own retain and **never deallocate the caller's
+    /// buffer**, which the caller keeps alive via its own retain (e.g. an
+    /// `Arc<metal::Buffer>` in a buffer cache).
+    ///
+    /// `len_bytes` is the logical byte length the handle exposes; it bounds
+    /// host copies via [`copy_to_device`](Self::copy_to_device) /
+    /// [`copy_from_device`](Self::copy_from_device). It must not exceed the
+    /// buffer's actual `length()`.
+    ///
+    /// # Errors
+    /// * [`MetalError::UnsupportedPlatform`] on non-macOS.
+    /// * [`MetalError::InvalidArgument`] if `len_bytes` exceeds the buffer's
+    ///   physical length.
+    #[cfg(target_os = "macos")]
+    pub fn import_external(&self, buffer: &metal::Buffer, len_bytes: usize) -> MetalResult<u64> {
+        let physical = buffer.length();
+        if len_bytes as u64 > physical {
+            return Err(MetalError::InvalidArgument(format!(
+                "import len_bytes {len_bytes} exceeds buffer length {physical}"
+            )));
+        }
+        // Take an independent retain so the buffer survives for the handle's
+        // lifetime regardless of what the caller does with its own reference.
+        let retained = buffer.to_owned();
+        let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
         self.buffers
             .lock()
             .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?
+            .insert(
+                handle,
+                MetalBufferInfo {
+                    buffer: retained,
+                    size: len_bytes as u64,
+                    ownership: BufferOwnership::External,
+                },
+            );
+        Ok(handle)
+    }
+
+    /// Release the buffer associated with `handle`.
+    ///
+    /// For an `BufferOwnership::Owned` allocation this drops the manager's sole
+    /// retain (freeing the GPU memory). For an `BufferOwnership::External`
+    /// import this drops only the manager's own retain — the caller's buffer is
+    /// untouched (the caller holds an independent retain). Unknown handles are
+    /// silently ignored (idempotent free).
+    pub fn free(&self, handle: u64) -> MetalResult<()> {
+        let removed = self
+            .buffers
+            .lock()
+            .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?
             .remove(&handle);
+        if let Some(info) = removed {
+            // The dropped `MetalBufferInfo` releases exactly one retain — the one
+            // this manager holds. The `ownership` flag distinguishes whether that
+            // retain was a sole allocation (owned) or an independent import retain
+            // (external); in the external case the caller's buffer survives.
+            match info.ownership {
+                BufferOwnership::Owned => {
+                    tracing::trace!(handle, "freed owned Metal buffer");
+                }
+                BufferOwnership::External => {
+                    tracing::trace!(
+                        handle,
+                        "released import retain for external Metal buffer (caller's buffer untouched)"
+                    );
+                }
+            }
+            // `info` (and its `metal::Buffer`, on macOS) drops at the end of this
+            // block, releasing the manager's single retain.
+        }
         Ok(())
+    }
+
+    /// Report whether `handle` refers to an imported (`BufferOwnership::External`)
+    /// buffer (`Some(true)`), an owned allocation (`Some(false)`), or is unknown
+    /// (`None`).
+    ///
+    /// Lets a consumer assert that a cache-backed buffer was registered as
+    /// external (so [`free`](Self::free) will not deallocate it).
+    pub fn is_external(&self, handle: u64) -> MetalResult<Option<bool>> {
+        let buffers = self
+            .buffers
+            .lock()
+            .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?;
+        Ok(buffers
+            .get(&handle)
+            .map(|info| info.ownership == BufferOwnership::External))
     }
 
     /// Upload host bytes `src` into the device buffer identified by `handle`.
@@ -169,6 +279,67 @@ impl MetalMemoryManager {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (dst, handle);
+            Err(MetalError::UnsupportedPlatform)
+        }
+    }
+
+    /// Copy `len_bytes` from device buffer `src` to device buffer `dst`,
+    /// **device-to-device** with no host round-trip.
+    ///
+    /// Both handles may be owned or imported, in any combination. For the
+    /// shared-mode buffers this manager tracks, the copy is a direct
+    /// CPU-visible `memcpy` between the two buffers' unified-memory pages, so it
+    /// never stages through a host `Vec`. `len_bytes` is clamped to each
+    /// buffer's tracked length.
+    ///
+    /// # Errors
+    /// * [`MetalError::UnsupportedPlatform`] on non-macOS.
+    /// * [`MetalError::InvalidArgument`] for an unknown `src`/`dst` handle, if
+    ///   `src == dst`, or if `len_bytes` exceeds either buffer's length.
+    pub fn copy_device_to_device(&self, dst: u64, src: u64, len_bytes: usize) -> MetalResult<()> {
+        #[cfg(target_os = "macos")]
+        {
+            if src == dst {
+                return Err(MetalError::InvalidArgument(
+                    "copy_device_to_device requires distinct src and dst handles".into(),
+                ));
+            }
+            let buffers = self
+                .buffers
+                .lock()
+                .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?;
+            let src_info = buffers
+                .get(&src)
+                .ok_or_else(|| MetalError::InvalidArgument(format!("unknown src handle {src}")))?;
+            let dst_info = buffers
+                .get(&dst)
+                .ok_or_else(|| MetalError::InvalidArgument(format!("unknown dst handle {dst}")))?;
+            if len_bytes as u64 > src_info.size {
+                return Err(MetalError::InvalidArgument(format!(
+                    "len_bytes {len_bytes} exceeds src length {}",
+                    src_info.size
+                )));
+            }
+            if len_bytes as u64 > dst_info.size {
+                return Err(MetalError::InvalidArgument(format!(
+                    "len_bytes {len_bytes} exceeds dst length {}",
+                    dst_info.size
+                )));
+            }
+            // SAFETY: both shared-mode buffers are CPU-accessible for their full
+            // lifetime; the handles are distinct, so the regions do not alias.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    src_info.buffer.contents() as *const u8,
+                    dst_info.buffer.contents() as *mut u8,
+                    len_bytes,
+                );
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (dst, src, len_bytes);
             Err(MetalError::UnsupportedPlatform)
         }
     }

@@ -35,6 +35,9 @@ pub mod non_contrastive;
 pub mod ptx_kernels;
 pub mod ssl;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 /// Convenience re-exports for common SSL types.

@@ -91,6 +91,9 @@ pub mod prelude {
     pub use crate::routing::top_k::{TopKConfig, TopKResult, TopKRouter, topk};
 }
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 #[cfg(test)]
 mod e2e_tests {
     use super::prelude::*;

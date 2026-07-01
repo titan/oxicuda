@@ -7,8 +7,8 @@ through WGSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/ox
 
 ## Implementation Status
 
-- **Actual SLoC:** ~5,300 across 11 files
-- **Tests:** 185 passing (+1 doc-test)
+- **Actual SLoC:** ~5,430 across 11 files
+- **Tests:** 216 passing (+1 doc-test)
 - **Status:** Full memory + compute, WGSL generators (+ transpose/softmax/scan/layernorm/subgroup/f64-emul/FFT), host-side dispatch planner, WASM target, FP16 path
 - **Targets:** Native (Vulkan / Metal / D3D12 / GL via wgpu) + browser (WebGPU API)
 
@@ -93,7 +93,7 @@ through WGSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-japan/ox
 ## Quality Status
 
 - Warnings: 0
-- Tests: 185 passing (+1 doc-test)
+- Tests: 216 passing (+1 doc-test)
 - unwrap() calls: 0
 - Clippy: clean (pedantic + nursery), `-D warnings` on `--all-features --all-targets`
 
@@ -174,7 +174,7 @@ WebGPU compute is the most-constrained backend due to portability requirements: 
 - [ ] Firefox WebGPU CI (`wasm-pack test --firefox --headless`)
 - [ ] Subgroup-op kernels tested on hardware that supports them (currently not implemented)
 - [ ] FP16 GEMM correctness vs FP32 reference within tolerance (5e-3 relative)
-- [ ] WGSL output validated by `naga --validate` in CI pre-commit
+- [x] WGSL output validated by `naga --validate` in CI pre-commit
 - [ ] Adapter limits negotiation (workgroup size, storage buffer count) tested on iGPU + dGPU
 
 ### Implementation Deepening

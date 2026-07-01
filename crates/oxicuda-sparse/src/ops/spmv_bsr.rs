@@ -188,9 +188,14 @@ fn emit_spmv_bsr<T: GpuFloat>(sm: SmVersion, _block_dim: u32) -> SparseResult<St
                 let blk_done = b.fresh_label("bsr_blk_done");
 
                 b.label(&blk_loop);
+                // Exit the loop when blk_idx >= blk_end. The original skip-branch
+                // (`@!pred bra`) used `setp.lo`; invert to `setp.hs` and use the
+                // structured `branch_if` so the target matches the `$`-prefixed
+                // `b.label` definition (a bare `bra blk_done` is rejected by ptxas
+                // as an unknown symbol).
                 let pred_blk = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred_blk}, {blk_idx}, {blk_end};"));
-                b.raw_ptx(&format!("@!{pred_blk} bra {blk_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred_blk}, {blk_idx}, {blk_end};"));
+                b.branch_if(pred_blk, &blk_done);
 
                 // Load block column index
                 let ci_addr = b.byte_offset_addr(col_idx_base.clone(), blk_idx.clone(), 4);
@@ -225,9 +230,10 @@ fn emit_spmv_bsr<T: GpuFloat>(sm: SmVersion, _block_dim: u32) -> SparseResult<St
                 let inner_done = b.fresh_label("bsr_inner_done");
 
                 b.label(&inner_loop);
+                // Exit the inner loop when j >= block_dim (inverted skip-branch).
                 let pred_j = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred_j}, {j}, {block_dim_reg};"));
-                b.raw_ptx(&format!("@!{pred_j} bra {inner_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred_j}, {j}, {block_dim_reg};"));
+                b.branch_if(pred_j, &inner_done);
 
                 // values index = val_block_offset + row_in_block_offset + j
                 let val_flat = b.alloc_reg(PtxType::U32);
@@ -288,6 +294,24 @@ fn emit_spmv_bsr<T: GpuFloat>(sm: SmVersion, _block_dim: u32) -> SparseResult<St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+
+    /// The BSR SpMV kernel must assemble for sm_86 in both precisions, with the
+    /// branch labels carrying the `$`-prefix (so `bra`/`@pred bra` resolve) and
+    /// no illegal `.b64` warp shuffle. Regression guard for the bare-label
+    /// "Unknown symbol 'L__…'" ptxas failure.
+    #[test]
+    fn spmv_bsr_f32_f64_assemble_sm86() {
+        let f32_ptx = emit_spmv_bsr::<f32>(SmVersion::Sm86, 4).expect("f32 BSR PTX");
+        assert_assembles_and_clean("spmv_bsr_f32", &f32_ptx);
+
+        let f64_ptx = emit_spmv_bsr::<f64>(SmVersion::Sm86, 4).expect("f64 BSR PTX");
+        assert_assembles_and_clean("spmv_bsr_f64", &f64_ptx);
+        assert!(
+            !f64_ptx.contains("0F00000000"),
+            "f64 BSR kernel must not materialize an f32 0.0 immediate:\n{f64_ptx}"
+        );
+    }
 
     #[test]
     fn spmv_bsr_ptx_generates_f32() {

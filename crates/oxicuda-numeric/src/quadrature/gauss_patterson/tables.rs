@@ -169,3 +169,145 @@ pub(super) fn level_weights(level: usize) -> NumericResult<&'static [f64]> {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Number of abscissae per level (the 1,3,7,15,31 Patterson sequence).
+    const COUNTS: [usize; 5] = [1, 3, 7, 15, 31];
+    /// Guaranteed polynomial degree of exactness per level. Gauss-Patterson
+    /// nests the Kronrod extension giving the Patterson bound `3·n_prev + 1`:
+    /// 1 → 1, 3 → 5, 7 → 10, 15 → 22, 31 → 46.
+    const DEGREES: [usize; 5] = [1, 5, 10, 22, 46];
+
+    /// Exact value of `∫_{-1}^{1} x^k dx`: zero for odd `k`, `2/(k+1)` for even `k`.
+    fn exact_moment(k: usize) -> f64 {
+        if k % 2 == 1 {
+            0.0
+        } else {
+            2.0 / ((k + 1) as f64)
+        }
+    }
+
+    #[test]
+    fn node_counts_and_alignment() {
+        for (level, &count) in COUNTS.iter().enumerate() {
+            let nodes = level_nodes(level).expect("nodes");
+            let weights = level_weights(level).expect("weights");
+            assert_eq!(nodes.len(), count, "level {level} node count");
+            assert_eq!(
+                nodes.len(),
+                weights.len(),
+                "level {level} node/weight length mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn weights_sum_to_two() {
+        // ∫_{-1}^{1} 1 dx = 2, so every (degree ≥ 0 exact) rule's weights sum to 2.
+        for level in 0..=4 {
+            let s: f64 = level_weights(level).expect("weights").iter().sum();
+            assert!((s - 2.0).abs() < 1e-12, "level {level} weight sum = {s}");
+        }
+    }
+
+    #[test]
+    fn weights_all_positive() {
+        // Gauss-Patterson rules are interpolatory with strictly positive weights.
+        for level in 0..=4 {
+            for (i, &w) in level_weights(level).expect("weights").iter().enumerate() {
+                assert!(w > 0.0, "level {level} weight {i} = {w} not positive");
+            }
+        }
+    }
+
+    #[test]
+    fn nodes_symmetric_and_bounded() {
+        for level in 0..=4 {
+            let nodes = level_nodes(level).expect("nodes");
+            let n = nodes.len();
+            for i in 0..n {
+                assert!(
+                    nodes[i].abs() <= 1.0,
+                    "level {level} node {i} outside [-1,1]"
+                );
+                // Symmetry about 0: node[i] == -node[n-1-i].
+                assert!(
+                    (nodes[i] + nodes[n - 1 - i]).abs() < 1e-14,
+                    "level {level} not symmetric at index {i}"
+                );
+            }
+            // Odd-cardinality rules have an abscissa exactly at the centre.
+            assert!(
+                nodes[n / 2].abs() < 1e-15,
+                "level {level} centre node not 0"
+            );
+        }
+    }
+
+    #[test]
+    fn degree_of_exactness() {
+        // Core identity: the n-point rule integrates x^k EXACTLY up to its degree.
+        for (level, &degree) in DEGREES.iter().enumerate() {
+            let nodes = level_nodes(level).expect("nodes");
+            let weights = level_weights(level).expect("weights");
+            for k in 0..=degree {
+                let approx: f64 = nodes
+                    .iter()
+                    .zip(weights.iter())
+                    .map(|(&x, &w)| w * x.powi(k as i32))
+                    .sum();
+                let exact = exact_moment(k);
+                assert!(
+                    (approx - exact).abs() < 1e-10,
+                    "level {level} ∫x^{k}: approx={approx} exact={exact}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nesting_contains_previous_level() {
+        // Defining nested property: level L's abscissae ⊇ level (L-1)'s abscissae.
+        for level in 1..=4 {
+            let prev = level_nodes(level - 1).expect("prev nodes");
+            let cur = level_nodes(level).expect("cur nodes");
+            for &p in prev {
+                let found = cur.iter().any(|&c| (c - p).abs() < 1e-12);
+                assert!(found, "level {level} does not contain previous node {p}");
+            }
+        }
+    }
+
+    #[test]
+    fn level1_matches_three_point_gauss_legendre() {
+        // Level 1 is the classical 3-point Gauss-Legendre rule:
+        // nodes {0, ±√(3/5)}, weights {5/9, 8/9, 5/9}.
+        let nodes = level_nodes(1).expect("nodes");
+        let weights = level_weights(1).expect("weights");
+        let root = (3.0_f64 / 5.0).sqrt();
+        assert!((nodes[0] + root).abs() < 1e-14, "nodes={nodes:?}");
+        assert!(nodes[1].abs() < 1e-15, "nodes={nodes:?}");
+        assert!((nodes[2] - root).abs() < 1e-14, "nodes={nodes:?}");
+        assert!(
+            (weights[0] - 5.0 / 9.0).abs() < 1e-14,
+            "weights={weights:?}"
+        );
+        assert!(
+            (weights[1] - 8.0 / 9.0).abs() < 1e-14,
+            "weights={weights:?}"
+        );
+        assert!(
+            (weights[2] - 5.0 / 9.0).abs() < 1e-14,
+            "weights={weights:?}"
+        );
+    }
+
+    #[test]
+    fn level_out_of_range_errors() {
+        assert!(level_nodes(5).is_err());
+        assert!(level_weights(5).is_err());
+    }
+}

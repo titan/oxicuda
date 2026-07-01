@@ -177,7 +177,7 @@ impl DeviceRunLengthEncodeTemplate {
         .map_err(&ferr)?;
         writeln!(out, "{{").map_err(&ferr)?;
         writeln!(out, "    .reg .{ty}   %cur, %prev;").map_err(&ferr)?;
-        writeln!(out, "    .reg .u32    %head, %tid, %bid;").map_err(&ferr)?;
+        writeln!(out, "    .reg .u32    %head, %ltid, %bid;").map_err(&ferr)?;
         writeln!(
             out,
             "    .reg .u64    %n, %gid, %ptr_in, %ptr_out, %addr, %prev_idx;"
@@ -188,9 +188,14 @@ impl DeviceRunLengthEncodeTemplate {
         writeln!(out, "    ld.param.u64 %ptr_out, [param_heads];").map_err(&ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(&ferr)?;
         writeln!(out, "    ld.param.u64 %n,        [param_n];").map_err(&ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(&ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(&ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(&ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(&ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(&ferr)?;
         writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(&ferr)?;
         writeln!(out, "    @%oob ret;").map_err(&ferr)?;
 
@@ -248,7 +253,7 @@ impl DeviceRunLengthEncodeTemplate {
         .map_err(&ferr)?;
         writeln!(out, "{{").map_err(&ferr)?;
         writeln!(out, "    .reg .{ty}   %val;").map_err(&ferr)?;
-        writeln!(out, "    .reg .u32    %head, %tid, %bid;").map_err(&ferr)?;
+        writeln!(out, "    .reg .u32    %head, %ltid, %bid;").map_err(&ferr)?;
         writeln!(out, "    .reg .u64    %n, %gid, %run, %addr;").map_err(&ferr)?;
         writeln!(
             out,
@@ -263,9 +268,14 @@ impl DeviceRunLengthEncodeTemplate {
         writeln!(out, "    ld.param.u64 %ptr_head,  [param_heads];").map_err(&ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_ridx,  [param_run_idx];").map_err(&ferr)?;
         writeln!(out, "    ld.param.u64 %n,          [param_n];").map_err(&ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(&ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(&ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(&ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(&ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(&ferr)?;
         writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(&ferr)?;
         writeln!(out, "    @%oob ret;").map_err(&ferr)?;
 
@@ -316,7 +326,7 @@ impl DeviceRunLengthEncodeTemplate {
         )
         .map_err(&ferr)?;
         writeln!(out, "{{").map_err(&ferr)?;
-        writeln!(out, "    .reg .u32    %tid, %bid;").map_err(&ferr)?;
+        writeln!(out, "    .reg .u32    %ltid, %bid;").map_err(&ferr)?;
         writeln!(
             out,
             "    .reg .u64    %num_runs, %n, %r, %start, %next, %len, %addr, %next_r;"
@@ -329,9 +339,14 @@ impl DeviceRunLengthEncodeTemplate {
         writeln!(out, "    ld.param.u64 %ptr_start, [param_starts];").map_err(&ferr)?;
         writeln!(out, "    ld.param.u64 %num_runs,  [param_num_runs];").map_err(&ferr)?;
         writeln!(out, "    ld.param.u64 %n,          [param_n];").map_err(&ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(&ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(&ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(&ferr)?;
-        writeln!(out, "    mad.lo.u64   %r, %bid, {bs}, %tid;").map_err(&ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %r, %ltid;
+    mad.wide.u32   %r, %bid, {bs}, %r;"
+        )
+        .map_err(&ferr)?;
         writeln!(out, "    setp.ge.u64  %oob, %r, %num_runs;").map_err(&ferr)?;
         writeln!(out, "    @%oob ret;").map_err(&ferr)?;
 

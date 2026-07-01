@@ -53,11 +53,11 @@ pub fn statevec_apply_1q_ptx(sm: u32) -> String {
 
     ld.param.u32 %r5, [param_mask];
 
-    // i0 = (tid & ~mask) << 1 | (tid & (mask - 1))
-    not.b32 %r6, %r5;
+    // i0 = ((tid & ~(mask-1)) << 1) | (tid & (mask-1))  — insert a 0 bit at the qubit slot
+    sub.u32 %r8, %r5, 1;       // mask - 1 (low-bit mask)
+    not.b32 %r6, %r8;          // ~(mask-1) (high-bit mask)
     and.b32 %r7, %r3, %r6;
     shl.b32 %r7, %r7, 1;
-    sub.u32 %r8, %r5, 1;
     and.b32 %r9, %r3, %r8;
     or.b32 %r10, %r7, %r9;
 
@@ -184,29 +184,39 @@ pub fn statevec_apply_2q_ptx(sm: u32) -> String {
     ld.param.u32 %r5, [param_mask0];
     ld.param.u32 %r6, [param_mask1];
 
-    // Reconstruct 4 indices from the thread index by inserting 0 bits at mask positions
-    // The two mask bits select which of the 4 basis states we address
-    // i00 = base with both mask bits = 0
-    // i01 = base | mask1, i10 = base | mask0, i11 = base | mask0 | mask1
-    not.b32 %r7, %r5;
-    not.b32 %r8, %r6;
-    and.b32 %r9,  %r3, %r7;
-    and.b32 %r9,  %r9, %r8;
-    // expand: insert bit for mask0 (shift bits above mask0 left by 1)
-    // simplified: use 2-bit expansion over tid
-    shl.b32 %r10, %r9, 2;               // raw expanded base
-    or.b32  %r11, %r10, 0;              // i00 (both bits 0)
-    or.b32  %r12, %r10, %r6;            // i01 (mask1 set)
-    or.b32  %r13, %r10, %r5;            // i10 (mask0 set)
-    or.b32  %r14, %r10, %r5;
-    or.b32  %r14, %r14, %r6;            // i11 (both set)
+    // Reconstruct the 4 group indices by inserting two 0 bits into tid at the two
+    // qubit positions. lo = lower mask, hi = higher mask (single-bit masks).
+    min.u32 %r7, %r5, %r6;
+    max.u32 %r8, %r5, %r6;
+
+    // step 1: insert a 0 bit at the lower qubit slot
+    sub.u32 %r9, %r7, 1;        // lo - 1
+    not.b32 %r10, %r9;          // ~(lo-1)
+    and.b32 %r15, %r3, %r10;
+    shl.b32 %r15, %r15, 1;
+    and.b32 %r16, %r3, %r9;
+    or.b32  %r17, %r15, %r16;   // tid with a 0 inserted below lo
+
+    // step 2: insert a 0 bit at the higher qubit slot. Because we inserted the
+    // lower hole first (low -> high), the higher hole's final position is just hi.
+    sub.u32 %r19, %r8, 1;       // hi - 1
+    not.b32 %r10, %r19;         // ~(hi-1)
+    and.b32 %r15, %r17, %r10;
+    shl.b32 %r15, %r15, 1;
+    and.b32 %r16, %r17, %r19;
+    or.b32  %r11, %r15, %r16;   // i00 (both qubit bits = 0)
+
+    or.b32  %r12, %r11, %r6;    // i01 = i00 | mask1
+    or.b32  %r13, %r11, %r5;    // i10 = i00 | mask0
+    or.b32  %r14, %r11, %r5;
+    or.b32  %r14, %r14, %r6;    // i11 = i00 | mask0 | mask1
 
     ld.param.u64 %rd0, [param_amp_re];
     ld.param.u64 %rd1, [param_amp_im];
     ld.param.u64 %rd2, [param_gate_re];
     ld.param.u64 %rd3, [param_gate_im];
 
-    // load 4 input amplitudes
+    // load 4 input amplitudes (re: f0,f2,f4,f6 ; im: f1,f3,f5,f7)
     mul.lo.u32 %r20, %r11, 4;
     cvt.u64.u32 %rd4, %r20;
     add.u64 %rd8,  %rd0, %rd4;
@@ -235,14 +245,15 @@ pub fn statevec_apply_2q_ptx(sm: u32) -> String {
     ld.global.f32 %f6, [%rd8];    // x3.re
     ld.global.f32 %f7, [%rd12];   // x3.im
 
-    // 4x4 complex matrix-vector product: y[j] = sum_k gate[j,k] * x[k]
-    // Store results in f32-f47 (real) and f48-f63 (imag) — 4 output slots
-    // Row 0: y0 = gate[0,0]*x0 + gate[0,1]*x1 + gate[0,2]*x2 + gate[0,3]*x3
+    // 4x4 complex matrix-vector product: y[j] = sum_k gate[j,k] * x[k].
+    // gate_re[j*4+k] / gate_im[j*4+k] at byte offset (j*4+k)*4.
+    // Row 0 -> f16(re),f17(im); Row 1 -> f18,f19; Row 2 -> f20,f21; Row 3 -> f22,f23.
+
+    // ---- Row 0 (gate offsets 0,4,8,12) ----
     mov.f32 %f16, 0F00000000;
     mov.f32 %f17, 0F00000000;
-    // gate_re[0..4] at offsets 0..16 bytes
-    ld.global.f32 %f8,  [%rd2+0];
-    ld.global.f32 %f9,  [%rd3+0];
+    ld.global.f32 %f8, [%rd2+0];
+    ld.global.f32 %f9, [%rd3+0];
     mul.f32 %f10, %f8, %f0;
     mul.f32 %f11, %f9, %f1;
     sub.f32 %f10, %f10, %f11;
@@ -251,9 +262,8 @@ pub fn statevec_apply_2q_ptx(sm: u32) -> String {
     mul.f32 %f11, %f9, %f0;
     add.f32 %f10, %f10, %f11;
     add.f32 %f17, %f17, %f10;
-
-    ld.global.f32 %f8,  [%rd2+4];
-    ld.global.f32 %f9,  [%rd3+4];
+    ld.global.f32 %f8, [%rd2+4];
+    ld.global.f32 %f9, [%rd3+4];
     mul.f32 %f10, %f8, %f2;
     mul.f32 %f11, %f9, %f3;
     sub.f32 %f10, %f10, %f11;
@@ -262,9 +272,8 @@ pub fn statevec_apply_2q_ptx(sm: u32) -> String {
     mul.f32 %f11, %f9, %f2;
     add.f32 %f10, %f10, %f11;
     add.f32 %f17, %f17, %f10;
-
-    ld.global.f32 %f8,  [%rd2+8];
-    ld.global.f32 %f9,  [%rd3+8];
+    ld.global.f32 %f8, [%rd2+8];
+    ld.global.f32 %f9, [%rd3+8];
     mul.f32 %f10, %f8, %f4;
     mul.f32 %f11, %f9, %f5;
     sub.f32 %f10, %f10, %f11;
@@ -273,9 +282,8 @@ pub fn statevec_apply_2q_ptx(sm: u32) -> String {
     mul.f32 %f11, %f9, %f4;
     add.f32 %f10, %f10, %f11;
     add.f32 %f17, %f17, %f10;
-
-    ld.global.f32 %f8,  [%rd2+12];
-    ld.global.f32 %f9,  [%rd3+12];
+    ld.global.f32 %f8, [%rd2+12];
+    ld.global.f32 %f9, [%rd3+12];
     mul.f32 %f10, %f8, %f6;
     mul.f32 %f11, %f9, %f7;
     sub.f32 %f10, %f10, %f11;
@@ -285,13 +293,163 @@ pub fn statevec_apply_2q_ptx(sm: u32) -> String {
     add.f32 %f10, %f10, %f11;
     add.f32 %f17, %f17, %f10;
 
-    // store y0
+    // ---- Row 1 (gate offsets 16,20,24,28) ----
+    mov.f32 %f18, 0F00000000;
+    mov.f32 %f19, 0F00000000;
+    ld.global.f32 %f8, [%rd2+16];
+    ld.global.f32 %f9, [%rd3+16];
+    mul.f32 %f10, %f8, %f0;
+    mul.f32 %f11, %f9, %f1;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f18, %f18, %f10;
+    mul.f32 %f10, %f8, %f1;
+    mul.f32 %f11, %f9, %f0;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f19, %f19, %f10;
+    ld.global.f32 %f8, [%rd2+20];
+    ld.global.f32 %f9, [%rd3+20];
+    mul.f32 %f10, %f8, %f2;
+    mul.f32 %f11, %f9, %f3;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f18, %f18, %f10;
+    mul.f32 %f10, %f8, %f3;
+    mul.f32 %f11, %f9, %f2;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f19, %f19, %f10;
+    ld.global.f32 %f8, [%rd2+24];
+    ld.global.f32 %f9, [%rd3+24];
+    mul.f32 %f10, %f8, %f4;
+    mul.f32 %f11, %f9, %f5;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f18, %f18, %f10;
+    mul.f32 %f10, %f8, %f5;
+    mul.f32 %f11, %f9, %f4;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f19, %f19, %f10;
+    ld.global.f32 %f8, [%rd2+28];
+    ld.global.f32 %f9, [%rd3+28];
+    mul.f32 %f10, %f8, %f6;
+    mul.f32 %f11, %f9, %f7;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f18, %f18, %f10;
+    mul.f32 %f10, %f8, %f7;
+    mul.f32 %f11, %f9, %f6;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f19, %f19, %f10;
+
+    // ---- Row 2 (gate offsets 32,36,40,44) ----
+    mov.f32 %f20, 0F00000000;
+    mov.f32 %f21, 0F00000000;
+    ld.global.f32 %f8, [%rd2+32];
+    ld.global.f32 %f9, [%rd3+32];
+    mul.f32 %f10, %f8, %f0;
+    mul.f32 %f11, %f9, %f1;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f20, %f20, %f10;
+    mul.f32 %f10, %f8, %f1;
+    mul.f32 %f11, %f9, %f0;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f21, %f21, %f10;
+    ld.global.f32 %f8, [%rd2+36];
+    ld.global.f32 %f9, [%rd3+36];
+    mul.f32 %f10, %f8, %f2;
+    mul.f32 %f11, %f9, %f3;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f20, %f20, %f10;
+    mul.f32 %f10, %f8, %f3;
+    mul.f32 %f11, %f9, %f2;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f21, %f21, %f10;
+    ld.global.f32 %f8, [%rd2+40];
+    ld.global.f32 %f9, [%rd3+40];
+    mul.f32 %f10, %f8, %f4;
+    mul.f32 %f11, %f9, %f5;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f20, %f20, %f10;
+    mul.f32 %f10, %f8, %f5;
+    mul.f32 %f11, %f9, %f4;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f21, %f21, %f10;
+    ld.global.f32 %f8, [%rd2+44];
+    ld.global.f32 %f9, [%rd3+44];
+    mul.f32 %f10, %f8, %f6;
+    mul.f32 %f11, %f9, %f7;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f20, %f20, %f10;
+    mul.f32 %f10, %f8, %f7;
+    mul.f32 %f11, %f9, %f6;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f21, %f21, %f10;
+
+    // ---- Row 3 (gate offsets 48,52,56,60) ----
+    mov.f32 %f22, 0F00000000;
+    mov.f32 %f23, 0F00000000;
+    ld.global.f32 %f8, [%rd2+48];
+    ld.global.f32 %f9, [%rd3+48];
+    mul.f32 %f10, %f8, %f0;
+    mul.f32 %f11, %f9, %f1;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f22, %f22, %f10;
+    mul.f32 %f10, %f8, %f1;
+    mul.f32 %f11, %f9, %f0;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f23, %f23, %f10;
+    ld.global.f32 %f8, [%rd2+52];
+    ld.global.f32 %f9, [%rd3+52];
+    mul.f32 %f10, %f8, %f2;
+    mul.f32 %f11, %f9, %f3;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f22, %f22, %f10;
+    mul.f32 %f10, %f8, %f3;
+    mul.f32 %f11, %f9, %f2;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f23, %f23, %f10;
+    ld.global.f32 %f8, [%rd2+56];
+    ld.global.f32 %f9, [%rd3+56];
+    mul.f32 %f10, %f8, %f4;
+    mul.f32 %f11, %f9, %f5;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f22, %f22, %f10;
+    mul.f32 %f10, %f8, %f5;
+    mul.f32 %f11, %f9, %f4;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f23, %f23, %f10;
+    ld.global.f32 %f8, [%rd2+60];
+    ld.global.f32 %f9, [%rd3+60];
+    mul.f32 %f10, %f8, %f6;
+    mul.f32 %f11, %f9, %f7;
+    sub.f32 %f10, %f10, %f11;
+    add.f32 %f22, %f22, %f10;
+    mul.f32 %f10, %f8, %f7;
+    mul.f32 %f11, %f9, %f6;
+    add.f32 %f10, %f10, %f11;
+    add.f32 %f23, %f23, %f10;
+
+    // store y0..y3 to i00,i01,i10,i11 (all inputs already read, so no race)
     mul.lo.u32 %r20, %r11, 4;
     cvt.u64.u32 %rd4, %r20;
     add.u64 %rd8,  %rd0, %rd4;
     add.u64 %rd12, %rd1, %rd4;
     st.global.f32 [%rd8],  %f16;
     st.global.f32 [%rd12], %f17;
+    mul.lo.u32 %r20, %r12, 4;
+    cvt.u64.u32 %rd4, %r20;
+    add.u64 %rd8,  %rd0, %rd4;
+    add.u64 %rd12, %rd1, %rd4;
+    st.global.f32 [%rd8],  %f18;
+    st.global.f32 [%rd12], %f19;
+    mul.lo.u32 %r20, %r13, 4;
+    cvt.u64.u32 %rd4, %r20;
+    add.u64 %rd8,  %rd0, %rd4;
+    add.u64 %rd12, %rd1, %rd4;
+    st.global.f32 [%rd8],  %f20;
+    st.global.f32 [%rd12], %f21;
+    mul.lo.u32 %r20, %r14, 4;
+    cvt.u64.u32 %rd4, %r20;
+    add.u64 %rd8,  %rd0, %rd4;
+    add.u64 %rd12, %rd1, %rd4;
+    st.global.f32 [%rd8],  %f22;
+    st.global.f32 [%rd12], %f23;
 
 DONE:
     ret;
@@ -335,6 +493,12 @@ pub fn statevec_apply_cnot_ptx(sm: u32) -> String {
     // only process indices where ctrl bit = 1
     and.b32 %r7, %r3, %r5;
     setp.eq.u32 %p1, %r7, 0;
+    @%p1 bra DONE;
+
+    // only process the tgt=0 member of each pair (avoid the double-swap race:
+    // otherwise both the tgt=0 and tgt=1 threads swap the same pair)
+    and.b32 %r7, %r3, %r6;
+    setp.ne.u32 %p1, %r7, 0;
     @%p1 bra DONE;
 
     // i0 = index with tgt=0 (clear tgt bit), i1 = index with tgt=1 (set tgt bit)
@@ -503,10 +667,9 @@ pub fn partial_trace_ptx(sm: u32) -> String {
     mul.f32 %f3, %f1, %f1;
     add.f32 %f4, %f2, %f3;
 
-    // reduced index: extract keep bits from index (zero trace bits)
+    // reduced index: compact the kept (non-trace) bits into a dense index.
     ld.param.u32 %r6, [param_trace_mask];
-    not.b32 %r7, %r6;
-    and.b32 %r8, %r3, %r7;   // keep-bit index (sparse)
+    mov.u32 %r8, 0;          // dense reduced-index accumulator (must start at 0)
 
     // compact to dense reduced index via parallel bit extract (simplified: use pext-equivalent)
     // For PTX correctness we use the compact mapping via shift:
@@ -606,8 +769,8 @@ pub fn trotter_step_ptx(sm: u32) -> String {
     mul.f32 %f5, %f4, %f4;             // x^2
     mul.f32 %f6, %f5, %f5;             // x^4
     mov.f32 %f7, 0F3F800000;           // 1.0
-    mov.f32 %f8, 0F3E000000;           // 0.5
-    mov.f32 %f9, 0F3B888889;           // 1/24
+    mov.f32 %f8, 0F3F000000;           // 0.5
+    mov.f32 %f9, 0F3D2AAAAB;           // 1/24
     // cos ~ 1 - x^2/2 + x^4/24
     mul.f32 %f10, %f5, %f8;
     sub.f32 %f10, %f7, %f10;
@@ -670,15 +833,11 @@ pub fn measure_prob_ptx(sm: u32) -> String {
     ld.param.u32 %r5, [param_qubit_mask];
     ld.param.u32 %r6, [param_outcome];
 
-    // check if this index has the target qubit value
-    and.b32 %r7, %r3, %r5;
-    // if outcome=0, r7 must be 0; if outcome=1, r7 must be nonzero
-    setp.eq.u32 %p0, %r6, 0;
-    setp.eq.u32 %p1, %r7, 0;
-    // match if (outcome==0 && bit==0) || (outcome==1 && bit!=0)
-    xor.pred %p1, %p1, %p0;   // p1 = p1 XOR p0: true when they match
-    @!%p1 bra DONE;
-
+    // Every lane loads its amplitude and computes prob = |amp|^2, then masks the
+    // contribution to 0 when this index does NOT have the target qubit value.
+    // (We must NOT branch out non-matching lanes before the warp shuffle: that
+    // would diverge the warp while the shfl uses a full-warp membermask, which is
+    // UB. Instead, zero the contribution and let all lanes reduce.)
     ld.param.u64 %rd0, [param_amp_re];
     ld.param.u64 %rd1, [param_amp_im];
 
@@ -693,6 +852,14 @@ pub fn measure_prob_ptx(sm: u32) -> String {
     mul.f32 %f2, %f0, %f0;
     mul.f32 %f3, %f1, %f1;
     add.f32 %f4, %f2, %f3;
+
+    // measured bit value (0/1) and match against outcome
+    and.b32 %r7, %r3, %r5;
+    setp.ne.u32 %p1, %r7, 0;       // p1 = (bit == 1)
+    selp.u32 %r9, 1, 0, %p1;       // r9 = measured bit value
+    setp.eq.u32 %p1, %r9, %r6;     // p1 = (bit == outcome) -> matches
+    mov.f32 %f6, 0F00000000;
+    selp.f32 %f4, %f4, %f6, %p1;   // contribution = match ? prob : 0
 
     // warp-shuffle reduction
     shfl.sync.down.b32 %f5, %f4, 16, 31, 0xffffffff;
@@ -768,11 +935,11 @@ pub fn qft_butterfly_ptx(sm: u32) -> String {
 
     ld.param.u32 %r5, [param_mask];
 
-    // i0 = (tid & ~mask) << 1 | (tid & (mask - 1))  (insert a 0 bit at the qubit slot)
-    not.b32 %r6, %r5;
+    // i0 = ((tid & ~(mask-1)) << 1) | (tid & (mask-1))  (insert a 0 bit at the qubit slot)
+    sub.u32 %r8, %r5, 1;       // mask - 1 (low-bit mask)
+    not.b32 %r6, %r8;          // ~(mask-1) (high-bit mask)
     and.b32 %r7, %r3, %r6;
     shl.b32 %r7, %r7, 1;
-    sub.u32 %r8, %r5, 1;
     and.b32 %r9, %r3, %r8;
     or.b32 %r10, %r7, %r9;
 
@@ -805,8 +972,8 @@ pub fn qft_butterfly_ptx(sm: u32) -> String {
     mul.f32 %f5, %f4, %f4;             // x^2
     mul.f32 %f6, %f5, %f5;             // x^4
     mov.f32 %f7, 0F3F800000;           // 1.0
-    mov.f32 %f8, 0F3E000000;           // 0.5
-    mov.f32 %f9, 0F3B888889;           // 1/24
+    mov.f32 %f8, 0F3F000000;           // 0.5
+    mov.f32 %f9, 0F3D2AAAAB;           // 1/24
     mul.f32 %f10, %f5, %f8;
     sub.f32 %f10, %f7, %f10;
     mul.f32 %f11, %f6, %f9;

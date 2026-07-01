@@ -1,6 +1,7 @@
 //! Neural operators: FNO, DeepONet, MWT, GNO, WNO.
 
 pub mod deeponet;
+pub mod fft;
 pub mod fno;
 pub mod fno_3d;
 pub mod gno;

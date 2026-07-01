@@ -8,7 +8,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.39).
 
 ## Implementation Status
 
-- **Actual SLoC:** 19,144 total lines (63 files)
+- **Actual SLoC:** 16,482 total lines (63 files)
 - **Coverage:** brute-force flat index baseline, bounded top-K heap selection,
   mini-batch k-means++ trainer, Product Quantization (PQ) with asymmetric distance
   computation (ADC), IVF coarse quantizer, IVFPQ coarse-prune + re-rank, HNSW
@@ -80,7 +80,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.39).
   NN-Descent quality, PTX non-empty × all SM versions)
 - [x] Benchmarks (`benches/ann_ops.rs`) — 7 PTX kernel groups × 4 SM
   + 5 algorithm benches
-- **Tests:** 412 passing
+- **Tests:** 464 passing
 
 ### Future Enhancements
 
@@ -141,7 +141,7 @@ integrators perform the actual GPU launch.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 412 passing (Flat, k-means, PQ, OPQ, anisotropic-PQ, IVF, IVFADC,
+- Tests: 464 passing (Flat, k-means, PQ, OPQ, anisotropic-PQ, IVF, IVFADC,
   HNSW recall, FreshDiskANN incremental insert/delete/consolidate, LSH +
   calibration, MinHash unbiasedness, index serializer, recall/Pareto metrics,
   NN-Descent, PTX × 6 SM)

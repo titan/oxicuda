@@ -86,16 +86,16 @@ impl_primitive_type!(
     PtxType::F32,
     "f32",
     "0f00000000", // 0.0 as PTX float literal
-    "0x7F800000", // +inf as hex float
-    "0xFF800000"  // -inf as hex float
+    "0f7F800000", // +inf as PTX f32 literal
+    "0fFF800000"  // -inf as PTX f32 literal
 );
 impl_primitive_type!(
     f64,
     PtxType::F64,
     "f64",
     "0d0000000000000000", // 0.0 as PTX double literal
-    "0x7FF0000000000000", // +inf
-    "0xFFF0000000000000"  // -inf
+    "0d7FF0000000000000", // +inf as PTX f64 literal
+    "0dFFF0000000000000"  // -inf as PTX f64 literal
 );
 
 // ─── Reduction operation ─────────────────────────────────────────────────────
@@ -548,7 +548,7 @@ mod tests {
         assert_eq!(ReduceOp::Sum.identity_literal::<f32>(), "0f00000000");
         assert_eq!(
             ReduceOp::Min.identity_literal::<f64>(),
-            "0x7FF0000000000000"
+            "0d7FF0000000000000"
         );
     }
 }

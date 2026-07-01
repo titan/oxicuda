@@ -143,13 +143,36 @@ impl GemmTemplate {
     /// # Errors
     ///
     /// Returns [`PtxGenError`] if the precision is unsupported or formatting fails.
+    #[allow(clippy::too_many_lines)]
     pub fn generate(&self) -> Result<String, PtxGenError> {
         self.validate()?;
 
+        // `ty` is the input-element precision used for global loads/stores of
+        // A, B and C; `acc_ty` is the accumulator precision used for the dot
+        // product, alpha/beta scaling and the FMA epilogue. They may differ
+        // (e.g. F16 inputs with an F32 accumulator), in which case the loaded
+        // elements live in a separate register bank and are converted to the
+        // accumulator precision with `cvt` before use.
         let ty = self.precision.as_ptx_str();
         let acc_ty = self.accumulator.as_ptx_str();
         let byte_size = self.precision.size_bytes();
         let kernel_name = self.kernel_name();
+        let needs_cvt = self.precision != self.accumulator;
+        let acc_zero = self.accumulator.zero_literal();
+        // The PTX `ld`/`st` element type for the input precision. The ISA has no
+        // `.f16`/`.bf16` memory-access form, so 16-bit floats are moved as raw
+        // `.b16` and reinterpreted by `cvt`; `.f32`/`.f64` load/store directly.
+        let mem_ty = match self.precision {
+            PtxType::F16 | PtxType::BF16 => ".b16",
+            _ => ty,
+        };
+        // 16-bit floats (`F16`/`BF16`) have no direct `cvt` to/from `.f64` on
+        // pre-Hopper targets, and `bf16` is designed around `f32` on every
+        // architecture, so half↔f64 conversions are routed through an `f32`
+        // scratch register. This bank is only needed for half inputs with an
+        // `F64` accumulator.
+        let needs_f32_scratch = matches!(self.precision, PtxType::F16 | PtxType::BF16)
+            && self.accumulator == PtxType::F64;
 
         let mut ptx = String::with_capacity(8192);
 
@@ -173,28 +196,27 @@ impl GemmTemplate {
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
-        // Register declarations
+        // Register declarations.
+        //
+        // The value bank `%f` is declared with the *accumulator* precision so
+        // that `mov`/`mul`/`fma.rn`/`ld.param` on the accumulator, alpha and
+        // beta all agree with the register type (PTX validates that the declared
+        // register type matches every instruction's type modifier). When the
+        // input precision differs, a second bank `%fin` holds the freshly loaded
+        // input-precision elements prior to conversion.
         writeln!(ptx, "    .reg .b32 %r<32>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b64 %rd<16>;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    .reg .f32 %f<16>;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    .reg {acc_ty} %f<16>;").map_err(PtxGenError::FormatError)?;
+        if needs_cvt {
+            writeln!(ptx, "    .reg {mem_ty} %fin<8>;").map_err(PtxGenError::FormatError)?;
+        }
+        if needs_f32_scratch {
+            writeln!(ptx, "    .reg .f32 %fc<8>;").map_err(PtxGenError::FormatError)?;
+        }
         writeln!(ptx, "    .reg .pred %p<4>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
-        // Naive GEMM: each thread computes one element C[row, col]
-        // row = blockIdx.y * blockDim.y + threadIdx.y
-        // col = blockIdx.x * blockDim.x + threadIdx.x
-        writeln!(ptx, "    // Compute row and column indices").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mov.u32 %r0, %tid.x;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mov.u32 %r1, %tid.y;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mov.u32 %r2, %ctaid.x;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mov.u32 %r3, %ctaid.y;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mov.u32 %r4, %ntid.x;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mov.u32 %r5, %ntid.y;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mad.lo.u32 %r6, %r2, %r4, %r0;").map_err(PtxGenError::FormatError)?; // col
-        writeln!(ptx, "    mad.lo.u32 %r7, %r3, %r5, %r1;").map_err(PtxGenError::FormatError)?; // row
-        writeln!(ptx).map_err(PtxGenError::FormatError)?;
-
-        // Load parameters
+        // Load parameters (loop-invariant; hoisted out of the grid-stride loop).
         writeln!(ptx, "    // Load parameters").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    ld.param.u64 %rd0, [%param_a];").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    ld.param.u64 %rd1, [%param_b];").map_err(PtxGenError::FormatError)?;
@@ -208,51 +230,103 @@ impl GemmTemplate {
             .map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
-        // Bounds check
-        writeln!(ptx, "    // Bounds check: row < M && col < N")
+        // Naive GEMM with a grid-stride loop over the flattened (row-major)
+        // output matrix. Each thread derives a unique *global linear id* from
+        // its block/thread coordinates and walks the C matrix in strides of the
+        // total launched thread count, computing one full K-dot-product per
+        // element. Using a linear id (instead of 2-D thread/block indices) makes
+        // the kernel correct under any launch geometry the dispatcher chooses —
+        // in particular the 1-D thread blocks it emits for skinny/tiled shapes,
+        // where `threadIdx.y` and `gridDim.y` would otherwise pin every thread
+        // to row 0.
+        writeln!(
+            ptx,
+            "    // global_id = ((ctaid.z*gridDim.y + ctaid.y)*gridDim.x + ctaid.x)*blockDim.x + tid.x"
+        )
+        .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r0, %tid.x;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r1, %ctaid.x;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r2, %ctaid.y;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r3, %ctaid.z;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r4, %ntid.x;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r5, %nctaid.x;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r6, %nctaid.y;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r7, %nctaid.z;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mad.lo.u32 %r11, %r3, %r6, %r2;").map_err(PtxGenError::FormatError)?; // z*gy + y
+        writeln!(ptx, "    mad.lo.u32 %r11, %r11, %r5, %r1;").map_err(PtxGenError::FormatError)?; // *gx + x
+        writeln!(ptx, "    mad.lo.u32 %r12, %r11, %r4, %r0;").map_err(PtxGenError::FormatError)?; // *bdx + tid.x
+        writeln!(
+            ptx,
+            "    // total_threads = gridDim.x*gridDim.y*gridDim.z*blockDim.x"
+        )
+        .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mul.lo.u32 %r13, %r5, %r6;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mul.lo.u32 %r13, %r13, %r7;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mul.lo.u32 %r13, %r13, %r4;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    // total_elems = M*N").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mul.lo.u32 %r14, %r8, %r9;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx).map_err(PtxGenError::FormatError)?;
+
+        // Grid-stride loop over output elements: idx = global_id, += total_threads.
+        writeln!(ptx, "    mov.u32 %r15, %r12;  // idx = global_id")
             .map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    setp.ge.u32 %p0, %r7, %r8;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    setp.ge.u32 %p1, %r6, %r9;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "$TILE_LOOP:").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    setp.ge.u32 %p0, %r15, %r14;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    @%p0 bra $GEMM_DONE;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    @%p1 bra $GEMM_DONE;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    // row = idx / N ; col = idx % N").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    div.u32 %r16, %r15, %r9;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    rem.u32 %r17, %r15, %r9;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
         // Accumulator init
         writeln!(ptx, "    // Initialize accumulator to 0").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mov{acc_ty} %f0, 0f00000000;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mov.u32 %r11, 0;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov{acc_ty} %f0, {acc_zero};").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mov.u32 %r18, 0;  // k").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
         // Inner loop over K
         writeln!(ptx, "    // K-loop: accumulate dot product").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "$K_LOOP:").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    setp.ge.u32 %p2, %r11, %r10;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    @%p2 bra $K_DONE;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    setp.ge.u32 %p1, %r18, %r10;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    @%p1 bra $K_DONE;").map_err(PtxGenError::FormatError)?;
 
         // Load A[row, k] = A[row * K + k]
-        writeln!(ptx, "    // A[row, k]").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mad.lo.u32 %r12, %r7, %r10, %r11;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    cvt.u64.u32 %rd3, %r12;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    // A[row, k] = A[row*K + k]").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mad.lo.u32 %r19, %r16, %r10, %r18;")
+            .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    cvt.u64.u32 %rd3, %r19;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.lo.u64 %rd3, %rd3, {byte_size};")
             .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    add.u64 %rd4, %rd0, %rd3;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    ld.global{ty} %f1, [%rd4];").map_err(PtxGenError::FormatError)?;
+        if needs_cvt {
+            writeln!(ptx, "    ld.global{mem_ty} %fin1, [%rd4];")
+                .map_err(PtxGenError::FormatError)?;
+            self.emit_convert_to_acc(&mut ptx, "%fin1", "%fc1", "%f1")?;
+        } else {
+            writeln!(ptx, "    ld.global{ty} %f1, [%rd4];").map_err(PtxGenError::FormatError)?;
+        }
 
         // Load B[k, col] = B[k * N + col]
-        writeln!(ptx, "    // B[k, col]").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mad.lo.u32 %r13, %r11, %r9, %r6;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    cvt.u64.u32 %rd5, %r13;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    // B[k, col] = B[k*N + col]").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mad.lo.u32 %r20, %r18, %r9, %r17;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    cvt.u64.u32 %rd5, %r20;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.lo.u64 %rd5, %rd5, {byte_size};")
             .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    add.u64 %rd6, %rd1, %rd5;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    ld.global{ty} %f2, [%rd6];").map_err(PtxGenError::FormatError)?;
+        if needs_cvt {
+            writeln!(ptx, "    ld.global{mem_ty} %fin2, [%rd6];")
+                .map_err(PtxGenError::FormatError)?;
+            self.emit_convert_to_acc(&mut ptx, "%fin2", "%fc2", "%f2")?;
+        } else {
+            writeln!(ptx, "    ld.global{ty} %f2, [%rd6];").map_err(PtxGenError::FormatError)?;
+        }
 
         // acc += a * b
         writeln!(ptx, "    fma.rn{acc_ty} %f0, %f1, %f2, %f0;")
             .map_err(PtxGenError::FormatError)?;
 
         // k++
-        writeln!(ptx, "    add.u32 %r11, %r11, 1;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    add.u32 %r18, %r18, 1;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    bra $K_LOOP;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "$K_DONE:").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
@@ -260,22 +334,116 @@ impl GemmTemplate {
         // Epilogue: C[row, col] = alpha * acc + beta * C_old
         writeln!(ptx, "    // Epilogue: C = alpha * acc + beta * C_old")
             .map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mad.lo.u32 %r14, %r7, %r9, %r6;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    cvt.u64.u32 %rd7, %r14;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mad.lo.u32 %r21, %r16, %r9, %r17;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    cvt.u64.u32 %rd7, %r21;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.lo.u64 %rd7, %rd7, {byte_size};")
             .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    add.u64 %rd8, %rd2, %rd7;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    ld.global{ty} %f3, [%rd8];").map_err(PtxGenError::FormatError)?;
+        if needs_cvt {
+            writeln!(ptx, "    ld.global{mem_ty} %fin3, [%rd8];")
+                .map_err(PtxGenError::FormatError)?;
+            self.emit_convert_to_acc(&mut ptx, "%fin3", "%fc3", "%f3")?;
+        } else {
+            writeln!(ptx, "    ld.global{ty} %f3, [%rd8];").map_err(PtxGenError::FormatError)?;
+        }
         writeln!(ptx, "    mul{acc_ty} %f0, %f0, %f8;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    fma.rn{acc_ty} %f0, %f9, %f3, %f0;")
             .map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    st.global{ty} [%rd8], %f0;").map_err(PtxGenError::FormatError)?;
+        if needs_cvt {
+            // Narrow the accumulator back to the output (input) precision before
+            // the store, since C is stored element-for-element in input precision.
+            self.emit_convert_from_acc(&mut ptx, "%f0", "%fc0", "%fin0")?;
+            writeln!(ptx, "    st.global{mem_ty} [%rd8], %fin0;")
+                .map_err(PtxGenError::FormatError)?;
+        } else {
+            writeln!(ptx, "    st.global{ty} [%rd8], %f0;").map_err(PtxGenError::FormatError)?;
+        }
+        writeln!(ptx).map_err(PtxGenError::FormatError)?;
+
+        // Advance to the next element handled by this thread.
+        writeln!(ptx, "    add.u32 %r15, %r15, %r13;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    bra $TILE_LOOP;").map_err(PtxGenError::FormatError)?;
 
         writeln!(ptx, "$GEMM_DONE:").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    ret;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "}}").map_err(PtxGenError::FormatError)?;
 
         Ok(ptx)
+    }
+
+    /// Emits the conversion of a freshly loaded input-precision element (in the
+    /// `%fin`/`fin` register) into the accumulator-precision value register
+    /// `dst`. 16-bit floats are widened via an `f32` intermediate (`fc`) when
+    /// the accumulator is `F64`, because no direct half↔f64 `cvt` exists on
+    /// pre-Hopper targets; otherwise a single `cvt` suffices.
+    ///
+    /// The caller guarantees the input and accumulator precisions differ.
+    fn emit_convert_to_acc(
+        &self,
+        ptx: &mut String,
+        fin: &str,
+        fc: &str,
+        dst: &str,
+    ) -> Result<(), PtxGenError> {
+        let in_ty = self.precision.as_ptx_str();
+        match self.precision {
+            PtxType::F16 | PtxType::BF16 => {
+                if self.accumulator == PtxType::F64 {
+                    // half -> f32 -> f64
+                    writeln!(ptx, "    cvt.f32{in_ty} {fc}, {fin};")
+                        .map_err(PtxGenError::FormatError)?;
+                    writeln!(ptx, "    cvt.f64.f32 {dst}, {fc};")
+                        .map_err(PtxGenError::FormatError)?;
+                } else {
+                    // half -> f32 (accumulator is f32)
+                    writeln!(ptx, "    cvt.f32{in_ty} {dst}, {fin};")
+                        .map_err(PtxGenError::FormatError)?;
+                }
+            }
+            _ => {
+                // Direct f32<->f64 conversion (widening or narrowing).
+                let cvt = self.accumulator.float_cvt_mnemonic(self.precision);
+                writeln!(ptx, "    {cvt} {dst}, {fin};").map_err(PtxGenError::FormatError)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Emits the conversion of the accumulator-precision result register `src`
+    /// back into the output (input) precision register `fin`, ready for the
+    /// global store. Mirrors [`emit_convert_to_acc`](Self::emit_convert_to_acc),
+    /// routing half↔f64 narrowing through the `f32` scratch register `fc`.
+    ///
+    /// The caller guarantees the input and accumulator precisions differ.
+    fn emit_convert_from_acc(
+        &self,
+        ptx: &mut String,
+        src: &str,
+        fc: &str,
+        fin: &str,
+    ) -> Result<(), PtxGenError> {
+        let in_ty = self.precision.as_ptx_str();
+        match self.precision {
+            PtxType::F16 | PtxType::BF16 => {
+                if self.accumulator == PtxType::F64 {
+                    // f64 -> f32 -> half
+                    writeln!(ptx, "    cvt.rn.f32.f64 {fc}, {src};")
+                        .map_err(PtxGenError::FormatError)?;
+                    writeln!(ptx, "    cvt.rn{in_ty}.f32 {fin}, {fc};")
+                        .map_err(PtxGenError::FormatError)?;
+                } else {
+                    // f32 -> half
+                    writeln!(ptx, "    cvt.rn{in_ty}.f32 {fin}, {src};")
+                        .map_err(PtxGenError::FormatError)?;
+                }
+            }
+            _ => {
+                // Direct f32<->f64 conversion.
+                let cvt = self.precision.float_cvt_mnemonic(self.accumulator);
+                writeln!(ptx, "    {cvt} {fin}, {src};").map_err(PtxGenError::FormatError)?;
+            }
+        }
+        Ok(())
     }
 
     /// Generates a multi-stage pipelined GEMM PTX module.
@@ -1011,5 +1179,172 @@ mod tests {
             total_gflops > 0.0001,
             "CPU reference GEMM unacceptably slow: {total_gflops:.6} GFLOPS"
         );
+    }
+
+    // ── PTX precision-correctness tests (the f64 codegen bug) ────────────────
+    //
+    // The naive GEMM template historically declared its value register bank as
+    // `.reg .f32 %f<16>` and initialised the accumulator with the single-
+    // precision zero literal `0f00000000`, even when the kernel body used
+    // `.f64` instructions. `ptxas` rejects that with "Arguments mismatch for
+    // instruction 'ld'/'mov'/'fma'/'mul'/'st'". These tests assert the emitted
+    // PTX is precision-correct and (when `ptxas` is present) actually assembles
+    // for the real A4000 target (sm_86).
+
+    fn gemm_template(precision: PtxType, accumulator: PtxType) -> GemmTemplate {
+        GemmTemplate {
+            tile_m: 64,
+            tile_n: 8,
+            tile_k: 8,
+            warp_m: 32,
+            warp_n: 8,
+            precision,
+            accumulator,
+            use_tensor_core: false,
+            stages: 1,
+            target: SmVersion::Sm86,
+            epilogue: EpilogueKind::LinearCombination,
+        }
+    }
+
+    /// The F64 naive kernel must declare a `.f64` value bank, use the double
+    /// zero literal, and must NOT contain the single-precision `0f00000000`
+    /// literal or an `.f32` value bank anywhere in the body.
+    #[test]
+    fn gemm_f64_ptx_is_precision_correct() {
+        let ptx = gemm_template(PtxType::F64, PtxType::F64)
+            .generate()
+            .expect("F64 GEMM should generate");
+        assert!(
+            ptx.contains(".reg .f64 %f<16>;"),
+            "F64 GEMM must declare a .f64 value bank:\n{ptx}"
+        );
+        assert!(
+            ptx.contains("mov.f64 %f0, 0d0000000000000000;"),
+            "F64 GEMM must zero the accumulator with the double literal:\n{ptx}"
+        );
+        assert!(
+            !ptx.contains("0f00000000"),
+            "F64 GEMM must not contain the single-precision zero literal:\n{ptx}"
+        );
+        assert!(
+            !ptx.contains(".reg .f32"),
+            "F64 GEMM must not declare a .f32 register bank:\n{ptx}"
+        );
+        // Body must use f64 arithmetic/memory instructions.
+        for needle in [
+            "ld.param.f64",
+            "ld.global.f64",
+            "fma.rn.f64",
+            "mul.f64",
+            "st.global.f64",
+        ] {
+            assert!(
+                ptx.contains(needle),
+                "F64 GEMM must contain {needle}:\n{ptx}"
+            );
+        }
+    }
+
+    /// Mixed precision (F16 input, F32 accumulator) must use two register banks
+    /// and `cvt` between them — never an `.f64`/`.f32` type clash.
+    #[test]
+    fn gemm_mixed_f16_f32_uses_cvt() {
+        let ptx = gemm_template(PtxType::F16, PtxType::F32)
+            .generate()
+            .expect("F16/F32 GEMM should generate");
+        assert!(
+            ptx.contains(".reg .f32 %f<16>;"),
+            "accumulator bank f32:\n{ptx}"
+        );
+        // 16-bit floats are moved through `.b16` containers (PTX `ld`/`st` have
+        // no `.f16` form) and reinterpreted by `cvt`.
+        assert!(ptx.contains(".reg .b16 %fin<8>;"), "input bank b16:\n{ptx}");
+        assert!(
+            ptx.contains("ld.global.b16 %fin1,"),
+            "load A as b16:\n{ptx}"
+        );
+        assert!(ptx.contains("cvt.f32.f16 %f1, %fin1;"), "widen A:\n{ptx}");
+        assert!(
+            ptx.contains("cvt.rn.f16.f32 %fin0, %f0;"),
+            "narrow store:\n{ptx}"
+        );
+        assert!(
+            ptx.contains("st.global.b16 [%rd8], %fin0;"),
+            "store as b16:\n{ptx}"
+        );
+    }
+
+    /// Locate `ptxas` on PATH (or the well-known CUDA bin dir), returning its
+    /// path if present so the test can skip gracefully on CPU-only machines.
+    fn find_ptxas() -> Option<std::path::PathBuf> {
+        if let Ok(path) = std::env::var("PATH") {
+            for dir in std::env::split_paths(&path) {
+                let candidate = dir.join("ptxas");
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        let fallback = std::path::PathBuf::from("/usr/local/cuda/bin/ptxas");
+        if fallback.is_file() {
+            return Some(fallback);
+        }
+        None
+    }
+
+    /// Runs `ptxas -arch=sm_86` on the generated PTX for every precision
+    /// combination the naive path admits, asserting each assembles cleanly.
+    /// Skips (with a printed note) when `ptxas` is unavailable.
+    #[test]
+    fn gemm_naive_ptx_assembles_for_sm86() {
+        let Some(ptxas) = find_ptxas() else {
+            println!("skipping: ptxas not found on PATH");
+            return;
+        };
+
+        // Every combination admitted by `validate()`: precision ∈
+        // {F16,BF16,F32,F64}, accumulator ∈ {F32,F64}.
+        let combos = [
+            (PtxType::F32, PtxType::F32),
+            (PtxType::F64, PtxType::F64),
+            (PtxType::F16, PtxType::F32),
+            (PtxType::BF16, PtxType::F32),
+            (PtxType::F32, PtxType::F64),
+            (PtxType::F64, PtxType::F32),
+            (PtxType::F16, PtxType::F64),
+            (PtxType::BF16, PtxType::F64),
+        ];
+
+        for (precision, accumulator) in combos {
+            let ptx = gemm_template(precision, accumulator)
+                .generate()
+                .expect("GEMM PTX generation should succeed");
+
+            let mut ptx_path = std::env::temp_dir();
+            ptx_path.push(format!(
+                "oxicuda_gemm_{}_{}_{}.ptx",
+                precision.as_ptx_str().trim_start_matches('.'),
+                accumulator.as_ptx_str().trim_start_matches('.'),
+                std::process::id(),
+            ));
+            std::fs::write(&ptx_path, &ptx).expect("write PTX to temp file");
+
+            let output = std::process::Command::new(&ptxas)
+                .arg("-arch=sm_86")
+                .arg(&ptx_path)
+                .arg("-o")
+                .arg("/dev/null")
+                .output()
+                .expect("invoke ptxas");
+
+            let _ = std::fs::remove_file(&ptx_path);
+
+            assert!(
+                output.status.success(),
+                "ptxas rejected {precision:?}/{accumulator:?} GEMM PTX:\n{}\n--- PTX ---\n{ptx}",
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
     }
 }

@@ -7,7 +7,7 @@ to cuDNN. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.4).
 
 ## Implementation Status
 
-- **Actual SLoC:** 39,297 SLoC (110 files)
+- **Actual SLoC:** 40,845 SLoC (110 files)
 - **Estimated SLoC (estimation.md):** 396K--653K (median 525K)
 - **Ratio:** ~5.8% of median estimate -- compact foundation with all major DNN primitives
 

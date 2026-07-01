@@ -57,7 +57,7 @@ pub fn tp_col_scatter_ptx(sm: SmVersion) -> String {
 ) {{
     .reg .u64  %src, %dst, %ptr_s, %ptr_d;
     .reg .u32  %n, %tcols, %lcols, %off;
-    .reg .u32  %tid, %ntid, %ctaid, %gid;
+    .reg .u32  %t_idx, %n_tid, %cta, %gid, %ngrid, %stride;
     .reg .u32  %row, %lcol, %gcol;
     .reg .u64  %src_idx, %dst_idx;
     .reg .f32  %val;
@@ -70,10 +70,15 @@ pub fn tp_col_scatter_ptx(sm: SmVersion) -> String {
     ld.param.u32  %lcols, [local_cols];
     ld.param.u32  %off,   [col_offset];
 
-    mov.u32 %tid,   %tid.x;
-    mov.u32 %ntid,  %ntid.x;
-    mov.u32 %ctaid, %ctaid.x;
-    mad.lo.u32 %gid, %ctaid, %ntid, %tid;
+    mov.u32 %t_idx,   %tid.x;
+    mov.u32 %n_tid,  %ntid.x;
+    mov.u32 %cta, %ctaid.x;
+    mad.lo.u32 %gid, %cta, %n_tid, %t_idx;
+    // Grid-stride step = blockDim.x * gridDim.x (covers each element exactly once
+    // across all blocks; a blockDim-only stride double-visits elements, which is a
+    // read-modify-write hazard for accumulating kernels like tp_row_all_reduce).
+    mov.u32 %ngrid, %nctaid.x;
+    mul.lo.u32 %stride, %n_tid, %ngrid;
 
 $LOOP:
     setp.ge.u32 %p, %gid, %n;
@@ -99,8 +104,7 @@ $LOOP:
     add.u64     %ptr_d, %dst, %ptr_d;
     st.global.f32 [%ptr_d], %val;
 
-    add.u32 %gid, %gid, %ntid;
-    mul.lo.u32 %ntid, %ntid, 1;
+    add.u32 %gid, %gid, %stride;
     bra $LOOP;
 $DONE:
     ret;
@@ -136,7 +140,7 @@ pub fn tp_row_all_reduce_ptx(sm: SmVersion) -> String {
     .param .u32 n
 ) {{
     .reg .u64  %buf, %acc, %ptr_b, %ptr_a;
-    .reg .u32  %n, %tid, %ntid, %ctaid, %gid;
+    .reg .u32  %n, %t_idx, %n_tid, %cta, %gid, %ngrid, %stride;
     .reg .f32  %v_buf, %v_acc, %v_sum;
     .reg .pred %p;
 
@@ -144,10 +148,15 @@ pub fn tp_row_all_reduce_ptx(sm: SmVersion) -> String {
     ld.param.u64 %acc, [p_accum];
     ld.param.u32 %n,   [n];
 
-    mov.u32 %tid,   %tid.x;
-    mov.u32 %ntid,  %ntid.x;
-    mov.u32 %ctaid, %ctaid.x;
-    mad.lo.u32 %gid, %ctaid, %ntid, %tid;
+    mov.u32 %t_idx,   %tid.x;
+    mov.u32 %n_tid,  %ntid.x;
+    mov.u32 %cta, %ctaid.x;
+    mad.lo.u32 %gid, %cta, %n_tid, %t_idx;
+    // Grid-stride step = blockDim.x * gridDim.x (covers each element exactly once
+    // across all blocks; a blockDim-only stride double-visits elements, which is a
+    // read-modify-write hazard for accumulating kernels like tp_row_all_reduce).
+    mov.u32 %ngrid, %nctaid.x;
+    mul.lo.u32 %stride, %n_tid, %ngrid;
 
 $LOOP:
     setp.ge.u32 %p, %gid, %n;
@@ -166,7 +175,7 @@ $LOOP:
     add.f32 %v_sum, %v_buf, %v_acc;
     st.global.f32 [%ptr_b], %v_sum;
 
-    add.u32 %gid, %gid, %ntid;
+    add.u32 %gid, %gid, %stride;
     bra $LOOP;
 $DONE:
     ret;
@@ -207,7 +216,7 @@ pub fn sp_seq_chunk_copy_ptx(sm: SmVersion) -> String {
 ) {{
     .reg .u64  %full, %chunk, %ptr_f, %ptr_c;
     .reg .u32  %cs, %cl, %hd, %dir;
-    .reg .u32  %tid, %ntid, %ctaid, %gid, %n;
+    .reg .u32  %t_idx, %n_tid, %cta, %gid, %n, %ngrid, %stride;
     .reg .u32  %tok, %feat, %full_tok;
     .reg .u64  %idx_f, %idx_c;
     .reg .f32  %val;
@@ -220,10 +229,15 @@ pub fn sp_seq_chunk_copy_ptx(sm: SmVersion) -> String {
     ld.param.u32 %hd,    [hidden_dim];
     ld.param.u32 %dir,   [direction];
 
-    mov.u32 %tid,   %tid.x;
-    mov.u32 %ntid,  %ntid.x;
-    mov.u32 %ctaid, %ctaid.x;
-    mad.lo.u32 %gid, %ctaid, %ntid, %tid;
+    mov.u32 %t_idx,   %tid.x;
+    mov.u32 %n_tid,  %ntid.x;
+    mov.u32 %cta, %ctaid.x;
+    mad.lo.u32 %gid, %cta, %n_tid, %t_idx;
+    // Grid-stride step = blockDim.x * gridDim.x (covers each element exactly once
+    // across all blocks; a blockDim-only stride double-visits elements, which is a
+    // read-modify-write hazard for accumulating kernels like tp_row_all_reduce).
+    mov.u32 %ngrid, %nctaid.x;
+    mul.lo.u32 %stride, %n_tid, %ngrid;
     mul.lo.u32 %n, %cl, %hd;
 
 $LOOP:
@@ -260,7 +274,7 @@ $INSERT:
     st.global.f32  [%ptr_f], %val;
 
 $NEXT:
-    add.u32 %gid, %gid, %ntid;
+    add.u32 %gid, %gid, %stride;
     bra $LOOP;
 $DONE:
     ret;
@@ -301,7 +315,7 @@ pub fn ep_token_scatter_ptx(sm: SmVersion) -> String {
 ) {{
     .reg .u64  %inp, %ebuf, %eids, %eslots;
     .reg .u32  %nt, %hd;
-    .reg .u32  %tid, %ntid, %ctaid, %gid, %n;
+    .reg .u32  %t_idx, %n_tid, %cta, %gid, %n, %ngrid, %stride;
     .reg .u32  %tok, %feat;
     .reg .u32  %eid, %slot;
     .reg .u64  %src_off, %dst_off, %ptr_s, %ptr_d;
@@ -316,10 +330,15 @@ pub fn ep_token_scatter_ptx(sm: SmVersion) -> String {
     ld.param.u32 %nt,     [n_tokens];
     ld.param.u32 %hd,     [hidden_dim];
 
-    mov.u32 %tid,   %tid.x;
-    mov.u32 %ntid,  %ntid.x;
-    mov.u32 %ctaid, %ctaid.x;
-    mad.lo.u32 %gid, %ctaid, %ntid, %tid;
+    mov.u32 %t_idx,   %tid.x;
+    mov.u32 %n_tid,  %ntid.x;
+    mov.u32 %cta, %ctaid.x;
+    mad.lo.u32 %gid, %cta, %n_tid, %t_idx;
+    // Grid-stride step = blockDim.x * gridDim.x (covers each element exactly once
+    // across all blocks; a blockDim-only stride double-visits elements, which is a
+    // read-modify-write hazard for accumulating kernels like tp_row_all_reduce).
+    mov.u32 %ngrid, %nctaid.x;
+    mul.lo.u32 %stride, %n_tid, %ngrid;
     mul.lo.u32 %n, %nt, %hd;
 
 $LOOP:
@@ -356,7 +375,7 @@ $LOOP:
     add.u64      %ptr_d, %ebuf, %dst_off;
     st.global.f32 [%ptr_d], %val;
 
-    add.u32 %gid, %gid, %ntid;
+    add.u32 %gid, %gid, %stride;
     bra $LOOP;
 $DONE:
     ret;
@@ -387,7 +406,7 @@ pub fn ep_token_gather_ptx(sm: SmVersion) -> String {
 ) {{
     .reg .u64  %ebuf, %out, %eslots;
     .reg .u32  %nt, %hd;
-    .reg .u32  %tid, %ntid, %ctaid, %gid, %n;
+    .reg .u32  %t_idx, %n_tid, %cta, %gid, %n, %ngrid, %stride;
     .reg .u32  %tok, %feat, %slot;
     .reg .u64  %src_off, %dst_off, %ptr_s, %ptr_d, %ptr_slot;
     .reg .f32  %val;
@@ -399,10 +418,15 @@ pub fn ep_token_gather_ptx(sm: SmVersion) -> String {
     ld.param.u32 %nt,     [n_tokens];
     ld.param.u32 %hd,     [hidden_dim];
 
-    mov.u32 %tid,   %tid.x;
-    mov.u32 %ntid,  %ntid.x;
-    mov.u32 %ctaid, %ctaid.x;
-    mad.lo.u32 %gid, %ctaid, %ntid, %tid;
+    mov.u32 %t_idx,   %tid.x;
+    mov.u32 %n_tid,  %ntid.x;
+    mov.u32 %cta, %ctaid.x;
+    mad.lo.u32 %gid, %cta, %n_tid, %t_idx;
+    // Grid-stride step = blockDim.x * gridDim.x (covers each element exactly once
+    // across all blocks; a blockDim-only stride double-visits elements, which is a
+    // read-modify-write hazard for accumulating kernels like tp_row_all_reduce).
+    mov.u32 %ngrid, %nctaid.x;
+    mul.lo.u32 %stride, %n_tid, %ngrid;
     mul.lo.u32 %n, %nt, %hd;
 
 $LOOP:
@@ -434,7 +458,7 @@ $LOOP:
     add.u64      %ptr_d, %out, %dst_off;
     st.global.f32 [%ptr_d], %val;
 
-    add.u32 %gid, %gid, %ntid;
+    add.u32 %gid, %gid, %stride;
     bra $LOOP;
 $DONE:
     ret;

@@ -75,7 +75,7 @@ fn main() -> StatsResult<()> {
 
 ## Status
 
-**Alpha** -- 33,056 SLoC, 938 passing tests. API may evolve before v1.0.
+**Alpha** -- 35,055 SLoC, 1015 passing tests. API may evolve before v1.0.
 
 ## License
 

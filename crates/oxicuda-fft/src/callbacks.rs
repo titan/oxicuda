@@ -607,23 +607,35 @@ pub fn generate_window_ptx(
         sm.as_ptx_str()
     ));
 
-    ptx.push_str(&format!("// Window: {window}, N={n}\n"));
-    ptx.push_str(&format!(".shared .align 8 .f64 window_lut[{n}];\n\n"));
+    ptx.push_str(&format!("// Window: {window}, N={n}\n\n"));
 
+    // Each thread writes one f64 coefficient `out[tid] = w(tid)` to global
+    // memory.  Register `%t_idx` deliberately does NOT shadow the special
+    // register `%tid` (a user reg named `%tid` makes `mov %tid, %tid.x` parse
+    // `.x` as a video selector and ptxas rejects the module).
     ptx.push_str(".visible .entry precompute_window(\n");
     ptx.push_str("    .param .u64 out_ptr\n");
     ptx.push_str(") {\n");
-    ptx.push_str("    .reg .u32 %tid;\n");
+    ptx.push_str("    .reg .u32 %t_idx;\n");
     ptx.push_str("    .reg .u64 %addr;\n");
-    ptx.push_str("    .reg .f64 %coeff;\n\n");
-    ptx.push_str("    mov.u32 %tid, %tid.x;\n");
-    ptx.push_str(&format!("    setp.ge.u32 %p_done, %tid, {n};\n"));
+    ptx.push_str("    .reg .pred %p_done;\n");
+    ptx.push_str("    .reg .f64 %coeff;\n");
+    ptx.push_str("    .reg .f64 %tmp1;\n");
+    ptx.push_str("    .reg .f64 %tmp2;\n");
+    ptx.push_str("    .reg .f64 %t1;\n");
+    ptx.push_str("    .reg .f64 %t2;\n");
+    ptx.push_str("    .reg .f64 %t3;\n");
+    ptx.push_str("    .reg .f64 %t4;\n");
+    // Scratch f32 register for the cosine: `cos.approx` is f32-only (there is
+    // no `cos.approx.f64`), so each cosine is computed by narrowing to f32,
+    // taking the hardware approximation, then widening back to f64.
+    ptx.push_str("    .reg .f32 %fcos;\n\n");
+    ptx.push_str("    mov.u32 %t_idx, %tid.x;\n");
+    ptx.push_str(&format!("    setp.ge.u32 %p_done, %t_idx, {n};\n"));
     ptx.push_str("    @%p_done bra $done;\n\n");
 
-    // Precompute coefficients as immediates for small N, or use formula
-    // for large N.  For simplicity we always embed the formula.
-    ptx.push_str("    // Compute coefficient for this thread's index\n");
-    ptx.push_str("    cvt.rn.f64.u32 %coeff, %tid;\n");
+    // Compute coefficient for this thread's index.
+    ptx.push_str("    cvt.rn.f64.u32 %coeff, %t_idx;\n");
 
     if n > 1 {
         let nm1 = (n - 1) as f64;
@@ -637,7 +649,7 @@ pub fn generate_window_ptx(
 
     ptx.push_str("\n    // Store to output\n");
     ptx.push_str("    ld.param.u64 %addr, [out_ptr];\n");
-    ptx.push_str("    mad.wide.u32 %addr, %tid, 8, %addr;\n");
+    ptx.push_str("    mad.wide.u32 %addr, %t_idx, 8, %addr;\n");
     ptx.push_str("    st.global.f64 [%addr], %coeff;\n\n");
     ptx.push_str("$done:\n");
     ptx.push_str("    ret;\n");
@@ -651,6 +663,13 @@ pub fn generate_window_ptx(
 /// On entry `%coeff` contains `idx / (N-1)`.  On exit `%coeff` holds the
 /// window coefficient.
 fn emit_window_formula(ptx: &mut String, window: &WindowFunction) -> Result<(), PtxGenError> {
+    // `cos.approx` is f32-only; compute cos(reg_f64) in place by narrowing to
+    // f32, taking the hardware approximation, and widening back to f64.
+    let cos_f64 = |ptx: &mut String, reg: &str| {
+        ptx.push_str(&format!("    cvt.rn.f32.f64 %fcos, {reg};\n"));
+        ptx.push_str("    cos.approx.f32 %fcos, %fcos;\n");
+        ptx.push_str(&format!("    cvt.f64.f32 {reg}, %fcos;\n"));
+    };
     match window {
         WindowFunction::Hann => {
             // 0.5 * (1 - cos(2*pi*x))
@@ -658,7 +677,7 @@ fn emit_window_formula(ptx: &mut String, window: &WindowFunction) -> Result<(), 
                 "    mul.rn.f64 %coeff, %coeff, {:.17e}; // 2*pi*x\n",
                 2.0 * PI
             ));
-            ptx.push_str("    cos.approx.f64 %coeff, %coeff;\n");
+            cos_f64(ptx, "%coeff");
             ptx.push_str("    neg.f64 %coeff, %coeff;\n");
             ptx.push_str("    add.rn.f64 %coeff, %coeff, 1.0;\n");
             ptx.push_str("    mul.rn.f64 %coeff, %coeff, 0.5;\n");
@@ -668,7 +687,7 @@ fn emit_window_formula(ptx: &mut String, window: &WindowFunction) -> Result<(), 
                 "    mul.rn.f64 %coeff, %coeff, {:.17e};\n",
                 2.0 * PI
             ));
-            ptx.push_str("    cos.approx.f64 %coeff, %coeff;\n");
+            cos_f64(ptx, "%coeff");
             ptx.push_str("    mul.rn.f64 %coeff, %coeff, -0.46;\n");
             ptx.push_str("    add.rn.f64 %coeff, %coeff, 0.54;\n");
         }
@@ -682,8 +701,8 @@ fn emit_window_formula(ptx: &mut String, window: &WindowFunction) -> Result<(), 
                 "    mul.rn.f64 %tmp2, %coeff, {:.17e};\n",
                 4.0 * PI
             ));
-            ptx.push_str("    cos.approx.f64 %tmp1, %tmp1;\n");
-            ptx.push_str("    cos.approx.f64 %tmp2, %tmp2;\n");
+            cos_f64(ptx, "%tmp1");
+            cos_f64(ptx, "%tmp2");
             ptx.push_str("    mul.rn.f64 %tmp1, %tmp1, -0.5;\n");
             ptx.push_str("    mul.rn.f64 %tmp2, %tmp2, 0.08;\n");
             ptx.push_str("    add.rn.f64 %coeff, %tmp1, 0.42;\n");
@@ -694,9 +713,9 @@ fn emit_window_formula(ptx: &mut String, window: &WindowFunction) -> Result<(), 
             ptx.push_str(&format!("    mul.rn.f64 %t1, %coeff, {:.17e};\n", 2.0 * PI));
             ptx.push_str(&format!("    mul.rn.f64 %t2, %coeff, {:.17e};\n", 4.0 * PI));
             ptx.push_str(&format!("    mul.rn.f64 %t3, %coeff, {:.17e};\n", 6.0 * PI));
-            ptx.push_str("    cos.approx.f64 %t1, %t1;\n");
-            ptx.push_str("    cos.approx.f64 %t2, %t2;\n");
-            ptx.push_str("    cos.approx.f64 %t3, %t3;\n");
+            cos_f64(ptx, "%t1");
+            cos_f64(ptx, "%t2");
+            cos_f64(ptx, "%t3");
             ptx.push_str("    mul.rn.f64 %t1, %t1, -0.48829;\n");
             ptx.push_str("    mul.rn.f64 %t2, %t2, 0.14128;\n");
             ptx.push_str("    mul.rn.f64 %t3, %t3, -0.01168;\n");
@@ -710,10 +729,10 @@ fn emit_window_formula(ptx: &mut String, window: &WindowFunction) -> Result<(), 
             ptx.push_str(&format!("    mul.rn.f64 %t2, %coeff, {:.17e};\n", 4.0 * PI));
             ptx.push_str(&format!("    mul.rn.f64 %t3, %coeff, {:.17e};\n", 6.0 * PI));
             ptx.push_str(&format!("    mul.rn.f64 %t4, %coeff, {:.17e};\n", 8.0 * PI));
-            ptx.push_str("    cos.approx.f64 %t1, %t1;\n");
-            ptx.push_str("    cos.approx.f64 %t2, %t2;\n");
-            ptx.push_str("    cos.approx.f64 %t3, %t3;\n");
-            ptx.push_str("    cos.approx.f64 %t4, %t4;\n");
+            cos_f64(ptx, "%t1");
+            cos_f64(ptx, "%t2");
+            cos_f64(ptx, "%t3");
+            cos_f64(ptx, "%t4");
             ptx.push_str("    mul.rn.f64 %t1, %t1, -0.41663158;\n");
             ptx.push_str("    mul.rn.f64 %t2, %t2, 0.277263158;\n");
             ptx.push_str("    mul.rn.f64 %t3, %t3, -0.083578947;\n");

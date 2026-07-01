@@ -10,7 +10,7 @@ data augmentation. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol
 
 ## Implementation Status
 
-- **Actual SLoC:** 13,881 (47 files)
+- **Actual SLoC:** 15,076 (47 files)
 - **PTX kernels:** 12 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120) — 7 portable scalar + 5 architecture-deepening (Hopper `wgmma`/`redux.sync`, Blackwell `cp.async.bulk.tensor`, FP16/BF16 mixed precision)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 

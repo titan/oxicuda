@@ -6,7 +6,7 @@ GPU-accelerated matrix decompositions and linear solvers, serving as a pure Rust
 
 ## Implementation Status
 
-**Actual: 19,297 SLoC (47 files) -- Estimated: 76K-122K SLoC (estimation.md Vol.5 solver portion)**
+**Actual: 24,587 SLoC (54 files) -- Estimated: 76K-122K SLoC (estimation.md Vol.5 solver portion)**
 
 Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD, eigendecomposition, inverse, determinant, least squares), four iterative sparse solvers (CG, BiCGSTAB, GMRES, direct), and helper utilities (pivoting, condition number estimation).
 
@@ -69,7 +69,7 @@ Current implementation covers eight dense decompositions (LU, QR, Cholesky, SVD,
 
 ## Quality Status
 
-- Tests: 479 passing (+32: MINRES, QMR, LSQR, left-looking sparse LU, PARDISO-compatible direct solver)
+- Tests: 530 passing (+32: MINRES, QMR, LSQR, left-looking sparse LU, PARDISO-compatible direct solver)
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`

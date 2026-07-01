@@ -1,9 +1,12 @@
 //! Mixed-precision sparse matrix-vector multiplication (SpMV).
 //!
-//! Provides FP16/BF16 storage with FP32 accumulation for memory-bandwidth-bound
-//! SpMV operations. This approach halves the memory footprint of matrix values
-//! while maintaining FP32 numerical quality during the dot-product accumulation,
-//! yielding up to 2x bandwidth savings on bandwidth-limited GPUs.
+//! Provides FP16/BF16 storage with FP32 (or FP64) accumulation for
+//! memory-bandwidth-bound SpMV operations. This approach halves the memory
+//! footprint of matrix values while maintaining higher numerical quality during
+//! the dot-product accumulation, yielding up to 2x bandwidth savings on
+//! bandwidth-limited GPUs. The accumulation precision is selected via
+//! [`ComputePrecision`]; the dense vectors `x`/`y` and the `alpha`/`beta`
+//! scalars are stored in that compute precision.
 //!
 //! Three kernel strategies are available:
 //! - **Scalar**: one thread per row, FP16 load -> FP32 FMA
@@ -138,7 +141,7 @@ pub enum MixedSpMVAlgo {
 pub struct MixedPrecisionConfig {
     /// Storage precision for matrix values (FP16 or BF16).
     pub storage_precision: StoragePrecision,
-    /// Compute/accumulation precision (FP32 for now).
+    /// Compute/accumulation precision (FP32 or FP64).
     pub compute_precision: ComputePrecision,
     /// Algorithm selection.
     pub algorithm: MixedSpMVAlgo,
@@ -355,12 +358,12 @@ pub fn validate_mixed_precision_config(config: &MixedPrecisionConfig) -> SparseR
         }
     }
 
-    // FP64 compute is only meaningful with FP16 storage (BF16 range can overflow in F32
-    // but F64 compute with BF16 is valid)
-    if config.compute_precision == ComputePrecision::Fp64 {
-        // FP64 compute is supported but rarely beneficial for SpMV on modern GPUs.
-        // Allow it but warn via documentation that throughput may be low.
-    }
+    // Both FP32 and FP64 compute precisions are fully supported: the kernels
+    // accumulate in the compute precision (FP64 widens FP16/BF16 storage via the
+    // appropriate `cvt`, using an f32 intermediate for `bf16 -> f64` on pre-sm_90
+    // targets). FP64 compute is rarely beneficial for bandwidth-bound SpMV but is
+    // numerically valid for either storage format, so no configuration is
+    // rejected here.
 
     Ok(())
 }
@@ -393,13 +396,181 @@ pub fn estimate_precision_loss(nnz_per_row: f64, storage: StoragePrecision) -> f
 }
 
 // ---------------------------------------------------------------------------
+// Compute-precision-aware emission helpers
+//
+// The mixed-precision kernels accumulate in `compute` precision (FP32 or
+// FP64). Storage (the matrix values) is always FP16/BF16, but the dense
+// vectors `x`/`y` and the scalars `alpha`/`beta` live in the compute
+// precision. These helpers dispatch the float-typed instructions on the
+// runtime `ComputePrecision` so the same kernel body emits correct PTX for
+// both widths. Crucially this avoids the two latent codegen bugs: a 32-bit
+// `0F…` zero literal / `mov.b64` from a u32 bit-pattern (size mismatch) and
+// `shfl.sync.down.b64` (ptxas only accepts `.b32`).
+// ---------------------------------------------------------------------------
+
+/// PTX type of the parameter carrying an `alpha`/`beta` bit pattern.
+const fn mp_bits_param_ty(compute: ComputePrecision) -> PtxType {
+    match compute {
+        ComputePrecision::Fp32 => PtxType::U32,
+        ComputePrecision::Fp64 => PtxType::U64,
+    }
+}
+
+/// Loads an `alpha`/`beta` bit-pattern parameter in the correct width.
+fn mp_load_bits_param(b: &mut BodyBuilder<'_>, compute: ComputePrecision, name: &str) -> Register {
+    match compute {
+        ComputePrecision::Fp32 => b.load_param_u32(name),
+        ComputePrecision::Fp64 => b.load_param_u64(name),
+    }
+}
+
+/// Hex literal for a `+0.0` constant in the compute precision (`0F…`/`0D…`).
+const fn mp_zero_literal(compute: ComputePrecision) -> &'static str {
+    match compute {
+        ComputePrecision::Fp32 => "0F00000000",
+        ComputePrecision::Fp64 => "0D0000000000000000",
+    }
+}
+
+/// Loads a compute-precision dense-vector element from global memory.
+fn mp_load_compute(b: &mut BodyBuilder<'_>, compute: ComputePrecision, addr: Register) -> Register {
+    match compute {
+        ComputePrecision::Fp32 => b.load_global_f32(addr),
+        ComputePrecision::Fp64 => b.load_global_f64(addr),
+    }
+}
+
+/// Stores a compute-precision dense-vector element to global memory.
+fn mp_store_compute(
+    b: &mut BodyBuilder<'_>,
+    compute: ComputePrecision,
+    addr: Register,
+    val: Register,
+) {
+    match compute {
+        ComputePrecision::Fp32 => b.store_global_f32(addr, val),
+        ComputePrecision::Fp64 => b.store_global_f64(addr, val),
+    }
+}
+
+/// Emits a compute-precision fused multiply-add `a * x + c`.
+fn mp_fma_compute(
+    b: &mut BodyBuilder<'_>,
+    compute: ComputePrecision,
+    a: Register,
+    x: Register,
+    c: Register,
+) -> Register {
+    match compute {
+        ComputePrecision::Fp32 => b.fma_f32(a, x, c),
+        ComputePrecision::Fp64 => b.fma_f64(a, x, c),
+    }
+}
+
+/// Emits one warp down-shuffle of a compute-precision register.
+///
+/// Delegates to [`crate::ptx_helpers::emit_shfl_float`], which performs the
+/// f64 unpack/shuffle/repack so no `shfl.sync.down.b64` (rejected by ptxas)
+/// is ever emitted.
+fn mp_shfl_down_compute(
+    b: &mut BodyBuilder<'_>,
+    compute: ComputePrecision,
+    val: Register,
+    offset: u32,
+) -> Register {
+    let off = offset.to_string();
+    match compute {
+        ComputePrecision::Fp32 => {
+            crate::ptx_helpers::emit_shfl_float::<f32>(b, "down", val, &off, "31")
+        }
+        ComputePrecision::Fp64 => {
+            crate::ptx_helpers::emit_shfl_float::<f64>(b, "down", val, &off, "31")
+        }
+    }
+}
+
+/// Builds the PTX fragment that converts a half value held in the scoped
+/// `.b16` register `src` into the compute-precision register `dst`.
+///
+/// `widen` is the name of a scoped `.f32` temporary used only for the
+/// `bf16 -> f64` path, which sm_86 cannot do directly (`cvt.f64.bf16` requires
+/// sm_90+), so the value is widened through f32. The returned fragment is meant
+/// to be embedded inside a `{ … }` register scope that declares `src`.
+fn mp_half_cvt_fragment(
+    storage: StoragePrecision,
+    compute: ComputePrecision,
+    src: &str,
+    dst: &Register,
+    widen: &str,
+) -> String {
+    let ss = storage.suffix();
+    match (storage, compute) {
+        (_, ComputePrecision::Fp32) => format!("cvt.f32.{ss} {dst}, {src};"),
+        (StoragePrecision::Fp16, ComputePrecision::Fp64) => {
+            format!("cvt.f64.f16 {dst}, {src};")
+        }
+        (StoragePrecision::Bf16, ComputePrecision::Fp64) => {
+            format!(".reg .f32 {widen}; cvt.f32.bf16 {widen}, {src}; cvt.f64.f32 {dst}, {widen};")
+        }
+    }
+}
+
+/// Loads a half-precision (FP16/BF16) matrix value from `[addr]` and converts
+/// it to the compute precision, returning the compute-typed register.
+///
+/// The 16-bit value is staged through a *scoped* `.b16` register declared
+/// inline (`{ .reg .b16 … }`). This is required because the PTX register
+/// allocator places every float register in a single `%f` class with one
+/// declared width, so a half value routed through the allocator would be
+/// declared at f32/f64 width and could not be the destination of a 16-bit
+/// load. PTX also has no `ld.*.f16` type, so the raw bits are read with
+/// `ld.global.b16` and reinterpreted by `cvt`.
+fn mp_load_half(
+    b: &mut BodyBuilder<'_>,
+    storage: StoragePrecision,
+    compute: ComputePrecision,
+    addr: &Register,
+) -> Register {
+    let dst = b.alloc_reg(compute.ptx_type());
+    let frag = mp_half_cvt_fragment(storage, compute, "%mphalf", &dst, "%mpw");
+    b.raw_ptx(&format!(
+        "{{ .reg .b16 %mphalf; ld.global.b16 %mphalf, [{addr}]; {frag} }}"
+    ));
+    dst
+}
+
+/// Splits a packed 32-bit register holding two adjacent half values into the
+/// low and high compute-precision values (the packed 2xFP16/BF16 load path).
+///
+/// Uses a scoped block that declares two `.b16` halves, splits the packed
+/// register with `mov.b32 {lo, hi}, packed`, and converts each half. Distinct
+/// widen-temp names keep the optional `bf16 -> f64` f32 temporaries from
+/// colliding within the single scope.
+fn mp_unpack_pair(
+    b: &mut BodyBuilder<'_>,
+    storage: StoragePrecision,
+    compute: ComputePrecision,
+    packed: &Register,
+) -> (Register, Register) {
+    let lo = b.alloc_reg(compute.ptx_type());
+    let hi = b.alloc_reg(compute.ptx_type());
+    let frag_lo = mp_half_cvt_fragment(storage, compute, "%mplo", &lo, "%mpwlo");
+    let frag_hi = mp_half_cvt_fragment(storage, compute, "%mphi", &hi, "%mpwhi");
+    b.raw_ptx(&format!(
+        "{{ .reg .b16 %mplo, %mphi; mov.b32 {{%mplo, %mphi}}, {packed}; {frag_lo} {frag_hi} }}"
+    ));
+    (lo, hi)
+}
+
+// ---------------------------------------------------------------------------
 // PTX Generation: Scalar kernel
 // ---------------------------------------------------------------------------
 
 /// Generates PTX for scalar mixed-precision SpMV (one thread per row).
 ///
 /// Each thread loads FP16/BF16 values from global memory, converts them
-/// to FP32, performs FMA accumulation in FP32, and writes the FP32 result.
+/// to the compute precision, performs FMA accumulation in that precision, and
+/// writes the result back in the compute precision.
 ///
 /// Kernel signature:
 /// ```text
@@ -407,10 +578,10 @@ pub fn estimate_precision_loss(nnz_per_row: f64, storage: StoragePrecision) -> f
 ///     .param .u64 row_ptr,     // i32 CSR row offsets
 ///     .param .u64 col_idx,     // i32 column indices
 ///     .param .u64 values,      // FP16/BF16 values
-///     .param .u64 x_ptr,       // FP32 dense vector x
-///     .param .u64 y_ptr,       // FP32 dense vector y
-///     .param .u32 alpha_bits,  // FP32 alpha as u32 bits
-///     .param .u32 beta_bits,   // FP32 beta as u32 bits
+///     .param .u64 x_ptr,       // dense vector x (compute precision)
+///     .param .u64 y_ptr,       // dense vector y (compute precision)
+///     .param .uN  alpha_bits,  // alpha bit-pattern (u32 for FP32, u64 for FP64)
+///     .param .uN  beta_bits,   // beta bit-pattern  (u32 for FP32, u64 for FP64)
 ///     .param .u32 num_rows
 /// )
 /// ```
@@ -424,7 +595,6 @@ pub fn generate_mixed_scalar_spmv_ptx(
     let storage = config.storage_precision;
     let compute = config.compute_precision;
     let sm = config.sm_version;
-    let storage_suffix = storage.suffix();
     let compute_suffix = compute.suffix();
     let compute_bit = compute.bit_suffix();
     let elem_bytes = storage.element_bytes();
@@ -436,8 +606,8 @@ pub fn generate_mixed_scalar_spmv_ptx(
         .param("values", PtxType::U64)
         .param("x_ptr", PtxType::U64)
         .param("y_ptr", PtxType::U64)
-        .param("alpha_bits", PtxType::U32)
-        .param("beta_bits", PtxType::U32)
+        .param("alpha_bits", mp_bits_param_ty(compute))
+        .param("beta_bits", mp_bits_param_ty(compute))
         .param("num_rows", PtxType::U32)
         .body(move |b| {
             let gid = b.global_thread_id_x();
@@ -453,11 +623,11 @@ pub fn generate_mixed_scalar_spmv_ptx(
                 let y_ptr = b.load_param_u64("y_ptr");
 
                 // Load alpha/beta as FP32 from bit patterns
-                let alpha_bits = b.load_param_u32("alpha_bits");
+                let alpha_bits = mp_load_bits_param(b, compute, "alpha_bits");
                 let alpha = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!("mov.{compute_bit} {alpha}, {alpha_bits};"));
 
-                let beta_bits = b.load_param_u32("beta_bits");
+                let beta_bits = mp_load_bits_param(b, compute, "beta_bits");
                 let beta = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!("mov.{compute_bit} {beta}, {beta_bits};"));
 
@@ -472,8 +642,10 @@ pub fn generate_mixed_scalar_spmv_ptx(
 
                 // Initialize FP32 accumulator to 0
                 let acc = b.alloc_reg(compute.ptx_type());
-                let zero_bits: u32 = 0u32;
-                b.raw_ptx(&format!("mov.{compute_bit} {acc}, 0F{zero_bits:08X};"));
+                // Compute-precision +0.0 literal (`0F…`/`0D…`); a bare `0F`
+                // literal with `mov.b64` would be a width mismatch under ptxas.
+                let zero_lit = mp_zero_literal(compute);
+                b.raw_ptx(&format!("mov.{compute_bit} {acc}, {zero_lit};"));
 
                 // Loop setup
                 let loop_label = b.fresh_label("mpspmv_loop");
@@ -488,9 +660,11 @@ pub fn generate_mixed_scalar_spmv_ptx(
                 b.raw_ptx(&format!("mov.b32 {re_u32}, {row_end};"));
 
                 b.label(&loop_label);
+                // Exit when k >= row_end (inverted skip-branch via branch_if so
+                // the `$`-prefixed label target matches the `b.label` def).
                 let pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred}, {k}, {re_u32};"));
-                b.raw_ptx(&format!("@!{pred} bra {done_label};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred}, {k}, {re_u32};"));
+                b.branch_if(pred, &done_label);
 
                 // Load col_idx[k]
                 let ci_addr = b.byte_offset_addr(col_idx_base.clone(), k.clone(), 4);
@@ -498,23 +672,16 @@ pub fn generate_mixed_scalar_spmv_ptx(
                 let col_u32 = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("mov.b32 {col_u32}, {col};"));
 
-                // Load FP16/BF16 value and convert to FP32
+                // Load FP16/BF16 value and convert to the compute precision.
                 let v_addr = b.byte_offset_addr(values_base.clone(), k.clone(), elem_bytes);
-                let val_half = b.alloc_reg(storage.ptx_type());
-                b.raw_ptx(&format!(
-                    "ld.global.{storage_suffix} {val_half}, [{v_addr}];"
-                ));
-                let val_fp32 = b.alloc_reg(compute.ptx_type());
-                b.raw_ptx(&format!(
-                    "cvt.{compute_suffix}.{storage_suffix} {val_fp32}, {val_half};"
-                ));
+                let val_fp32 = mp_load_half(b, storage, compute, &v_addr);
 
-                // Load x[col] (already FP32)
+                // Load x[col] (compute precision)
                 let x_addr = b.byte_offset_addr(x_ptr.clone(), col_u32, compute.element_bytes());
-                let x_val = b.load_global_f32(x_addr);
+                let x_val = mp_load_compute(b, compute, x_addr);
 
                 // FMA: acc += val_fp32 * x_val
-                let new_acc = b.fma_f32(val_fp32, x_val, acc.clone());
+                let new_acc = mp_fma_compute(b, compute, val_fp32, x_val, acc.clone());
                 b.raw_ptx(&format!("mov.{compute_suffix} {acc}, {new_acc};"));
 
                 // k++
@@ -524,7 +691,7 @@ pub fn generate_mixed_scalar_spmv_ptx(
 
                 // y = alpha * acc + beta * y_old
                 let y_addr = b.byte_offset_addr(y_ptr, row, compute.element_bytes());
-                let y_old = b.load_global_f32(y_addr.clone());
+                let y_old = mp_load_compute(b, compute, y_addr.clone());
 
                 let alpha_acc = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!(
@@ -541,7 +708,7 @@ pub fn generate_mixed_scalar_spmv_ptx(
                     "add.{compute_suffix} {result}, {alpha_acc}, {beta_y};"
                 ));
 
-                b.store_global_f32(y_addr, result);
+                mp_store_compute(b, compute, y_addr, result);
             });
 
             b.ret();
@@ -568,7 +735,6 @@ pub fn generate_mixed_vector_spmv_ptx(
     let storage = config.storage_precision;
     let compute = config.compute_precision;
     let sm = config.sm_version;
-    let storage_suffix = storage.suffix();
     let compute_suffix = compute.suffix();
     let compute_bit = compute.bit_suffix();
     let elem_bytes = storage.element_bytes();
@@ -580,8 +746,8 @@ pub fn generate_mixed_vector_spmv_ptx(
         .param("values", PtxType::U64)
         .param("x_ptr", PtxType::U64)
         .param("y_ptr", PtxType::U64)
-        .param("alpha_bits", PtxType::U32)
-        .param("beta_bits", PtxType::U32)
+        .param("alpha_bits", mp_bits_param_ty(compute))
+        .param("beta_bits", mp_bits_param_ty(compute))
         .param("num_rows", PtxType::U32)
         .body(move |b| {
             let tid_global = b.global_thread_id_x();
@@ -607,11 +773,11 @@ pub fn generate_mixed_vector_spmv_ptx(
                 let x_ptr = b.load_param_u64("x_ptr");
                 let y_ptr = b.load_param_u64("y_ptr");
 
-                let alpha_bits = b.load_param_u32("alpha_bits");
+                let alpha_bits = mp_load_bits_param(b, compute, "alpha_bits");
                 let alpha = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!("mov.{compute_bit} {alpha}, {alpha_bits};"));
 
-                let beta_bits = b.load_param_u32("beta_bits");
+                let beta_bits = mp_load_bits_param(b, compute, "beta_bits");
                 let beta = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!("mov.{compute_bit} {beta}, {beta_bits};"));
 
@@ -630,8 +796,10 @@ pub fn generate_mixed_vector_spmv_ptx(
 
                 // Each lane starts at row_start + lane, stride 32
                 let acc = b.alloc_reg(compute.ptx_type());
-                let zero_bits: u32 = 0u32;
-                b.raw_ptx(&format!("mov.{compute_bit} {acc}, 0F{zero_bits:08X};"));
+                // Compute-precision +0.0 literal (`0F…`/`0D…`); a bare `0F`
+                // literal with `mov.b64` would be a width mismatch under ptxas.
+                let zero_lit = mp_zero_literal(compute);
+                b.raw_ptx(&format!("mov.{compute_bit} {acc}, {zero_lit};"));
 
                 let k = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("add.u32 {k}, {row_start}, {lane};"));
@@ -640,9 +808,10 @@ pub fn generate_mixed_vector_spmv_ptx(
                 let done_label = b.fresh_label("mpspmv_vdone");
 
                 b.label(&loop_label);
+                // Exit when k >= row_end (inverted skip-branch via branch_if).
                 let pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred}, {k}, {row_end};"));
-                b.raw_ptx(&format!("@!{pred} bra {done_label};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred}, {k}, {row_end};"));
+                b.branch_if(pred, &done_label);
 
                 // Load col and half-precision value
                 let ci_addr = b.byte_offset_addr(col_idx_base.clone(), k.clone(), 4);
@@ -651,22 +820,13 @@ pub fn generate_mixed_vector_spmv_ptx(
                 b.raw_ptx(&format!("mov.b32 {col_u32}, {col_i32};"));
 
                 let v_addr = b.byte_offset_addr(values_base.clone(), k.clone(), elem_bytes);
-                let val_half = b.alloc_reg(storage.ptx_type());
-                b.raw_ptx(&format!("ld.global.{storage_suffix} {val_half}, [{v_addr}];"));
-                let val_fp32 = b.alloc_reg(compute.ptx_type());
-                b.raw_ptx(&format!(
-                    "cvt.{compute_suffix}.{storage_suffix} {val_fp32}, {val_half};"
-                ));
+                let val_fp32 = mp_load_half(b, storage, compute, &v_addr);
 
-                let x_addr = b.byte_offset_addr(
-                    x_ptr.clone(),
-                    col_u32,
-                    compute.element_bytes(),
-                );
-                let x_val = b.load_global_f32(x_addr);
+                let x_addr = b.byte_offset_addr(x_ptr.clone(), col_u32, compute.element_bytes());
+                let x_val = mp_load_compute(b, compute, x_addr);
 
                 // FMA accumulate
-                let new_acc = b.fma_f32(val_fp32, x_val, acc.clone());
+                let new_acc = mp_fma_compute(b, compute, val_fp32, x_val, acc.clone());
                 b.raw_ptx(&format!("mov.{compute_suffix} {acc}, {new_acc};"));
 
                 // k += 32
@@ -674,13 +834,12 @@ pub fn generate_mixed_vector_spmv_ptx(
                 b.branch(&loop_label);
                 b.label(&done_label);
 
-                // Warp shuffle reduction in FP32
+                // Warp shuffle reduction in the compute precision. For FP64
+                // `mp_shfl_down_compute` unpacks into two b32 halves so no
+                // `shfl.sync.down.b64` (rejected by ptxas) is emitted.
                 let mut current = acc;
                 for offset in [16u32, 8, 4, 2, 1] {
-                    let shuffled = b.alloc_reg(compute.ptx_type());
-                    b.raw_ptx(&format!(
-                        "shfl.sync.down.{compute_bit} {shuffled}, {current}, {offset}, 31, 0xFFFFFFFF;"
-                    ));
+                    let shuffled = mp_shfl_down_compute(b, compute, current.clone(), offset);
                     let sum = b.alloc_reg(compute.ptx_type());
                     b.raw_ptx(&format!(
                         "add.{compute_suffix} {sum}, {current}, {shuffled};"
@@ -688,15 +847,15 @@ pub fn generate_mixed_vector_spmv_ptx(
                     current = sum;
                 }
 
-                // Lane 0 writes result
-                let is_lane_0 = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.eq.u32 {is_lane_0}, {lane}, 0;"));
-
+                // Only lane 0 writes the result; other lanes skip ahead.
+                // Inverted skip-branch (`setp.eq` -> `setp.ne`).
+                let not_lane_0 = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ne.u32 {not_lane_0}, {lane}, 0;"));
                 let skip_label = b.fresh_label("mpspmv_skip");
-                b.raw_ptx(&format!("@!{is_lane_0} bra {skip_label};"));
+                b.branch_if(not_lane_0, &skip_label);
 
                 let y_addr = b.byte_offset_addr(y_ptr, row, compute.element_bytes());
-                let y_old = b.load_global_f32(y_addr.clone());
+                let y_old = mp_load_compute(b, compute, y_addr.clone());
 
                 let alpha_acc = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!(
@@ -711,7 +870,7 @@ pub fn generate_mixed_vector_spmv_ptx(
                     "add.{compute_suffix} {result}, {alpha_acc}, {beta_y};"
                 ));
 
-                b.store_global_f32(y_addr, result);
+                mp_store_compute(b, compute, y_addr, result);
 
                 b.label(&skip_label);
             });
@@ -744,7 +903,6 @@ pub fn generate_packed_vector_spmv_ptx(
     let storage = config.storage_precision;
     let compute = config.compute_precision;
     let sm = config.sm_version;
-    let storage_suffix = storage.suffix();
     let compute_suffix = compute.suffix();
     let compute_bit = compute.bit_suffix();
     let elem_bytes = storage.element_bytes();
@@ -756,8 +914,8 @@ pub fn generate_packed_vector_spmv_ptx(
         .param("values", PtxType::U64)
         .param("x_ptr", PtxType::U64)
         .param("y_ptr", PtxType::U64)
-        .param("alpha_bits", PtxType::U32)
-        .param("beta_bits", PtxType::U32)
+        .param("alpha_bits", mp_bits_param_ty(compute))
+        .param("beta_bits", mp_bits_param_ty(compute))
         .param("num_rows", PtxType::U32)
         .body(move |b| {
             let tid_global = b.global_thread_id_x();
@@ -781,11 +939,11 @@ pub fn generate_packed_vector_spmv_ptx(
                 let x_ptr = b.load_param_u64("x_ptr");
                 let y_ptr = b.load_param_u64("y_ptr");
 
-                let alpha_bits = b.load_param_u32("alpha_bits");
+                let alpha_bits = mp_load_bits_param(b, compute, "alpha_bits");
                 let alpha = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!("mov.{compute_bit} {alpha}, {alpha_bits};"));
 
-                let beta_bits = b.load_param_u32("beta_bits");
+                let beta_bits = mp_load_bits_param(b, compute, "beta_bits");
                 let beta = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!("mov.{compute_bit} {beta}, {beta_bits};"));
 
@@ -812,8 +970,10 @@ pub fn generate_packed_vector_spmv_ptx(
 
                 // Accumulator
                 let acc = b.alloc_reg(compute.ptx_type());
-                let zero_bits: u32 = 0u32;
-                b.raw_ptx(&format!("mov.{compute_bit} {acc}, 0F{zero_bits:08X};"));
+                // Compute-precision +0.0 literal (`0F…`/`0D…`); a bare `0F`
+                // literal with `mov.b64` would be a width mismatch under ptxas.
+                let zero_lit = mp_zero_literal(compute);
+                b.raw_ptx(&format!("mov.{compute_bit} {acc}, {zero_lit};"));
 
                 // Packed loop: each lane processes pairs, stride = 32*2 = 64 elements
                 // Lane processes element indices: row_start + lane*2, row_start + lane*2 + 64, ...
@@ -830,8 +990,12 @@ pub fn generate_packed_vector_spmv_ptx(
                 // k+1 must be < row_end_even to process a full pair
                 let k_plus_1 = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("add.u32 {k_plus_1}, {k}, 1;"));
-                b.raw_ptx(&format!("setp.ls.u32 {pred_pair}, {k_plus_1}, {row_end_even};"));
-                b.raw_ptx(&format!("@!{pred_pair} bra {packed_done};"));
+                // Exit the packed loop when k+1 > row_end_even (no full pair
+                // remains). Inverted skip-branch (`setp.ls` -> `setp.hi`).
+                b.raw_ptx(&format!(
+                    "setp.hi.u32 {pred_pair}, {k_plus_1}, {row_end_even};"
+                ));
+                b.branch_if(pred_pair, &packed_done);
 
                 // Load packed 2xFP16 as a 32-bit value
                 // Address = values_base + k * 2 (each FP16 is 2 bytes)
@@ -839,28 +1003,9 @@ pub fn generate_packed_vector_spmv_ptx(
                 let packed_val = b.alloc_reg(PtxType::B32);
                 b.raw_ptx(&format!("ld.global.b32 {packed_val}, [{v_addr}];"));
 
-                // Unpack low half (first FP16)
-                // Extract low 16 bits
-                let lo_bits = b.alloc_reg(PtxType::B16);
-                b.raw_ptx("{ .reg .b16 __hi;");
-                b.raw_ptx(&format!("mov.b32 {{{lo_bits}, __hi}}, {packed_val}; }}"));
-                let val_lo_h = b.alloc_reg(storage.ptx_type());
-                b.raw_ptx(&format!("mov.b16 {val_lo_h}, {lo_bits};"));
-                let val_lo_f32 = b.alloc_reg(compute.ptx_type());
-                b.raw_ptx(&format!(
-                    "cvt.{compute_suffix}.{storage_suffix} {val_lo_f32}, {val_lo_h};"
-                ));
-
-                // Extract high 16 bits
-                let hi_bits = b.alloc_reg(PtxType::B16);
-                b.raw_ptx("{ .reg .b16 __lo;");
-                b.raw_ptx(&format!("mov.b32 {{__lo, {hi_bits}}}, {packed_val}; }}"));
-                let val_hi_h = b.alloc_reg(storage.ptx_type());
-                b.raw_ptx(&format!("mov.b16 {val_hi_h}, {hi_bits};"));
-                let val_hi_f32 = b.alloc_reg(compute.ptx_type());
-                b.raw_ptx(&format!(
-                    "cvt.{compute_suffix}.{storage_suffix} {val_hi_f32}, {val_hi_h};"
-                ));
+                // Split the packed 32-bit register into the two half values and
+                // convert each to the compute precision.
+                let (val_lo_f32, val_hi_f32) = mp_unpack_pair(b, storage, compute, &packed_val);
 
                 // Load two column indices and x values
                 let ci_addr_0 = b.byte_offset_addr(col_idx_base.clone(), k.clone(), 4);
@@ -874,15 +1019,15 @@ pub fn generate_packed_vector_spmv_ptx(
                 b.raw_ptx(&format!("mov.b32 {col_1}, {col_1_i32};"));
 
                 let x_addr_0 = b.byte_offset_addr(x_ptr.clone(), col_0, compute.element_bytes());
-                let x_val_0 = b.load_global_f32(x_addr_0);
+                let x_val_0 = mp_load_compute(b, compute, x_addr_0);
 
                 let x_addr_1 = b.byte_offset_addr(x_ptr.clone(), col_1, compute.element_bytes());
-                let x_val_1 = b.load_global_f32(x_addr_1);
+                let x_val_1 = mp_load_compute(b, compute, x_addr_1);
 
                 // FMA: acc += val_lo * x0; acc += val_hi * x1
-                let acc1 = b.fma_f32(val_lo_f32, x_val_0, acc.clone());
+                let acc1 = mp_fma_compute(b, compute, val_lo_f32, x_val_0, acc.clone());
                 b.raw_ptx(&format!("mov.{compute_suffix} {acc}, {acc1};"));
-                let acc2 = b.fma_f32(val_hi_f32, x_val_1, acc.clone());
+                let acc2 = mp_fma_compute(b, compute, val_hi_f32, x_val_1, acc.clone());
                 b.raw_ptx(&format!("mov.{compute_suffix} {acc}, {acc2};"));
 
                 // k += 64 (32 lanes * 2 elements per lane)
@@ -894,15 +1039,19 @@ pub fn generate_packed_vector_spmv_ptx(
                 let has_remainder = b.alloc_reg(PtxType::Pred);
                 let nnz_odd = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("and.b32 {nnz_odd}, {nnz_row}, 1;"));
-                b.raw_ptx(&format!("setp.ne.u32 {has_remainder}, {nnz_odd}, 0;"));
+                // Skip the remainder handling when nnz is even (nnz_odd == 0).
+                // Inverted skip-branch (`setp.ne` -> `setp.eq`).
+                b.raw_ptx(&format!("setp.eq.u32 {has_remainder}, {nnz_odd}, 0;"));
 
                 let remainder_done = b.fresh_label("mpspmv_rem_done");
-                b.raw_ptx(&format!("@!{has_remainder} bra {remainder_done};"));
+                b.branch_if(has_remainder, &remainder_done);
 
                 // Only lane 0 handles the remainder element
+                // Only lane 0 handles the remainder (inverted `setp.eq` ->
+                // `setp.ne`): every other lane jumps straight to the reduction.
                 let is_lane_0_rem = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.eq.u32 {is_lane_0_rem}, {lane}, 0;"));
-                b.raw_ptx(&format!("@!{is_lane_0_rem} bra {remainder_done};"));
+                b.raw_ptx(&format!("setp.ne.u32 {is_lane_0_rem}, {lane}, 0;"));
+                b.branch_if(is_lane_0_rem, &remainder_done);
 
                 // Last element index = row_end - 1
                 let last_idx = b.alloc_reg(PtxType::U32);
@@ -910,36 +1059,27 @@ pub fn generate_packed_vector_spmv_ptx(
 
                 let last_v_addr =
                     b.byte_offset_addr(values_base.clone(), last_idx.clone(), elem_bytes);
-                let last_val_h = b.alloc_reg(storage.ptx_type());
-                b.raw_ptx(&format!(
-                    "ld.global.{storage_suffix} {last_val_h}, [{last_v_addr}];"
-                ));
-                let last_val_f32 = b.alloc_reg(compute.ptx_type());
-                b.raw_ptx(&format!(
-                    "cvt.{compute_suffix}.{storage_suffix} {last_val_f32}, {last_val_h};"
-                ));
+                let last_val_f32 = mp_load_half(b, storage, compute, &last_v_addr);
 
                 let last_ci_addr = b.byte_offset_addr(col_idx_base, last_idx, 4);
                 let last_col_i32 = b.load_global_i32(last_ci_addr);
                 let last_col = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("mov.b32 {last_col}, {last_col_i32};"));
 
-                let last_x_addr =
-                    b.byte_offset_addr(x_ptr, last_col, compute.element_bytes());
-                let last_x_val = b.load_global_f32(last_x_addr);
+                let last_x_addr = b.byte_offset_addr(x_ptr, last_col, compute.element_bytes());
+                let last_x_val = mp_load_compute(b, compute, last_x_addr);
 
-                let acc_rem = b.fma_f32(last_val_f32, last_x_val, acc.clone());
+                let acc_rem = mp_fma_compute(b, compute, last_val_f32, last_x_val, acc.clone());
                 b.raw_ptx(&format!("mov.{compute_suffix} {acc}, {acc_rem};"));
 
                 b.label(&remainder_done);
 
-                // Warp shuffle reduction in FP32
+                // Warp shuffle reduction in the compute precision. For FP64
+                // `mp_shfl_down_compute` unpacks into two b32 halves so no
+                // `shfl.sync.down.b64` (rejected by ptxas) is emitted.
                 let mut current = acc;
                 for offset in [16u32, 8, 4, 2, 1] {
-                    let shuffled = b.alloc_reg(compute.ptx_type());
-                    b.raw_ptx(&format!(
-                        "shfl.sync.down.{compute_bit} {shuffled}, {current}, {offset}, 31, 0xFFFFFFFF;"
-                    ));
+                    let shuffled = mp_shfl_down_compute(b, compute, current.clone(), offset);
                     let sum = b.alloc_reg(compute.ptx_type());
                     b.raw_ptx(&format!(
                         "add.{compute_suffix} {sum}, {current}, {shuffled};"
@@ -947,15 +1087,15 @@ pub fn generate_packed_vector_spmv_ptx(
                     current = sum;
                 }
 
-                // Lane 0 writes the final result
-                let is_lane_0 = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.eq.u32 {is_lane_0}, {lane}, 0;"));
-
+                // Only lane 0 writes the final result (inverted `setp.eq` ->
+                // `setp.ne`).
+                let not_lane_0 = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ne.u32 {not_lane_0}, {lane}, 0;"));
                 let skip_label = b.fresh_label("mpspmv_pskip");
-                b.raw_ptx(&format!("@!{is_lane_0} bra {skip_label};"));
+                b.branch_if(not_lane_0, &skip_label);
 
                 let y_addr = b.byte_offset_addr(y_ptr, row, compute.element_bytes());
-                let y_old = b.load_global_f32(y_addr.clone());
+                let y_old = mp_load_compute(b, compute, y_addr.clone());
 
                 let alpha_acc = b.alloc_reg(compute.ptx_type());
                 b.raw_ptx(&format!(
@@ -970,7 +1110,7 @@ pub fn generate_packed_vector_spmv_ptx(
                     "add.{compute_suffix} {result}, {alpha_acc}, {beta_y};"
                 ));
 
-                b.store_global_f32(y_addr, result);
+                mp_store_compute(b, compute, y_addr, result);
 
                 b.label(&skip_label);
             });
@@ -1009,8 +1149,62 @@ pub fn vector_launch_params(num_rows: u32) -> (u32, u32) {
 mod tests {
     use super::*;
 
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+
     fn default_fp16_config(algo: MixedSpMVAlgo) -> MixedPrecisionConfig {
         MixedPrecisionConfig::fp16_fp32(algo, SmVersion::Sm80)
+    }
+
+    /// All three mixed-precision kernels must assemble for sm_86 with both FP32
+    /// and FP64 compute precision (and FP16/BF16 storage). The FP64 compute path
+    /// is the regression guard: it must use `0D` zero literals, `mov.b64` from a
+    /// `u64` bit-pattern parameter, f64 fma/load/store, and a warp reduction that
+    /// splits into `.b32` halves (never `shfl.sync.down.b64`).
+    #[test]
+    fn mixed_precision_all_kernels_assemble_sm86() {
+        for storage in [StoragePrecision::Fp16, StoragePrecision::Bf16] {
+            for compute in [ComputePrecision::Fp32, ComputePrecision::Fp64] {
+                for algo in [
+                    MixedSpMVAlgo::Scalar,
+                    MixedSpMVAlgo::Vector,
+                    MixedSpMVAlgo::VectorPacked,
+                ] {
+                    let config = MixedPrecisionConfig {
+                        storage_precision: storage,
+                        compute_precision: compute,
+                        algorithm: algo,
+                        sm_version: SmVersion::Sm86,
+                    };
+                    let (ptx, kernel) = match algo {
+                        MixedSpMVAlgo::Scalar => (
+                            generate_mixed_scalar_spmv_ptx(&config).expect("scalar PTX"),
+                            "mixed_scalar",
+                        ),
+                        MixedSpMVAlgo::Vector => (
+                            generate_mixed_vector_spmv_ptx(&config).expect("vector PTX"),
+                            "mixed_vector",
+                        ),
+                        MixedSpMVAlgo::VectorPacked => (
+                            generate_packed_vector_spmv_ptx(&config).expect("packed PTX"),
+                            "mixed_packed",
+                        ),
+                        MixedSpMVAlgo::Auto => unreachable!("Auto is resolved before codegen"),
+                    };
+                    let tag = format!("{kernel}_{}_{}", storage.suffix(), compute.suffix());
+                    assert_assembles_and_clean(&tag, &ptx);
+                    if compute == ComputePrecision::Fp64 {
+                        assert!(
+                            !ptx.contains("0F00000000"),
+                            "{tag}: FP64 compute must not materialize an f32 0.0 immediate:\n{ptx}"
+                        );
+                        assert!(
+                            ptx.contains("fma.rn.f64"),
+                            "{tag}: FP64 compute must use f64 FMA:\n{ptx}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn default_bf16_config(algo: MixedSpMVAlgo) -> MixedPrecisionConfig {

@@ -6,7 +6,7 @@ GPU-accelerated sparse matrix operations, serving as a pure Rust equivalent to N
 
 ## Implementation Status
 
-**Actual: 15,955 SLoC (48 files) -- Estimated: 58K-92K SLoC (estimation.md Vol.5 sparse portion)**
+**Actual: 16,320 SLoC (47 files) -- Estimated: 58K-92K SLoC (estimation.md Vol.5 sparse portion)**
 
 Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), format conversion, five core operations (SpMV, SpMM, SpGEMM, SpTRSV, SDDMM), preconditioners (ILU(0), IC(0), IC(k), smoothed-aggregation AMG), and a LOBPCG eigensolver. The advanced solvers (IC(k), LOBPCG, AMG) run on a host-resident CSR (`host_csr::HostCsr`) so they are fully exercised CPU-only without a CUDA device.
 
@@ -68,7 +68,7 @@ Current implementation covers five sparse formats (CSR, CSC, COO, BSR, ELL), for
 
 ## Quality Status
 
-- Tests: 406 passing (+ 3 doctests); `cargo clippy --all-features --all-targets -- -D warnings` clean
+- Tests: 417 passing (+ 3 doctests); `cargo clippy --all-features --all-targets -- -D warnings` clean
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`

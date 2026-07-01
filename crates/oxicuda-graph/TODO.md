@@ -6,7 +6,7 @@ High-level DAG-based computation graph engine that sits above the raw CUDA drive
 
 ## Implementation Status
 
-**Actual: 10,716 SLoC across 30 files** (added `capture.rs` 586, `exec.rs` 703, `schedule.rs` 466)
+**Actual: 8,362 SLoC across 30 files** (added `capture.rs` 586, `exec.rs` 703, `schedule.rs` 466)
 
 Vol.7 models GPU workloads as directed acyclic graphs (DAGs) of kernel
 launches, memcopies, and event syncs. It runs a suite of analysis and

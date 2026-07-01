@@ -6,7 +6,7 @@ Pure Rust Differential Privacy primitives covering mechanisms (exponential / rep
 
 ## Implementation Status
 
-**Actual: 28,952 SLoC (89 files)**
+**Actual: 21,747 SLoC (91 files)**
 
 Current implementation provides DP primitives that complement `oxicuda-federated::privacy` (which owns `GaussianMechanism`, `LaplacianMechanism`, `MomentsAccountant`, `PateConfig`, and the RDP accountant). This crate focuses on selection mechanisms, advanced accountants, local DP, private optimisers, and sensitivity analyses.
 
@@ -125,7 +125,7 @@ Current implementation provides DP primitives that complement `oxicuda-federated
 
 ## Quality Status
 
-- Tests: 816 passing (unit + 20 e2e integration tests in `e2e_tests.rs`; includes 22 counter-based-RNG tests in `rng/`, 19 mixed-precision/fused-noise tests in `noise/`, 6 DP-Adam convergence-harness tests in `optimizer/dp_adam_harness.rs`, and 9 DP synthetic-data (PATE-GAN / DP-GAN) tests in `mechanism/synthetic_data.rs`)
+- Tests: 823 passing (unit + 20 e2e integration tests in `e2e_tests.rs`; includes 22 counter-based-RNG tests in `rng/`, 19 mixed-precision/fused-noise tests in `noise/`, 6 DP-Adam convergence-harness tests in `optimizer/dp_adam_harness.rs`, and 9 DP synthetic-data (PATE-GAN / DP-GAN) tests in `mechanism/synthetic_data.rs`)
 - Warnings: 0 (clippy clean, `--all-features --all-targets -D warnings`)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches

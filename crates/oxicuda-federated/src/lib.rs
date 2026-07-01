@@ -109,6 +109,11 @@ pub mod prelude {
     pub use crate::selection::random::{random_select, stratified_select};
 }
 
+// ─── On-device GPU validation of the hand-written PTX kernels ─────────────────
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── End-to-end integration tests ────────────────────────────────────────────
 
 #[cfg(test)]

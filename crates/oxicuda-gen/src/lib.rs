@@ -16,6 +16,10 @@ pub mod score;
 pub mod solver;
 pub mod vae;
 
+/// On-device GPU validation of the hand-written PTX kernels (feature-gated).
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 /// Re-exports of the most commonly used types.
 pub mod prelude {
     pub use crate::error::{GenError, GenResult};

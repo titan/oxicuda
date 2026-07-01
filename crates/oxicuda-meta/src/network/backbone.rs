@@ -122,3 +122,167 @@ impl MlpBackbone {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::MetaError;
+    use crate::handle::LcgRng;
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    fn make_rng(seed: u64) -> LcgRng {
+        LcgRng::new(seed)
+    }
+
+    // -----------------------------------------------------------------------
+    // Output-shape tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn output_dim_matches_configured_last_dim() {
+        let mut rng = make_rng(42);
+        let dims = [4_usize, 8, 3];
+        let net = MlpBackbone::new(&dims, &mut rng).expect("new ok");
+        let x = vec![0.5_f32; 4];
+        let out = net.forward(&x).expect("forward ok");
+        assert_eq!(out.len(), 3, "output length must equal last dims entry");
+    }
+
+    // -----------------------------------------------------------------------
+    // Determinism tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn forward_is_deterministic_for_same_input() {
+        let mut rng = make_rng(7);
+        let net = MlpBackbone::new(&[4, 8, 3], &mut rng).expect("new ok");
+        let x: Vec<f32> = (0..4).map(|i| i as f32 * 0.1).collect();
+        let a = net.forward(&x).expect("first forward");
+        let b = net.forward(&x).expect("second forward");
+        assert_eq!(
+            a, b,
+            "same input must yield identical embedding on repeated call"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Numerical-health tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn forward_outputs_are_all_finite() {
+        let mut rng = make_rng(99);
+        let net = MlpBackbone::new(&[16, 32, 8], &mut rng).expect("new ok");
+        let x: Vec<f32> = (0..16).map(|i| (i as f32).sin()).collect();
+        let out = net.forward(&x).expect("forward ok");
+        for &v in &out {
+            assert!(v.is_finite(), "all outputs must be finite, got {v}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // ReLU-placement tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn relu_clamps_negative_preactivation_in_hidden_layer() {
+        // Net [1, 1, 1].  Layer-0: w=-1, b=0 → pre-activation = -1*1 = -1.
+        // ReLU must clamp the hidden value to 0.  Layer-1: w=1, b=0 → output = 0.
+        let mut rng = make_rng(0);
+        let mut net = MlpBackbone::new(&[1, 1, 1], &mut rng).expect("new ok");
+        // params layout per-layer: [w_flat …, b_flat …] then next layer
+        net.from_params(&[-1.0_f32, 0.0, 1.0, 0.0])
+            .expect("load params ok");
+        let out = net.forward(&[1.0_f32]).expect("forward ok");
+        assert_eq!(
+            out[0], 0.0_f32,
+            "ReLU must clamp -1 hidden pre-activation to 0; final output should be 0"
+        );
+    }
+
+    #[test]
+    fn relu_is_not_applied_on_output_layer() {
+        // Net [1, 1, 1].  Layer-0: w=+1 → hidden=+1 (passes ReLU).
+        // Layer-1: w=-1, b=0 → output = -1.  No ReLU on the final layer.
+        let mut rng = make_rng(0);
+        let mut net = MlpBackbone::new(&[1, 1, 1], &mut rng).expect("new ok");
+        net.from_params(&[1.0_f32, 0.0, -1.0, 0.0])
+            .expect("load params ok");
+        let out = net.forward(&[1.0_f32]).expect("forward ok");
+        assert!(
+            out[0] < 0.0,
+            "output layer must NOT apply ReLU; expected negative value, got {}",
+            out[0]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Parameter-management tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn param_count_matches_analytical_formula() {
+        let mut rng = make_rng(13);
+        // Layer 0: 4*8 = 32 weights + 8 biases = 40
+        // Layer 1: 8*3 = 24 weights + 3 biases = 27
+        // Total: 67
+        let dims = [4_usize, 8, 3];
+        let net = MlpBackbone::new(&dims, &mut rng).expect("new ok");
+        let expected = (4 * 8 + 8) + (8 * 3 + 3);
+        assert_eq!(
+            net.param_count(),
+            expected,
+            "param_count does not match layer arithmetic"
+        );
+    }
+
+    #[test]
+    fn to_params_from_params_roundtrip_preserves_forward() {
+        let mut rng = make_rng(17);
+        let mut net = MlpBackbone::new(&[4, 6, 2], &mut rng).expect("new ok");
+        let x = vec![0.1_f32, 0.2, 0.3, 0.4];
+        let before = net.forward(&x).expect("forward before roundtrip");
+        let params = net.to_params();
+        // Corrupt, then restore original params.
+        net.from_params(&vec![0.0_f32; params.len()])
+            .expect("zero all params");
+        net.from_params(&params).expect("restore params");
+        let after = net.forward(&x).expect("forward after roundtrip");
+        assert_eq!(
+            before, after,
+            "param roundtrip must restore identical forward outputs"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Error-handling tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn new_errors_on_fewer_than_two_dims() {
+        let mut rng = make_rng(1);
+        assert!(
+            matches!(
+                MlpBackbone::new(&[4], &mut rng),
+                Err(MetaError::BackboneError { .. })
+            ),
+            "single-element dims must return BackboneError"
+        );
+    }
+
+    #[test]
+    fn forward_errors_on_wrong_input_length() {
+        let mut rng = make_rng(2);
+        let net = MlpBackbone::new(&[4, 8, 3], &mut rng).expect("new ok");
+        assert!(
+            matches!(
+                net.forward(&[1.0_f32, 2.0]),
+                Err(MetaError::DimensionMismatch { .. })
+            ),
+            "mismatched input length must return DimensionMismatch"
+        );
+    }
+}

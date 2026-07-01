@@ -9,8 +9,8 @@ multi-scale features, DETR decoder, and bipartite set matching. Part of
 
 ## Implementation Status
 
-- **Actual SLoC:** ~29,949 total lines across 67 `src/` files
-- **Tests:** 840 `#[test]` in src/ (all passing under `--all-features`)
+- **Actual SLoC:** ~22,299 total lines across 67 `src/` files
+- **Tests:** 853 `#[test]` in src/ (all passing under `--all-features`)
 - **Crate:** `oxicuda-vision` -- Vol.20 Vision Transformer & CLIP Primitives
 
 ### Completed [x]
@@ -127,7 +127,7 @@ through the oxicuda-driver runtime loader.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no_warnings policy)
-- Tests: 840 passing
+- Tests: 853 passing
 - unwrap() calls: 0 in production code (no-unwrap policy)
 - Files under 2000 SLoC: All (largest is `ptx_kernels.rs` at ~1741 lines)
 - Pure-Rust default features: Yes (Pure Rust Policy)

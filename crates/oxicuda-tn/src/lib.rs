@@ -88,3 +88,6 @@ pub use trg::{LatticeTensor, trg_partition_log, trg_step};
 
 #[cfg(test)]
 mod e2e_tests;
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;

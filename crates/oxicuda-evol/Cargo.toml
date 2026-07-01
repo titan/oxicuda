@@ -14,11 +14,18 @@ categories = ["science", "algorithms"]
 [lints]
 workspace = true
 
+[features]
+# On-device PTX validation harness (`src/gpu_tests.rs`). Requires a CUDA device.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name = "evol_ops"

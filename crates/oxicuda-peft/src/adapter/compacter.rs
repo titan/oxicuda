@@ -165,3 +165,177 @@ impl CompacterAdapter {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    /// Build a deterministic input vector in `[-1, 1)` of the given length.
+    fn make_input(len: usize, seed: u64) -> Vec<f32> {
+        let mut rng = LcgRng::new(seed);
+        (0..len).map(|_| rng.next_f32() * 2.0 - 1.0).collect()
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 1: output length == in_dim for a single token
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn compacter_output_shape_single_token() {
+        let mut rng = LcgRng::new(1);
+        let cfg = PhaseConfig { n: 2, k: 2 };
+        let adapter = CompacterAdapter::new(8, 4, cfg, &mut rng);
+        let x = make_input(8, 2);
+        let out = adapter.forward(&x, 1);
+        assert_eq!(
+            out.len(),
+            8,
+            "output length must equal in_dim for seq_len=1"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 2: output length == seq_len * in_dim for a multi-token sequence
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn compacter_output_shape_multi_token() {
+        let mut rng = LcgRng::new(3);
+        let cfg = PhaseConfig { n: 2, k: 2 };
+        let adapter = CompacterAdapter::new(8, 4, cfg, &mut rng);
+        let x = make_input(8 * 5, 4);
+        let out = adapter.forward(&x, 5);
+        assert_eq!(out.len(), 40, "output length must be seq_len * in_dim");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 3: reconstruct_w_up() always returns all zeros (near-identity init),
+    // so forward(x) == x exactly: acc_i = 0 + Σ_j 0*hidden[j] = 0; out = 0 + x.
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn compacter_zero_w_up_forward_is_identity() {
+        let mut rng = LcgRng::new(7);
+        let cfg = PhaseConfig { n: 2, k: 2 };
+        let adapter = CompacterAdapter::new(8, 4, cfg, &mut rng);
+        let w_up = adapter.reconstruct_w_up();
+        assert!(
+            w_up.iter().all(|&v| v == 0.0),
+            "reconstruct_w_up must return all zeros at init"
+        );
+        let x = make_input(8, 9);
+        let out = adapter.forward(&x, 1);
+        for (i, (&got, &expected)) in out.iter().zip(x.iter()).enumerate() {
+            assert_eq!(
+                got, expected,
+                "forward(x)[{i}] must equal x[{i}] when w_up=0 and bias_up=0"
+            );
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 4: analytic Kronecker reconstruction.
+    //
+    // For n=2, k=1, in_dim=4, bottleneck_dim=4 (so b_rows=2, b_cols=2):
+    //   A = [[1, 2], [3, 4]]  (row-major: [1,2,3,4])
+    //   B = [[5, 6], [7, 8]]  (row-major: [5,6,7,8])
+    //
+    // kron(A, B)[ai*b_rows+p, aj*b_cols+q] = A[ai,aj] * B[p,q]
+    //
+    //   Row 0 (ai=0, p=0): [A00*B00, A00*B01, A01*B00, A01*B01] = [ 5,  6, 10, 12]
+    //   Row 1 (ai=0, p=1): [A00*B10, A00*B11, A01*B10, A01*B11] = [ 7,  8, 14, 16]
+    //   Row 2 (ai=1, p=0): [A10*B00, A10*B01, A11*B00, A11*B01] = [15, 18, 20, 24]
+    //   Row 3 (ai=1, p=1): [A10*B10, A10*B11, A11*B10, A11*B11] = [21, 24, 28, 32]
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn compacter_kronecker_reconstruction_analytic() {
+        let mut rng = LcgRng::new(99);
+        let cfg = PhaseConfig { n: 2, k: 1 };
+        let mut adapter = CompacterAdapter::new(4, 4, cfg, &mut rng);
+        // Override with analytically known values.
+        adapter.a_factors[0] = vec![1.0_f32, 2.0, 3.0, 4.0]; // [[1,2],[3,4]]
+        adapter.b_factors[0] = vec![5.0_f32, 6.0, 7.0, 8.0]; // [[5,6],[7,8]]
+        let w = adapter.reconstruct_w_down();
+        let expected: [f32; 16] = [
+            5.0, 6.0, 10.0, 12.0, 7.0, 8.0, 14.0, 16.0, 15.0, 18.0, 20.0, 24.0, 21.0, 24.0, 28.0,
+            32.0,
+        ];
+        assert_eq!(
+            w.len(),
+            expected.len(),
+            "reconstructed w_down must have in_dim * bottleneck_dim elements"
+        );
+        for (i, (&got, &exp)) in w.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (got - exp).abs() < 1e-5_f32,
+                "w_down[{i}]: got {got}, expected {exp}"
+            );
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 5: Kronecker-factor parameter count < dense weight parameter count.
+    //
+    // For in_dim=16, bottleneck_dim=8, n=4, k=2:
+    //   b_rows = 16/4 = 4, b_cols = 8/4 = 2
+    //   Kronecker params = k*(n² + b_rows*b_cols) = 2*(16 + 8) = 48
+    //   Dense params     = in_dim * bottleneck_dim = 128
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn compacter_parameter_count_smaller_than_dense() {
+        let n = 4usize;
+        let k = 2usize;
+        let in_dim = 16usize;
+        let bottleneck_dim = 8usize;
+        let mut rng = LcgRng::new(55);
+        let cfg = PhaseConfig { n, k };
+        let adapter = CompacterAdapter::new(in_dim, bottleneck_dim, cfg, &mut rng);
+        let b_rows = in_dim / n;
+        let b_cols = bottleneck_dim / n;
+        let kronecker_params: usize = adapter.a_factors.iter().map(|a| a.len()).sum::<usize>()
+            + adapter.b_factors.iter().map(|b| b.len()).sum::<usize>();
+        let expected_kronecker_params = k * (n * n + b_rows * b_cols);
+        let dense_params = in_dim * bottleneck_dim;
+        assert_eq!(
+            kronecker_params, expected_kronecker_params,
+            "Kronecker factor parameter count mismatch"
+        );
+        assert!(
+            kronecker_params < dense_params,
+            "Compacter Kronecker params ({kronecker_params}) must be fewer than \
+             equivalent dense weight ({dense_params})"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 6: same RNG seed → byte-identical forward output (determinism)
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn compacter_determinism_fixed_seed() {
+        let x = make_input(8, 99);
+        let mut rng_a = LcgRng::new(42);
+        let mut rng_b = LcgRng::new(42);
+        let adapter_a = CompacterAdapter::new(8, 4, PhaseConfig { n: 2, k: 2 }, &mut rng_a);
+        let adapter_b = CompacterAdapter::new(8, 4, PhaseConfig { n: 2, k: 2 }, &mut rng_b);
+        let out_a = adapter_a.forward(&x, 1);
+        let out_b = adapter_b.forward(&x, 1);
+        assert_eq!(
+            out_a, out_b,
+            "same seed must yield identical forward outputs"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Test 7: all output values are finite
+    // ────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn compacter_finite_outputs() {
+        let mut rng = LcgRng::new(13);
+        let cfg = PhaseConfig { n: 2, k: 2 };
+        let adapter = CompacterAdapter::new(8, 4, cfg, &mut rng);
+        let x = make_input(8 * 3, 17);
+        let out = adapter.forward(&x, 3);
+        assert!(
+            out.iter().all(|v| v.is_finite()),
+            "all outputs must be finite"
+        );
+    }
+}

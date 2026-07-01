@@ -473,7 +473,14 @@ impl CooperativeGemmPlan {
             &format!("    mul.lo.u64 %rd5, %rd5, {elem_bytes};"),
         )?;
         wl(&mut ptx, "    add.u64 %rd7, %rd0, %rd5;")?;
-        wl(&mut ptx, &format!("    ld.global{in_ty} %f1, [%rd7];"))?;
+        // The accumulator FMA below reads %fd1/%fd2 (f64) or %f1/%f2 (f32);
+        // load A into the register bank that matches the precision so the
+        // memory type, the register type and the FMA operands all agree.
+        if self.config.precision == CoopPrecision::F64 {
+            wl(&mut ptx, &format!("    ld.global{in_ty} %fd1, [%rd7];"))?;
+        } else {
+            wl(&mut ptx, &format!("    ld.global{in_ty} %f1, [%rd7];"))?;
+        }
         wl(&mut ptx, "")?;
 
         wl(&mut ptx, "    // B[k, col]: row-major offset = k * N + col")?;
@@ -486,7 +493,11 @@ impl CooperativeGemmPlan {
             &format!("    mul.lo.u64 %rd9, %rd9, {elem_bytes};"),
         )?;
         wl(&mut ptx, "    add.u64 %rd11, %rd1, %rd9;")?;
-        wl(&mut ptx, &format!("    ld.global{in_ty} %f2, [%rd11];"))?;
+        if self.config.precision == CoopPrecision::F64 {
+            wl(&mut ptx, &format!("    ld.global{in_ty} %fd2, [%rd11];"))?;
+        } else {
+            wl(&mut ptx, &format!("    ld.global{in_ty} %f2, [%rd11];"))?;
+        }
         wl(&mut ptx, "")?;
 
         // FMA
@@ -1056,6 +1067,73 @@ mod tests {
             reduction_strategy: strategy,
             precision,
         }
+    }
+
+    /// The f64 partial-GEMM kernel must assemble cleanly on sm_86: previously
+    /// it loaded A/B into the `.f32` `%f1`/`%f2` registers with `.f64` loads
+    /// while the FMA read the (never-written) `%fd1`/`%fd2`, which both failed
+    /// `ptxas` and computed garbage. Skips gracefully when `ptxas` is absent.
+    #[test]
+    fn partial_gemm_f64_ptx_assembles_for_sm86() {
+        let ptxas = {
+            let mut found = None;
+            if let Ok(path) = std::env::var("PATH") {
+                for dir in std::env::split_paths(&path) {
+                    let candidate = dir.join("ptxas");
+                    if candidate.is_file() {
+                        found = Some(candidate);
+                        break;
+                    }
+                }
+            }
+            found.or_else(|| {
+                let p = std::path::PathBuf::from("/usr/local/cuda/bin/ptxas");
+                p.is_file().then_some(p)
+            })
+        };
+        let Some(ptxas) = ptxas else {
+            println!("skipping: ptxas not found on PATH");
+            return;
+        };
+
+        let cfg = make_config(
+            256,
+            256,
+            1024,
+            2,
+            SmVersion::Sm86,
+            CoopReductionStrategy::TwoPhase,
+            CoopPrecision::F64,
+        );
+        let plan = CooperativeGemmPlan::new(cfg).expect("valid f64 cooperative plan");
+        let ptx = plan
+            .generate_partial_gemm_ptx()
+            .expect("f64 partial GEMM PTX should generate");
+        // The f64 path must keep A/B in the .f64 %fd bank that the FMA reads.
+        assert!(
+            ptx.contains("ld.global.f64 %fd1,") && ptx.contains("ld.global.f64 %fd2,"),
+            "f64 partial GEMM must load A/B into the .f64 register bank:\n{ptx}"
+        );
+
+        let mut ptx_path = std::env::temp_dir();
+        ptx_path.push(format!(
+            "oxicuda_coop_partial_f64_{}.ptx",
+            std::process::id()
+        ));
+        std::fs::write(&ptx_path, &ptx).expect("write PTX to temp file");
+        let output = std::process::Command::new(&ptxas)
+            .arg("-arch=sm_86")
+            .arg(&ptx_path)
+            .arg("-o")
+            .arg("/dev/null")
+            .output()
+            .expect("invoke ptxas");
+        let _ = std::fs::remove_file(&ptx_path);
+        assert!(
+            output.status.success(),
+            "ptxas rejected f64 partial GEMM PTX:\n{}\n--- PTX ---\n{ptx}",
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 
     // -- Config validation ---------------------------------------------------

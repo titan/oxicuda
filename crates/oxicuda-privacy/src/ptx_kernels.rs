@@ -53,45 +53,57 @@ pub fn exponential_sample_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     format!(
         r#"{hdr}
-// Exponential mechanism sampler
-// scores[i] are pre-exponentiated weights (host normalizes first).
-// Each thread i checks if cumsum[i] >= u * total and atomically
-// writes its index if it is the first to cross the threshold.
+// Exponential-mechanism selection step (inverse-CDF categorical sampler).
+// scores[i] are the pre-exponentiated weights (the host exponentiates and
+// supplies threshold = u * total_weight). A single thread (thread 0) walks the
+// running prefix sum and writes the first index i whose cumulative weight
+// reaches `threshold`; if floating-point slack means none does, it writes n-1.
+// This mirrors the CPU `mechanism::exponential::exponential_sample` selection
+// loop exactly. Launch with one thread (grid=1, block=1).
 .visible .entry exponential_sample(
     .param .u64 param_scores,      // f64* weights (pre-exp)
     .param .u32 param_n,           // number of outcomes
     .param .f64 param_threshold,   // u * total_weight (host-computed)
-    .param .u64 param_out           // u32* output index
+    .param .u64 param_out           // u32* output index (single element)
 )
 {{
-    .reg .u64   rd_scores, rd_out;
-    .reg .u32   r_n, r_tid, r_stride, r_one;
+    .reg .u64   rd_scores, rd_out, rd_addr;
+    .reg .u32   r_n, r_tid, r_i, r_sel;
     .reg .f64   fd_w, fd_cum, fd_thr;
-    .reg .pred  p_guard, p_cross;
+    .reg .pred  p_exit, p_done, p_cross;
 
     ld.param.u64    rd_scores,    [param_scores];
     ld.param.u32    r_n,          [param_n];
     ld.param.f64    fd_thr,       [param_threshold];
     ld.param.u64    rd_out,       [param_out];
 
+    // Only thread 0 performs the serial cumulative scan.
     mov.u32         r_tid,        %tid.x;
-    setp.ge.u32     p_guard,      r_tid, r_n;
-    @p_guard bra    EXIT;
+    setp.ne.u32     p_exit,       r_tid, 0;
+    @p_exit bra     EXIT;
 
-    // Compute byte offset for this thread's weight element
-    mul.wide.u32    rd_scores,    r_tid, 8;      // 8 bytes per f64
-    add.u64         rd_scores,    rd_scores, %rd_scores; // NOTE: for demo
-    // Simplified: each thread loads its own weight
-    // (full kernel would use shared-memory prefix scan)
-    ld.global.f64   fd_w,         [rd_scores];
+    mov.f64         fd_cum,       0D0000000000000000;
+    mov.u32         r_i,          0;
+    // Numerical fallback: last index, used only if `threshold` is never reached.
+    sub.u32         r_sel,        r_n, 1;
 
-    // If this weight >= threshold, this thread may be selected
-    setp.ge.f64     p_cross,      fd_w, fd_thr;
-    @!p_cross bra   EXIT;
+LOOP:
+    setp.ge.u32     p_done,       r_i, r_n;
+    @p_done bra     STORE;
+    mul.wide.u32    rd_addr,      r_i, 8;          // 8 bytes per f64
+    add.u64         rd_addr,      rd_scores, rd_addr;
+    ld.global.f64   fd_w,         [rd_addr];
+    add.f64         fd_cum,       fd_cum, fd_w;
+    setp.ge.f64     p_cross,      fd_cum, fd_thr;
+    @p_cross bra    STORE_SEL;
+    add.u32         r_i,          r_i, 1;
+    bra             LOOP;
 
-    // Atomic min to record smallest index that crosses threshold
-    mov.u32         r_one,        r_tid;
-    atom.global.min.u32  r_stride, [rd_out], r_one;
+STORE_SEL:
+    mov.u32         r_sel,        r_i;
+
+STORE:
+    st.global.u32   [rd_out],     r_sel;
 
 EXIT:
     ret;
@@ -124,6 +136,7 @@ pub fn laplace_noise_ptx(sm: u32) -> String {
     .reg .u64   rd_data, rd_state, rd_addr;
     .reg .u32   r_n, r_tid;
     .reg .f64   fd_val, fd_u, fd_noise, fd_scale;
+    .reg .f32   f_a32, f_l32;
     .reg .pred  p_guard;
 
     // LCG constants (Knuth MMIX)
@@ -166,7 +179,10 @@ pub fn laplace_noise_ptx(sm: u32) -> String {
     // 1 - 2|u-0.5|
     mov.f64         fd_val,    0D3FF0000000000000; // 1.0
     sub.f64         fd_noise,  fd_val, fd_noise;
-    lg2.approx.f64  fd_noise,  fd_noise;           // log2 approx
+    // log2(arg) via the f32 SFU approximation (PTX has no lg2 for .f64).
+    cvt.rn.f32.f64  f_a32,     fd_noise;
+    lg2.approx.f32  f_l32,     f_a32;
+    cvt.f64.f32     fd_noise,  f_l32;
     // ln = log2 * ln2
     mul.f64         fd_noise,  fd_noise, 0D3FE62E42FEFA39EF; // ln2
     neg.f64         fd_noise,  fd_noise;
@@ -213,6 +229,7 @@ pub fn gaussian_noise_ptx(sm: u32) -> String {
     .reg .u64   rd_data, rd_s1, rd_s2, rd_addr;
     .reg .u32   r_n, r_tid, r_pair;
     .reg .f64   fd_u1, fd_u2, fd_r, fd_theta, fd_z, fd_sigma, fd_val;
+    .reg .f32   f_t32, f_o32;
     .reg .pred  p_guard, p_odd;
 
     .reg .u64   rd_mul, rd_add;
@@ -256,19 +273,26 @@ pub fn gaussian_noise_ptx(sm: u32) -> String {
     mov.f64         fd_r,       0D4340000000000000;
     div.rn.f64      fd_u2,      fd_u2, fd_r;
 
-    // r = sqrt(-2 ln u1)
-    lg2.approx.f64  fd_r,       fd_u1;
+    // r = sqrt(-2 ln u1); ln(u1) = log2(u1)*ln2 via the f32 SFU approximation
+    // (PTX has no lg2 for .f64); the sqrt uses the IEEE f64 instruction.
+    cvt.rn.f32.f64  f_t32,      fd_u1;
+    lg2.approx.f32  f_o32,      f_t32;
+    cvt.f64.f32     fd_r,       f_o32;
     mul.f64         fd_r,       fd_r, 0D3FE62E42FEFA39EF; // ln2
     neg.f64         fd_r,       fd_r;
     mul.f64         fd_r,       fd_r, 0D4000000000000000; // * 2
-    sqrt.approx.f64 fd_r,       fd_r;
+    sqrt.rn.f64     fd_r,       fd_r;
 
     // theta = 2*pi*u2
     mul.f64         fd_theta,   fd_u2, 0D401921FB54442D18; // 2*pi
 
-    // z1 = r*cos(theta), z2 = r*sin(theta)
-    cos.approx.f64  fd_z,       fd_theta;
-    sin.approx.f64  fd_u2,      fd_theta;
+    // z1 = r*cos(theta), z2 = r*sin(theta); cos/sin via the f32 SFU
+    // approximation (PTX has no sin/cos for .f64).
+    cvt.rn.f32.f64  f_t32,      fd_theta;
+    cos.approx.f32  f_o32,      f_t32;
+    cvt.f64.f32     fd_z,       f_o32;
+    sin.approx.f32  f_o32,      f_t32;
+    cvt.f64.f32     fd_u2,      f_o32;
     @p_odd mov.f64  fd_z,       fd_u2;   // odd threads get sin component
 
     mul.f64         fd_z,       fd_r, fd_z;
@@ -311,7 +335,7 @@ pub fn clip_gradient_ptx(sm: u32) -> String {
     .param .f64 param_clip       // L2 clipping bound
 )
 {{
-    .reg .u64   rd_grads, rd_base, rd_addr;
+    .reg .u64   rd_grads, rd_base, rd_addr, rd_smem;
     .reg .u32   r_n, r_batch, r_bid, r_tid;
     .reg .f64   fd_g, fd_sum, fd_clip, fd_norm, fd_scale;
     .reg .pred  p_guard;
@@ -322,6 +346,10 @@ pub fn clip_gradient_ptx(sm: u32) -> String {
     ld.param.u32    r_n,        [param_n_params];
     ld.param.u32    r_batch,    [param_batch];
     ld.param.f64    fd_clip,    [param_clip];
+
+    // Materialise the shared base address in a register: PTX forbids using a
+    // shared-state symbol directly as an ALU operand (only as an address).
+    mov.u64         rd_smem,    smem;
 
     mov.u32         r_bid,      %ctaid.x;
     mov.u32         r_tid,      %tid.x;
@@ -335,18 +363,20 @@ pub fn clip_gradient_ptx(sm: u32) -> String {
 
     setp.ge.u32     p_guard,    r_tid, r_n;
 
-    // Load gradient element and square it
+    // Load gradient element and square it (out-of-range threads keep 0).
+    // PTX has no braced predicated blocks, so guard with a forward branch;
+    // every thread still reaches the shared store + barrier below.
     mov.f64         fd_g,       0D0000000000000000;
-    @!p_guard {{
-        mul.wide.u32    rd_addr,  r_tid, 8;
-        add.u64         rd_addr,  rd_base, rd_addr;
-        ld.global.f64   fd_g,     [rd_addr];
-        mul.f64         fd_g,     fd_g, fd_g;
-    }}
+    @p_guard bra    SKIP_SQ;
+    mul.wide.u32    rd_addr,    r_tid, 8;
+    add.u64         rd_addr,    rd_base, rd_addr;
+    ld.global.f64   fd_g,       [rd_addr];
+    mul.f64         fd_g,       fd_g, fd_g;
+SKIP_SQ:
 
     // Store squared value to shared memory for reduction
     mul.wide.u32    rd_addr,    r_tid, 8;
-    add.u64         rd_addr,    smem, rd_addr;
+    add.u64         rd_addr,    rd_smem, rd_addr;
     st.shared.f64   [rd_addr],  fd_g;
     bar.sync        0;
 
@@ -360,13 +390,13 @@ LOOP:
     setp.ge.u32     p_guard,    r_bid, r_n;
     @p_guard bra    DONE_SUM;
     mul.wide.u32    rd_addr,    r_bid, 8;
-    add.u64         rd_addr,    smem, rd_addr;
+    add.u64         rd_addr,    rd_smem, rd_addr;
     ld.shared.f64   fd_g,       [rd_addr];
     add.f64         fd_sum,     fd_sum, fd_g;
     add.u32         r_bid,      r_bid, 1;
     bra             LOOP;
 DONE_SUM:
-    sqrt.approx.f64 fd_norm,    fd_sum;
+    sqrt.rn.f64     fd_norm,    fd_sum;             // IEEE f64 sqrt
     // scale = clip / max(norm, 1e-9)
     mov.f64         fd_g,       0D3E112E0BE826D695; // ~1e-9
     max.f64         fd_norm,    fd_norm, fd_g;
@@ -420,9 +450,10 @@ pub fn svt_threshold_ptx(sm: u32) -> String {
     .param .u64 param_results    // u8* output (0/1)
 )
 {{
-    .reg .u64   rd_q, rd_out, rd_state, rd_addr;
+    .reg .u64   rd_q, rd_out, rd_state, rd_addr, rd_toff;
     .reg .u32   r_n, r_tid;
     .reg .f64   fd_q, fd_nthresh, fd_nscale, fd_u, fd_noise, fd_half;
+    .reg .f32   f_a32, f_l32;
     .reg .u8    rv_res;
     .reg .pred  p_guard, p_above, p_odd;
     .reg .u64   rd_mul, rd_add;
@@ -460,7 +491,10 @@ pub fn svt_threshold_ptx(sm: u32) -> String {
     add.f64         fd_noise,   fd_noise, fd_noise;
     mov.f64         fd_half,    0D3FF0000000000000;
     sub.f64         fd_noise,   fd_half, fd_noise;
-    lg2.approx.f64  fd_noise,   fd_noise;
+    // log2(arg) via the f32 SFU approximation (PTX has no lg2 for .f64).
+    cvt.rn.f32.f64  f_a32,      fd_noise;
+    lg2.approx.f32  f_l32,      f_a32;
+    cvt.f64.f32     fd_noise,   f_l32;
     mul.f64         fd_noise,   fd_noise, 0D3FE62E42FEFA39EF;
     neg.f64         fd_noise,   fd_noise;
     setp.ge.f64     p_odd,      fd_u, 0D0000000000000000;
@@ -478,8 +512,9 @@ pub fn svt_threshold_ptx(sm: u32) -> String {
     setp.ge.f64     p_above,    fd_q, fd_nthresh;
     selp.u32        r_n,        1, 0, p_above;    // reuse r_n
 
-    // Store u8 result
-    add.u64         rd_addr,    rd_out, r_tid;
+    // Store u8 result (1 byte per element; widen tid to u64 before the add).
+    cvt.u64.u32     rd_toff,    r_tid;
+    add.u64         rd_addr,    rd_out, rd_toff;
     cvt.u8.u32      rv_res,     r_n;
     st.global.u8    [rd_addr],  rv_res;
 
@@ -595,7 +630,7 @@ pub fn oue_encode_ptx(sm: u32) -> String {
     .param .u64 param_seed       // RNG seed
 )
 {{
-    .reg .u64   rd_out, rd_state, rd_addr;
+    .reg .u64   rd_out, rd_state, rd_addr, rd_toff;
     .reg .u32   r_k, r_tid, r_true;
     .reg .f64   fd_p_half, fd_p_flip, fd_u, fd_thresh;
     .reg .u8    rv_bit;
@@ -635,7 +670,9 @@ pub fn oue_encode_ptx(sm: u32) -> String {
     setp.lt.f64     p_set,       fd_u, fd_thresh;
     selp.u32        r_k,         1, 0, p_set;    // reuse r_k
     cvt.u8.u32      rv_bit,      r_k;
-    add.u64         rd_addr,     rd_out, r_tid;
+    // Output is u8* of length k: byte offset = tid (widen u32 -> u64).
+    cvt.u64.u32     rd_toff,     r_tid;
+    add.u64         rd_addr,     rd_out, rd_toff;
     st.global.u8    [rd_addr],   rv_bit;
 
 EXIT:

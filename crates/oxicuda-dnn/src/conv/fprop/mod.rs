@@ -6,4 +6,5 @@
 pub mod direct;
 pub mod im2col_gemm;
 pub mod implicit_gemm;
+pub(crate) mod standard_conv;
 pub mod winograd;

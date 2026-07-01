@@ -139,3 +139,141 @@ fn matmul_t2(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
     }
     c
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Frobenius squared error ||V_dense - W H||_F^2.
+    fn frob_sq_err(model: &Nmf, v_dense: &[f32]) -> f32 {
+        let mut err = 0.0_f32;
+        for u in 0..model.n_users {
+            for i in 0..model.n_items {
+                let v_ui = v_dense[u * model.n_items + i];
+                let pred = model.score(u, i).expect("score ok");
+                let d = v_ui - pred;
+                err += d * d;
+            }
+        }
+        err
+    }
+
+    /// Build a dense [n_users × n_items] rank-1 matrix: V[u,i] = u_vec[u]*v_vec[i].
+    fn dense_rank1(u_vec: &[f32], v_vec: &[f32]) -> Vec<f32> {
+        let n = u_vec.len();
+        let m = v_vec.len();
+        (0..n)
+            .flat_map(|u| (0..m).map(move |i| u_vec[u] * v_vec[i]))
+            .collect()
+    }
+
+    #[test]
+    fn nmf_empty_data_returns_err() {
+        let mut rng = LcgRng::new(1);
+        assert!(matches!(
+            Nmf::fit(&[], 3, 3, 2, 10, &mut rng),
+            Err(RecsysError::EmptyInteraction)
+        ));
+    }
+
+    #[test]
+    fn nmf_zero_dim_returns_err() {
+        let mut rng = LcgRng::new(2);
+        let data = vec![(0usize, 0usize, 1.0_f32)];
+        assert!(matches!(
+            Nmf::fit(&data, 2, 2, 0, 5, &mut rng),
+            Err(RecsysError::InvalidEmbeddingDim { .. })
+        ));
+    }
+
+    #[test]
+    fn nmf_factors_nonnegative_after_many_updates() {
+        // The defining invariant of NMF multiplicative updates: W,H >= 0 always.
+        let mut rng = LcgRng::new(42);
+        let data: Vec<(usize, usize, f32)> = vec![
+            (0, 0, 1.0),
+            (0, 1, 0.5),
+            (1, 0, 0.3),
+            (1, 2, 0.8),
+            (2, 1, 0.6),
+            (2, 2, 1.0),
+        ];
+        let model = Nmf::fit(&data, 3, 3, 4, 100, &mut rng).expect("fit should succeed");
+        for (idx, &w) in model.w.iter().enumerate() {
+            assert!(w >= 0.0, "W[{idx}] = {w} is negative");
+        }
+        for (idx, &h) in model.h.iter().enumerate() {
+            assert!(h >= 0.0, "H[{idx}] = {h} is negative");
+        }
+    }
+
+    #[test]
+    fn nmf_reconstruction_error_decreases_with_more_iterations() {
+        // Identical seed → identical W,H init → more iters must yield lower
+        // (or equal) Frobenius error (Lee & Seung multiplicative-update guarantee).
+        let u_vec = [0.8_f32, 0.5, 1.0, 0.3];
+        let v_vec = [1.0_f32, 0.6, 0.4, 0.9];
+        let dense = dense_rank1(&u_vec, &v_vec);
+        let n_users = 4;
+        let n_items = 4;
+        // Build data from raw arrays (Copy) to avoid moving `dense` into closure.
+        let data: Vec<(usize, usize, f32)> = (0..n_users)
+            .flat_map(|u| (0..n_items).map(move |i| (u, i, u_vec[u] * v_vec[i])))
+            .collect();
+
+        let milestones = [0usize, 5, 20, 80];
+        let mut prev_err = f32::MAX;
+        for &n_iters in &milestones {
+            let mut rng = LcgRng::new(111);
+            let model = Nmf::fit(&data, n_users, n_items, 2, n_iters, &mut rng)
+                .expect("fit should succeed");
+            let err = frob_sq_err(&model, &dense);
+            assert!(
+                err <= prev_err + 1e-3,
+                "error increased from {prev_err:.6} to {err:.6} at n_iters={n_iters}"
+            );
+            prev_err = err;
+        }
+    }
+
+    #[test]
+    fn nmf_rank1_input_converges_to_small_reconstruction_error() {
+        // A rank-1 non-negative matrix is exactly factorisable by NMF with
+        // dim=2.  After enough iterations the reconstruction should be close.
+        let u_vec = [1.0_f32, 0.7, 0.5];
+        let v_vec = [0.8_f32, 1.0, 0.6];
+        let dense = dense_rank1(&u_vec, &v_vec);
+        let n_users = 3;
+        let n_items = 3;
+        // Build data from raw arrays (Copy) to avoid moving `dense` into closure.
+        let data: Vec<(usize, usize, f32)> = (0..n_users)
+            .flat_map(|u| (0..n_items).map(move |i| (u, i, u_vec[u] * v_vec[i])))
+            .collect();
+
+        let mut rng = LcgRng::new(7);
+        let model =
+            Nmf::fit(&data, n_users, n_items, 2, 400, &mut rng).expect("fit should succeed");
+        let err = frob_sq_err(&model, &dense);
+        assert!(
+            err < 0.05,
+            "rank-1 NMF should converge to small error, got {err:.6}"
+        );
+    }
+
+    #[test]
+    fn nmf_scores_finite_and_nonneg_for_all_pairs() {
+        // W >= 0 and H >= 0 implies WH >= 0 entry-wise.
+        let mut rng = LcgRng::new(13);
+        let data: Vec<(usize, usize, f32)> = vec![(0, 0, 1.0), (1, 1, 0.5), (2, 2, 0.8)];
+        let model = Nmf::fit(&data, 3, 3, 3, 20, &mut rng).expect("fit should succeed");
+        for u in 0..3 {
+            for i in 0..3 {
+                let s = model.score(u, i).expect("score ok");
+                assert!(s.is_finite(), "score({u},{i}) = {s} not finite");
+                assert!(s >= -1e-7, "score({u},{i}) = {s} < 0 (W,H >= 0 so WH >= 0)");
+            }
+        }
+    }
+}

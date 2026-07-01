@@ -11,6 +11,9 @@ readme                 = "README.md"
 keywords = ["gpu", "vision", "vit", "clip", "transformer"]
 categories = ["science", "algorithms"]
 
+[features]
+gpu-tests = []
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -23,6 +26,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver  = { workspace = true }
+oxicuda-memory  = { workspace = true }
+oxicuda-launch  = { workspace = true }
 
 [[bench]]
 name    = "vision_ops"

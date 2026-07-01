@@ -81,14 +81,14 @@ fn identity_literal(op: ReduceOp, ty: PtxType) -> &'static str {
         (ReduceOp::Product, PtxType::F32) => "0f3F800000",
         (ReduceOp::Product, PtxType::F64) => "0d3FF0000000000000",
         (ReduceOp::Product, _) => "1",
-        (ReduceOp::Min, PtxType::F32) => "0x7F800000",
+        (ReduceOp::Min, PtxType::F32) => "0f7F800000",
         (ReduceOp::Min, PtxType::F64) => "0x7FF0000000000000",
         (ReduceOp::Min, PtxType::U32) => "4294967295",
         (ReduceOp::Min, PtxType::U64) => "18446744073709551615",
         (ReduceOp::Min, PtxType::S32) => "2147483647",
         (ReduceOp::Min, PtxType::S64) => "9223372036854775807",
         (ReduceOp::Min, _) => "0",
-        (ReduceOp::Max, PtxType::F32) => "0xFF800000",
+        (ReduceOp::Max, PtxType::F32) => "0fFF800000",
         (ReduceOp::Max, PtxType::F64) => "0xFFF0000000000000",
         (ReduceOp::Max, PtxType::S32) => "-2147483648",
         (ReduceOp::Max, PtxType::S64) => "-9223372036854775808",
@@ -253,7 +253,7 @@ impl DecoupledScanTemplate {
             "    .reg .{ty}   %val, %acc, %other, %block_agg, %excl_prefix, %pred_v;"
         )
         .map_err(ferr)?;
-        writeln!(out, "    .reg .u32    %tid, %bid, %nb, %d, %flag, %probe;").map_err(ferr)?;
+        writeln!(out, "    .reg .u32    %ltid, %bid, %nb, %d, %flag, %probe;").map_err(ferr)?;
         writeln!(
             out,
             "    .reg .u64    %n, %gid, %addr, %smem_base, %smem_addr;"
@@ -274,9 +274,14 @@ impl DecoupledScanTemplate {
         writeln!(out, "    ld.param.u64 %ptr_prefix, [param_prefix];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %n,           [param_n];").map_err(ferr)?;
         writeln!(out, "    ld.param.u32 %nb,          [param_num_blocks];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    mov.u64      %smem_base, ds_smem;").map_err(ferr)?;
 
         // Load element (identity if OOB).
@@ -286,7 +291,7 @@ impl DecoupledScanTemplate {
         writeln!(out, "    @%oob mov.{ty} %val, {ident};").map_err(ferr)?;
 
         // Hillis-Steele inclusive scan within the block over shared memory.
-        writeln!(out, "    mul.wide.u32 %smem_addr, %tid, {eb};").map_err(ferr)?;
+        writeln!(out, "    mul.wide.u32 %smem_addr, %ltid, {eb};").map_err(ferr)?;
         writeln!(out, "    add.u64      %smem_addr, %smem_addr, %smem_base;").map_err(ferr)?;
         writeln!(out, "    mov.{ty}      %acc, %val;").map_err(ferr)?;
         writeln!(out, "    st.shared.{ty} [%smem_addr], %acc;").map_err(ferr)?;
@@ -295,9 +300,9 @@ impl DecoupledScanTemplate {
         writeln!(out, "DS_SCAN:").map_err(ferr)?;
         writeln!(out, "    setp.ge.u32  %p, %offset, {bs};").map_err(ferr)?;
         writeln!(out, "    @%p bra DS_SCAN_DONE;").map_err(ferr)?;
-        writeln!(out, "    setp.ge.u32  %active, %tid, %offset;").map_err(ferr)?;
+        writeln!(out, "    setp.ge.u32  %active, %ltid, %offset;").map_err(ferr)?;
         writeln!(out, "    @!%active bra DS_SCAN_SYNC;").map_err(ferr)?;
-        writeln!(out, "    sub.u32      %partner_i, %tid, %offset;").map_err(ferr)?;
+        writeln!(out, "    sub.u32      %partner_i, %ltid, %offset;").map_err(ferr)?;
         writeln!(out, "    mul.wide.u32 %addr, %partner_i, {eb};").map_err(ferr)?;
         writeln!(out, "    add.u64      %addr, %addr, %smem_base;").map_err(ferr)?;
         writeln!(out, "    ld.shared.{ty} %other, [%addr];").map_err(ferr)?;
@@ -316,7 +321,7 @@ impl DecoupledScanTemplate {
         writeln!(out, "    ld.shared.{ty} %block_agg, [%addr];").map_err(ferr)?;
 
         // Thread 0 publishes the descriptor and runs the lookback.
-        writeln!(out, "    setp.ne.u32  %p, %tid, 0;").map_err(ferr)?;
+        writeln!(out, "    setp.ne.u32  %p, %ltid, 0;").map_err(ferr)?;
         writeln!(out, "    @%p bra DS_WAIT_PREFIX;").map_err(ferr)?;
 
         // Block 0 has prefix = identity and publishes P directly.
@@ -329,7 +334,7 @@ impl DecoupledScanTemplate {
         writeln!(out, "    add.u64      %addr, %addr, %ptr_agg;").map_err(ferr)?;
         writeln!(out, "    st.global.{ty} [%addr], %block_agg;").map_err(ferr)?;
         writeln!(out, "    membar.gl;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %bid, 4, %ptr_status;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %bid, 4, %ptr_status;").map_err(ferr)?;
         writeln!(out, "    atom.global.exch.b32 %flag, [%addr], {FLAG_A};").map_err(ferr)?;
 
         // Lookback: walk predecessors from bid-1 downward.
@@ -338,7 +343,7 @@ impl DecoupledScanTemplate {
         writeln!(out, "LOOKBACK:").map_err(ferr)?;
         // Spin until predecessor status != X.
         writeln!(out, "LOOKBACK_SPIN:").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %probe, 4, %ptr_status;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %probe, 4, %ptr_status;").map_err(ferr)?;
         writeln!(out, "    ld.global.u32 %flag, [%addr];").map_err(ferr)?;
         writeln!(out, "    setp.eq.u32  %p, %flag, {FLAG_X};").map_err(ferr)?;
         writeln!(out, "    @%p bra LOOKBACK_SPIN;").map_err(ferr)?;
@@ -368,7 +373,7 @@ impl DecoupledScanTemplate {
         writeln!(out, "    add.u64      %addr, %addr, %ptr_prefix;").map_err(ferr)?;
         writeln!(out, "    st.global.{ty} [%addr], %other;").map_err(ferr)?;
         writeln!(out, "    membar.gl;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %bid, 4, %ptr_status;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %bid, 4, %ptr_status;").map_err(ferr)?;
         writeln!(out, "    atom.global.exch.b32 %flag, [%addr], {FLAG_P};").map_err(ferr)?;
         // Stash the block's exclusive prefix in the shared spill slot for peers.
         writeln!(out, "    mul.wide.u32 %addr, {bs}, {eb};").map_err(ferr)?;
@@ -395,9 +400,9 @@ impl DecoupledScanTemplate {
                 "    // exclusive within-block value = inclusive without own element"
             )
             .map_err(ferr)?;
-            writeln!(out, "    setp.eq.u32  %p, %tid, 0;").map_err(ferr)?;
+            writeln!(out, "    setp.eq.u32  %p, %ltid, 0;").map_err(ferr)?;
             writeln!(out, "    @%p bra DS_EXC_FIRST;").map_err(ferr)?;
-            writeln!(out, "    sub.u32      %probe_i, %tid, 1;").map_err(ferr)?;
+            writeln!(out, "    sub.u32      %probe_i, %ltid, 1;").map_err(ferr)?;
             writeln!(out, "    mul.wide.u32 %addr, %probe_i, {eb};").map_err(ferr)?;
             writeln!(out, "    add.u64      %addr, %addr, %smem_base;").map_err(ferr)?;
             writeln!(out, "    ld.shared.{ty} %acc, [%addr];").map_err(ferr)?;

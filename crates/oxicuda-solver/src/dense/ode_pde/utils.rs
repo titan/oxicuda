@@ -234,3 +234,229 @@ pub(super) fn solve_dense_system(a: &[Vec<f64>], b: &[f64]) -> SolverResult<Vec<
 
     Ok(x)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::pde::BoundaryCondition;
+    use super::super::types::OdeSystem;
+    use super::*;
+    use std::f64::consts::PI;
+
+    fn max_abs_diff(a: &[f64], b: &[f64]) -> f64 {
+        a.iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0_f64, f64::max)
+    }
+
+    // ---------------------------------------------------------------------
+    // Thomas algorithm (tridiagonal solver)
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn tridiagonal_solves_known_system() {
+        // 4x4 system with sub/super-diagonal 1 and main diagonal 4.
+        // Constructed so that the exact solution is x = [1, 2, 3, 4].
+        // Row products:
+        //   4*1 + 1*2            = 6
+        //   1*1 + 4*2 + 1*3      = 12
+        //   1*2 + 4*3 + 1*4      = 18
+        //   1*3 + 4*4            = 19
+        let sub = [1.0, 1.0, 1.0];
+        let main = [4.0, 4.0, 4.0, 4.0];
+        let sup = [1.0, 1.0, 1.0];
+        let rhs = [6.0, 12.0, 18.0, 19.0];
+        let x = solve_tridiagonal(&sub, &main, &sup, &rhs).expect("tridiagonal solve");
+        let expected = [1.0, 2.0, 3.0, 4.0];
+        assert!(max_abs_diff(&x, &expected) < 1e-12);
+    }
+
+    #[test]
+    fn tridiagonal_edge_cases_and_singular() {
+        // Empty system => empty solution.
+        let empty = solve_tridiagonal(&[], &[], &[], &[]).expect("empty system");
+        assert!(empty.is_empty());
+
+        // 1x1 system: 2 * x = 6 => x = 3.
+        let one = solve_tridiagonal(&[], &[2.0], &[], &[6.0]).expect("1x1 system");
+        assert_eq!(one.len(), 1);
+        assert!((one[0] - 3.0).abs() < 1e-12);
+
+        // 1x1 singular (zero pivot) is rejected.
+        let singular = solve_tridiagonal(&[], &[0.0], &[], &[6.0]);
+        assert!(matches!(singular, Err(SolverError::SingularMatrix)));
+
+        // Inconsistent array lengths are rejected.
+        let bad = solve_tridiagonal(&[1.0], &[1.0, 1.0, 1.0], &[1.0, 1.0], &[1.0, 1.0, 1.0]);
+        assert!(matches!(bad, Err(SolverError::DimensionMismatch(_))));
+    }
+
+    #[test]
+    fn tridiagonal_laplacian_second_order_convergence() {
+        // Solve the discrete 1-D Poisson problem -u'' = f directly through the
+        // Thomas solver using the standard second-derivative stencil [-1, 2, -1].
+        // With f = pi^2 sin(pi x) on [0,1] and homogeneous Dirichlet data the
+        // exact solution is sin(pi x); the error must shrink as O(dx^2).
+        let mut errors = Vec::new();
+        for &nx in &[11usize, 21, 41] {
+            let dx = 1.0 / (nx - 1) as f64;
+            let m = nx - 2; // interior unknowns
+            let sub = vec![-1.0; m - 1];
+            let main = vec![2.0; m];
+            let sup = vec![-1.0; m - 1];
+            let rhs: Vec<f64> = (0..m)
+                .map(|i| {
+                    let x = (i + 1) as f64 * dx;
+                    dx * dx * PI * PI * (PI * x).sin()
+                })
+                .collect();
+            let interior = solve_tridiagonal(&sub, &main, &sup, &rhs).expect("laplacian solve");
+            let exact: Vec<f64> = (0..m).map(|i| (PI * (i + 1) as f64 * dx).sin()).collect();
+            errors.push(max_abs_diff(&interior, &exact));
+        }
+        for window in errors.windows(2) {
+            let ratio = window[0] / window[1];
+            assert!(
+                ratio > 3.7 && ratio < 4.3,
+                "expected ~4x error reduction, got ratio {ratio}"
+            );
+        }
+        assert!(errors.last().expect("errors") < &1e-3);
+    }
+
+    // ---------------------------------------------------------------------
+    // Numerical Jacobian (forward finite differences)
+    // ---------------------------------------------------------------------
+
+    /// Linear system f(y) = A y with constant Jacobian A = [[2, -1], [0, 3]].
+    struct LinearSystem;
+    impl OdeSystem for LinearSystem {
+        fn rhs(&self, _t: f64, y: &[f64], dydt: &mut [f64]) -> crate::error::SolverResult<()> {
+            dydt[0] = 2.0 * y[0] - y[1];
+            dydt[1] = 3.0 * y[1];
+            Ok(())
+        }
+        fn dim(&self) -> usize {
+            2
+        }
+    }
+
+    /// Scalar nonlinear system f(y) = y^2, exact Jacobian 2*y.
+    struct SquareSystem;
+    impl OdeSystem for SquareSystem {
+        fn rhs(&self, _t: f64, y: &[f64], dydt: &mut [f64]) -> crate::error::SolverResult<()> {
+            dydt[0] = y[0] * y[0];
+            Ok(())
+        }
+        fn dim(&self) -> usize {
+            1
+        }
+    }
+
+    #[test]
+    fn numerical_jacobian_linear_exact_and_quadratic_first_order() {
+        // Forward differences are exact (to round-off) for a linear right-hand
+        // side: J must equal the constant coefficient matrix.
+        let jac = numerical_jacobian(&LinearSystem, 0.0, &[1.0, 2.0], 1e-6).expect("jacobian");
+        let expected = [[2.0, -1.0], [0.0, 3.0]];
+        for i in 0..2 {
+            for j in 0..2 {
+                assert!((jac[i][j] - expected[i][j]).abs() < 1e-6);
+            }
+        }
+
+        // For f(y) = y^2 the forward difference recovers 2*y to first order.
+        let jac2 = numerical_jacobian(&SquareSystem, 0.0, &[1.5], 1e-6).expect("jacobian2");
+        assert!((jac2[0][0] - 3.0).abs() < 1e-4);
+    }
+
+    // ---------------------------------------------------------------------
+    // Vector norm
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn vec_norm_euclidean() {
+        // Pythagorean triples give exact integer norms.
+        assert!((vec_norm(&[3.0, 4.0]) - 5.0).abs() < 1e-15);
+        assert!((vec_norm(&[1.0, 2.0, 2.0]) - 3.0).abs() < 1e-15);
+        // The empty vector has zero norm.
+        assert_eq!(vec_norm(&[]), 0.0);
+    }
+
+    // ---------------------------------------------------------------------
+    // Boundary-condition application
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn apply_bc_1d_dirichlet_neumann_periodic() {
+        // Dirichlet: end nodes are pinned to the prescribed values, interior
+        // values are untouched.
+        let mut u = [9.0; 5];
+        apply_bc_1d(
+            &mut u,
+            &BoundaryCondition::Dirichlet(1.0),
+            &BoundaryCondition::Dirichlet(2.0),
+            5,
+        );
+        assert_eq!(u[0], 1.0);
+        assert_eq!(u[4], 2.0);
+        assert_eq!(&u[1..4], &[9.0, 9.0, 9.0]);
+
+        // Neumann: ghost-node update u[0] = u[1] - val, u[n-1] = u[n-2] + val.
+        let mut un = [5.0, 3.0, 7.0, 4.0, 9.0];
+        apply_bc_1d(
+            &mut un,
+            &BoundaryCondition::Neumann(0.5),
+            &BoundaryCondition::Neumann(0.2),
+            5,
+        );
+        assert!((un[0] - 2.5).abs() < 1e-15); // 3.0 - 0.5
+        assert!((un[4] - 4.2).abs() < 1e-15); // 4.0 + 0.2
+
+        // Periodic: u[0] = u[n-2], u[n-1] = u[1].
+        let mut up = [10.0, 20.0, 30.0, 40.0, 50.0];
+        apply_bc_1d(
+            &mut up,
+            &BoundaryCondition::Periodic,
+            &BoundaryCondition::Periodic,
+            5,
+        );
+        assert_eq!(up[0], 40.0);
+        assert_eq!(up[4], 20.0);
+    }
+
+    // ---------------------------------------------------------------------
+    // Dense Gaussian elimination with partial pivoting
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn solve_dense_system_with_pivoting_and_singular() {
+        // A x = b with known x = [1, 2, 3].
+        let a = vec![
+            vec![2.0, 1.0, 1.0],
+            vec![4.0, 1.0, 0.0],
+            vec![-1.0, 2.0, 1.0],
+        ];
+        let b = [7.0, 6.0, 6.0];
+        let x = solve_dense_system(&a, &b).expect("dense solve");
+        assert!(max_abs_diff(&x, &[1.0, 2.0, 3.0]) < 1e-10);
+
+        // A zero leading pivot forces a row swap; solution is still exact.
+        let a_pivot = vec![
+            vec![0.0, 1.0, 0.0],
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 0.0, 2.0],
+        ];
+        let b_pivot = [6.0, 5.0, 14.0];
+        let x_pivot = solve_dense_system(&a_pivot, &b_pivot).expect("pivot solve");
+        assert!(max_abs_diff(&x_pivot, &[5.0, 6.0, 7.0]) < 1e-10);
+
+        // A rank-deficient matrix is reported as singular.
+        let a_sing = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
+        let b_sing = [3.0, 6.0];
+        assert!(matches!(
+            solve_dense_system(&a_sing, &b_sing),
+            Err(SolverError::SingularMatrix)
+        ));
+    }
+}

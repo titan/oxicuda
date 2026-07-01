@@ -95,7 +95,7 @@ pub fn generate_philox_optimized_uniform_f32_ptx(sm: SmVersion) -> Result<String
             // Check loop condition: idx < n_div4
             let pred_loop = b.alloc_reg(PtxType::Pred);
             b.raw_ptx(&format!("setp.lo.u32 {pred_loop}, {idx}, {n_div4};"));
-            b.raw_ptx(&format!("@!{pred_loop} bra {done_label};"));
+            b.raw_ptx(&format!("@!{pred_loop} bra ${done_label};"));
 
             // counter = idx + offset (as 64-bit)
             b.comment("Compute counter = idx + offset");
@@ -163,7 +163,7 @@ pub fn generate_philox_optimized_uniform_f32_ptx(sm: SmVersion) -> Result<String
 
             // Advance loop index
             b.raw_ptx(&format!("add.u32 {idx}, {idx}, {grid_stride};"));
-            b.raw_ptx(&format!("bra {loop_label};"));
+            b.raw_ptx(&format!("bra ${loop_label};"));
             b.label(&done_label);
 
             b.ret();
@@ -233,7 +233,7 @@ pub fn generate_philox_optimized_normal_f32_ptx(sm: SmVersion) -> Result<String,
             b.label(&loop_label);
             let pred_loop = b.alloc_reg(PtxType::Pred);
             b.raw_ptx(&format!("setp.lo.u32 {pred_loop}, {idx}, {n_div4};"));
-            b.raw_ptx(&format!("@!{pred_loop} bra {done_label};"));
+            b.raw_ptx(&format!("@!{pred_loop} bra ${done_label};"));
 
             // Philox counter computation
             let idx_hi = b.alloc_reg(PtxType::U32);
@@ -293,7 +293,7 @@ pub fn generate_philox_optimized_normal_f32_ptx(sm: SmVersion) -> Result<String,
 
             // Advance loop
             b.raw_ptx(&format!("add.u32 {idx}, {idx}, {grid_stride};"));
-            b.raw_ptx(&format!("bra {loop_label};"));
+            b.raw_ptx(&format!("bra ${loop_label};"));
             b.label(&done_label);
 
             b.ret();

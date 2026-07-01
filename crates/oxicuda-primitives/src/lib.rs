@@ -66,6 +66,8 @@
 pub mod block;
 pub mod device;
 pub mod error;
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
 pub mod handle;
 pub mod host_reference;
 pub mod ptx_helpers;

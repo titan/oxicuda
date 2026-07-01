@@ -178,3 +178,197 @@ fn normalise_rows(m: &mut [f32], rows: usize, cols: usize) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    fn cfg(r: usize, alpha: f32, target_r: usize) -> AdaloraConfig {
+        AdaloraConfig { r, alpha, target_r }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 1: reconstruct_delta matches hand-computed scale · P · diag(Λ) · Q
+    // -----------------------------------------------------------------------
+    #[test]
+    fn reconstruct_delta_analytic() {
+        // out=2, in=2, rank=1, alpha=1 → scale=1
+        let mut rng = LcgRng::new(0);
+        let mut layer = AdaloraLinear::new(2, 2, &cfg(1, 1.0, 1), &mut rng);
+
+        // P = [[1.0], [0.0]]  (out=2, rank=1, row-major)
+        layer.p = vec![1.0, 0.0];
+        layer.lambda = vec![2.0];
+        // Q = [[0.5, 0.5]]    (rank=1, in=2, row-major)
+        layer.q = vec![0.5, 0.5];
+
+        // Expected: scale * P * diag(Λ) * Q
+        //   = 1 * [[1*2*0.5, 1*2*0.5], [0*2*0.5, 0*2*0.5]]
+        //   = [[1.0, 1.0], [0.0, 0.0]]
+        let delta = layer.reconstruct_delta();
+        assert_eq!(delta.len(), 4, "delta shape must be out*in");
+        assert!(
+            (delta[0] - 1.0).abs() < 1e-5,
+            "delta[0,0] expected 1.0, got {}",
+            delta[0]
+        );
+        assert!(
+            (delta[1] - 1.0).abs() < 1e-5,
+            "delta[0,1] expected 1.0, got {}",
+            delta[1]
+        );
+        assert!(
+            delta[2].abs() < 1e-5,
+            "delta[1,0] expected 0.0, got {}",
+            delta[2]
+        );
+        assert!(
+            delta[3].abs() < 1e-5,
+            "delta[1,1] expected 0.0, got {}",
+            delta[3]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 2: forward(x) = (W + ΔW) · x  where ΔW = scale · P · diag(Λ) · Q
+    // -----------------------------------------------------------------------
+    #[test]
+    fn forward_equals_base_plus_delta() {
+        let mut rng = LcgRng::new(42);
+        let mut layer = AdaloraLinear::new(2, 2, &cfg(1, 1.0, 1), &mut rng);
+
+        // Identity base weight
+        layer.w = vec![1.0, 0.0, 0.0, 1.0];
+        layer.p = vec![1.0, 0.0];
+        layer.lambda = vec![2.0];
+        layer.q = vec![0.5, 0.5]; // delta = [[1,1],[0,0]]
+
+        let x = vec![1.0_f32, 1.0];
+        // base: [1, 1]; delta·x: [2, 0]; total: [3, 1]
+        let y = layer.forward(&x);
+        assert_eq!(y.len(), 2, "output length must equal out_features");
+        assert!((y[0] - 3.0).abs() < 1e-5, "y[0] expected 3.0, got {}", y[0]);
+        assert!((y[1] - 1.0).abs() < 1e-5, "y[1] expected 1.0, got {}", y[1]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 3: output shape is [out_features]
+    // -----------------------------------------------------------------------
+    #[test]
+    fn forward_output_shape() {
+        let mut rng = LcgRng::new(99);
+        let layer = AdaloraLinear::new(8, 5, &cfg(2, 4.0, 1), &mut rng);
+        let x = vec![0.5_f32; 8];
+        assert_eq!(layer.forward(&x).len(), 5);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 4: same seed and input produce identical output (determinism)
+    // -----------------------------------------------------------------------
+    #[test]
+    fn forward_deterministic() {
+        let mut rng1 = LcgRng::new(7);
+        let mut rng2 = LcgRng::new(7);
+        let l1 = AdaloraLinear::new(4, 4, &cfg(3, 6.0, 2), &mut rng1);
+        let l2 = AdaloraLinear::new(4, 4, &cfg(3, 6.0, 2), &mut rng2);
+        let x = vec![0.1_f32, -0.3, 0.7, 0.2];
+        assert_eq!(l1.forward(&x), l2.forward(&x));
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 5: importance_scores matches |λ_i| · ‖P[:,i]‖₂ · ‖Q[i,:]‖₂
+    // -----------------------------------------------------------------------
+    #[test]
+    fn importance_scores_formula() {
+        let mut rng = LcgRng::new(55);
+        let mut layer = AdaloraLinear::new(3, 3, &cfg(2, 4.0, 1), &mut rng);
+
+        // P (3×2 row-major): column 0 = [1,0,0] norm=1, column 1 = [0,1,0] norm=1
+        layer.p = vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        layer.lambda = vec![3.0, 5.0];
+        // Q (2×3 row-major): row 0 = [1,0,0] norm=1, row 1 = [0,1,0] norm=1
+        layer.q = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+
+        // importance[0] = |3.0| * 1.0 * 1.0 = 3.0
+        // importance[1] = |5.0| * 1.0 * 1.0 = 5.0
+        let scores = layer.importance_scores();
+        assert_eq!(scores.len(), 2);
+        assert!(
+            (scores[0] - 3.0).abs() < 1e-5,
+            "score[0] expected 3.0, got {}",
+            scores[0]
+        );
+        assert!(
+            (scores[1] - 5.0).abs() < 1e-5,
+            "score[1] expected 5.0, got {}",
+            scores[1]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 6: prune_to_target zeroes the rank - target_rank least-important lambdas
+    // -----------------------------------------------------------------------
+    #[test]
+    fn prune_to_target_zeroes_least_important() {
+        // rank=3, target=1 → 2 lowest-importance lambdas must become 0
+        let mut rng = LcgRng::new(11);
+        let mut layer = AdaloraLinear::new(3, 3, &cfg(3, 3.0, 1), &mut rng);
+
+        // Identity-like P and Q so importance_score[i] = |lambda[i]|
+        layer.p = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        layer.lambda = vec![10.0, 1.0, 5.0]; // importances: 10, 1, 5
+        layer.q = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+
+        layer.prune_to_target();
+
+        // Highest importance (index 0, score=10) must survive
+        assert!(
+            (layer.lambda[0] - 10.0).abs() < 1e-5,
+            "lambda[0] should survive pruning"
+        );
+        // Two lowest (index 1 score=1, index 2 score=5) must be zeroed
+        assert!(
+            layer.lambda[1].abs() < 1e-5,
+            "lambda[1] (score=1) should be pruned to 0"
+        );
+        assert!(
+            layer.lambda[2].abs() < 1e-5,
+            "lambda[2] (score=5) should be pruned to 0"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 7: prune_to_target leaves at most target_rank non-zero lambdas
+    // -----------------------------------------------------------------------
+    #[test]
+    fn prune_to_target_effective_rank() {
+        let r = 4;
+        let target_r = 2;
+        let mut rng = LcgRng::new(22);
+        let mut layer = AdaloraLinear::new(4, 4, &cfg(r, 4.0, target_r), &mut rng);
+        // Assign distinguishable lambda values
+        layer.lambda = vec![0.5, 2.0, 0.1, 1.5];
+
+        layer.prune_to_target();
+
+        let nonzero = layer.lambda.iter().filter(|&&v| v != 0.0).count();
+        assert!(
+            nonzero <= target_r,
+            "expected ≤{target_r} non-zero lambdas after pruning, got {nonzero}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 8: forward outputs are finite for random initialisation
+    // -----------------------------------------------------------------------
+    #[test]
+    fn forward_finite_outputs() {
+        let mut rng = LcgRng::new(33);
+        let layer = AdaloraLinear::new(6, 5, &cfg(4, 8.0, 2), &mut rng);
+        let x = vec![0.3_f32, -0.5, 1.2, -0.7, 0.9, 0.1];
+        for &v in layer.forward(&x).iter() {
+            assert!(v.is_finite(), "output must be finite, got {v}");
+        }
+    }
+}

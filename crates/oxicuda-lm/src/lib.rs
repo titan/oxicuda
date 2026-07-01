@@ -72,6 +72,11 @@ pub use ngram::{NgramConfig, NgramModel, Smoothing};
 pub use tokenizer::{BpeBuilder, BpeTokenizer, UnigramTokenizer, Vocab, WordPieceTokenizer};
 pub use weights::{ModelWeights, WeightTensor};
 
+// ─── On-device GPU equivalence tests ────────────────────────────────────────
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Integration tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]

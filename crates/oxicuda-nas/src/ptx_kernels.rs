@@ -209,10 +209,12 @@ pub fn gumbel_softmax_ptx(sm: u32) -> String {
     let eps = f32_hex(1e-10_f32);
     let zero = f32_hex(0.0_f32);
     let neg_inf = f32_hex(f32::NEG_INFINITY);
-    // log2(e) for converting natural log to log base 2
+    // log2(e): scales a natural-log argument before `ex2` so 2^(x·log2e) = e^x.
     let log2e = f32_hex(std::f32::consts::LOG2_E);
-    // 1 / ln(2) = log2(e) — same constant, used for lg2 → ln conversion
-    let inv_ln2 = f32_hex(1.0_f32 / std::f32::consts::LN_2);
+    // ln(2): scales a `lg2` (base-2 log) result to a natural log, since
+    // ln(x) = log2(x)·ln(2). (The original PTX used 1/ln(2) = log2(e) here — the
+    // inverse factor — making every ln ≈ 2.08× too large; see the gpu_tests note.)
+    let ln2 = f32_hex(std::f32::consts::LN_2);
     format!(
         r#"{hdr}.visible .entry gumbel_softmax_kernel(
     .param .u64 p_logits,
@@ -255,12 +257,12 @@ $GUMB_PREP_LOOP:
     add.f32       %f4,  %f3, {eps};          // u + eps
     // lg2(u+eps) then multiply by ln(2) to get ln(u+eps)
     lg2.approx.f32 %f5, %f4;                 // log2(u+eps)
-    mul.f32       %f6,  %f5, {inv_ln2};      // * 1/log2(e) = ln(u+eps)
+    mul.f32       %f6,  %f5, {ln2};      // * 1/log2(e) = ln(u+eps)
     // negate: -ln(u+eps)
     neg.f32       %f7,  %f6;
     add.f32       %f8,  %f7, {eps};          // + eps
     lg2.approx.f32 %f9, %f8;
-    mul.f32       %f10, %f9, {inv_ln2};      // ln(-ln(u+eps)+eps)
+    mul.f32       %f10, %f9, {ln2};      // ln(-ln(u+eps)+eps)
     neg.f32       %f11, %f10;                // g = -ln(-ln(u+eps)+eps)
     // perturbed = (logit + gumbel) / temperature
     add.f32       %f12, %f2, %f11;
@@ -284,11 +286,11 @@ $GUMB_SUM_LOOP:
     ld.global.f32 %f3,  [%rd8];
     add.f32       %f4,  %f3, {eps};
     lg2.approx.f32 %f5, %f4;
-    mul.f32       %f6,  %f5, {inv_ln2};
+    mul.f32       %f6,  %f5, {ln2};
     neg.f32       %f7,  %f6;
     add.f32       %f8,  %f7, {eps};
     lg2.approx.f32 %f9, %f8;
-    mul.f32       %f10, %f9, {inv_ln2};
+    mul.f32       %f10, %f9, {ln2};
     neg.f32       %f11, %f10;
     add.f32       %f12, %f2, %f11;
     div.rn.f32    %f13, %f12, %f0;
@@ -311,11 +313,11 @@ $GUMB_SUM_END:
     ld.global.f32 %f3,  [%rd11];
     add.f32       %f4,  %f3, {eps};
     lg2.approx.f32 %f5, %f4;
-    mul.f32       %f6,  %f5, {inv_ln2};
+    mul.f32       %f6,  %f5, {ln2};
     neg.f32       %f7,  %f6;
     add.f32       %f8,  %f7, {eps};
     lg2.approx.f32 %f9, %f8;
-    mul.f32       %f10, %f9, {inv_ln2};
+    mul.f32       %f10, %f9, {ln2};
     neg.f32       %f11, %f10;
     add.f32       %f12, %f2, %f11;
     div.rn.f32    %f13, %f12, %f0;

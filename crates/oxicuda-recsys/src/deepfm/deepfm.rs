@@ -165,3 +165,114 @@ impl DeepFm {
         Ok(sigmoid(linear_val + fm_val + deep_val))
     }
 }
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    fn make_rng(seed: u64) -> LcgRng {
+        LcgRng::new(seed)
+    }
+
+    fn tiny_model(rng: &mut LcgRng) -> DeepFm {
+        DeepFm::new(vec![4, 5, 3], 4, &[8, 4], rng).expect("must build")
+    }
+
+    #[test]
+    fn output_in_unit_interval() {
+        let mut rng = make_rng(1);
+        let model = tiny_model(&mut rng);
+        let p = model.forward(&[1, 2, 0]).expect("forward must succeed");
+        assert!((0.0..=1.0).contains(&p), "output {p} not in [0,1]");
+    }
+
+    #[test]
+    fn deterministic_same_seed() {
+        let mut rng = make_rng(2);
+        let model = tiny_model(&mut rng);
+        let p1 = model.forward(&[0, 0, 0]).expect("must succeed");
+        let p2 = model.forward(&[0, 0, 0]).expect("must succeed");
+        assert_eq!(p1, p2, "same input must yield identical output");
+    }
+
+    #[test]
+    fn finite_output() {
+        let mut rng = make_rng(3);
+        let model = tiny_model(&mut rng);
+        let p = model.forward(&[3, 4, 2]).expect("forward must succeed");
+        assert!(p.is_finite(), "output must be finite, got {p}");
+    }
+
+    /// DeepFM FM 2nd-order term is 0.5·(‖Σe_i‖² – Σ‖e_i‖²), which for two
+    /// fields equals e₀·e₁ (sum of all pairwise dot products). Build a 2-field
+    /// model, zero the linear and deep weights, install known embeddings, and
+    /// verify that forward ≈ sigmoid(e₀·e₁).
+    #[test]
+    fn fm_second_order_matches_closed_form() {
+        let mut rng = make_rng(99);
+        // 2 fields, each cardinality 2, embedding dim 2, no hidden deep layers.
+        let mut model = DeepFm::new(vec![2, 2], 2, &[], &mut rng).expect("must build");
+
+        // Zero linear weights (total size = 2+2 = 4 entries).
+        for v in &mut model.linear_w {
+            *v = 0.0;
+        }
+        // Zero the single final deep scalar layer (weights size = deep_input_dim = 4).
+        for (w, b) in &mut model.deep_layers {
+            for v in w.iter_mut() {
+                *v = 0.0;
+            }
+            for v in b.iter_mut() {
+                *v = 0.0;
+            }
+        }
+        // field 0 val 0 → e₀=[1,2];  field 1 val 0 → e₁=[3,4]
+        model.embeddings[0] = vec![1.0, 2.0, 0.0, 0.0];
+        model.embeddings[1] = vec![3.0, 4.0, 0.0, 0.0];
+
+        // Analytic: e₀·e₁ = 1·3 + 2·4 = 11.0
+        // FM = 0.5·(‖[4,6]‖² – (‖[1,2]‖² + ‖[3,4]‖²)) = 0.5·(52 – 30) = 11.0
+        let expected_fm = 11.0_f32;
+        let expected_p = 1.0 / (1.0 + (-expected_fm).exp());
+
+        let p = model.forward(&[0, 0]).expect("forward must succeed");
+        assert!(
+            (p - expected_p).abs() < 1e-5,
+            "FM closed form: got {p}, want {expected_p}"
+        );
+    }
+
+    #[test]
+    fn wrong_field_count_errors() {
+        let mut rng = make_rng(4);
+        let model = tiny_model(&mut rng); // 3 fields
+        let err = model.forward(&[0, 0]); // only 2 → mismatch
+        assert!(matches!(err, Err(RecsysError::DimensionMismatch { .. })));
+    }
+
+    #[test]
+    fn field_id_out_of_bounds_errors() {
+        let mut rng = make_rng(5);
+        let model = DeepFm::new(vec![3, 3], 2, &[4], &mut rng).expect("must build");
+        // field 0 has cardinality 3; id=3 is out of bounds → Internal error
+        let err = model.forward(&[3, 0]);
+        assert!(matches!(err, Err(RecsysError::Internal { .. })));
+    }
+
+    #[test]
+    fn empty_field_dims_rejected() {
+        let mut rng = make_rng(6);
+        let err = DeepFm::new(vec![], 4, &[8], &mut rng);
+        assert!(matches!(err, Err(RecsysError::EmptyInput)));
+    }
+
+    #[test]
+    fn zero_emb_dim_rejected() {
+        let mut rng = make_rng(7);
+        let err = DeepFm::new(vec![3, 3], 0, &[8], &mut rng);
+        assert!(matches!(err, Err(RecsysError::InvalidEmbeddingDim { .. })));
+    }
+}

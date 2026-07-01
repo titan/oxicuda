@@ -40,6 +40,9 @@ pub mod sampling;
 pub mod transform;
 pub mod voxel;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 /// Convenience re-exports for common geometry types.
 pub mod prelude {
     pub use crate::arch::dgcnn::{EdgeConv, EdgeConvConfig};

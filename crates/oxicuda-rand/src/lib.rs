@@ -39,6 +39,9 @@ pub mod quasi;
 pub mod sde;
 pub mod statistical_tests;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 pub use error::{RandError, RandResult};
 pub use generator::{RngEngine, RngGenerator};
 pub use graph_gen::{

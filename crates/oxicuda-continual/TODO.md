@@ -11,7 +11,7 @@ task-incremental / class-incremental data streams. Part of
 
 ## Implementation Status
 
-**Actual: 21,327 SLoC (48 files)** -- 529 unit tests + 12 E2E integration tests
+**Actual: 16,361 SLoC (48 files)** -- 548 unit tests + 12 E2E integration tests
 
 The crate spans the three canonical continual-learning families plus
 metrics and data streams. All algorithms run pure-Rust on CPU for unit testing
@@ -195,7 +195,7 @@ strings that can be consumed by `oxicuda-driver` / `oxicuda-launch` at runtime.
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 529 unit + 12 E2E = 541 passing
+- Tests: 548 unit + 12 E2E = 560 passing
 - unwrap() calls: 0 (production code)
 - All public APIs return `ContinualResult<T>` or `Result<T, ContinualError>`
 

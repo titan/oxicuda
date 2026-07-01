@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace      = true
 repository.workspace   = true
 authors.workspace      = true
+readme                 = "README.md"
 keywords = ["gpu", "pinn", "neural-ode", "neural-operator", "scientific-ml"]
 categories = ["science", "algorithms"]
 
@@ -17,11 +18,18 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# On-device PTX validation harness (src/gpu_tests.rs). Requires a CUDA device.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name    = "pinn_ops"

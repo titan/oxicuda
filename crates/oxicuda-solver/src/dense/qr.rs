@@ -12,17 +12,11 @@
 //! The Householder vectors are stored in the lower triangle of A (below
 //! the diagonal), and the `tau` array stores the Householder scalars.
 
-use std::sync::Arc;
-
 use oxicuda_blas::types::{GpuFloat, Layout, MatrixDesc, MatrixDescMut, Transpose};
-use oxicuda_driver::Module;
-use oxicuda_launch::{Kernel, LaunchParams};
 use oxicuda_memory::DeviceBuffer;
-use oxicuda_ptx::prelude::*;
 
 use crate::error::{SolverError, SolverResult};
 use crate::handle::SolverHandle;
-use crate::ptx_helpers::SOLVER_BLOCK_SIZE;
 
 /// Block size for the blocked QR algorithm.
 const QR_BLOCK_SIZE: u32 = 32;
@@ -263,8 +257,9 @@ fn form_explicit_q_from_householder_host<T: GpuFloat>(
             q_f32[col * m_usize + col] = 1.0;
         }
 
-        // Q = H_0 H_1 ... H_{k-1}, apply each Householder from the left.
-        for i in 0..k {
+        // Q = H_0 H_1 ... H_{k-1}: apply reflectors from the left in reverse
+        // index order so H_0 ends up leftmost (forming Q, not Qᵀ).
+        for i in (0..k).rev() {
             let tau_i = tau_f32[i];
             if tau_i == 0.0 {
                 continue;
@@ -308,8 +303,9 @@ fn form_explicit_q_from_householder_host<T: GpuFloat>(
             q_f64[col * m_usize + col] = 1.0;
         }
 
-        // Q = H_0 H_1 ... H_{k-1}, apply each Householder from the left.
-        for i in 0..k {
+        // Q = H_0 H_1 ... H_{k-1}: apply reflectors from the left in reverse
+        // index order so H_0 ends up leftmost (forming Q, not Qᵀ).
+        for i in (0..k).rev() {
             let tau_i = tau_f64[i];
             if tau_i == 0.0 {
                 continue;
@@ -345,15 +341,46 @@ fn form_explicit_q_from_householder_host<T: GpuFloat>(
 }
 
 // ---------------------------------------------------------------------------
-// Blocked QR implementation
+// Precision helpers
 // ---------------------------------------------------------------------------
 
-/// Blocked Householder QR factorization.
+/// Reinterprets a `T: GpuFloat` value as `f64` (8-byte direct, narrower via f32).
+fn t_to_f64<T: GpuFloat>(v: T) -> f64 {
+    if T::SIZE == 8 {
+        f64::from_bits(v.to_bits_u64())
+    } else {
+        f64::from(f32::from_bits(v.to_bits_u64() as u32))
+    }
+}
+
+/// Converts an `f64` back to `T: GpuFloat` (inverse of [`t_to_f64`]).
+fn f64_to_t<T: GpuFloat>(v: f64) -> T {
+    if T::SIZE == 8 {
+        T::from_bits_u64(v.to_bits())
+    } else {
+        T::from_bits_u64(u64::from((v as f32).to_bits()))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Householder QR factorization (CPU host-fallback)
+// ---------------------------------------------------------------------------
+
+/// Householder QR factorization, computed on the host.
 ///
-/// Processes columns in panels of width `QR_BLOCK_SIZE`:
-/// 1. Panel QR: compute Householder reflections for the panel.
-/// 2. Form T matrix for the compact WY representation.
-/// 3. Apply block reflector to trailing columns via GEMM.
+/// ===================================================================
+/// CPU host-fallback: the fully blocked on-device Householder QR (panel
+/// factorization + compact-WY trailing update on the GPU) is not implemented
+/// yet. Rather than launch a no-op kernel and read back a matrix that was never
+/// factorized, this routine performs the entire factorization on the host and
+/// stages the result back. Results are exact (LAPACK `geqrf` storage); there is
+/// NO GPU acceleration of this path (see follow-ups).
+/// ===================================================================
+///
+/// On exit `a` holds `R` in its upper triangle and the Householder vectors `v`
+/// (with implicit unit head) below the diagonal; `tau[k]` is the reflector
+/// scalar for `H_k = I - tau_k v_k v_kᵀ`. This is exactly the layout consumed by
+/// [`form_explicit_q_from_householder_host`] and [`apply_qt`].
 fn blocked_qr<T: GpuFloat>(
     handle: &mut SolverHandle,
     a: &mut DeviceBuffer<T>,
@@ -362,190 +389,128 @@ fn blocked_qr<T: GpuFloat>(
     lda: u32,
     tau: &mut DeviceBuffer<T>,
 ) -> SolverResult<()> {
-    let k = m.min(n);
-    let nb = QR_BLOCK_SIZE.min(k);
-    let num_blocks = k.div_ceil(nb);
+    // No kernels are launched on this CPU path; the handle only binds the
+    // context/stream for the device transfers below.
+    let _ = &handle;
 
-    for block_idx in 0..num_blocks {
-        let j = block_idx * nb;
-        let jb = nb.min(k - j);
-        let remaining_rows = m - j;
+    let m_usize = m as usize;
+    let n_usize = n as usize;
+    let lda_usize = lda as usize;
+    let k = m_usize.min(n_usize);
 
-        // Step 1: Panel QR — compute Householder vectors for columns j..j+jb.
-        panel_qr::<T>(handle, a, m, lda, j, jb, tau)?;
+    let mut a_host = vec![T::gpu_zero(); a.len()];
+    a.copy_to_host(&mut a_host)?;
+    let mut af: Vec<f64> = a_host.iter().map(|&v| t_to_f64(v)).collect();
+    let mut tauf = vec![0.0_f64; k];
 
-        // Step 2: Form the T matrix for the compact WY representation.
-        // T is upper triangular, jb x jb, such that:
-        // I - V * T * V^T = (I - tau_0 v_0 v_0^T)(I - tau_1 v_1 v_1^T)...
-        let _t_size = jb as usize * jb as usize;
-
-        // Step 3: Apply block reflector to trailing columns.
-        let trailing_cols = n.saturating_sub(j + jb);
-        if trailing_cols > 0 {
-            // W = T * V^T * A[j:m, j+jb:n]  (jb x trailing_cols)
-            // A[j:m, j+jb:n] -= V * W
-
-            // V is stored in A[j:m, j:j+jb] (lower triangle + unit diagonal).
-            let v_desc = MatrixDesc::<T>::from_raw(
-                a.as_device_ptr() + (j as u64 + j as u64 * lda as u64) * T::SIZE as u64,
-                remaining_rows,
-                jb,
-                lda,
-                Layout::ColMajor,
-            );
-
-            let trailing_desc = MatrixDesc::<T>::from_raw(
-                a.as_device_ptr() + (j as u64 + (j + jb) as u64 * lda as u64) * T::SIZE as u64,
-                remaining_rows,
-                trailing_cols,
-                lda,
-                Layout::ColMajor,
-            );
-
-            // The GEMM-based block reflector application:
-            // tmp = V^T * A_trail   (jb x trailing_cols) via GEMM
-            // tmp = T * tmp          (jb x trailing_cols) via TRMM
-            // A_trail -= V * tmp     (remaining_rows x trailing_cols) via GEMM
-            let _ = (v_desc, trailing_desc);
+    for col in 0..k {
+        // Norm of the sub-column A[col.., col].
+        let mut norm = 0.0_f64;
+        for r in col..m_usize {
+            let v = af[col * lda_usize + r];
+            norm += v * v;
         }
-    }
-
-    Ok(())
-}
-
-/// Panel QR: compute Householder reflections for a narrow panel.
-///
-/// Factorizes columns j..j+jb of the submatrix A[j:m, j:j+jb] using
-/// Householder reflections. Each column is processed by a GPU kernel
-/// that computes the Householder vector and tau, then applies the
-/// reflection to the remaining panel columns.
-fn panel_qr<T: GpuFloat>(
-    handle: &SolverHandle,
-    a: &mut DeviceBuffer<T>,
-    m: u32,
-    lda: u32,
-    j: u32,
-    jb: u32,
-    tau: &mut DeviceBuffer<T>,
-) -> SolverResult<()> {
-    let sm = handle.sm_version();
-
-    for col in 0..jb {
-        let global_col = j + col;
-        let rows_below = m - global_col;
-
-        if rows_below == 0 {
+        norm = norm.sqrt();
+        if norm == 0.0 {
+            tauf[col] = 0.0;
             continue;
         }
+        let x0 = af[col * lda_usize + col];
+        let beta = if x0 >= 0.0 { -norm } else { norm };
+        let tau_c = (beta - x0) / beta;
+        let inv = 1.0 / (x0 - beta);
 
-        // Compute Householder vector for this column.
-        let ptx = emit_householder_vector::<T>(sm)?;
-        let module = Arc::new(Module::from_ptx(&ptx)?);
-        let kernel = Kernel::from_module(module, &householder_name::<T>())?;
+        // v below the diagonal (implicit v[col] = 1); R diagonal = beta.
+        for r in (col + 1)..m_usize {
+            af[col * lda_usize + r] *= inv;
+        }
+        af[col * lda_usize + col] = beta;
+        tauf[col] = tau_c;
 
-        let shared_bytes = rows_below * T::size_u32();
-        let params = LaunchParams::new(1u32, SOLVER_BLOCK_SIZE).with_shared_mem(shared_bytes);
-
-        // Column pointer: A[global_col, global_col].
-        let col_offset = (global_col as u64 + global_col as u64 * lda as u64) * T::SIZE as u64;
-        let col_ptr = a.as_device_ptr() + col_offset;
-        let tau_ptr = tau.as_device_ptr() + (global_col as u64 * T::SIZE as u64);
-
-        let args = (col_ptr, tau_ptr, rows_below, lda);
-        kernel.launch(&params, handle.stream(), &args)?;
-
-        // Apply Householder reflection to remaining columns in the panel.
-        let remaining_panel_cols = jb - col - 1;
-        if remaining_panel_cols > 0 {
-            apply_householder_to_panel::<T>(handle, a, m, lda, global_col, remaining_panel_cols)?;
+        // Apply H_col to the trailing columns c > col.
+        for c in (col + 1)..n_usize {
+            let mut w = af[c * lda_usize + col]; // v[col] = 1
+            for r in (col + 1)..m_usize {
+                w += af[col * lda_usize + r] * af[c * lda_usize + r];
+            }
+            w *= tau_c;
+            af[c * lda_usize + col] -= w;
+            for r in (col + 1)..m_usize {
+                af[c * lda_usize + r] -= af[col * lda_usize + r] * w;
+            }
         }
     }
 
+    for (slot, &val) in a_host.iter_mut().zip(af.iter()) {
+        *slot = f64_to_t(val);
+    }
+    a.copy_from_host(&a_host)?;
+
+    let mut tau_host = vec![T::gpu_zero(); tau.len()];
+    for (dst, &val) in tau_host.iter_mut().zip(tauf.iter()) {
+        *dst = f64_to_t(val);
+    }
+    tau.copy_from_host(&tau_host)?;
+
     Ok(())
 }
 
-/// Applies a single Householder reflection to the trailing panel columns.
+/// Applies `Qᵀ` to `B` in place (`B <- Qᵀ B`) using the stored Householder
+/// reflectors, computed on the host.
 ///
-/// Given `H = I - tau * v * v^T`, computes:
-/// `A[:, col+1:col+1+remaining] = H * A[:, col+1:col+1+remaining]`
-fn apply_householder_to_panel<T: GpuFloat>(
-    handle: &SolverHandle,
-    _a: &mut DeviceBuffer<T>,
-    _m: u32,
-    _lda: u32,
-    _col: u32,
-    _remaining_cols: u32,
-) -> SolverResult<()> {
-    // The application is: for each trailing column c:
-    //   w = v^T * A[:, c]   (dot product)
-    //   A[:, c] -= tau * w * v   (rank-1 update)
-    // This can be done as a GEMV + GER or batched with GEMM.
-    let _ = handle;
-    Ok(())
-}
-
-/// Applies Q^T to B using the stored Householder reflections.
-///
-/// Processes reflections in forward order: `B <- H(k-1) * ... * H(0) * B`.
+/// CPU host-fallback (see [`blocked_qr`]); no GPU kernels are launched. The QR
+/// factor `a` and the right-hand side `b` are interpreted with leading
+/// dimension `m` (column-major), matching [`qr_solve`]'s triangular solve.
 fn apply_qt<T: GpuFloat>(
     handle: &SolverHandle,
-    _a: &DeviceBuffer<T>,
-    _tau: &DeviceBuffer<T>,
-    _b: &mut DeviceBuffer<T>,
-    _m: u32,
-    _n: u32,
-    _nrhs: u32,
+    a: &DeviceBuffer<T>,
+    tau: &DeviceBuffer<T>,
+    b: &mut DeviceBuffer<T>,
+    m: u32,
+    n: u32,
+    nrhs: u32,
 ) -> SolverResult<()> {
-    // Apply each Householder reflection H(i) = I - tau[i] * v_i * v_i^T to B.
-    // In the blocked version, group QR_BLOCK_SIZE reflections and apply using
-    // the compact WY representation via two GEMM calls.
-    let _ = handle;
+    let _ = &handle;
+    let m_usize = m as usize;
+    let n_usize = n as usize;
+    let nrhs_usize = nrhs as usize;
+    let k = m_usize.min(n_usize);
+
+    let mut a_host = vec![T::gpu_zero(); a.len()];
+    a.copy_to_host(&mut a_host)?;
+    let af: Vec<f64> = a_host.iter().map(|&v| t_to_f64(v)).collect();
+    let mut tau_host = vec![T::gpu_zero(); tau.len()];
+    tau.copy_to_host(&mut tau_host)?;
+    let tauf: Vec<f64> = tau_host.iter().map(|&v| t_to_f64(v)).collect();
+    let mut b_host = vec![T::gpu_zero(); b.len()];
+    b.copy_to_host(&mut b_host)?;
+    let mut bf: Vec<f64> = b_host.iter().map(|&v| t_to_f64(v)).collect();
+
+    // Qᵀ = H_{k-1} … H_0; applying H_0, H_1, …, H_{k-1} from the left in order.
+    for col in 0..k {
+        let tau_c = tauf[col];
+        if tau_c == 0.0 {
+            continue;
+        }
+        for c in 0..nrhs_usize {
+            let mut w = bf[c * m_usize + col]; // v[col] = 1
+            for r in (col + 1)..m_usize {
+                w += af[col * m_usize + r] * bf[c * m_usize + r];
+            }
+            w *= tau_c;
+            bf[c * m_usize + col] -= w;
+            for r in (col + 1)..m_usize {
+                bf[c * m_usize + r] -= af[col * m_usize + r] * w;
+            }
+        }
+    }
+
+    for (slot, &val) in b_host.iter_mut().zip(bf.iter()) {
+        *slot = f64_to_t(val);
+    }
+    b.copy_from_host(&b_host)?;
+
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// PTX kernel generation
-// ---------------------------------------------------------------------------
-
-fn householder_name<T: GpuFloat>() -> String {
-    format!("solver_householder_{}", T::NAME)
-}
-
-/// Emits PTX for computing a Householder vector from a column.
-///
-/// Given a column vector `x` of length `n`, computes the Householder vector `v`
-/// and scalar `tau` such that `(I - tau * v * v^T) * x = ||x|| * e_1`.
-///
-/// The vector `v` overwrites `x[1:]` (with implicit `v[0] = 1`), and `tau`
-/// is written to the provided output pointer.
-fn emit_householder_vector<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
-    let name = householder_name::<T>();
-    let float_ty = T::PTX_TYPE;
-
-    let ptx = KernelBuilder::new(&name)
-        .target(sm)
-        .max_threads_per_block(SOLVER_BLOCK_SIZE)
-        .param("col_ptr", PtxType::U64)
-        .param("tau_ptr", PtxType::U64)
-        .param("n", PtxType::U32)
-        .param("lda", PtxType::U32)
-        .body(move |b| {
-            let tid = b.thread_id_x();
-            let n_reg = b.load_param_u32("n");
-
-            // Step 1: Compute ||x[1:]||^2 using parallel reduction.
-            // Step 2: Compute beta = -sign(x[0]) * ||x||.
-            // Step 3: tau = (beta - x[0]) / beta.
-            // Step 4: v[i] = x[i] / (x[0] - beta) for i > 0.
-            // Step 5: x[0] = beta (the diagonal element of R).
-
-            let _ = (tid, n_reg, float_ty);
-
-            b.ret();
-        })
-        .build()?;
-
-    Ok(ptx)
 }
 
 #[cfg(test)]
@@ -563,18 +528,6 @@ mod tests {
     #[test]
     fn test_qr_block_size_is_32() {
         assert_eq!(QR_BLOCK_SIZE, 32, "QR panel block size must be 32");
-    }
-
-    #[test]
-    fn householder_name_format() {
-        let name = householder_name::<f32>();
-        assert!(name.contains("f32"));
-    }
-
-    #[test]
-    fn householder_name_f64() {
-        let name = householder_name::<f64>();
-        assert!(name.contains("f64"));
     }
 
     #[test]
@@ -613,5 +566,122 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn try_solver_handle() -> Option<(std::sync::Arc<oxicuda_driver::Context>, SolverHandle)> {
+        if oxicuda_driver::init().is_err() {
+            eprintln!("skipping device test: CUDA driver unavailable");
+            return None;
+        }
+        if !oxicuda_driver::device::Device::count()
+            .map(|c| c > 0)
+            .unwrap_or(false)
+        {
+            eprintln!("skipping device test: no NVIDIA CUDA device");
+            return None;
+        }
+        let dev = oxicuda_driver::device::Device::get(0).expect("device 0");
+        let ctx = std::sync::Arc::new(oxicuda_driver::Context::new(&dev).expect("ctx"));
+        let handle = SolverHandle::new(&ctx).expect("handle");
+        Some((ctx, handle))
+    }
+
+    #[test]
+    fn qr_factorize_reconstructs_a_equals_qr() {
+        // CPU host-fallback correctness: factor on device buffers, form Q, and
+        // verify Q * R == A within tolerance. (Computation is on the host.)
+        let Some((_ctx, mut handle)) = try_solver_handle() else {
+            return;
+        };
+        let m = 4usize;
+        let n = 3usize;
+        // Column-major A (m x n), well-conditioned.
+        let a = vec![
+            1.0_f64, 2.0, 3.0, 4.0, // col 0
+            2.0, 1.0, 0.0, 1.0, // col 1
+            3.0, 0.0, 2.0, 1.0, // col 2
+        ];
+        let mut d_a = oxicuda_memory::DeviceBuffer::from_host(&a).expect("up A");
+        let mut d_tau = oxicuda_memory::DeviceBuffer::<f64>::zeroed(n).expect("tau");
+        qr_factorize::<f64>(
+            &mut handle,
+            &mut d_a,
+            m as u32,
+            n as u32,
+            m as u32,
+            &mut d_tau,
+        )
+        .expect("qr factorize");
+
+        let mut qr = vec![0.0_f64; m * n];
+        d_a.copy_to_host(&mut qr).expect("dl QR");
+        let mut q = oxicuda_memory::DeviceBuffer::<f64>::zeroed(m * m).expect("q");
+        qr_generate_q::<f64>(&handle, &d_a, &d_tau, &mut q, m as u32, n as u32).expect("gen Q");
+        let mut q_host = vec![0.0_f64; m * m];
+        q.copy_to_host(&mut q_host).expect("dl Q");
+
+        // R = upper triangle of qr (m x n, col-major, lda = m).
+        let r_at = |row: usize, col: usize| {
+            if row <= col { qr[col * m + row] } else { 0.0 }
+        };
+        // Reconstruct A = Q * R and compare.
+        for col in 0..n {
+            for row in 0..m {
+                let mut s = 0.0;
+                for kk in 0..m {
+                    s += q_host[kk * m + row] * r_at(kk, col);
+                }
+                let want = a[col * m + row];
+                assert!(
+                    (s - want).abs() < 1e-10,
+                    "(Q*R)[{row},{col}]={s} != A={want}"
+                );
+            }
+        }
+
+        // Q must be orthonormal: QᵀQ ≈ I.
+        for i in 0..m {
+            for j in 0..m {
+                let mut s = 0.0;
+                for r in 0..m {
+                    s += q_host[i * m + r] * q_host[j * m + r];
+                }
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!((s - want).abs() < 1e-10, "(QᵀQ)[{i},{j}]={s}");
+            }
+        }
+    }
+
+    #[test]
+    fn qr_solve_least_squares_residual() {
+        let Some((_ctx, mut handle)) = try_solver_handle() else {
+            return;
+        };
+        // Overdetermined consistent system: pick x, set b = A x, recover x.
+        let m = 4usize;
+        let n = 2usize;
+        let a = vec![1.0_f64, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0];
+        let x_true = [2.0_f64, -1.0];
+        let mut b = vec![0.0_f64; m];
+        for row in 0..m {
+            b[row] = a[row] * x_true[0] + a[m + row] * x_true[1];
+        }
+        let mut d_a = oxicuda_memory::DeviceBuffer::from_host(&a).expect("up A");
+        let mut d_tau = oxicuda_memory::DeviceBuffer::<f64>::zeroed(n).expect("tau");
+        qr_factorize::<f64>(
+            &mut handle,
+            &mut d_a,
+            m as u32,
+            n as u32,
+            m as u32,
+            &mut d_tau,
+        )
+        .expect("qr factorize");
+        let mut d_b = oxicuda_memory::DeviceBuffer::from_host(&b).expect("up b");
+        qr_solve::<f64>(&handle, &d_a, &d_tau, &mut d_b, m as u32, n as u32, 1).expect("qr solve");
+        let mut sol = vec![0.0_f64; m];
+        d_b.copy_to_host(&mut sol).expect("dl");
+        assert!((sol[0] - x_true[0]).abs() < 1e-9, "x0={}", sol[0]);
+        assert!((sol[1] - x_true[1]).abs() < 1e-9, "x1={}", sol[1]);
     }
 }

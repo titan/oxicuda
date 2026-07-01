@@ -30,3 +30,9 @@ pub mod vector;
 
 #[cfg(test)]
 mod e2e_tests;
+
+/// On-device GPU validation tests (feature-gated): JIT-compile each hand-written
+/// PTX kernel, launch it on a real CUDA device, and assert numerical equivalence
+/// to the crate's CPU references. Tests skip when no CUDA device is present.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;

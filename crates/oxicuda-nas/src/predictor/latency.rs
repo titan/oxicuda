@@ -19,6 +19,15 @@ use crate::handle::LcgRng;
 use crate::ops::OpKind;
 use crate::predictor::predictor_io::{ArchFeatures, LayerSpec};
 
+// ─── LatencyLut serialisation constants ──────────────────────────────────────
+
+/// Magic bytes that open every serialised [`LatencyLut`] buffer.
+const LUT_MAGIC: [u8; 4] = *b"LLUT";
+/// Binary encoding version; increment whenever the layout changes incompatibly.
+const LUT_VERSION: u8 = 1;
+
+// ─── LatencyLut ──────────────────────────────────────────────────────────────
+
 /// Lookup-table latency model.
 #[derive(Debug, Default, Clone)]
 pub struct LatencyLut {
@@ -90,7 +99,226 @@ impl LatencyLut {
     pub fn n_entries(&self) -> usize {
         self.table.len()
     }
+
+    /// Serialise the LUT to a deterministic, dependency-free little-endian byte
+    /// buffer suitable for file persistence or network transfer.
+    ///
+    /// # Layout (all multi-byte integers are little-endian)
+    ///
+    /// | Bytes          | Content                                           |
+    /// |----------------|---------------------------------------------------|
+    /// | `[0..4)`       | magic `b"LLUT"` (4 bytes)                        |
+    /// | `[4]`          | format version byte (currently `1`)               |
+    /// | `[5..9)`       | `default_latency` as `f32` bit-pattern            |
+    /// | `[9..17)`      | entry count `n` as `u64`                          |
+    /// | `[17..17+37n)` | `n` entries × 37 bytes each (see below)           |
+    ///
+    /// Per-entry layout (37 bytes, emitted in stable sort order):
+    ///
+    /// | Offset | Size | Content                                             |
+    /// |--------|------|-----------------------------------------------------|
+    /// | 0      | 1    | `OpKind` index 0–7 (per [`OpKind::all`] order)    |
+    /// | 1      | 8    | `cin` as `u64`                                     |
+    /// | 9      | 8    | `cout` as `u64`                                    |
+    /// | 17     | 8    | `h` as `u64`                                       |
+    /// | 25     | 8    | `w` as `u64`                                       |
+    /// | 33     | 4    | latency as `f32` bit-pattern                       |
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let n = self.table.len();
+        // Header: 4 magic + 1 version + 4 default_latency + 8 entry_count = 17 bytes.
+        // Each entry: 1 disc + 8 cin + 8 cout + 8 h + 8 w + 4 lat = 37 bytes.
+        let mut buf = Vec::with_capacity(17 + n * 37);
+        buf.extend_from_slice(&LUT_MAGIC);
+        buf.push(LUT_VERSION);
+        buf.extend_from_slice(&self.default_latency.to_bits().to_le_bytes());
+        buf.extend_from_slice(&(n as u64).to_le_bytes());
+        // Collect into an owned Vec so we can sort for deterministic output.
+        let mut entries: Vec<(LatencyKey, f32)> =
+            self.table.iter().map(|(&k, &v)| (k, v)).collect();
+        entries.sort_unstable_by_key(|item| {
+            (
+                op_kind_to_disc(item.0.op),
+                item.0.cin,
+                item.0.cout,
+                item.0.h,
+                item.0.w,
+            )
+        });
+        for (key, latency) in &entries {
+            buf.push(op_kind_to_disc(key.op));
+            buf.extend_from_slice(&(key.cin as u64).to_le_bytes());
+            buf.extend_from_slice(&(key.cout as u64).to_le_bytes());
+            buf.extend_from_slice(&(key.h as u64).to_le_bytes());
+            buf.extend_from_slice(&(key.w as u64).to_le_bytes());
+            buf.extend_from_slice(&latency.to_bits().to_le_bytes());
+        }
+        buf
+    }
+
+    /// Deserialise a [`LatencyLut`] from a buffer previously produced by
+    /// [`LatencyLut::to_bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NasError::Internal`] when the buffer is truncated, begins
+    /// with wrong magic bytes, carries an unrecognised format version, or
+    /// contains an out-of-range `OpKind` discriminant.  The method **never
+    /// panics** on malformed input.
+    pub fn from_bytes(bytes: &[u8]) -> NasResult<Self> {
+        let mut cur = 0usize;
+
+        // 1. Magic
+        let magic = lut_read4(bytes, &mut cur)
+            .ok_or_else(|| NasError::Internal("lut: truncated header (magic)".into()))?;
+        if magic != LUT_MAGIC {
+            return Err(NasError::Internal(
+                "lut: invalid magic — buffer is not a serialised LatencyLut".into(),
+            ));
+        }
+
+        // 2. Format version
+        let version = lut_read1(bytes, &mut cur)
+            .ok_or_else(|| NasError::Internal("lut: truncated header (version)".into()))?;
+        if version != LUT_VERSION {
+            return Err(NasError::Internal(format!(
+                "lut: unsupported format version {version} (expected {LUT_VERSION})"
+            )));
+        }
+
+        // 3. default_latency
+        let def_raw = lut_read4(bytes, &mut cur)
+            .ok_or_else(|| NasError::Internal("lut: truncated default_latency field".into()))?;
+        let default_latency = f32::from_bits(u32::from_le_bytes(def_raw));
+
+        // 4. Entry count
+        let n_raw = lut_read8(bytes, &mut cur)
+            .ok_or_else(|| NasError::Internal("lut: truncated entry count field".into()))?;
+        let n = u64::from_le_bytes(n_raw) as usize;
+
+        // 5. Entries
+        let mut table = HashMap::with_capacity(n);
+        for idx in 0..n {
+            let disc = lut_read1(bytes, &mut cur).ok_or_else(|| {
+                NasError::Internal(format!("lut: truncated entry {idx} (op discriminant)"))
+            })?;
+            let op = disc_to_op_kind(disc).ok_or_else(|| {
+                NasError::Internal(format!(
+                    "lut: invalid OpKind discriminant {disc} in entry {idx}"
+                ))
+            })?;
+
+            let cin_raw = lut_read8(bytes, &mut cur)
+                .ok_or_else(|| NasError::Internal(format!("lut: truncated entry {idx} (cin)")))?;
+            let cin = u64::from_le_bytes(cin_raw) as usize;
+
+            let cout_raw = lut_read8(bytes, &mut cur)
+                .ok_or_else(|| NasError::Internal(format!("lut: truncated entry {idx} (cout)")))?;
+            let cout = u64::from_le_bytes(cout_raw) as usize;
+
+            let h_raw = lut_read8(bytes, &mut cur)
+                .ok_or_else(|| NasError::Internal(format!("lut: truncated entry {idx} (h)")))?;
+            let h = u64::from_le_bytes(h_raw) as usize;
+
+            let w_raw = lut_read8(bytes, &mut cur)
+                .ok_or_else(|| NasError::Internal(format!("lut: truncated entry {idx} (w)")))?;
+            let w = u64::from_le_bytes(w_raw) as usize;
+
+            let lat_raw = lut_read4(bytes, &mut cur).ok_or_else(|| {
+                NasError::Internal(format!("lut: truncated entry {idx} (latency)"))
+            })?;
+            let latency = f32::from_bits(u32::from_le_bytes(lat_raw));
+
+            table.insert(
+                LatencyKey {
+                    op,
+                    cin,
+                    cout,
+                    h,
+                    w,
+                },
+                latency,
+            );
+        }
+
+        Ok(Self {
+            table,
+            default_latency,
+        })
+    }
 }
+
+// ─── LatencyLut serialisation helpers ────────────────────────────────────────
+
+/// Map an [`OpKind`] to its stable one-byte serialisation discriminant.
+///
+/// The mapping is the binary format contract and **must never be reordered**.
+/// It mirrors the order of [`OpKind::all`].
+fn op_kind_to_disc(op: OpKind) -> u8 {
+    match op {
+        OpKind::Zero => 0,
+        OpKind::Identity => 1,
+        OpKind::SepConv3x3 => 2,
+        OpKind::SepConv5x5 => 3,
+        OpKind::DilConv3x3 => 4,
+        OpKind::DilConv5x5 => 5,
+        OpKind::MaxPool3x3 => 6,
+        OpKind::AvgPool3x3 => 7,
+    }
+}
+
+/// Reverse of [`op_kind_to_disc`]; returns `None` for unrecognised discriminants.
+fn disc_to_op_kind(disc: u8) -> Option<OpKind> {
+    match disc {
+        0 => Some(OpKind::Zero),
+        1 => Some(OpKind::Identity),
+        2 => Some(OpKind::SepConv3x3),
+        3 => Some(OpKind::SepConv5x5),
+        4 => Some(OpKind::DilConv3x3),
+        5 => Some(OpKind::DilConv5x5),
+        6 => Some(OpKind::MaxPool3x3),
+        7 => Some(OpKind::AvgPool3x3),
+        _ => None,
+    }
+}
+
+/// Read one byte from `bytes` at `*cur`, advancing the cursor.
+/// Returns `None` on underflow.
+fn lut_read1(bytes: &[u8], cur: &mut usize) -> Option<u8> {
+    let v = bytes.get(*cur).copied()?;
+    *cur += 1;
+    Some(v)
+}
+
+/// Read four bytes from `bytes` at `*cur`, advancing the cursor.
+/// Returns `None` on underflow.
+fn lut_read4(bytes: &[u8], cur: &mut usize) -> Option<[u8; 4]> {
+    let start = *cur;
+    let end = start.checked_add(4)?;
+    if end > bytes.len() {
+        return None;
+    }
+    let mut arr = [0u8; 4];
+    arr.copy_from_slice(&bytes[start..end]);
+    *cur = end;
+    Some(arr)
+}
+
+/// Read eight bytes from `bytes` at `*cur`, advancing the cursor.
+/// Returns `None` on underflow.
+fn lut_read8(bytes: &[u8], cur: &mut usize) -> Option<[u8; 8]> {
+    let start = *cur;
+    let end = start.checked_add(8)?;
+    if end > bytes.len() {
+        return None;
+    }
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(&bytes[start..end]);
+    *cur = end;
+    Some(arr)
+}
+
+// ─── LatencyMlp ──────────────────────────────────────────────────────────────
 
 /// Small MLP latency surrogate.
 #[derive(Debug, Clone)]
@@ -266,9 +494,13 @@ impl LatencyMlp {
     }
 }
 
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── existing LUT tests ────────────────────────────────────────────────────
 
     #[test]
     fn lut_returns_default_for_unknown() {
@@ -303,6 +535,159 @@ mod tests {
         let r = lut.predict(&[]);
         assert!(r.is_err());
     }
+
+    // ── LatencyLut serialisation tests ───────────────────────────────────────
+
+    /// Round-trip serialise+deserialise a LUT with one entry per `OpKind`
+    /// variant, a non-default `default_latency`, and verify every field is
+    /// bit-exact after the round-trip.
+    #[test]
+    fn lut_serde_roundtrip_all_ops() {
+        let mut lut = LatencyLut::new();
+        lut.default_latency = 9.99e-4_f32;
+
+        // (op, cin, cout, h, w, latency)
+        let specs: &[(OpKind, usize, usize, usize, usize, f32)] = &[
+            (OpKind::Zero, 3, 64, 16, 16, 1.23e-3),
+            (OpKind::Identity, 64, 64, 8, 8, 4.56e-4),
+            (OpKind::SepConv3x3, 32, 64, 14, 14, 2.11e-3),
+            (OpKind::SepConv5x5, 16, 32, 7, 7, 3.00e-3),
+            (OpKind::DilConv3x3, 64, 128, 8, 8, 5.55e-3),
+            (OpKind::DilConv5x5, 128, 256, 4, 4, 7.77e-3),
+            (OpKind::MaxPool3x3, 64, 64, 8, 8, 1.10e-4),
+            (OpKind::AvgPool3x3, 64, 64, 4, 4, 9.00e-5),
+        ];
+        for &(op, cin, cout, h, w, lat) in specs {
+            lut.insert(&LayerSpec::new(op, cin, cout, h, w), lat);
+        }
+
+        let bytes = lut.to_bytes();
+        let lut2 = LatencyLut::from_bytes(&bytes).expect("round-trip deserialization");
+
+        // default_latency must be bit-exact.
+        assert_eq!(
+            lut2.default_latency.to_bits(),
+            lut.default_latency.to_bits(),
+            "default_latency changed after round-trip"
+        );
+        // Entry count must match.
+        assert_eq!(lut2.n_entries(), lut.n_entries(), "entry count mismatch");
+        // Each inserted entry must reproduce bit-exactly.
+        for &(op, cin, cout, h, w, lat) in specs {
+            let spec = LayerSpec::new(op, cin, cout, h, w);
+            assert_eq!(
+                lut2.lookup(&spec).to_bits(),
+                lat.to_bits(),
+                "lookup mismatch for {op:?} ({cin},{cout},{h},{w})"
+            );
+        }
+    }
+
+    /// `predict()` must return the same bit-exact value before and after a
+    /// round-trip, including for a key that falls back to `default_latency`.
+    #[test]
+    fn lut_serde_predict_identical_before_after() {
+        let mut lut = LatencyLut::new();
+        lut.default_latency = 1.5e-3_f32;
+
+        let l1 = LayerSpec::new(OpKind::SepConv3x3, 32, 64, 8, 8);
+        let l2 = LayerSpec::new(OpKind::MaxPool3x3, 64, 64, 8, 8);
+        // l_fallback is never inserted → falls back to default_latency.
+        let l_fallback = LayerSpec::new(OpKind::DilConv5x5, 999, 999, 99, 99);
+
+        lut.insert(&l1, 2.0e-3_f32);
+        lut.insert(&l2, 3.0e-4_f32);
+
+        let pred_before = lut
+            .predict(&[l1, l2, l_fallback])
+            .expect("predict before serialisation");
+
+        let bytes = lut.to_bytes();
+        let lut2 = LatencyLut::from_bytes(&bytes).expect("round-trip");
+
+        let pred_after = lut2
+            .predict(&[l1, l2, l_fallback])
+            .expect("predict after deserialisation");
+
+        assert_eq!(
+            pred_before.to_bits(),
+            pred_after.to_bits(),
+            "predict() result changed after round-trip"
+        );
+    }
+
+    /// An empty LUT with a custom `default_latency` must survive a round-trip.
+    #[test]
+    fn lut_serde_roundtrip_empty_lut() {
+        let mut lut = LatencyLut::new();
+        lut.default_latency = 7.77e-5_f32;
+        let bytes = lut.to_bytes();
+        let lut2 = LatencyLut::from_bytes(&bytes).expect("empty lut round-trip");
+        assert_eq!(
+            lut2.default_latency.to_bits(),
+            lut.default_latency.to_bits(),
+            "default_latency mismatch for empty LUT"
+        );
+        assert_eq!(lut2.n_entries(), 0, "empty LUT should have 0 entries");
+    }
+
+    /// Every strict prefix of a valid buffer must return `Err`, never panic.
+    #[test]
+    fn lut_serde_truncated_bytes_returns_err() {
+        let mut lut = LatencyLut::new();
+        lut.insert(&LayerSpec::new(OpKind::Identity, 4, 4, 8, 8), 1e-3_f32);
+        let bytes = lut.to_bytes();
+
+        for truncate_at in 0..bytes.len() {
+            let result = LatencyLut::from_bytes(&bytes[..truncate_at]);
+            assert!(
+                result.is_err(),
+                "expected Err for truncation at {truncate_at} bytes (full buf = {})",
+                bytes.len()
+            );
+        }
+    }
+
+    /// Completely unrelated bytes must produce `Err`, not panic.
+    #[test]
+    fn lut_serde_garbage_bytes_returns_err() {
+        let garbage = b"this is not a valid LatencyLut binary blob at all!!";
+        assert!(
+            LatencyLut::from_bytes(garbage).is_err(),
+            "expected Err for garbage input"
+        );
+    }
+
+    /// A buffer whose magic bytes have been corrupted must be rejected.
+    #[test]
+    fn lut_serde_wrong_magic_returns_err() {
+        let lut = LatencyLut::new();
+        let mut bytes = lut.to_bytes();
+        bytes[0] ^= 0xFF; // flip bits of the first magic byte
+        assert!(
+            LatencyLut::from_bytes(&bytes).is_err(),
+            "expected Err for corrupted magic"
+        );
+    }
+
+    /// An out-of-range `OpKind` discriminant inside the entry region must
+    /// produce `Err`.  Header ends at byte 17; byte 17 is the first entry's
+    /// discriminant.
+    #[test]
+    fn lut_serde_invalid_op_discriminant_returns_err() {
+        let mut lut = LatencyLut::new();
+        lut.insert(&LayerSpec::new(OpKind::Identity, 4, 4, 8, 8), 1e-3_f32);
+        let mut bytes = lut.to_bytes();
+        // Header: 4 magic + 1 version + 4 default_latency + 8 entry_count = 17 bytes.
+        // Byte 17 is the OpKind discriminant of the first entry.
+        bytes[17] = 0xFF; // 0xFF is not a valid discriminant (0–7 are)
+        assert!(
+            LatencyLut::from_bytes(&bytes).is_err(),
+            "expected Err for invalid OpKind discriminant"
+        );
+    }
+
+    // ── existing MLP tests ────────────────────────────────────────────────────
 
     #[test]
     fn mlp_predict_before_fit_errors() {

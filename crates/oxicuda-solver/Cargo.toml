@@ -27,6 +27,11 @@ default = []
 f16 = ["dep:half", "oxicuda-blas/f16"]
 sparse-solvers = ["dep:oxicuda-sparse"]
 full = ["f16", "sparse-solvers"]
+# On-device PTX validation tests (require a real CUDA GPU). The infra crates
+# (`oxicuda-driver`, `oxicuda-memory`, `oxicuda-launch`) are already regular
+# dependencies, so the harness needs no extra dev-dependencies — this is an
+# empty feature flag that simply gates the `gpu_tests` module.
+gpu-tests = []
 
 [package.metadata.docs.rs]
 all-features = true

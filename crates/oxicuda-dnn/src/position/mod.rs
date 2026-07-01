@@ -15,7 +15,7 @@ pub mod alibi;
 pub mod rope;
 
 pub use alibi::{AlibiBias, alibi_slope};
-pub use rope::{Rope, RopeConfig};
+pub use rope::{NeoXRopeConfig, Rope, RopeConfig, RopeStyle, apply_rope_neox_half_split};
 
 // ---------------------------------------------------------------------------
 // DnnRng — minimal host-side PRNG for the CPU-reference modules

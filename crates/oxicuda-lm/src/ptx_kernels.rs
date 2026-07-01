@@ -331,7 +331,7 @@ pub fn rms_norm_ptx(sm: u32) -> String {
     // Shared memory for partial sums (max 256 threads per block)
     .shared .align 4 .f32 smem[256];
 
-    .reg .u64  %rd<6>;
+    .reg .u64  %rd<7>;
     .reg .u32  %r<8>;
     .reg .f32  %f<8>;
     .reg .pred %p0, %p1;
@@ -342,6 +342,9 @@ pub fn rms_norm_ptx(sm: u32) -> String {
     ld.param.u32  %r0,  [dim];
     ld.param.u32  %r1,  [n_tokens];
     ld.param.f32  %f0,  [eps];
+    // %rd6 holds the shared-space base address of smem[].
+    // PTX only allows [label] in ld/st; arithmetic must use a register.
+    mov.u64       %rd6, smem;
 
     // block_id = blockIdx.x (one block per token)
     mov.u32       %r2, %ctaid.x;
@@ -370,7 +373,7 @@ $SKIP_LOAD:
     // Store partial in smem
     mov.u32       %r3, %tid.x;
     mul.wide.u32  %rd3, %r3, 4;
-    add.u64       %rd3, [smem], %rd3;
+    add.u64       %rd3, %rd6, %rd3;   // smem_base + tid*4 = &smem[tid]
     st.shared.f32 [%rd3], %f1;
     bar.sync 0;
 
@@ -512,6 +515,9 @@ pub fn causal_attn_softmax_ptx(sm: u32) -> String {
     ld.param.u32  %r0,  [kv_len];
     ld.param.u32  %r1,  [n_heads];
     ld.param.u32  %r2,  [past_len];
+    // %rd3 holds the shared-space base address of smem[].
+    // PTX only allows [label] in ld/st; arithmetic must use a register.
+    mov.u64       %rd3, smem;
 
     // q_pos = blockIdx.x, head_idx = blockIdx.y
     mov.u32       %r3, %ctaid.x;
@@ -557,11 +563,14 @@ $MASK_DONE:
     // Reduce max across block via smem
     mov.u32       %r5, %tid.x;
     mul.wide.u32  %rd1, %r5, 4;
-    add.u64       %rd1, [smem], %rd1;
+    add.u64       %rd1, %rd3, %rd1;   // smem_base + tid*4 = &smem[tid]
     st.shared.f32 [%rd1], %f0;
     bar.sync 0;
 
-    // Simple sequential reduction by thread 0
+    // Sequential max reduction by thread 0 only.
+    // BUG FIX: %p1=(tid==0) guards the smem[0] write so no other thread races
+    // to overwrite the total-max with its partial-max before the broadcast.
+    setp.eq.u32   %p1, %r5, 0;
     setp.ne.u32   %p0, %r5, 0;
     @%p0 bra $MAX_DONE;
     mov.f32       %f0, 0FFF800000;
@@ -570,14 +579,14 @@ $MAX_RED:
     setp.ge.u32   %p0, %r8, %r6;
     @%p0 bra $MAX_DONE;
     mul.wide.u32  %rd2, %r8, 4;
-    add.u64       %rd2, [smem], %rd2;
+    add.u64       %rd2, %rd3, %rd2;   // smem_base + i*4 = &smem[i]
     ld.shared.f32 %f1, [%rd2];
     setp.gt.f32   %p0, %f1, %f0;
     selp.f32      %f0, %f1, %f0, %p0;
     add.u32       %r8, %r8, 1;
     bra $MAX_RED;
 $MAX_DONE:
-    st.shared.f32 [smem], %f0;
+    @%p1 st.shared.f32 [smem], %f0; // only thread 0 writes total max
     bar.sync 0;
     ld.shared.f32 %f0, [smem]; // broadcast max to all threads
 
@@ -607,10 +616,14 @@ $EXP_DONE:
     // Reduce sum across block
     mov.u32       %r5, %tid.x;
     mul.wide.u32  %rd1, %r5, 4;
-    add.u64       %rd1, [smem], %rd1;
+    add.u64       %rd1, %rd3, %rd1;   // smem_base + tid*4 = &smem[tid]
     st.shared.f32 [%rd1], %f2;
     bar.sync 0;
 
+    // BUG FIX: %p1=(tid==0) set before branch so it survives SIMT divergence.
+    // Without this, threads 1..N race to write their partial sums over the
+    // total sum that thread 0 computed, corrupting the broadcast value.
+    setp.eq.u32   %p1, %r5, 0;
     setp.ne.u32   %p0, %r5, 0;
     @%p0 bra $SUM_DONE;
     mov.f32       %f2, 0F00000000;
@@ -619,13 +632,13 @@ $SUM_RED:
     setp.ge.u32   %p0, %r8, %r6;
     @%p0 bra $SUM_DONE;
     mul.wide.u32  %rd2, %r8, 4;
-    add.u64       %rd2, [smem], %rd2;
+    add.u64       %rd2, %rd3, %rd2;   // smem_base + i*4 = &smem[i]
     ld.shared.f32 %f3, [%rd2];
     add.f32       %f2, %f2, %f3;
     add.u32       %r8, %r8, 1;
     bra $SUM_RED;
 $SUM_DONE:
-    st.shared.f32 [smem], %f2;
+    @%p1 st.shared.f32 [smem], %f2; // only thread 0 writes total sum
     bar.sync 0;
     ld.shared.f32 %f2, [smem];      // broadcast sum
     rcp.approx.f32 %f2, %f2;        // inv_sum

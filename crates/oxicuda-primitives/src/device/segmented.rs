@@ -69,14 +69,14 @@ fn identity_literal(op: ReduceOp, ty: PtxType) -> &'static str {
         (ReduceOp::Product, PtxType::F32) => "0f3F800000", // 1.0f
         (ReduceOp::Product, PtxType::F64) => "0d3FF0000000000000", // 1.0
         (ReduceOp::Product, _) => "1",
-        (ReduceOp::Min, PtxType::F32) => "0x7F800000",
+        (ReduceOp::Min, PtxType::F32) => "0f7F800000",
         (ReduceOp::Min, PtxType::F64) => "0x7FF0000000000000",
         (ReduceOp::Min, PtxType::U32) => "4294967295",
         (ReduceOp::Min, PtxType::U64) => "18446744073709551615",
         (ReduceOp::Min, PtxType::S32) => "2147483647",
         (ReduceOp::Min, PtxType::S64) => "9223372036854775807",
         (ReduceOp::Min, _) => "0",
-        (ReduceOp::Max, PtxType::F32) => "0xFF800000",
+        (ReduceOp::Max, PtxType::F32) => "0fFF800000",
         (ReduceOp::Max, PtxType::F64) => "0xFFF0000000000000",
         (ReduceOp::Max, PtxType::S32) => "-2147483648",
         (ReduceOp::Max, PtxType::S64) => "-9223372036854775808",
@@ -167,7 +167,7 @@ impl SegmentedReduceTemplate {
         .map_err(ferr)?;
         writeln!(out, "{{").map_err(ferr)?;
         writeln!(out, "    .reg .{ty}   %acc, %val, %other;").map_err(ferr)?;
-        writeln!(out, "    .reg .u32    %tid, %seg, %stride_t;").map_err(ferr)?;
+        writeln!(out, "    .reg .u32    %ltid, %seg, %stride_t;").map_err(ferr)?;
         writeln!(
             out,
             "    .reg .u64    %nseg, %seg_beg, %seg_end, %i, %addr, %off_addr;"
@@ -185,7 +185,7 @@ impl SegmentedReduceTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_off, [param_offsets];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %nseg,    [param_num_segments];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %seg, %ctaid.x;").map_err(ferr)?;
         // Out-of-range block guard (grid may be rounded up).
         writeln!(out, "    cvt.u64.u32  %i, %seg;").map_err(ferr)?;
@@ -199,7 +199,7 @@ impl SegmentedReduceTemplate {
 
         // Per-thread strided accumulation starting at identity.
         writeln!(out, "    mov.{ty}      %acc, {ident};").map_err(ferr)?;
-        writeln!(out, "    cvt.u64.u32  %i, %tid;").map_err(ferr)?;
+        writeln!(out, "    cvt.u64.u32  %i, %ltid;").map_err(ferr)?;
         writeln!(out, "    add.u64      %i, %i, %seg_beg;").map_err(ferr)?;
         writeln!(out, "SEG_RED_LOOP:").map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %loop_p, %i, %seg_end;").map_err(ferr)?;
@@ -213,7 +213,7 @@ impl SegmentedReduceTemplate {
         // Tree reduction of per-thread partials through shared memory.
         writeln!(out, "SEG_RED_REDUCE:").map_err(ferr)?;
         writeln!(out, "    mov.u64      %smem_base, seg_red_smem;").map_err(ferr)?;
-        writeln!(out, "    mul.wide.u32 %smem_addr, %tid, {eb};").map_err(ferr)?;
+        writeln!(out, "    mul.wide.u32 %smem_addr, %ltid, {eb};").map_err(ferr)?;
         writeln!(out, "    add.u64      %smem_addr, %smem_addr, %smem_base;").map_err(ferr)?;
         writeln!(out, "    st.shared.{ty} [%smem_addr], %acc;").map_err(ferr)?;
         writeln!(out, "    bar.sync 0;").map_err(ferr)?;
@@ -221,9 +221,9 @@ impl SegmentedReduceTemplate {
         writeln!(out, "SEG_RED_TREE:").map_err(ferr)?;
         writeln!(out, "    setp.eq.u32  %p, %half, 0;").map_err(ferr)?;
         writeln!(out, "    @%p bra SEG_RED_WRITE;").map_err(ferr)?;
-        writeln!(out, "    setp.lt.u32  %active, %tid, %half;").map_err(ferr)?;
+        writeln!(out, "    setp.lt.u32  %active, %ltid, %half;").map_err(ferr)?;
         writeln!(out, "    @!%active bra SEG_RED_TREE_SYNC;").map_err(ferr)?;
-        writeln!(out, "    add.u32      %partner, %tid, %half;").map_err(ferr)?;
+        writeln!(out, "    add.u32      %partner, %ltid, %half;").map_err(ferr)?;
         writeln!(out, "    mul.wide.u32 %addr, %partner, {eb};").map_err(ferr)?;
         writeln!(out, "    add.u64      %addr, %addr, %smem_base;").map_err(ferr)?;
         writeln!(out, "    ld.shared.{ty} %other, [%addr];").map_err(ferr)?;
@@ -237,7 +237,7 @@ impl SegmentedReduceTemplate {
 
         // Thread 0 writes the segment result.
         writeln!(out, "SEG_RED_WRITE:").map_err(ferr)?;
-        writeln!(out, "    setp.ne.u32  %p, %tid, 0;").map_err(ferr)?;
+        writeln!(out, "    setp.ne.u32  %p, %ltid, 0;").map_err(ferr)?;
         writeln!(out, "    @%p ret;").map_err(ferr)?;
         writeln!(out, "    cvt.u64.u32  %i, %seg;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %addr, %i, {eb}, %ptr_out;").map_err(ferr)?;
@@ -363,7 +363,7 @@ impl SegmentedScanTemplate {
         .map_err(ferr)?;
         writeln!(out, "{{").map_err(ferr)?;
         writeln!(out, "    .reg .{ty}   %acc, %val, %store;").map_err(ferr)?;
-        writeln!(out, "    .reg .u32    %tid, %bid;").map_err(ferr)?;
+        writeln!(out, "    .reg .u32    %ltid, %bid;").map_err(ferr)?;
         writeln!(
             out,
             "    .reg .u64    %nseg, %seg, %seg_beg, %seg_end, %i, %addr, %off_addr;"
@@ -376,9 +376,14 @@ impl SegmentedScanTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %ptr_off, [param_offsets];").map_err(ferr)?;
         writeln!(out, "    ld.param.u64 %nseg,    [param_num_segments];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %seg, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %seg, %ltid;
+    mad.wide.u32   %seg, %bid, {bs}, %seg;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    setp.ge.u64  %p, %seg, %nseg;").map_err(ferr)?;
         writeln!(out, "    @%p ret;").map_err(ferr)?;
 
@@ -554,7 +559,7 @@ mod tests {
             .generate(SmVersion::Sm80)
             .expect("PTX generation should succeed in test");
         assert!(ptx.contains("min.f32"), "PTX: {ptx}");
-        assert!(ptx.contains("0x7F800000"), "PTX: {ptx}");
+        assert!(ptx.contains("0f7F800000"), "PTX: {ptx}");
     }
 
     #[test]

@@ -8,7 +8,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.38).
 
 ## Implementation Status
 
-- **Actual SLoC:** ~21,300 total lines (87 files)
+- **Actual SLoC:** ~16,752 total lines (88 files)
 - **Coverage:** state-vector simulation (dense + sparse + FP16/BF16-packed),
   standard + parametric gates, Pauli/Hamiltonian expectation values, Trotter-Suzuki
   1/2/4-order evolution (cross-validated vs exact `expm`), Lindblad master equation
@@ -85,7 +85,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.38).
   identity, QPE recovers φ=1/4)
 - [x] Benchmarks (`benches/quantum_ops.rs`) — 7 PTX kernel groups × 4 SM versions
   + 5 algorithm benches (H, Bell, ZZ feature map, VQE energy, QAOA)
-- **Tests:** 482 passing
+- **Tests:** 490 passing
 
 ### Future Enhancements
 
@@ -142,7 +142,7 @@ is delegated to higher-level integrators.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 482 passing (state vector, gates, Pauli, Trotter, VQE, QAOA, density,
+- Tests: 490 passing (state vector, gates, Pauli, Trotter, VQE, QAOA, density,
   channels, kernels, circuit, stabilizer, MPS, mid-circuit, SPSA, QFIM/natural
   gradient, QFT/QPE Fourier, PTX × 6 SM, MCWF quantum trajectories, Lindblad RK4,
   tensor-network contraction, layer-wise warm-start VQE, projected + trainable

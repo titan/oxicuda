@@ -154,7 +154,7 @@ impl BlockReduceTemplate {
         writeln!(out, "    .reg .{ty}   %val, %shfl;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %n, %warpid, %laneid, %mask, %offset;"
+            "    .reg .u32    %ltid, %n, %warpid, %laneid, %mask, %offset;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(
@@ -168,20 +168,36 @@ impl BlockReduceTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %n,        [param_n];").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    mov.u32 %tid,    %tid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    shr.u32 %warpid, %tid, 5;    // warpid = tid / 32")
-            .map_err(|e| e.to_string())?;
-        writeln!(out, "    and.b32 %laneid, %tid, 31;   // laneid = tid % 32")
-            .map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32 %mask, 0xFFFFFFFF;").map_err(|e| e.to_string())?;
-
-        // Load input element (identity if out of bounds)
-        let identity = self.cfg.op.identity_literal::<f32>();
-        let elem_bytes_usize = elem_bytes as usize;
-        writeln!(out, "    setp.ge.u32 %p, %tid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32 %ltid,    %tid.x;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u64  %addr, %tid, {elem_bytes_usize}, %ptr_in;"
+            "    shr.u32 %warpid, %ltid, 5;    // warpid = tid / 32"
+        )
+        .map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    and.b32 %laneid, %ltid, 31;   // laneid = tid % 32"
+        )
+        .map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32 %mask, 0xFFFFFFFF;").map_err(|e| e.to_string())?;
+
+        // Load input element (identity if out of bounds). The identity literal
+        // MUST match the kernel's element type — using the f32 literal for an
+        // integer kernel emits e.g. `mov.u32 %val, 0f00000000`, which ptxas
+        // rejects (and would be the wrong value besides).
+        let identity = match self.cfg.ty {
+            PtxType::U32 => self.cfg.op.identity_literal::<u32>(),
+            PtxType::U64 => self.cfg.op.identity_literal::<u64>(),
+            PtxType::S32 => self.cfg.op.identity_literal::<i32>(),
+            PtxType::S64 => self.cfg.op.identity_literal::<i64>(),
+            PtxType::F64 => self.cfg.op.identity_literal::<f64>(),
+            _ => self.cfg.op.identity_literal::<f32>(),
+        };
+        let elem_bytes_usize = elem_bytes as usize;
+        writeln!(out, "    setp.ge.u32 %p, %ltid, %n;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    mad.wide.u32  %addr, %ltid, {elem_bytes_usize}, %ptr_in;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    @!%p ld.global.{ty} %val, [%addr];").map_err(|e| e.to_string())?;
@@ -311,7 +327,7 @@ impl BlockReduceTemplate {
             // Warp 0, lane 0 already wrote result to smem_partial[0]
             // (we need to store it there explicitly)
             // Re-store: lane 0 of warp 0 stores val at smem_partial[0]
-            writeln!(out, "    setp.ne.u32 %p, %tid, 0;").map_err(|e| e.to_string())?;
+            writeln!(out, "    setp.ne.u32 %p, %ltid, 0;").map_err(|e| e.to_string())?;
             writeln!(out, "    @%p bra BCAST_READ_{name};").map_err(|e| e.to_string())?;
             writeln!(out, "    st.shared.{ty} [%smem_addr], %val;").map_err(|e| e.to_string())?;
             writeln!(out, "BCAST_READ_{name}:").map_err(|e| e.to_string())?;
@@ -319,7 +335,7 @@ impl BlockReduceTemplate {
             writeln!(out, "    ld.shared.{ty} %val, [%smem_addr];").map_err(|e| e.to_string())?;
             writeln!(
                 out,
-                "    mad.lo.u64  %addr, %tid, {elem_bytes_usize}, %ptr_out;"
+                "    mad.wide.u32  %addr, %ltid, {elem_bytes_usize}, %ptr_out;"
             )
             .map_err(|e| e.to_string())?;
             writeln!(out, "    st.global.{ty} [%addr], %val;").map_err(|e| e.to_string())?;

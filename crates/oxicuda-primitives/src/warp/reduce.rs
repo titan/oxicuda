@@ -135,7 +135,7 @@ impl WarpReduceTemplate {
         // Register declarations
         writeln!(out, "    .reg .{ty}   %val;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .{ty}   %shfl;").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %tid, %n, %mask, %laneid;").map_err(|e| e.to_string())?;
+        writeln!(out, "    .reg .u32    %ltid, %n, %mask, %laneid;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %ptr_in, %ptr_out, %addr;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u32    %offset;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .pred   %p;").map_err(|e| e.to_string())?;
@@ -146,8 +146,8 @@ impl WarpReduceTemplate {
         writeln!(out, "    ld.param.u32 %n,        [param_n];").map_err(|e| e.to_string())?;
 
         // Compute lane ID and global thread ID
-        writeln!(out, "    mov.u32 %tid, %tid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    and.b32 %laneid, %tid, 31;   // lane = tid & 31")
+        writeln!(out, "    mov.u32 %ltid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    and.b32 %laneid, %ltid, 31;   // lane = tid & 31")
             .map_err(|e| e.to_string())?;
 
         // Load input element (guard: if tid >= n load identity)
@@ -169,24 +169,24 @@ impl WarpReduceTemplate {
             }
             ReduceOp::Min => {
                 if matches!(self.cfg.ty, PtxType::F32) {
-                    "0x7F800000"
+                    "0f7F800000"
                 } else {
                     "0x7FFFFFFF"
                 }
             }
             ReduceOp::Max => {
                 if matches!(self.cfg.ty, PtxType::F32) {
-                    "0xFF800000"
+                    "0fFF800000"
                 } else {
                     "0x80000000"
                 }
             }
             ReduceOp::And => "0xFFFFFFFF",
         };
-        writeln!(out, "    setp.ge.u32  %p, %tid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32  %p, %ltid, %n;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u64   %addr, %tid, {}, %ptr_in;",
+            "    mad.wide.u32   %addr, %ltid, {}, %ptr_in;",
             std::mem::size_of::<f32>()
         )
         .map_err(|e| e.to_string())?;
@@ -222,7 +222,7 @@ impl WarpReduceTemplate {
         if broadcast {
             writeln!(
                 out,
-                "    mad.lo.u64 %addr, %tid, {}, %ptr_out;",
+                "    mad.wide.u32 %addr, %ltid, {}, %ptr_out;",
                 std::mem::size_of::<f32>()
             )
             .map_err(|e| e.to_string())?;
@@ -264,7 +264,7 @@ impl WarpReduceTemplate {
         writeln!(out, "    .reg .u32    %lo, %hi, %shfl_lo, %shfl_hi;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %shfl64;").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %tid, %n, %mask, %laneid, %offset;")
+        writeln!(out, "    .reg .u32    %ltid, %n, %mask, %laneid, %offset;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %ptr_in, %ptr_out, %addr;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .pred   %p;").map_err(|e| e.to_string())?;
@@ -273,11 +273,11 @@ impl WarpReduceTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %n,        [param_n];").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    mov.u32 %tid, %tid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    and.b32 %laneid, %tid, 31;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32 %ltid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    and.b32 %laneid, %ltid, 31;").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    setp.ge.u32 %p, %tid, %n;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64  %addr, %tid, 8, %ptr_in;").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32 %p, %ltid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32  %addr, %ltid, 8, %ptr_in;").map_err(|e| e.to_string())?;
         writeln!(out, "    @!%p ld.global.{ty} %val, [%addr];").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p  mov.{ty} %val, 0;").map_err(|e| e.to_string())?;
 

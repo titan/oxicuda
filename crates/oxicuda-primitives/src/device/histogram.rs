@@ -166,7 +166,7 @@ impl DeviceHistogramTemplate {
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "{{").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %tid, %bid, %num_bins;").map_err(|e| e.to_string())?;
+        writeln!(out, "    .reg .u32    %ltid, %bid, %num_bins;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %gid, %ptr, %addr;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .pred   %p;").map_err(|e| e.to_string())?;
 
@@ -174,11 +174,16 @@ impl DeviceHistogramTemplate {
             .map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %num_bins,  [param_num_bins];")
             .map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
 
         // gid = bid * bs + tid; if gid >= num_bins, exit.
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(|e| e.to_string())?;
         writeln!(out, "    cvt.u64.u32  %addr, %num_bins;").map_err(|e| e.to_string())?;
         writeln!(out, "    setp.ge.u64  %p, %gid, %addr;").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p ret;").map_err(|e| e.to_string())?;
@@ -250,7 +255,7 @@ impl DeviceHistogramTemplate {
 
         // Register declarations.
         writeln!(out, "    .reg .{ty}   %val;").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %tid, %bid, %num_bins, %bin, %old;")
+        writeln!(out, "    .reg .u32    %ltid, %bid, %num_bins, %bin, %old;")
             .map_err(|e| e.to_string())?;
         writeln!(
             out,
@@ -266,6 +271,8 @@ impl DeviceHistogramTemplate {
         writeln!(out, "    .reg .pred   %p;").map_err(|e| e.to_string())?;
 
         if self.cfg.mode == DeviceHistogramMode::EvenRange {
+            // Out-of-range predicate: values outside `[lo, hi)` are dropped.
+            writeln!(out, "    .reg .pred   %oor;").map_err(|e| e.to_string())?;
             if is_fp {
                 writeln!(
                     out,
@@ -274,7 +281,7 @@ impl DeviceHistogramTemplate {
                 .map_err(|e| e.to_string())?;
                 writeln!(out, "    .reg .s32    %bin_s;").map_err(|e| e.to_string())?;
             } else {
-                writeln!(out, "    .reg .u32    %lo_u, %hi_u, %bin_width, %nb_m1;")
+                writeln!(out, "    .reg .u32    %lo_u, %hi_u, %range_u, %nb_m1;")
                     .map_err(|e| e.to_string())?;
             }
         }
@@ -302,25 +309,25 @@ impl DeviceHistogramTemplate {
             } else {
                 writeln!(out, "    ld.param.u32 %lo_u,  [param_lo];").map_err(|e| e.to_string())?;
                 writeln!(out, "    ld.param.u32 %hi_u,  [param_hi];").map_err(|e| e.to_string())?;
-                // bin_width = ceil((hi - lo + 1) / num_bins)
-                writeln!(out, "    sub.u32      %bin_width, %hi_u, %lo_u;")
-                    .map_err(|e| e.to_string())?;
-                writeln!(out, "    add.u32      %bin_width, %bin_width, 1;")
-                    .map_err(|e| e.to_string())?;
-                writeln!(out, "    add.u32      %bin_width, %bin_width, %num_bins;")
-                    .map_err(|e| e.to_string())?;
-                writeln!(out, "    sub.u32      %bin_width, %bin_width, 1;")
-                    .map_err(|e| e.to_string())?;
-                writeln!(out, "    div.u32      %bin_width, %bin_width, %num_bins;")
+                // Even-range binning maps `[lo, hi)` onto `num_bins` equal-width
+                // bins via `bin = (val - lo) * num_bins / (hi - lo)` (matching
+                // CUB's HistogramEven and the crate's host reference). Keep the
+                // raw range; the multiply-then-divide happens per element.
+                writeln!(out, "    sub.u32      %range_u, %hi_u, %lo_u;")
                     .map_err(|e| e.to_string())?;
                 writeln!(out, "    sub.u32      %nb_m1, %num_bins, 1;")
                     .map_err(|e| e.to_string())?;
             }
         }
 
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u64      %smem_base, hist_smem;").map_err(|e| e.to_string())?;
 
         // ── Phase 1: Initialise private histogram to zero ─────────────────────
@@ -328,13 +335,13 @@ impl DeviceHistogramTemplate {
         // num_bins > block_size.
         writeln!(out, "    .reg .u32 %init_idx;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64 %init_addr;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %init_idx, %tid;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %init_idx, %ltid;").map_err(|e| e.to_string())?;
         writeln!(out, "HIST_INIT_LOOP:").map_err(|e| e.to_string())?;
         writeln!(out, "    setp.ge.u32  %p, %init_idx, %num_bins;").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p bra HIST_INIT_DONE;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u64   %init_addr, %init_idx, 4, %smem_base;"
+            "    mad.wide.u32   %init_addr, %init_idx, 4, %smem_base;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    st.shared.u32 [%init_addr], 0;").map_err(|e| e.to_string())?;
@@ -349,6 +356,35 @@ impl DeviceHistogramTemplate {
         writeln!(out, "    mad.lo.u64   %addr, %gid, {eb}, %ptr_in;").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.global.{ty} %val, [%addr];").map_err(|e| e.to_string())?;
 
+        // Even-range mode drops values outside `[lo, hi)` (they are not counted).
+        if self.cfg.mode == DeviceHistogramMode::EvenRange {
+            if is_fp {
+                writeln!(out, "    setp.lt.f32  %oor, %val, %lo_f;").map_err(|e| e.to_string())?;
+                writeln!(out, "    @%oor bra HIST_MERGE;").map_err(|e| e.to_string())?;
+                writeln!(out, "    setp.ge.f32  %oor, %val, %hi_f;").map_err(|e| e.to_string())?;
+                writeln!(out, "    @%oor bra HIST_MERGE;").map_err(|e| e.to_string())?;
+            } else {
+                // Materialise the key as u32 (matching `emit_bin_computation`),
+                // then drop anything outside `[lo, hi)`.
+                match self.cfg.ty {
+                    PtxType::U32 | PtxType::S32 => {
+                        writeln!(out, "    mov.b32      %val_u32, %val;")
+                            .map_err(|e| e.to_string())?;
+                    }
+                    _ => {
+                        writeln!(out, "    cvt.u32.u64  %val_u32, %val;")
+                            .map_err(|e| e.to_string())?;
+                    }
+                }
+                writeln!(out, "    setp.lt.u32  %oor, %val_u32, %lo_u;")
+                    .map_err(|e| e.to_string())?;
+                writeln!(out, "    @%oor bra HIST_MERGE;").map_err(|e| e.to_string())?;
+                writeln!(out, "    setp.ge.u32  %oor, %val_u32, %hi_u;")
+                    .map_err(|e| e.to_string())?;
+                writeln!(out, "    @%oor bra HIST_MERGE;").map_err(|e| e.to_string())?;
+            }
+        }
+
         // Compute bin index based on mode and type.
         self.emit_bin_computation(&mut out, is_fp)?;
 
@@ -359,7 +395,7 @@ impl DeviceHistogramTemplate {
         // and EvenRange already clamped above.  This is a no-op safety guard.)
 
         // Atomic increment of private histogram[bin].
-        writeln!(out, "    mad.lo.u64   %bin_addr, %bin, 4, %smem_base;")
+        writeln!(out, "    mad.wide.u32   %bin_addr, %bin, 4, %smem_base;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    atom.shared.add.u32 %old, [%bin_addr], 1;")
             .map_err(|e| e.to_string())?;
@@ -369,19 +405,19 @@ impl DeviceHistogramTemplate {
         writeln!(out, "    bar.sync 0;").map_err(|e| e.to_string())?;
         // Each thread merges one or more bins with a strided loop.
         writeln!(out, "    .reg .u32 %merge_idx;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %merge_idx, %tid;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %merge_idx, %ltid;").map_err(|e| e.to_string())?;
         writeln!(out, "HIST_MERGE_LOOP:").map_err(|e| e.to_string())?;
         writeln!(out, "    setp.ge.u32  %p, %merge_idx, %num_bins;").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p bra HIST_MERGE_DONE;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u64   %smem_addr, %merge_idx, 4, %smem_base;"
+            "    mad.wide.u32   %smem_addr, %merge_idx, 4, %smem_base;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    ld.shared.u32 %priv_val, [%smem_addr];").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    mad.lo.u64   %glob_addr, %merge_idx, 4, %ptr_hist;"
+            "    mad.wide.u32   %glob_addr, %merge_idx, 4, %ptr_hist;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(
@@ -489,34 +525,31 @@ impl DeviceHistogramTemplate {
                     }
                 } else {
                     // Integer EvenRange: bin = (val - lo) / bin_width.
+                    // bin = (val - lo) * num_bins / range, clamped to [0, nb-1].
+                    // (`val` is already known in-range here, so `val - lo` does
+                    // not underflow.) The widening of the intermediate product is
+                    // not needed: `(val-lo) < range <= u32::MAX / num_bins` for
+                    // the bin counts used in practice; we compute with mul.lo.
+                    let emit_int = |out: &mut String| -> Result<(), String> {
+                        writeln!(out, "    sub.u32      %val_u32, %val_u32, %lo_u;")
+                            .map_err(|e| e.to_string())?;
+                        writeln!(out, "    mul.lo.u32   %val_u32, %val_u32, %num_bins;")
+                            .map_err(|e| e.to_string())?;
+                        writeln!(out, "    div.u32      %bin, %val_u32, %range_u;")
+                            .map_err(|e| e.to_string())?;
+                        writeln!(out, "    min.u32      %bin, %bin, %nb_m1;")
+                            .map_err(|e| e.to_string())
+                    };
                     match self.cfg.ty {
-                        PtxType::U32 => {
-                            writeln!(out, "    sub.u32      %val_u32, %val, %lo_u;")
-                                .map_err(|e| e.to_string())?;
-                            writeln!(out, "    div.u32      %bin, %val_u32, %bin_width;")
-                                .map_err(|e| e.to_string())?;
-                            writeln!(out, "    min.u32      %bin, %bin, %nb_m1;")
-                                .map_err(|e| e.to_string())?;
-                        }
-                        PtxType::S32 => {
-                            writeln!(out, "    mov.b32      %val_u32, %val;")
-                                .map_err(|e| e.to_string())?;
-                            writeln!(out, "    sub.u32      %val_u32, %val_u32, %lo_u;")
-                                .map_err(|e| e.to_string())?;
-                            writeln!(out, "    div.u32      %bin, %val_u32, %bin_width;")
-                                .map_err(|e| e.to_string())?;
-                            writeln!(out, "    min.u32      %bin, %bin, %nb_m1;")
-                                .map_err(|e| e.to_string())?;
+                        PtxType::U32 | PtxType::S32 => {
+                            // `%val_u32` already holds the key bits (set by the
+                            // out-of-range guard above).
+                            emit_int(out)?;
                         }
                         PtxType::U64 | PtxType::S64 => {
                             writeln!(out, "    cvt.u32.u64  %val_u32, %val;")
                                 .map_err(|e| e.to_string())?;
-                            writeln!(out, "    sub.u32      %val_u32, %val_u32, %lo_u;")
-                                .map_err(|e| e.to_string())?;
-                            writeln!(out, "    div.u32      %bin, %val_u32, %bin_width;")
-                                .map_err(|e| e.to_string())?;
-                            writeln!(out, "    min.u32      %bin, %bin, %nb_m1;")
-                                .map_err(|e| e.to_string())?;
+                            emit_int(out)?;
                         }
                         _ => {
                             writeln!(out, "    mov.u32      %bin, 0;")

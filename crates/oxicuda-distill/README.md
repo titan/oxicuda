@@ -76,7 +76,7 @@ fn main() -> oxicuda_distill::error::DistillResult<()> {
 
 ## Status
 
-**Alpha** -- 11,889 SLoC, 447 passing tests. API may evolve before v1.0.
+**Alpha** -- 11,889 SLoC, 530 passing tests. API may evolve before v1.0.
 
 ## License
 

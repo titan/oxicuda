@@ -79,7 +79,7 @@ fn main() -> OtResult<()> {
 
 ## Status
 
-**Alpha** — 24,969 SLoC, 628 passing tests. API may evolve before v1.0.
+**Alpha** — 26,462 SLoC, 657 passing tests. API may evolve before v1.0.
 
 ## License
 

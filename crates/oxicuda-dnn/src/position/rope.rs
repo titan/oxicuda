@@ -175,6 +175,163 @@ impl Rope {
     }
 }
 
+// ─── GPT-NeoX half-split partial-rotary RoPE ─────────────────────────────────
+
+/// Pairing strategy for [`RopeConfig`]-style rotary embeddings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RopeStyle {
+    /// GPT-J / original RoFormer interleaved pairing: element `2i` pairs
+    /// with `2i+1`. This is what [`Rope`] implements.
+    Interleaved,
+    /// GPT-NeoX half-split pairing: element `i` pairs with `i + rotary_dim/2`
+    /// (the rotated block is split in half, low half rotated against high half).
+    NeoXHalfSplit,
+}
+
+/// Configuration for [`apply_rope_neox_half_split`] (GPT-NeoX half-split RoPE).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NeoXRopeConfig {
+    /// Per-head feature dimension D (the full head width).
+    pub d_head: usize,
+    /// Number of leading dims to rotate (`rotary_dim <= d_head`, must be even).
+    /// `rotary_dim == d_head` means full rotary; `< d_head` leaves the tail
+    /// `[rotary_dim, d_head)` unrotated (partial rotary).
+    pub rotary_dim: usize,
+    /// Maximum sequence length (positions are implicit `0..seq_len`).
+    pub max_seq_len: usize,
+    /// Frequency base (typically 10000.0).
+    pub base: f32,
+}
+
+/// Applies GPT-NeoX **half-split** partial-rotary position embedding to `x`,
+/// returning a new tensor of identical shape (out-of-place).
+///
+/// # Half-split vs interleaved
+///
+/// Unlike [`Rope::apply`], which uses the GPT-J / RoFormer *interleaved*
+/// pairing where adjacent elements `(2i, 2i+1)` form a rotation pair, the
+/// GPT-NeoX layout splits the rotated block in half: element `i` pairs with
+/// element `i + rotary_dim/2`. Concretely, with `half = rotary_dim / 2`, the
+/// low lane `i ∈ [0, half)` is rotated against the high lane `i + half`:
+///
+/// ```text
+/// out[i]        = x[i] · cosθ − x[i+half] · sinθ
+/// out[i+half]   = x[i] · sinθ + x[i+half] · cosθ
+/// ```
+///
+/// This is the pairing used by GPT-NeoX, GPT-J-in-NeoX form, LLaMA's HF
+/// reference (`rotate_half`), Falcon, and many others, and matches
+/// trustformers' `rope_f32`.
+///
+/// # Partial rotary
+///
+/// Only the leading `rotary_dim` lanes of each head are rotated; the tail
+/// `[rotary_dim, d_head)` is copied through unchanged. `rotary_dim == d_head`
+/// degenerates to full rotary. `rotary_dim` must be even and `<= d_head`.
+///
+/// # Frequencies
+///
+/// The inverse frequency for pair `i` uses `rotary_dim` (the number of rotated
+/// lanes) as the denominator — **not** `d_head`:
+///
+/// ```text
+/// freq_i = base^(−2i / rotary_dim)
+/// θ      = pos · freq_i
+/// ```
+///
+/// # Layout
+///
+/// `x` is a flat row-major `[seq_len, num_heads, d_head]` tensor (no batch
+/// dimension). Positions are implicit `0..seq_len` (there is no position-offset
+/// array). All arithmetic is `f32`.
+///
+/// # Errors
+/// - [`DnnError::InvalidArgument`] if `d_head == 0`; if `rotary_dim` is zero,
+///   odd, or greater than `d_head`; if `max_seq_len == 0`; if `base` is
+///   non-finite or `<= 1.0`; if `seq_len == 0` or `n_heads == 0`; or if
+///   `seq_len > max_seq_len`.
+/// - [`DnnError::InvalidDimension`] if `x.len() != seq_len · n_heads · d_head`.
+pub fn apply_rope_neox_half_split(
+    x: &[f32],
+    seq_len: usize,
+    n_heads: usize,
+    config: &NeoXRopeConfig,
+) -> DnnResult<Vec<f32>> {
+    if config.d_head == 0 {
+        return Err(DnnError::InvalidArgument(
+            "NeoX RoPE: d_head must be > 0".into(),
+        ));
+    }
+    if config.rotary_dim == 0 || config.rotary_dim % 2 != 0 || config.rotary_dim > config.d_head {
+        return Err(DnnError::InvalidArgument(format!(
+            "NeoX RoPE: rotary_dim ({}) must be even, > 0, and <= d_head ({})",
+            config.rotary_dim, config.d_head
+        )));
+    }
+    if config.max_seq_len == 0 {
+        return Err(DnnError::InvalidArgument(
+            "NeoX RoPE: max_seq_len must be > 0".into(),
+        ));
+    }
+    if !config.base.is_finite() || config.base <= 1.0 {
+        return Err(DnnError::InvalidArgument(format!(
+            "NeoX RoPE: base must be finite and > 1, got {}",
+            config.base
+        )));
+    }
+    if seq_len == 0 || n_heads == 0 {
+        return Err(DnnError::InvalidArgument(format!(
+            "NeoX RoPE: seq_len and n_heads must be > 0, got {seq_len} and {n_heads}"
+        )));
+    }
+    if seq_len > config.max_seq_len {
+        return Err(DnnError::InvalidArgument(format!(
+            "NeoX RoPE: seq_len {seq_len} exceeds max_seq_len {}",
+            config.max_seq_len
+        )));
+    }
+    let expected = seq_len * n_heads * config.d_head;
+    if x.len() != expected {
+        return Err(DnnError::InvalidDimension(format!(
+            "NeoX RoPE: expected {expected} elements, got {}",
+            x.len()
+        )));
+    }
+
+    let half = config.rotary_dim / 2;
+
+    // freq_i = base^(-2i / rotary_dim)  (denominator is rotary_dim, not d_head)
+    let inv_freqs: Vec<f32> = (0..half)
+        .map(|i| {
+            config
+                .base
+                .powf(-((2 * i) as f32 / config.rotary_dim as f32))
+        })
+        .collect();
+
+    // Tail [rotary_dim, d_head) is already correct because out starts as a copy.
+    let mut out = x.to_vec();
+
+    for pos in 0..seq_len {
+        for head in 0..n_heads {
+            let base = (pos * n_heads + head) * config.d_head;
+            for (i, &freq) in inv_freqs.iter().enumerate() {
+                let angle = pos as f32 * freq;
+                let c = angle.cos();
+                let s = angle.sin();
+                let lo = base + i;
+                let hi = base + i + half;
+                let xi = x[lo];
+                let xj = x[hi];
+                out[lo] = xi * c - xj * s;
+                out[hi] = xi * s + xj * c;
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -373,5 +530,216 @@ mod tests {
         let x = vec![0.0_f32; 10]; // not seq·heads·d_head
         let out = r.apply(&x, 2, 2);
         assert!(matches!(out, Err(DnnError::InvalidDimension(_))));
+    }
+}
+
+// ─── NeoX half-split tests ───────────────────────────────────────────────────
+
+#[cfg(test)]
+mod neox_tests {
+    use super::*;
+    use crate::position::DnnRng;
+
+    /// The half-split implementation must agree, lane-for-lane, with a
+    /// dead-simple independent naive triple-loop reference.
+    #[test]
+    fn neox_matches_naive_reference() -> DnnResult<()> {
+        let mut x = vec![0.0_f32; 2 * 2 * 8];
+        for (idx, v) in x.iter_mut().enumerate() {
+            *v = (idx as f32) * 0.1 + 0.3;
+        }
+
+        // Independent naive reference (NOT calling apply_rope_neox_half_split).
+        let mut expected = x.clone();
+        let half = 4usize;
+        for pos in 0..2 {
+            for head in 0..2 {
+                let base = (pos * 2 + head) * 8;
+                for i in 0..half {
+                    let freq = 10000f32.powf(-((2 * i) as f32 / 8.0));
+                    let angle = pos as f32 * freq;
+                    let c = angle.cos();
+                    let s = angle.sin();
+                    let xi = x[base + i];
+                    let xj = x[base + i + half];
+                    expected[base + i] = xi * c - xj * s;
+                    expected[base + i + half] = xi * s + xj * c;
+                }
+            }
+        }
+
+        let cfg = NeoXRopeConfig {
+            d_head: 8,
+            rotary_dim: 8,
+            max_seq_len: 16,
+            base: 10000.0,
+        };
+        let got = apply_rope_neox_half_split(&x, 2, 2, &cfg)?;
+        for k in 0..x.len() {
+            assert!(
+                (got[k] - expected[k]).abs() < 1e-5,
+                "mismatch at {k}: {} vs {}",
+                got[k],
+                expected[k]
+            );
+        }
+        Ok(())
+    }
+
+    /// Half-split pairing must produce a different result than the interleaved
+    /// [`Rope`] for the same input at a non-zero position.
+    #[test]
+    fn neox_differs_from_interleaved() -> DnnResult<()> {
+        let mut x = vec![0.0_f32; 2 * 8]; // seq_len=2, n_heads=1, d_head=8
+        for (idx, v) in x.iter_mut().enumerate() {
+            *v = (idx as f32) * 0.17 + 0.5;
+        }
+        let cfg = NeoXRopeConfig {
+            d_head: 8,
+            rotary_dim: 8,
+            max_seq_len: 16,
+            base: 10000.0,
+        };
+        let got = apply_rope_neox_half_split(&x, 2, 1, &cfg)?;
+
+        let r = Rope::new(RopeConfig {
+            d_head: 8,
+            max_seq_len: 16,
+            base: 10000.0,
+        })?;
+        let inter = r.apply(&x, 2, 1)?;
+
+        // Compare position-1 lanes (indices 8..16).
+        let diff: f32 = (8..16).map(|k| (got[k] - inter[k]).abs()).sum();
+        assert!(
+            diff > 1e-4,
+            "half-split must differ from interleaved at pos 1, diff={diff}"
+        );
+        Ok(())
+    }
+
+    /// Partial rotary: the tail `[rotary_dim, d_head)` is copied verbatim while
+    /// the rotated lanes change at non-zero positions.
+    #[test]
+    fn neox_partial_rotary_tail_passthrough() -> DnnResult<()> {
+        let mut x = vec![0.0_f32; 3 * 2 * 8];
+        for (idx, v) in x.iter_mut().enumerate() {
+            *v = (idx as f32) * 0.07 - 1.0;
+        }
+        let cfg = NeoXRopeConfig {
+            d_head: 8,
+            rotary_dim: 4,
+            max_seq_len: 16,
+            base: 10000.0,
+        };
+        let got = apply_rope_neox_half_split(&x, 3, 2, &cfg)?;
+
+        // Tail lanes [4, 8) must equal input verbatim for every (pos, head).
+        for pos in 0..3 {
+            for head in 0..2 {
+                let base = (pos * 2 + head) * 8;
+                for k in (base + 4)..(base + 8) {
+                    assert!(
+                        (got[k] - x[k]).abs() < 1e-6,
+                        "tail lane {k} should pass through unchanged"
+                    );
+                }
+            }
+        }
+
+        // Rotated lanes [0, 4) at positions >= 1 must differ from input.
+        let mut diff_sum = 0.0_f32;
+        for pos in 1..3 {
+            for head in 0..2 {
+                let base = (pos * 2 + head) * 8;
+                for k in (base)..(base + 4) {
+                    diff_sum += (got[k] - x[k]).abs();
+                }
+            }
+        }
+        assert!(
+            diff_sum > 1e-4,
+            "rotated lanes must change at pos>=1, diff_sum={diff_sum}"
+        );
+        Ok(())
+    }
+
+    /// At position 0 all angles are 0 ⇒ the first row equals the input.
+    #[test]
+    fn neox_pos0_identity() -> DnnResult<()> {
+        let mut rng = DnnRng::new(5);
+        let mut x = vec![0.0_f32; 2 * 2 * 8];
+        rng.fill_normal(&mut x);
+        let cfg = NeoXRopeConfig {
+            d_head: 8,
+            rotary_dim: 8,
+            max_seq_len: 16,
+            base: 10000.0,
+        };
+        let got = apply_rope_neox_half_split(&x, 2, 2, &cfg)?;
+        // First n_heads * d_head = 2 * 8 = 16 elements are position 0.
+        for k in 0..(2 * 8) {
+            assert!(
+                (got[k] - x[k]).abs() < 1e-6,
+                "position 0 must be identity at lane {k}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn neox_odd_rotary_dim_error() {
+        let cfg = NeoXRopeConfig {
+            d_head: 8,
+            rotary_dim: 3,
+            max_seq_len: 16,
+            base: 10000.0,
+        };
+        let x = vec![0.0_f32; 8]; // 1 * 1 * 8, valid length so rotary_dim check fires first
+        let out = apply_rope_neox_half_split(&x, 1, 1, &cfg);
+        assert!(matches!(out, Err(DnnError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn neox_rotary_gt_dhead_error() {
+        let cfg = NeoXRopeConfig {
+            d_head: 4,
+            rotary_dim: 8,
+            max_seq_len: 16,
+            base: 10000.0,
+        };
+        let x = vec![0.0_f32; 4]; // 1 * 1 * 4, valid length so rotary_dim check fires first
+        let out = apply_rope_neox_half_split(&x, 1, 1, &cfg);
+        assert!(matches!(out, Err(DnnError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn neox_wrong_len_error() {
+        let cfg = NeoXRopeConfig {
+            d_head: 8,
+            rotary_dim: 8,
+            max_seq_len: 16,
+            base: 10000.0,
+        };
+        let x = vec![0.0_f32; 10]; // expected 2*2*8 = 32
+        let out = apply_rope_neox_half_split(&x, 2, 2, &cfg);
+        assert!(matches!(out, Err(DnnError::InvalidDimension(_))));
+    }
+
+    /// Random input must always produce finite outputs.
+    #[test]
+    fn neox_finite_output() -> DnnResult<()> {
+        let mut rng = DnnRng::new(11);
+        let mut x = vec![0.0_f32; 4 * 3 * 8];
+        rng.fill_normal(&mut x);
+        let cfg = NeoXRopeConfig {
+            d_head: 8,
+            rotary_dim: 8,
+            max_seq_len: 16,
+            base: 10000.0,
+        };
+        let got = apply_rope_neox_half_split(&x, 4, 3, &cfg)?;
+        assert!(got.iter().all(|v| v.is_finite()));
+        Ok(())
     }
 }

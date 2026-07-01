@@ -122,7 +122,7 @@ Batched and reduction kernels aim for comparable device occupancy.
 |------|-------|
 | Version | 0.3.0 |
 | Release date | 2026-06-25 |
-| Tests | 772 passing |
+| Tests | 791 passing |
 | Warnings | 0 (clippy clean) |
 | `unwrap()` | 0 (production code) |
 

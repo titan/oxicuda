@@ -146,6 +146,9 @@ pub mod prelude {
     pub use crate::symbolic::regression::{Expr, Individual, SymbolicConfig, SymbolicRegressor};
 }
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 #[cfg(test)]
 mod e2e_tests {
     use super::prelude::*;

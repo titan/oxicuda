@@ -140,10 +140,10 @@ impl WarpScanTemplate {
             (ReduceOp::Sum, _) => "0",
             (ReduceOp::Product, PtxType::F32) => "0f3F800000",
             (ReduceOp::Product, _) => "1",
-            (ReduceOp::Min, PtxType::F32) => "0x7F800000",
+            (ReduceOp::Min, PtxType::F32) => "0f7F800000",
             (ReduceOp::Min, PtxType::U32) => "0xFFFFFFFF",
             (ReduceOp::Min, _) => "0x7FFFFFFF",
-            (ReduceOp::Max, PtxType::F32) => "0xFF800000",
+            (ReduceOp::Max, PtxType::F32) => "0fFF800000",
             (ReduceOp::Max, PtxType::U32) => "0",
             (ReduceOp::Max, _) => "0x80000000",
             (ReduceOp::And, _) => "0xFFFFFFFF",
@@ -164,7 +164,7 @@ impl WarpScanTemplate {
         writeln!(out, "{{").map_err(|e| e.to_string())?;
 
         writeln!(out, "    .reg .{ty}   %val, %shfl;").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %tid, %n, %mask, %laneid, %offset;")
+        writeln!(out, "    .reg .u32    %ltid, %n, %mask, %laneid, %offset;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %ptr_in, %ptr_out, %addr;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .pred   %p, %q;").map_err(|e| e.to_string())?;
@@ -173,12 +173,12 @@ impl WarpScanTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %n,        [param_n];").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    mov.u32 %tid, %tid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    and.b32 %laneid, %tid, 31;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32 %ltid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    and.b32 %laneid, %ltid, 31;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32 %mask, 0xFFFFFFFF;").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    setp.ge.u32 %p, %tid, %n;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64  %addr, %tid, 4, %ptr_in;").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32 %p, %ltid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32  %addr, %ltid, 4, %ptr_in;").map_err(|e| e.to_string())?;
         writeln!(out, "    @!%p ld.global.{ty} %val, [%addr];").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p  mov.{ty} %val, {identity};").map_err(|e| e.to_string())?;
 
@@ -211,8 +211,8 @@ impl WarpScanTemplate {
         }
 
         // Write output
-        writeln!(out, "    setp.lt.u32 %p, %tid, %n;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64  %addr, %tid, 4, %ptr_out;").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.lt.u32 %p, %ltid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32  %addr, %ltid, 4, %ptr_out;").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p st.global.{ty} [%addr], %val;").map_err(|e| e.to_string())?;
 
         writeln!(out, "    ret;").map_err(|e| e.to_string())?;
@@ -244,7 +244,7 @@ impl WarpScanTemplate {
         writeln!(out, "    .reg .{ty}   %val, %shfl64;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u32    %lo, %hi, %shfl_lo, %shfl_hi;")
             .map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %tid, %n, %mask, %laneid, %offset;")
+        writeln!(out, "    .reg .u32    %ltid, %n, %mask, %laneid, %offset;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %ptr_in, %ptr_out, %addr;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .pred   %p, %q;").map_err(|e| e.to_string())?;
@@ -253,12 +253,12 @@ impl WarpScanTemplate {
         writeln!(out, "    ld.param.u64 %ptr_in,  [param_input];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u32 %n,        [param_n];").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    mov.u32 %tid, %tid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    and.b32 %laneid, %tid, 31;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32 %ltid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    and.b32 %laneid, %ltid, 31;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32 %mask, 0xFFFFFFFF;").map_err(|e| e.to_string())?;
 
-        writeln!(out, "    setp.ge.u32 %p, %tid, %n;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64  %addr, %tid, 8, %ptr_in;").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.ge.u32 %p, %ltid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32  %addr, %ltid, 8, %ptr_in;").map_err(|e| e.to_string())?;
         writeln!(out, "    @!%p ld.global.{ty} %val, [%addr];").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p  mov.{ty} %val, 0;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.b64 {{%lo, %hi}}, %val;").map_err(|e| e.to_string())?;
@@ -294,8 +294,8 @@ impl WarpScanTemplate {
             writeln!(out, "    mov.b64 {{%lo, %hi}}, %val;").map_err(|e| e.to_string())?;
         }
 
-        writeln!(out, "    setp.lt.u32 %p, %tid, %n;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64  %addr, %tid, 8, %ptr_out;").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.lt.u32 %p, %ltid, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mad.wide.u32  %addr, %ltid, 8, %ptr_out;").map_err(|e| e.to_string())?;
         writeln!(out, "    @%p st.global.{ty} [%addr], %val;").map_err(|e| e.to_string())?;
 
         writeln!(out, "    ret;").map_err(|e| e.to_string())?;

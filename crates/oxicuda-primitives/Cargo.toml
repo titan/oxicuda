@@ -11,6 +11,13 @@ readme = "README.md"
 keywords = ["cuda", "gpu", "parallel", "sort", "primitives"]
 categories = ["hardware-support", "science", "mathematics", "algorithms"]
 
+[features]
+# Enables on-device GPU tests that JIT-compile the generated PTX kernels, launch
+# them on a real CUDA device, and assert numerical equivalence to a CPU oracle.
+# The tests skip gracefully when no GPU is present, so this feature is safe to
+# enable on CPU-only machines.
+gpu-tests = []
+
 [dependencies]
 oxicuda-driver = { workspace = true }
 oxicuda-memory = { workspace = true }

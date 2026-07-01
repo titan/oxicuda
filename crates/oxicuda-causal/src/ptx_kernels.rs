@@ -283,7 +283,7 @@ pub fn expm_pade_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %rd<16>;
-    .reg .u32  %r<32>;
+    .reg .u32  %r<40>;
     .reg .f32  %f<32>;
     .reg .pred %p0;
     .reg .pred %p1;
@@ -302,6 +302,15 @@ pub fn expm_pade_ptx(sm: u32) -> String {
     ld.param.u64  %rd1, [p_out];
     ld.param.u32  %r0,  [d];
 
+    // Materialise each shared array's base (shared-window offset) into a
+    // register once. PTX forbids a scaled-symbol address like `[sh_cur+%r*4]`,
+    // so every shared access below computes its byte address with
+    // `mad.lo.u32 %r37, idx, 4, base` and dereferences `[%r37]`.
+    mov.u32       %r33, sh_cur;
+    mov.u32       %r34, sh_alt;
+    mov.u32       %r35, sh_aug;
+    mov.u32       %r36, sh_scr;
+
     mov.u32       %r1, %tid.x;        // linear thread id
     mul.lo.u32    %r2, %r0, %r0;      // d*d element count
 
@@ -316,7 +325,8 @@ pub fn expm_pade_ptx(sm: u32) -> String {
     mul.wide.u32  %rd2, %r5, 4;
     add.u64       %rd3, %rd0, %rd2;
     ld.global.f32 %f0, [%rd3];
-    st.shared.f32 [sh_cur + %r5*4], %f0;
+    mad.lo.u32    %r37, %r5, 4, %r33;
+    st.shared.f32 [%r37], %f0;
 $EXPM_EXIT:
     bar.sync      0;
 
@@ -333,13 +343,15 @@ $EXPM_ROWSUM:
     setp.ge.u32   %p0, %r7, %r0;
     @%p0 bra $EXPM_ROWSUM_DONE;
     add.u32       %r8, %r6, %r7;
-    ld.shared.f32 %f2, [sh_cur + %r8*4];
+    mad.lo.u32    %r37, %r8, 4, %r33;
+    ld.shared.f32 %f2, [%r37];
     abs.f32       %f2, %f2;
     add.f32       %f1, %f1, %f2;
     add.u32       %r7, %r7, 1;
     bra $EXPM_ROWSUM;
 $EXPM_ROWSUM_DONE:
-    st.shared.f32 [sh_scr + %r3*4], %f1;
+    mad.lo.u32    %r37, %r3, 4, %r36;
+    st.shared.f32 [%r37], %f1;
 $EXPM_AFTER_ROWSUM:
     bar.sync      0;
 
@@ -351,7 +363,8 @@ $EXPM_AFTER_ROWSUM:
 $EXPM_NORMMAX:
     setp.ge.u32   %p0, %r9, %r0;
     @%p0 bra $EXPM_NORMMAX_DONE;
-    ld.shared.f32 %f4, [sh_scr + %r9*4];
+    mad.lo.u32    %r37, %r9, 4, %r36;
+    ld.shared.f32 %f4, [%r37];
     max.f32       %f3, %f3, %f4;
     add.u32       %r9, %r9, 1;
     bra $EXPM_NORMMAX;
@@ -389,9 +402,10 @@ $EXPM_AFTER_EXP:
     shl.b32       %r13, %r13, %r12;   // 2^s as integer
     cvt.rn.f32.u32 %f9, %r13;         // 2^s as f32 (exact for s < 24)
     rcp.rn.f32    %f10, %f9;          // 2^-s, exact for power-of-two input
-    ld.shared.f32 %f11, [sh_cur + %r5*4];
+    mad.lo.u32    %r37, %r5, 4, %r33;
+    ld.shared.f32 %f11, [%r37];
     mul.f32       %f11, %f11, %f10;   // scaled A[i,j]
-    st.shared.f32 [sh_cur + %r5*4], %f11;
+    st.shared.f32 [%r37], %f11;
 $EXPM_AFTER_SCALE:
     bar.sync      0;
 
@@ -399,7 +413,8 @@ $EXPM_AFTER_SCALE:
     // A^2[i,j] = sum_k A[i,k]*A[k,j]; U = I + A/2 + A^2/12; V = I - A/2 + A^2/12.
     setp.ge.u32   %p0, %r1, %r2;
     @%p0 bra $EXPM_AFTER_PADE;
-    ld.shared.f32 %f12, [sh_cur + %r5*4];   // scaled A[i,j]
+    mad.lo.u32    %r37, %r5, 4, %r33;
+    ld.shared.f32 %f12, [%r37];             // scaled A[i,j]
     mul.f32       %f13, %f12, {HALF};       // A[i,j]/2
     mov.f32       %f14, {ZERO};             // accumulator for A^2[i,j]
     mul.lo.u32    %r13, %r3, %r0;           // row base i*d
@@ -408,9 +423,11 @@ $EXPM_PADE_DOT:
     setp.ge.u32   %p0, %r14, %r0;
     @%p0 bra $EXPM_PADE_DOT_DONE;
     add.u32       %r15, %r13, %r14;
-    ld.shared.f32 %f15, [sh_cur + %r15*4];  // A[i,k]
+    mad.lo.u32    %r37, %r15, 4, %r33;
+    ld.shared.f32 %f15, [%r37];             // A[i,k]
     mad.lo.u32    %r16, %r14, %r0, %r4;
-    ld.shared.f32 %f16, [sh_cur + %r16*4];  // A[k,j]
+    mad.lo.u32    %r37, %r16, 4, %r33;
+    ld.shared.f32 %f16, [%r37];             // A[k,j]
     fma.rn.f32    %f14, %f15, %f16, %f14;
     add.u32       %r14, %r14, 1;
     bra $EXPM_PADE_DOT;
@@ -423,16 +440,19 @@ $EXPM_PADE_DOT_DONE:
     add.f32       %f19, %f19, %f17;         // U[i,j]
     sub.f32       %f20, %f18, %f13;
     add.f32       %f20, %f20, %f17;         // V[i,j]
-    st.shared.f32 [sh_alt + %r5*4], %f19;   // U -> sh_alt
+    mad.lo.u32    %r37, %r5, 4, %r34;
+    st.shared.f32 [%r37], %f19;             // U -> sh_alt
     // Augmented tableau: [V | I], row stride 2*d.
     mul.lo.u32    %r17, %r3, %r0;
     add.u32       %r17, %r17, %r17;         // i*2d
     add.u32       %r18, %r17, %r4;          // left half slot
-    st.shared.f32 [sh_aug + %r18*4], %f20;  // V[i,j]
+    mad.lo.u32    %r37, %r18, 4, %r35;
+    st.shared.f32 [%r37], %f20;             // V[i,j]
     add.u32       %r19, %r18, %r0;          // right half slot
-    @%p0 st.shared.f32 [sh_aug + %r19*4], {ONE};
-    setp.ne.u32   %p1, %r3, %r4;
-    @%p1 st.shared.f32 [sh_aug + %r19*4], {ZERO};
+    // Right half holds I[i,j] = %f18 (1.0 on the diagonal, 0.0 otherwise);
+    // store it directly (PTX `st` cannot take an immediate data operand).
+    mad.lo.u32    %r37, %r19, 4, %r35;
+    st.shared.f32 [%r37], %f18;
 $EXPM_AFTER_PADE:
     bar.sync      0;
 
@@ -453,7 +473,8 @@ $EXPM_GJ_COL:
     mul.lo.u32    %r22, %r20, %r0;
     add.u32       %r22, %r22, %r22;         // c*2d
     add.u32       %r23, %r22, %r20;         // (c,c) slot
-    ld.shared.f32 %f21, [sh_aug + %r23*4];
+    mad.lo.u32    %r37, %r23, 4, %r35;
+    ld.shared.f32 %f21, [%r37];
     abs.f32       %f21, %f21;               // |tableau[c,c]|
     add.u32       %r24, %r20, 1;            // scan row r = c+1 ..
 $EXPM_GJ_PIV_SCAN:
@@ -462,7 +483,8 @@ $EXPM_GJ_PIV_SCAN:
     mul.lo.u32    %r25, %r24, %r0;
     add.u32       %r25, %r25, %r25;
     add.u32       %r25, %r25, %r20;         // (r,c) slot
-    ld.shared.f32 %f22, [sh_aug + %r25*4];
+    mad.lo.u32    %r37, %r25, 4, %r35;
+    ld.shared.f32 %f22, [%r37];
     abs.f32       %f22, %f22;
     setp.gt.f32   %p0, %f22, %f21;
     @%p0 mov.f32  %f21, %f22;
@@ -484,10 +506,12 @@ $EXPM_GJ_SWAP:
     @%p0 bra $EXPM_GJ_AFTER_PIVOT;
     add.u32       %r30, %r26, %r29;
     add.u32       %r31, %r27, %r29;
-    ld.shared.f32 %f23, [sh_aug + %r30*4];
-    ld.shared.f32 %f24, [sh_aug + %r31*4];
-    st.shared.f32 [sh_aug + %r30*4], %f24;
-    st.shared.f32 [sh_aug + %r31*4], %f23;
+    mad.lo.u32    %r37, %r30, 4, %r35;
+    ld.shared.f32 %f23, [%r37];
+    mad.lo.u32    %r38, %r31, 4, %r35;
+    ld.shared.f32 %f24, [%r38];
+    st.shared.f32 [%r37], %f24;
+    st.shared.f32 [%r38], %f23;
     add.u32       %r29, %r29, 1;
     bra $EXPM_GJ_SWAP;
 $EXPM_GJ_AFTER_PIVOT:
@@ -503,16 +527,19 @@ $EXPM_GJ_AFTER_PIVOT:
     mul.lo.u32    %r22, %r20, %r0;
     add.u32       %r22, %r22, %r22;         // c*2d
     add.u32       %r23, %r22, %r20;         // (c,c) slot
-    ld.shared.f32 %f25, [sh_aug + %r23*4];  // pivot value
+    mad.lo.u32    %r37, %r23, 4, %r35;
+    ld.shared.f32 %f25, [%r37];             // pivot value
     // Guard a (near-)singular pivot so the divide stays finite.
     abs.f32       %f26, %f25;
     setp.lt.f32   %p1, %f26, {TINY};
     mov.f32       %f27, {ONE};
     @%p1 mov.f32  %f25, %f27;
     add.u32       %r24, %r22, %r4;           // left slot (c,j)
-    ld.shared.f32 %f28, [sh_aug + %r24*4];   // tableau[c,j]
+    mad.lo.u32    %r37, %r24, 4, %r35;
+    ld.shared.f32 %f28, [%r37];              // tableau[c,j]
     add.u32       %r25, %r24, %r0;           // right slot (c,j+d)
-    ld.shared.f32 %f29, [sh_aug + %r25*4];   // tableau[c,j+d]
+    mad.lo.u32    %r37, %r25, 4, %r35;
+    ld.shared.f32 %f29, [%r37];              // tableau[c,j+d]
 $EXPM_GJ_NORM_SYNC:
     bar.sync      0;
     // Direct division by the pivot, matching the CPU Gauss-Jordan reference.
@@ -521,9 +548,11 @@ $EXPM_GJ_NORM_SYNC:
     setp.ne.u32   %p0, %r3, %r20;
     @%p0 bra $EXPM_GJ_AFTER_NORM;
     div.rn.f32    %f28, %f28, %f25;
-    st.shared.f32 [sh_aug + %r24*4], %f28;
+    mad.lo.u32    %r37, %r24, 4, %r35;
+    st.shared.f32 [%r37], %f28;
     div.rn.f32    %f29, %f29, %f25;
-    st.shared.f32 [sh_aug + %r25*4], %f29;
+    mad.lo.u32    %r37, %r25, 4, %r35;
+    st.shared.f32 [%r37], %f29;
 $EXPM_GJ_AFTER_NORM:
     bar.sync      0;
 
@@ -539,18 +568,23 @@ $EXPM_GJ_AFTER_NORM:
     mul.lo.u32    %r26, %r3, %r0;
     add.u32       %r26, %r26, %r26;          // i*2d
     add.u32       %r27, %r26, %r20;          // (i,c) slot -> elimination factor
-    ld.shared.f32 %f30, [sh_aug + %r27*4];   // factor = tableau[i,c]
+    mad.lo.u32    %r37, %r27, 4, %r35;
+    ld.shared.f32 %f30, [%r37];              // factor = tableau[i,c]
     neg.f32       %f30, %f30;                 // -factor for fused subtract
     mul.lo.u32    %r28, %r20, %r0;
     add.u32       %r28, %r28, %r28;          // c*2d
     add.u32       %r29, %r26, %r4;           // (i,j) slot
     add.u32       %r30, %r28, %r4;           // (c,j) slot
-    ld.shared.f32 %f31, [sh_aug + %r29*4];   // tableau[i,j]
-    ld.shared.f32 %f25, [sh_aug + %r30*4];   // tableau[c,j]
+    mad.lo.u32    %r37, %r29, 4, %r35;
+    ld.shared.f32 %f31, [%r37];              // tableau[i,j]
+    mad.lo.u32    %r37, %r30, 4, %r35;
+    ld.shared.f32 %f25, [%r37];              // tableau[c,j]
     add.u32       %r31, %r29, %r0;           // (i,j+d) slot
     add.u32       %r24, %r30, %r0;           // (c,j+d) slot
-    ld.shared.f32 %f28, [sh_aug + %r31*4];   // tableau[i,j+d]
-    ld.shared.f32 %f29, [sh_aug + %r24*4];   // tableau[c,j+d]
+    mad.lo.u32    %r37, %r31, 4, %r35;
+    ld.shared.f32 %f28, [%r37];              // tableau[i,j+d]
+    mad.lo.u32    %r37, %r24, 4, %r35;
+    ld.shared.f32 %f29, [%r37];              // tableau[c,j+d]
 $EXPM_GJ_ELIM_SYNC:
     bar.sync      0;
     // Sub-phase B: store the eliminated row entries.
@@ -559,9 +593,11 @@ $EXPM_GJ_ELIM_SYNC:
     setp.eq.u32   %p0, %r3, %r20;
     @%p0 bra $EXPM_GJ_AFTER_ELIM;
     fma.rn.f32    %f31, %f30, %f25, %f31;    // tableau[i,j] - factor*tableau[c,j]
-    st.shared.f32 [sh_aug + %r29*4], %f31;
+    mad.lo.u32    %r37, %r29, 4, %r35;
+    st.shared.f32 [%r37], %f31;
     fma.rn.f32    %f28, %f30, %f29, %f28;    // tableau[i,j+d] - factor*tableau[c,j+d]
-    st.shared.f32 [sh_aug + %r31*4], %f28;
+    mad.lo.u32    %r37, %r31, 4, %r35;
+    st.shared.f32 [%r37], %f28;
 $EXPM_GJ_AFTER_ELIM:
     bar.sync      0;
 
@@ -575,8 +611,10 @@ $EXPM_GJ_DONE:
     add.u32       %r21, %r21, %r21;          // i*2d
     add.u32       %r21, %r21, %r0;           // right half base
     add.u32       %r21, %r21, %r4;           // (i,j+d)
-    ld.shared.f32 %f0, [sh_aug + %r21*4];
-    st.shared.f32 [sh_cur + %r5*4], %f0;     // V^-1 -> sh_cur
+    mad.lo.u32    %r37, %r21, 4, %r35;
+    ld.shared.f32 %f0, [%r37];
+    mad.lo.u32    %r37, %r5, 4, %r33;
+    st.shared.f32 [%r37], %f0;               // V^-1 -> sh_cur
 $EXPM_AFTER_VINV:
     bar.sync      0;
 
@@ -590,20 +628,25 @@ $EXPM_GEMM_DOT:
     setp.ge.u32   %p0, %r7, %r0;
     @%p0 bra $EXPM_GEMM_DOT_DONE;
     add.u32       %r8, %r6, %r7;
-    ld.shared.f32 %f2, [sh_alt + %r8*4];     // U[i,k]
+    mad.lo.u32    %r37, %r8, 4, %r34;
+    ld.shared.f32 %f2, [%r37];               // U[i,k]
     mad.lo.u32    %r9, %r7, %r0, %r4;
-    ld.shared.f32 %f3, [sh_cur + %r9*4];     // V^-1[k,j]
+    mad.lo.u32    %r37, %r9, 4, %r33;
+    ld.shared.f32 %f3, [%r37];               // V^-1[k,j]
     fma.rn.f32    %f1, %f2, %f3, %f1;
     add.u32       %r7, %r7, 1;
     bra $EXPM_GEMM_DOT;
 $EXPM_GEMM_DOT_DONE:
-    st.shared.f32 [sh_aug + %r5*4], %f1;     // scaled expm -> sh_aug scratch
+    mad.lo.u32    %r37, %r5, 4, %r35;
+    st.shared.f32 [%r37], %f1;               // scaled expm -> sh_aug scratch
 $EXPM_AFTER_GEMM:
     bar.sync      0;
     setp.ge.u32   %p0, %r1, %r2;
     @%p0 bra $EXPM_AFTER_GEMM_CP;
-    ld.shared.f32 %f0, [sh_aug + %r5*4];
-    st.shared.f32 [sh_cur + %r5*4], %f0;     // scaled expm -> sh_cur
+    mad.lo.u32    %r37, %r5, 4, %r35;
+    ld.shared.f32 %f0, [%r37];
+    mad.lo.u32    %r37, %r5, 4, %r33;
+    st.shared.f32 [%r37], %f0;               // scaled expm -> sh_cur
 $EXPM_AFTER_GEMM_CP:
     bar.sync      0;
 
@@ -623,21 +666,26 @@ $EXPM_SQ_DOT:
     setp.ge.u32   %p0, %r7, %r0;
     @%p0 bra $EXPM_SQ_DOT_DONE;
     add.u32       %r8, %r6, %r7;
-    ld.shared.f32 %f2, [sh_cur + %r8*4];
+    mad.lo.u32    %r37, %r8, 4, %r33;
+    ld.shared.f32 %f2, [%r37];
     mad.lo.u32    %r9, %r7, %r0, %r4;
-    ld.shared.f32 %f3, [sh_cur + %r9*4];
+    mad.lo.u32    %r37, %r9, 4, %r33;
+    ld.shared.f32 %f3, [%r37];
     fma.rn.f32    %f1, %f2, %f3, %f1;
     add.u32       %r7, %r7, 1;
     bra $EXPM_SQ_DOT;
 $EXPM_SQ_DOT_DONE:
-    st.shared.f32 [sh_alt + %r5*4], %f1;
+    mad.lo.u32    %r37, %r5, 4, %r34;
+    st.shared.f32 [%r37], %f1;
 $EXPM_SQ_AFTER_MUL:
     bar.sync      0;
     // copy sh_alt back into sh_cur for the next squaring / final store
     setp.ge.u32   %p0, %r1, %r2;
     @%p0 bra $EXPM_SQ_AFTER_CP;
-    ld.shared.f32 %f0, [sh_alt + %r5*4];
-    st.shared.f32 [sh_cur + %r5*4], %f0;
+    mad.lo.u32    %r37, %r5, 4, %r34;
+    ld.shared.f32 %f0, [%r37];
+    mad.lo.u32    %r37, %r5, 4, %r33;
+    st.shared.f32 [%r37], %f0;
 $EXPM_SQ_AFTER_CP:
     bar.sync      0;
     add.u32       %r20, %r20, 1;
@@ -647,7 +695,8 @@ $EXPM_SQ_DONE:
     // --- Phase 7: write expm(A) from sh_cur to global output ---------------
     setp.ge.u32   %p0, %r1, %r2;
     @%p0 bra $EXPM_DONE;
-    ld.shared.f32 %f0, [sh_cur + %r5*4];
+    mad.lo.u32    %r37, %r5, 4, %r33;
+    ld.shared.f32 %f0, [%r37];
     mul.wide.u32  %rd4, %r5, 4;
     add.u64       %rd5, %rd1, %rd4;
     st.global.f32 [%rd5], %f0;

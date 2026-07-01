@@ -249,7 +249,7 @@ pub fn lof_reach_dist_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %rd<12>;
-    .reg .u32  %r<14>;
+    .reg .u32  %r<15>;
     .reg .f32  %f<10>;
     .reg .pred %p0, %p1;
 
@@ -289,6 +289,11 @@ $LOF_LOOP:
     add.u64       %rd6, %rd2, %rd5;
     ld.global.u32 %r13, [%rd6];        // j
 
+    // Bug-fix: save j to %r14 before it is clobbered by the dim loop counter.
+    // The original code reused %r13 as the dim counter, causing dist(x_i, x_j)
+    // to always compute dist(x_i, x_i) = 0.  %r14 holds j for the inner loop.
+    mov.u32       %r14, %r13;          // save j
+
     // knn_dist[j * k + (k-1)] — k-distance of j (last elem of j's knn)
     // For simplicity: p_knn_dist is [m] = k-distances indexed by j
     mul.wide.u32  %rd7, %r13, 4;
@@ -297,19 +302,19 @@ $LOF_LOOP:
 
     // Compute euclidean(x_i, data_j) over d dimensions
     mov.f32       %f1, {ZERO};
-    mov.u32       %r13, 0;
+    mov.u32       %r13, 0;             // dim loop counter (clobbers j; use %r14 for j)
 $LOF_INNER:
     setp.ge.u32   %p1, %r13, %r2;
     @%p1 bra $LOF_INNER_DONE;
 
-    mul.lo.u32    %r12, %r11, %r2;
-    add.u32       %r12, %r12, %r13;
+    mul.lo.u32    %r12, %r11, %r2;    // i * d
+    add.u32       %r12, %r12, %r13;   // i*d + dim
     mul.wide.u32  %rd9, %r12, 4;
     add.u64       %rd10, %rd0, %rd9;
     ld.global.f32 %f2, [%rd10];        // x_i[dim]
 
-    mul.lo.u32    %r12, %r11, %r2;    // reuse r12
-    add.u32       %r12, %r12, %r13;
+    mul.lo.u32    %r12, %r14, %r2;    // j * d  (fixed: was %r11=i, now %r14=j)
+    add.u32       %r12, %r12, %r13;   // j*d + dim
     mul.wide.u32  %rd9, %r12, 4;
     add.u64       %rd10, %rd1, %rd9;
     ld.global.f32 %f3, [%rd10];        // data_j[dim]

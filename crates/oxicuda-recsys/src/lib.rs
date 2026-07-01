@@ -56,6 +56,14 @@ pub use crate::ranking::fairness_ranking::{FairnessRanker, FairnessRankerConfig}
 pub use crate::sequential::cl4srec::{Cl4sRec, Cl4sRecConfig};
 pub use crate::sequential::duorec::{DuoRec, DuoRecConfig};
 
+/// On-device GPU validation tests (feature-gated): JIT-compile each hand-written
+/// PTX kernel, launch it on a real CUDA device, and assert numerical equivalence
+/// or structural correctness against CPU references. Compiled only under
+/// `--features gpu-tests` and only in test builds; every test skips gracefully
+/// when no GPU is available.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 #[cfg(test)]
 mod e2e_tests {
     use std::collections::{BTreeSet, HashSet};

@@ -8,7 +8,7 @@ neuroevolution (NEAT). Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) 
 
 ## Implementation Status
 
-**Actual: ~29.2k lines (59 files)** — covers GA building blocks, CMA-ES, DE,
+**Actual: ~23.0k lines (59 files)** — covers GA building blocks, CMA-ES, DE,
 NSGA-II, MOEA/D, NEAT, PSO, ACO, multi-objective metrics, and 7 PTX kernels × 6 SM
 versions. All algorithms are implemented end-to-end in pure Rust with no external
 linear-algebra or RNG dependencies.
@@ -177,7 +177,7 @@ time and would be JIT-compiled by `oxicuda-driver` on Linux + NVIDIA hardware.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, no `#![allow]` escapes besides necessary `type_complexity`)
-- Tests: 596 host-side unit tests + 2 doctests passing (incl. 18 cross-module e2e tests, the
+- Tests: 612 host-side unit tests + 2 doctests passing (incl. 18 cross-module e2e tests, the
   6 ZDT1-3 / DTLZ1-2 NSGA-II analytic-front convergence tests, the 6 CMA-ME quality-diversity
   tests, and 36 ZDT4-6 / DTLZ3-7 / WFG1-9 analytic-front structural tests); PTX kernel strings
   validated per SM version

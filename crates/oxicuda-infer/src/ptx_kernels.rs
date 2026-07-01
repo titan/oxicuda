@@ -12,6 +12,12 @@
 //! | [`top_k_filter_ptx`] | Suppress non-top-K logits to −∞ |
 //! | [`logits_softmax_ptx`] | Numerically stable softmax over logit vector |
 //! | [`kv_append_ptx`] | Append one token's K/V to the paged cache |
+//!
+//! # On-device validation
+//!
+//! Every kernel below is JIT-loaded on a real CUDA device and checked against a
+//! CPU oracle by the `gpu_tests` module (enable with `--features gpu-tests`).
+//! Several bugs were found and fixed that way; see the per-function notes.
 
 /// PTX IEEE 754 hex literal for a `f32` value.
 fn f32_hex(v: f32) -> String {
@@ -22,14 +28,33 @@ fn f32_hex(v: f32) -> String {
 
 /// Generate the PTX kernel for PagedAttention.
 ///
-/// Each thread block handles one attention head for one query token.
-/// The kernel:
-/// 1. Loads the query vector `q[head, :]` from `q_ptr`.
-/// 2. Iterates over KV blocks referenced by `block_table`.
-/// 3. For each filled slot, computes `dot(q, k) * scale`, accumulates online
-///    softmax (`Dao et al., FlashAttention`-style max-then-exp), and adds
-///    weighted value to the output accumulator.
-/// 4. Stores the final output to `out_ptr`.
+/// Each thread block handles one attention head; each thread owns one element
+/// `dim` of the head dimension. The kernel:
+/// 1. Iterates over the KV blocks referenced by `block_table`.
+/// 2. For each filled slot, recomputes the **full** query·key dot product over
+///    `head_dim`, scales it, and folds it into a FlashAttention-style online
+///    softmax (`Dao et al.`): running max `m`, running denominator `l`.
+/// 3. Accumulates `weight · v[t, dim]` into this thread's output element.
+/// 4. Normalises by `l` and stores `out[head, dim]`.
+///
+/// The exponential is evaluated in **base e** as `ex2(x · log2(e))`.
+///
+/// ## Bugs found on-device and fixed (vs the original hand-written PTX)
+///
+/// * **Invalid PTX** — the old offset math fed a 64-bit register to
+///   `mul.wide.u32` (whose sources must be 32-bit); ptxas rejected the module
+///   with "invalid PTX" on the RTX A4000 (sm_86), so it never loaded.
+/// * **Per-element "dot product"** — each thread used only `q[dim]·k[t,dim]` as
+///   the attention score instead of the full `Σ_d q[d]·k[t,d]`, so the softmax
+///   was meaningless. Fixed: each thread now recomputes the full dot product.
+/// * **Value loaded from the key buffer** — `v` was read through `k_ptr`. Fixed
+///   to read through `v_ptr`.
+/// * **Base-2 softmax** — `ex2.approx.f32` was applied without the `· log2(e)`
+///   scale, computing `2^x` instead of `e^x` (≈20–50 % error that still sums to
+///   1). Fixed by scaling the exponent.
+/// * **Wrong GQA map** — `kv_head = head / n_kv_heads` instead of
+///   `head / (n_heads / n_kv_heads)`, indexing past the KV heads for
+///   `gqa_ratio > n_kv_heads`. Fixed.
 ///
 /// # Parameters (device-side)
 ///
@@ -55,14 +80,16 @@ pub fn paged_attn_ptx(sm: u32) -> String {
     } else {
         "7.5"
     };
+    let neg_inf = f32_hex(f32::NEG_INFINITY);
+    let log2e = f32_hex(std::f32::consts::LOG2_E);
     format!(
         r#".version {ver}
 .target sm_{sm}
 .address_size 64
 
-// paged_attention
+// paged_attention  (corrected FlashAttention-style online softmax)
 // Grid : (n_query_heads, 1, 1)
-// Block: (head_dim, 1, 1)   -- each thread owns one head-dim element
+// Block: (head_dim, 1, 1)   -- each thread owns one head-dim element `dim`
 .visible .entry paged_attention(
     .param .u64 q_ptr,
     .param .u64 k_ptr,
@@ -78,134 +105,133 @@ pub fn paged_attn_ptx(sm: u32) -> String {
     .param .f32 scale
 )
 {{
-    .reg .u64  %rq, %rk, %rv, %rbt, %ro;
-    .reg .u32  %head, %dim, %hd, %ghead, %bs, %nb, %sl, %nkvh;
-    .reg .u32  %blk_i, %phys, %slot, %tok;
-    .reg .u64  %kaddr, %vaddr, %btaddr, %oaddr;
-    .reg .f32  %q_val, %k_val, %v_val, %scale_r;
-    .reg .f32  %dot, %exp_val, %log_sum, %out_acc, %max_score, %new_max;
-    .reg .f32  %old_scale, %new_score, %denom;
-    .reg .pred %p_oob, %p_blk, %p_slot, %p_update;
+    .reg .u64  %rq, %rk, %rv, %rbt, %ro, %addr;
+    .reg .u32  %nh, %nkvh, %hd, %bs, %nb, %sl;
+    .reg .u32  %head, %dim, %gqa, %kvh, %qbase, %kbase, %tmp, %blk, %phys, %slot, %tok, %d;
+    .reg .f32  %scale_r, %log2e, %m, %l, %acc, %dot, %qd, %kd, %vd;
+    .reg .f32  %score, %mnew, %alpha, %pw, %out;
+    .reg .pred %p;
 
-    // --- load parameters -----------------------------------------------
-    ld.param.u64  %rq,   [q_ptr];
-    ld.param.u64  %rk,   [k_ptr];
-    ld.param.u64  %rv,   [v_ptr];
-    ld.param.u64  %rbt,  [btbl_ptr];
-    ld.param.u64  %ro,   [out_ptr];
-    ld.param.u32  %hd,   [head_dim];
-    ld.param.u32  %bs,   [block_size];
-    ld.param.u32  %nb,   [n_blocks];
-    ld.param.u32  %sl,   [seq_len];
-    ld.param.u32  %nkvh, [n_kv_heads];
-    ld.param.f32  %scale_r, [scale];
+    ld.param.u64 %rq,   [q_ptr];
+    ld.param.u64 %rk,   [k_ptr];
+    ld.param.u64 %rv,   [v_ptr];
+    ld.param.u64 %rbt,  [btbl_ptr];
+    ld.param.u64 %ro,   [out_ptr];
+    ld.param.u32 %nh,   [n_heads];
+    ld.param.u32 %nkvh, [n_kv_heads];
+    ld.param.u32 %hd,   [head_dim];
+    ld.param.u32 %bs,   [block_size];
+    ld.param.u32 %nb,   [n_blocks];
+    ld.param.u32 %sl,   [seq_len];
+    ld.param.f32 %scale_r, [scale];
 
-    // head = blockIdx.x,  dim = threadIdx.x
     mov.u32 %head, %ctaid.x;
     mov.u32 %dim,  %tid.x;
+    setp.ge.u32 %p, %head, %nh;
+    @%p ret;
+    setp.ge.u32 %p, %dim, %hd;
+    @%p ret;
 
-    // bounds check
-    setp.ge.u32 %p_oob, %dim, %hd;
-    @%p_oob ret;
+    // GQA: kv_head = head / (n_heads / n_kv_heads)
+    div.u32 %gqa, %nh, %nkvh;
+    div.u32 %kvh, %head, %gqa;
 
-    // GQA: map query head → kv head
-    .reg .u32 %n_heads_r, %kv_head;
-    ld.param.u32  %n_heads_r, [n_heads];
-    setp.ge.u32 %p_oob, %head, %n_heads_r;
-    @%p_oob ret;
-    div.u32 %kv_head, %head, %nkvh;   // integer division maps Q → KV head
+    // q row base element offset
+    mul.lo.u32 %qbase, %head, %hd;
 
-    // load q[head * head_dim + dim]
-    .reg .u64 %qoff;
-    mad.wide.u32 %qoff, %head, %hd, %dim;
-    mul.wide.u32 %qoff, %qoff, 4;   // * sizeof(f32)
-    add.u64 %rq, %rq, %qoff;
-    ld.global.f32 %q_val, [%rq];
+    // online-softmax accumulators
+    mov.f32 %m,   {neg_inf};
+    mov.f32 %l,   0F00000000;
+    mov.f32 %acc, 0F00000000;
+    mov.f32 %log2e, {log2e};
 
-    // init online softmax accumulators
-    mov.f32 %max_score, 0Fff800000;  // -inf
-    mov.f32 %log_sum,   0F00000000;  // 0.0
-    mov.f32 %out_acc,   0F00000000;  // 0.0
-
-    // --- iterate over KV blocks ----------------------------------------
-    mov.u32 %blk_i, 0;
+    mov.u32 %blk, 0;
 $BLOCK_LOOP:
-    setp.ge.u32 %p_blk, %blk_i, %nb;
-    @%p_blk bra $BLOCK_DONE;
+    setp.ge.u32 %p, %blk, %nb;
+    @%p bra $BLOCK_DONE;
+    // phys = block_table[blk]
+    mul.wide.u32 %addr, %blk, 4;
+    add.u64 %addr, %rbt, %addr;
+    ld.global.u32 %phys, [%addr];
 
-    // load physical block id from block table
-    mul.wide.u32 %btaddr, %blk_i, 4;
-    add.u64 %btaddr, %rbt, %btaddr;
-    ld.global.u32 %phys, [%btaddr];
-
-    // iterate over slots within this block
     mov.u32 %slot, 0;
 $SLOT_LOOP:
-    setp.ge.u32 %p_slot, %slot, %bs;
-    @%p_slot bra $SLOT_DONE;
+    setp.ge.u32 %p, %slot, %bs;
+    @%p bra $SLOT_DONE;
+    mad.lo.u32 %tok, %blk, %bs, %slot;
+    setp.ge.u32 %p, %tok, %sl;
+    @%p bra $SLOT_DONE;
 
-    // global token index
-    mad.lo.u32 %tok, %blk_i, %bs, %slot;
-    setp.ge.u32 %p_slot, %tok, %sl;
-    @%p_slot bra $SLOT_DONE;
+    // kbase = ((phys*bs + slot)*n_kv_heads + kv_head) * head_dim
+    mad.lo.u32 %tmp, %phys, %bs, %slot;
+    mul.lo.u32 %tmp, %tmp, %nkvh;
+    add.u32    %tmp, %tmp, %kvh;
+    mul.lo.u32 %kbase, %tmp, %hd;
 
-    // k_ptr + (phys * block_size + slot) * n_kv_heads * head_dim * 4 + kv_head*head_dim*4 + dim*4
-    .reg .u32 %koff_u;
-    mad.lo.u32 %koff_u, %phys, %bs, %slot;    // (phys*bs + slot)
-    .reg .u32 %kv_stride;
-    mul.lo.u32 %kv_stride, %nkvh, %hd;        // n_kv_heads * head_dim
-    mul.lo.u32 %koff_u, %koff_u, %kv_stride;  // * kv_stride
-    mad.lo.u32 %koff_u, %kv_head, %hd, %koff_u; // + kv_head*head_dim
-    add.u32    %koff_u, %koff_u, %dim;         // + dim
-    .reg .u64 %koff;
-    mul.wide.u32 %koff, %koff_u, 4;
-    add.u64 %kaddr, %rk, %koff;
-    ld.global.f32 %k_val, [%kaddr];
+    // dot = Σ_d q[qbase+d] * k[kbase+d]  (full dot product, online softmax)
+    mov.f32 %dot, 0F00000000;
+    mov.u32 %d, 0;
+$DOT_LOOP:
+    setp.ge.u32 %p, %d, %hd;
+    @%p bra $DOT_DONE;
+    add.u32 %tmp, %qbase, %d;
+    mul.wide.u32 %addr, %tmp, 4;
+    add.u64 %addr, %rq, %addr;
+    ld.global.f32 %qd, [%addr];
+    add.u32 %tmp, %kbase, %d;
+    mul.wide.u32 %addr, %tmp, 4;
+    add.u64 %addr, %rk, %addr;
+    ld.global.f32 %kd, [%addr];
+    fma.rn.f32 %dot, %qd, %kd, %dot;
+    add.u32 %d, %d, 1;
+    bra $DOT_LOOP;
+$DOT_DONE:
+    mul.f32 %score, %dot, %scale_r;
 
-    // dot product contribution: q * k * scale
-    mul.f32 %new_score, %q_val, %k_val;
-    mul.f32 %new_score, %new_score, %scale_r;
+    // online softmax update (FlashAttention-style), base-e via ex2(x*log2e)
+    max.f32 %mnew, %m, %score;
+    sub.f32 %alpha, %m, %mnew;
+    mul.f32 %alpha, %alpha, %log2e;
+    ex2.approx.f32 %alpha, %alpha;       // exp(m - mnew)
+    sub.f32 %pw, %score, %mnew;
+    mul.f32 %pw, %pw, %log2e;
+    ex2.approx.f32 %pw, %pw;             // exp(score - mnew)
+    fma.rn.f32 %l, %l, %alpha, %pw;      // l = l*alpha + pw
 
-    // online softmax update (Flash-Attention style)
-    max.f32 %new_max, %max_score, %new_score;
-    sub.f32 %old_scale, %max_score, %new_max;
-    ex2.approx.f32 %old_scale, %old_scale;      // 2^(old_max - new_max)
-    mul.f32 %log_sum, %log_sum, %old_scale;
-    sub.f32 %exp_val, %new_score, %new_max;
-    ex2.approx.f32 %exp_val, %exp_val;          // 2^(score - new_max)
-    add.f32 %log_sum, %log_sum, %exp_val;
+    // v contribution: vd = v[kbase + dim]  (read through v_ptr, not k_ptr)
+    add.u32 %tmp, %kbase, %dim;
+    mul.wide.u32 %addr, %tmp, 4;
+    add.u64 %addr, %rv, %addr;
+    ld.global.f32 %vd, [%addr];
+    mul.f32 %acc, %acc, %alpha;
+    fma.rn.f32 %acc, %pw, %vd, %acc;     // acc = acc*alpha + pw*vd
 
-    // v contribution
-    add.u64 %vaddr, %rk, %koff;   // same offset into v block (k and v interleaved later)
-    // (simplified: in production K and V share the same block layout but separate halves)
-    ld.global.f32 %v_val, [%vaddr];
-    mul.f32 %out_acc, %out_acc, %old_scale;
-    fma.rn.f32 %out_acc, %exp_val, %v_val, %out_acc;
-
-    mov.f32 %max_score, %new_max;
+    mov.f32 %m, %mnew;
     add.u32 %slot, %slot, 1;
     bra $SLOT_LOOP;
 $SLOT_DONE:
-    add.u32 %blk_i, %blk_i, 1;
+    add.u32 %blk, %blk, 1;
     bra $BLOCK_LOOP;
 $BLOCK_DONE:
 
-    // normalise: out / sum(exp)
-    rcp.approx.f32 %denom, %log_sum;
-    mul.f32 %out_acc, %out_acc, %denom;
-
-    // store output
-    .reg .u64 %ooff;
-    mad.wide.u32 %ooff, %head, %hd, %dim;
-    mul.wide.u32 %ooff, %ooff, 4;
-    add.u64 %oaddr, %ro, %ooff;
-    st.global.f32 [%oaddr], %out_acc;
+    // out = acc / l (guard the empty-sequence l == 0 case)
+    mov.f32 %out, 0F00000000;
+    setp.eq.f32 %p, %l, 0F00000000;
+    @%p bra $ATTN_STORE;
+    div.rn.f32 %out, %acc, %l;
+$ATTN_STORE:
+    add.u32 %tmp, %qbase, %dim;
+    mul.wide.u32 %addr, %tmp, 4;
+    add.u64 %addr, %ro, %addr;
+    st.global.f32 [%addr], %out;
 
     ret;
 }}
 "#,
         ver = ver,
         sm = sm,
+        neg_inf = neg_inf,
+        log2e = log2e,
     )
 }
 
@@ -221,6 +247,19 @@ $BLOCK_DONE:
 /// ```
 /// Applied independently to Q and K.
 ///
+/// ## Bugs found on-device and fixed
+///
+/// * **Q\[2i\] lost its sine term** — the original applied two cancelling fused
+///   multiply-adds (`+q1·sin` then `−q1·sin`), leaving `q_out[2i] = q[2i]·cos`
+///   with **no** `−q[2i+1]·sin` term. (The K path was correct.) Fixed to a
+///   single subtractive fma, mirroring the K rotation.
+/// * **Imprecise `log2(10000)` constant** — the literal `0F4154A3BB` (≈13.2909)
+///   differs from `log2(10000) ≈ 13.28771` by ~0.02 %. Now derived exactly from
+///   `10000.0_f32.log2()`.
+///
+/// `cos.approx.f32` / `sin.approx.f32` are accurate for `|θ| < π`; callers
+/// (and the GPU tests) keep positions small enough that θ ≤ pos stays in range.
+///
 /// Grid : (seq_len * n_heads, 1, 1)
 /// Block: (head_dim/2, 1, 1)
 pub fn rope_apply_ptx(sm: u32) -> String {
@@ -232,6 +271,7 @@ pub fn rope_apply_ptx(sm: u32) -> String {
         "7.5"
     };
     let theta_base = f32_hex(10000.0_f32);
+    let log2_base = f32_hex(10000.0_f32.log2());
     format!(
         r#".version {ver}
 .target sm_{sm}
@@ -258,6 +298,10 @@ pub fn rope_apply_ptx(sm: u32) -> String {
     .reg .f32 %q0, %q1, %k0, %k1, %cos_t, %sin_t;
     .reg .f32 %theta, %pos_f, %freq, %angle;
     .reg .f32 %dim_f, %hd_f, %base;
+    .reg .u32 %half_hd;
+    .reg .f32 %log2_base;
+    .reg .u32 %base_off, %off0, %off1;
+    .reg .f32 %q0_new, %q1_new, %k0_new, %k1_new;
     .reg .pred %p_oob;
     .reg .u64 %q0addr, %q1addr, %k0addr, %k1addr, %paddr;
 
@@ -281,7 +325,6 @@ pub fn rope_apply_ptx(sm: u32) -> String {
     mul.lo.u32 %dim0, %pair, 2;
     add.u32    %dim1, %dim0, 1;
 
-    .reg .u32 %half_hd;
     shr.u32 %half_hd, %hd, 1;
     setp.ge.u32 %p_oob, %pair, %half_hd;
     @%p_oob ret;
@@ -299,28 +342,19 @@ pub fn rope_apply_ptx(sm: u32) -> String {
     cvt.rn.f32.u32 %hd_f,  %hd;
     div.approx.f32 %freq, %dim_f, %hd_f;
 
-    // theta = pos / 10000^freq
-    // θ = pos * 10000^(-freq) = pos * exp(-freq * ln(10000))
-    mov.f32 %base, {theta_base};  // 10000.0
-    // Using approximation: theta = pos_f * rcp(base^freq) -- simplified
-    // Full: base^freq = exp(freq * lg2(base) / lg2(e))
-    // PTX: ex2.approx for 2^x, so base^freq = 2^(freq * log2(base))
-    // log2(10000) ≈ 13.2877
-    .reg .f32 %log2_base;
-    mov.f32 %log2_base, 0F4154A3BB;  // log2f(10000.0f) ≈ 13.2877
+    // theta = pos / 10000^freq = pos * 2^(-freq*log2(10000))
+    mov.f32 %base, {theta_base};        // 10000.0 (documentation reference)
+    mov.f32 %log2_base, {log2_base};    // log2(10000)
     mul.f32 %angle, %freq, %log2_base;
-    ex2.approx.f32 %theta, %angle;   // 2^(freq*log2(10000)) = 10000^freq
-    rcp.approx.f32 %theta, %theta;   // 1 / 10000^freq
-    mul.f32 %theta, %pos_f, %theta;  // pos / 10000^freq
+    ex2.approx.f32 %theta, %angle;       // 2^(freq*log2(10000)) = 10000^freq
+    rcp.approx.f32 %theta, %theta;       // 1 / 10000^freq
+    mul.f32 %theta, %pos_f, %theta;      // pos / 10000^freq
 
-    // cos and sin via Taylor / PTX approximations
-    // PTX does not have native cos.f32/sin.f32 for general floats
-    // Use cos.approx / sin.approx (valid for |x| < pi)
+    // cos and sin (valid for |theta| < pi)
     cos.approx.f32 %cos_t, %theta;
     sin.approx.f32 %sin_t, %theta;
 
     // compute flat offsets: base = (seq_idx * n_heads + head_idx) * head_dim
-    .reg .u32 %base_off, %off0, %off1;
     mad.lo.u32 %base_off, %seq_idx, %nh, %head_idx;
     mul.lo.u32 %base_off, %base_off, %hd;
     add.u32    %off0, %base_off, %dim0;
@@ -336,23 +370,21 @@ pub fn rope_apply_ptx(sm: u32) -> String {
     ld.global.f32 %k0, [%k0addr];
     ld.global.f32 %k1, [%k1addr];
 
-    // rotate Q
-    .reg .f32 %q0_new, %q1_new, %k0_new, %k1_new;
+    // rotate Q:  q0' = q0*cos - q1*sin ,  q1' = q1*cos + q0*sin
     mul.f32 %q0_new, %q0, %cos_t;
-    fma.rn.f32 %q0_new, %q1, %sin_t, %q0_new;  // q0*cos - q1*sin (sub via neg)
-    // Note: fma a,b,c = a*b+c; for subtraction flip sign
     neg.f32 %sin_t, %sin_t;
-    fma.rn.f32 %q0_new, %q1, %sin_t, %q0_new;
-    neg.f32 %sin_t, %sin_t;   // restore
+    fma.rn.f32 %q0_new, %q1, %sin_t, %q0_new;   // q0*cos - q1*sin
+    neg.f32 %sin_t, %sin_t;                      // restore +sin
     mul.f32 %q1_new, %q1, %cos_t;
-    fma.rn.f32 %q1_new, %q0, %sin_t, %q1_new;
+    fma.rn.f32 %q1_new, %q0, %sin_t, %q1_new;    // q1*cos + q0*sin
 
+    // rotate K:  k0' = k0*cos - k1*sin ,  k1' = k1*cos + k0*sin
     mul.f32 %k0_new, %k0, %cos_t;
     neg.f32 %sin_t, %sin_t;
-    fma.rn.f32 %k0_new, %k1, %sin_t, %k0_new;
-    neg.f32 %sin_t, %sin_t;
+    fma.rn.f32 %k0_new, %k1, %sin_t, %k0_new;   // k0*cos - k1*sin
+    neg.f32 %sin_t, %sin_t;                      // restore +sin
     mul.f32 %k1_new, %k1, %cos_t;
-    fma.rn.f32 %k1_new, %k0, %sin_t, %k1_new;
+    fma.rn.f32 %k1_new, %k0, %sin_t, %k1_new;    // k1*cos + k0*sin
 
     st.global.f32 [%q0addr], %q0_new;
     st.global.f32 [%q1addr], %q1_new;
@@ -365,6 +397,7 @@ pub fn rope_apply_ptx(sm: u32) -> String {
         ver = ver,
         sm = sm,
         theta_base = theta_base,
+        log2_base = log2_base,
     )
 }
 
@@ -460,13 +493,27 @@ pub fn top_k_filter_ptx(sm: u32) -> String {
 
 /// Generate the PTX kernel for numerically stable softmax over a logit vector.
 ///
-/// Uses the standard three-pass algorithm:
-/// 1. Find max(logits) with warp-level reduce.
-/// 2. Compute `exp_sum = Σ exp(logit − max)`.
-/// 3. Write `exp(logit − max) / exp_sum`.
+/// Uses the standard three-pass algorithm (serial reductions in thread 0 over a
+/// shared-memory tile):
+/// 1. Find `max(logits)`.
+/// 2. Compute `exp(logit − max)` in **base e** as `ex2((logit − max)·log2(e))`.
+/// 3. Write `exp(logit − max) / Σ exp(...)`.
+///
+/// ## Bugs found on-device and fixed
+///
+/// * **Invalid PTX** — the original indexed shared memory as
+///   `[smem + %tid_x * 4]`, but PTX memory operands do not support a scaled
+///   register offset; ptxas rejected the module on sm_86 (never loaded). Fixed:
+///   the shared address is now materialised with `mad.lo.u32 addr, tid, 4, base`.
+/// * **Base-2 softmax** — `ex2.approx.f32` was applied directly to `logit − max`,
+///   computing `2^x` rather than `e^x`. Fixed with the `· log2(e)` scale (the
+///   distribution still summed to 1 before, so only a base-e oracle catches it).
+/// * **Read-after-overwrite race** — `smem[0]` (the max) could be overwritten by
+///   thread 0's exp before other warps read it. Fixed with an extra `bar.sync`.
 ///
 /// Grid : (batch_size, 1, 1)
-/// Block: (vocab_size, 1, 1)   (vocab_size ≤ 1024)
+/// Block: (vocab_size, 1, 1)   (vocab_size ≤ 1024; block must equal vocab_size
+/// so every thread reaches each `bar.sync`).
 pub fn logits_softmax_ptx(sm: u32) -> String {
     let ver = if sm >= 90 {
         "8.4"
@@ -475,14 +522,16 @@ pub fn logits_softmax_ptx(sm: u32) -> String {
     } else {
         "7.5"
     };
+    let neg_inf = f32_hex(f32::NEG_INFINITY);
+    let log2e = f32_hex(std::f32::consts::LOG2_E);
+    let tiny = f32_hex(1.0e-7_f32);
     format!(
         r#".version {ver}
 .target sm_{sm}
 .address_size 64
 
-// logits_softmax
-// logits_ptr:  [batch, vocab_size] f32 (in-place)
-// vocab_size, batch_size: u32
+// logits_softmax  (numerically stable, base-e)
+// logits_ptr: [batch, vocab_size] f32 (in-place)
 .visible .entry logits_softmax(
     .param .u64 logits_ptr,
     .param .u32 batch_size,
@@ -490,10 +539,9 @@ pub fn logits_softmax_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %rl, %addr;
-    .reg .u32 %bid, %tid_x, %vs, %bs;
-    .reg .u32 %glob_idx;
-    .reg .f32 %val, %max_val, %exp_val, %sum, %rcp_sum;
-    .reg .pred %p_oob;
+    .reg .u32 %bid, %tid_x, %vs, %bs, %glob, %i, %sbase, %saddr;
+    .reg .f32 %val, %maxv, %e, %ered, %sum, %rcp, %log2e;
+    .reg .pred %p;
     .shared .align 4 .f32 smem[1024];
 
     ld.param.u64 %rl, [logits_ptr];
@@ -502,82 +550,84 @@ pub fn logits_softmax_ptx(sm: u32) -> String {
 
     mov.u32 %bid,   %ctaid.x;
     mov.u32 %tid_x, %tid.x;
-    setp.ge.u32 %p_oob, %bid, %bs;
-    @%p_oob ret;
-    setp.ge.u32 %p_oob, %tid_x, %vs;
-    @%p_oob ret;
+    setp.ge.u32 %p, %bid, %bs;
+    @%p ret;
+    setp.ge.u32 %p, %tid_x, %vs;
+    @%p ret;
 
-    // Load logit
-    mad.lo.u32 %glob_idx, %bid, %vs, %tid_x;
-    mul.wide.u32 %addr, %glob_idx, 4;
+    mov.f32 %log2e, {log2e};
+
+    // load this thread's logit; keep it in %val for the whole kernel
+    mad.lo.u32 %glob, %bid, %vs, %tid_x;
+    mul.wide.u32 %addr, %glob, 4;
     add.u64 %addr, %rl, %addr;
     ld.global.f32 %val, [%addr];
-    st.shared.f32 [smem + %tid_x * 4], %val;
 
+    mov.u32 %sbase, smem;
+    mad.lo.u32 %saddr, %tid_x, 4, %sbase;
+    st.shared.f32 [%saddr], %val;
     bar.sync 0;
 
-    // Pass 1: reduce max (serial in thread 0, parallel in prod)
-    setp.ne.u32 %p_oob, %tid_x, 0;
-    @%p_oob bra $SKIP_MAX;
-    mov.f32 %max_val, 0Fff800000;  // -inf
-    .reg .u32 %i;
+    // Pass 1: thread 0 reduces max into smem[0].
+    setp.ne.u32 %p, %tid_x, 0;
+    @%p bra $SM_AFTERMAX;
+    mov.f32 %maxv, {neg_inf};
     mov.u32 %i, 0;
-$MAX_LOOP:
-    setp.ge.u32 %p_oob, %i, %vs;
-    @%p_oob bra $MAX_DONE;
-    ld.shared.f32 %exp_val, [smem + %i * 4];
-    max.f32 %max_val, %max_val, %exp_val;
+$SM_MAXLOOP:
+    setp.ge.u32 %p, %i, %vs;
+    @%p bra $SM_MAXDONE;
+    mad.lo.u32 %saddr, %i, 4, %sbase;
+    ld.shared.f32 %e, [%saddr];
+    max.f32 %maxv, %maxv, %e;
     add.u32 %i, %i, 1;
-    bra $MAX_LOOP;
-$MAX_DONE:
-    // store max back to smem[0]
-    st.shared.f32 [smem], %max_val;
-$SKIP_MAX:
+    bra $SM_MAXLOOP;
+$SM_MAXDONE:
+    st.shared.f32 [%sbase], %maxv;
+$SM_AFTERMAX:
     bar.sync 0;
 
-    // Pass 2: exp(x - max)
-    ld.shared.f32 %max_val, [smem];
-    sub.f32 %val, %val, %max_val;
-    ex2.approx.f32 %exp_val, %val;   // exp2 approximation: e^x = 2^(x*log2e)
-    // Correction: use ex2.approx.f32 with log2e factor
-    // Actually for e^x = 2^(x * log2(e)): multiply by log2(e) ≈ 1.4427
-    // But ex2.approx(x) = 2^x, so we need to compute e^x = ex2(x * log2e)
-    // For simplicity (and since this is a reference kernel) we use ex2 directly:
-    st.shared.f32 [smem + %tid_x * 4], %exp_val;
+    // Pass 2: every thread exp(logit - max) from its register %val.
+    ld.shared.f32 %maxv, [%sbase];
+    bar.sync 0;                          // all threads read max before smem[0] is overwritten
+    sub.f32 %val, %val, %maxv;
+    mul.f32 %val, %val, %log2e;
+    ex2.approx.f32 %e, %val;             // exp(logit - max), base-e
+    mad.lo.u32 %saddr, %tid_x, 4, %sbase;
+    st.shared.f32 [%saddr], %e;
     bar.sync 0;
 
-    // Pass 3: reduce sum (serial in thread 0)
-    setp.ne.u32 %p_oob, %tid_x, 0;
-    @%p_oob bra $SKIP_SUM;
+    // Pass 3: thread 0 reduces the exp-sum into smem[0].
+    setp.ne.u32 %p, %tid_x, 0;
+    @%p bra $SM_AFTERSUM;
     mov.f32 %sum, 0F00000000;
-    .reg .u32 %j;
-    mov.u32 %j, 0;
-$SUM_LOOP:
-    setp.ge.u32 %p_oob, %j, %vs;
-    @%p_oob bra $SUM_DONE;
-    ld.shared.f32 %exp_val, [smem + %j * 4];
-    add.f32 %sum, %sum, %exp_val;
-    add.u32 %j, %j, 1;
-    bra $SUM_LOOP;
-$SUM_DONE:
-    // clamp to avoid division by zero
-    max.f32 %sum, %sum, 0F33800000;  // max(sum, 1e-7)
-    st.shared.f32 [smem], %sum;
-$SKIP_SUM:
+    mov.u32 %i, 0;
+$SM_SUMLOOP:
+    setp.ge.u32 %p, %i, %vs;
+    @%p bra $SM_SUMDONE;
+    mad.lo.u32 %saddr, %i, 4, %sbase;
+    ld.shared.f32 %ered, [%saddr];
+    add.f32 %sum, %sum, %ered;
+    add.u32 %i, %i, 1;
+    bra $SM_SUMLOOP;
+$SM_SUMDONE:
+    max.f32 %sum, %sum, {tiny};          // avoid divide-by-zero
+    st.shared.f32 [%sbase], %sum;
+$SM_AFTERSUM:
     bar.sync 0;
 
-    // Write normalised value
-    ld.shared.f32 %sum, [smem];
-    ld.shared.f32 %exp_val, [smem + %tid_x * 4];
-    rcp.approx.f32 %rcp_sum, %sum;
-    mul.f32 %exp_val, %exp_val, %rcp_sum;
-    st.global.f32 [%addr], %exp_val;
-
+    // Pass 4: normalise using this thread's own exp value (%e) and write back.
+    ld.shared.f32 %sum, [%sbase];
+    rcp.approx.f32 %rcp, %sum;
+    mul.f32 %e, %e, %rcp;
+    st.global.f32 [%addr], %e;
     ret;
 }}
 "#,
         ver = ver,
         sm = sm,
+        neg_inf = neg_inf,
+        log2e = log2e,
+        tiny = tiny,
     )
 }
 
@@ -771,6 +821,17 @@ mod tests {
         assert!(
             ptx.contains("st.global.f32"),
             "kv_append should store K and V"
+        );
+    }
+
+    #[test]
+    fn logits_softmax_is_base_e() {
+        // The base-e correction multiplies the exponent by log2(e) before ex2.
+        let ptx = logits_softmax_ptx(80);
+        let log2e = f32_hex(std::f32::consts::LOG2_E);
+        assert!(
+            ptx.contains(&log2e),
+            "logits_softmax must scale by log2(e) for base-e exp"
         );
     }
 }

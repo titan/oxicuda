@@ -21,6 +21,7 @@ use oxicuda_driver::Module;
 use oxicuda_launch::{Kernel, LaunchParams};
 use oxicuda_memory::DeviceBuffer;
 use oxicuda_ptx::arch::SmVersion;
+use oxicuda_ptx::ir::PtxType;
 
 use crate::error::{DnnError, DnnResult};
 use crate::handle::DnnHandle;
@@ -187,8 +188,6 @@ fn layer_norm_kernel_name<T: GpuFloat>(hidden_dim: u32) -> String {
 /// 3. Normalize: y = (x - mean) * rsqrt(var + eps) * gamma + beta.
 fn generate_layer_norm_ptx<T: GpuFloat>(sm: SmVersion, hidden_dim: u32) -> DnnResult<String> {
     let ptx_ty = T::PTX_TYPE;
-    let ty = ptx_ty.as_ptx_str();
-    let byte_size = ptx_ty.size_bytes();
     let kernel_name = layer_norm_kernel_name::<T>(hidden_dim);
     let use_warp = hidden_dim <= 32;
     let block_size = if hidden_dim <= 1024 {
@@ -204,9 +203,9 @@ fn generate_layer_norm_ptx<T: GpuFloat>(sm: SmVersion, hidden_dim: u32) -> DnnRe
     write_header(&mut ptx, sm, &kernel_name, block_size, smem_bytes, use_warp)?;
 
     if use_warp {
-        write_warp_layer_norm(&mut ptx, ty, byte_size, hidden_dim)?;
+        write_warp_layer_norm(&mut ptx, ptx_ty, hidden_dim)?;
     } else {
-        write_block_layer_norm(&mut ptx, ty, byte_size, hidden_dim, block_size)?;
+        write_block_layer_norm(&mut ptx, ptx_ty, hidden_dim, block_size)?;
     }
 
     writeln!(ptx, "$LN_DONE:").map_err(fmt_err)?;
@@ -237,11 +236,12 @@ fn write_header(
     writeln!(ptx, "    .param .u32 %param_d,").map_err(fmt_err)?;
     writeln!(ptx, "    .param .u32 %param_epsilon_bits").map_err(fmt_err)?;
     writeln!(ptx, ")").map_err(fmt_err)?;
+    writeln!(ptx, ".maxntid {block_size}, 1, 1").map_err(fmt_err)?;
     writeln!(ptx, "{{").map_err(fmt_err)?;
-    writeln!(ptx, "    .maxntid {block_size}, 1, 1;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b32 %r<32>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b64 %rd<16>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .f32 %f<32>;").map_err(fmt_err)?;
+    writeln!(ptx, "    .reg .b16 %h<8>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .pred %p<8>;").map_err(fmt_err)?;
     if !use_warp {
         writeln!(ptx, "    .shared .align 4 .b8 smem_ln[{smem_bytes}];").map_err(fmt_err)?;
@@ -277,12 +277,8 @@ fn write_header(
 }
 
 /// Warp-shuffle-based layer norm for hidden_dim <= 32.
-fn write_warp_layer_norm(
-    ptx: &mut String,
-    ty: &str,
-    byte_size: usize,
-    hidden_dim: u32,
-) -> DnnResult<()> {
+fn write_warp_layer_norm(ptx: &mut String, ptx_ty: PtxType, hidden_dim: u32) -> DnnResult<()> {
+    let byte_size = ptx_ty.size_bytes();
     // Thread r0 = lane within warp. For layer norm, row = blockIdx.x.
     // Each block has block_size threads; here it's a single warp.
     // Lane < hidden_dim loads data, otherwise contributes 0.
@@ -297,12 +293,7 @@ fn write_warp_layer_norm(
     writeln!(ptx, "    add.u64 %rd8, %rd6, %rd8;").map_err(fmt_err)?;
     writeln!(ptx, "    mul.lo.u64 %rd8, %rd8, {byte_size};").map_err(fmt_err)?;
     writeln!(ptx, "    add.u64 %rd9, %rd0, %rd8;").map_err(fmt_err)?;
-    if ty == ".f32" {
-        writeln!(ptx, "    ld.global.f32 %f0, [%rd9];").map_err(fmt_err)?;
-    } else {
-        // Load in native type, convert to f32 for accumulation
-        writeln!(ptx, "    ld.global{ty} %f0, [%rd9];").map_err(fmt_err)?;
-    }
+    write_global_load_to_f32(ptx, ptx_ty, "%f0", "%rd9", "%h0")?;
     writeln!(ptx, "$WARP_MEAN:").map_err(fmt_err)?;
 
     // Pass 1: sum for mean via warp shuffle
@@ -350,23 +341,13 @@ fn write_warp_layer_norm(
     writeln!(ptx, "    mul.lo.u64 %rd10, %rd10, {byte_size};").map_err(fmt_err)?;
     writeln!(ptx, "    add.u64 %rd11, %rd2, %rd10;").map_err(fmt_err)?;
     writeln!(ptx, "    add.u64 %rd12, %rd3, %rd10;").map_err(fmt_err)?;
-    if ty == ".f32" {
-        writeln!(ptx, "    ld.global.f32 %f12, [%rd11];").map_err(fmt_err)?;
-        writeln!(ptx, "    ld.global.f32 %f13, [%rd12];").map_err(fmt_err)?;
-    } else {
-        writeln!(ptx, "    ld.global{ty} %f12, [%rd11];").map_err(fmt_err)?;
-        writeln!(ptx, "    ld.global{ty} %f13, [%rd12];").map_err(fmt_err)?;
-    }
+    write_global_load_to_f32(ptx, ptx_ty, "%f12", "%rd11", "%h0")?;
+    write_global_load_to_f32(ptx, ptx_ty, "%f13", "%rd12", "%h0")?;
     writeln!(ptx, "    fma.rn.f32 %f14, %f11, %f12, %f13;").map_err(fmt_err)?;
 
     // Store result
-    if ty == ".f32" {
-        writeln!(ptx, "    add.u64 %rd13, %rd1, %rd8;").map_err(fmt_err)?;
-        writeln!(ptx, "    st.global.f32 [%rd13], %f14;").map_err(fmt_err)?;
-    } else {
-        writeln!(ptx, "    add.u64 %rd13, %rd1, %rd8;").map_err(fmt_err)?;
-        writeln!(ptx, "    st.global{ty} [%rd13], %f14;").map_err(fmt_err)?;
-    }
+    writeln!(ptx, "    add.u64 %rd13, %rd1, %rd8;").map_err(fmt_err)?;
+    write_global_store_from_f32(ptx, ptx_ty, "%f14", "%rd13", "%h0")?;
     writeln!(ptx).map_err(fmt_err)?;
 
     Ok(())
@@ -375,11 +356,11 @@ fn write_warp_layer_norm(
 /// Block-level shared memory layer norm for hidden_dim > 32.
 fn write_block_layer_norm(
     ptx: &mut String,
-    ty: &str,
-    byte_size: usize,
+    ptx_ty: PtxType,
     hidden_dim: u32,
     block_size: u32,
 ) -> DnnResult<()> {
+    let byte_size = ptx_ty.size_bytes();
     writeln!(ptx, "    // Block-level LayerNorm (D > 32)").map_err(fmt_err)?;
 
     // Pass 1: each thread accumulates partial sum via strided loop
@@ -393,11 +374,7 @@ fn write_block_layer_norm(
     writeln!(ptx, "    add.u64 %rd8, %rd6, %rd8;").map_err(fmt_err)?;
     writeln!(ptx, "    mul.lo.u64 %rd8, %rd8, {byte_size};").map_err(fmt_err)?;
     writeln!(ptx, "    add.u64 %rd9, %rd0, %rd8;").map_err(fmt_err)?;
-    if ty == ".f32" {
-        writeln!(ptx, "    ld.global.f32 %f1, [%rd9];").map_err(fmt_err)?;
-    } else {
-        writeln!(ptx, "    ld.global{ty} %f1, [%rd9];").map_err(fmt_err)?;
-    }
+    write_global_load_to_f32(ptx, ptx_ty, "%f1", "%rd9", "%h0")?;
     writeln!(ptx, "    add.f32 %f0, %f0, %f1;").map_err(fmt_err)?;
     writeln!(ptx, "    add.u32 %r5, %r5, {block_size};").map_err(fmt_err)?;
     writeln!(ptx, "    bra $LN_SUM_LOOP;").map_err(fmt_err)?;
@@ -422,11 +399,7 @@ fn write_block_layer_norm(
     writeln!(ptx, "    add.u64 %rd8, %rd6, %rd8;").map_err(fmt_err)?;
     writeln!(ptx, "    mul.lo.u64 %rd8, %rd8, {byte_size};").map_err(fmt_err)?;
     writeln!(ptx, "    add.u64 %rd9, %rd0, %rd8;").map_err(fmt_err)?;
-    if ty == ".f32" {
-        writeln!(ptx, "    ld.global.f32 %f6, [%rd9];").map_err(fmt_err)?;
-    } else {
-        writeln!(ptx, "    ld.global{ty} %f6, [%rd9];").map_err(fmt_err)?;
-    }
+    write_global_load_to_f32(ptx, ptx_ty, "%f6", "%rd9", "%h0")?;
     writeln!(ptx, "    sub.f32 %f7, %f6, %f4;").map_err(fmt_err)?;
     writeln!(ptx, "    fma.rn.f32 %f5, %f7, %f7, %f5;").map_err(fmt_err)?;
     writeln!(ptx, "    add.u32 %r5, %r5, {block_size};").map_err(fmt_err)?;
@@ -453,11 +426,7 @@ fn write_block_layer_norm(
     writeln!(ptx, "    add.u64 %rd8, %rd6, %rd8;").map_err(fmt_err)?;
     writeln!(ptx, "    mul.lo.u64 %rd8, %rd8, {byte_size};").map_err(fmt_err)?;
     writeln!(ptx, "    add.u64 %rd9, %rd0, %rd8;").map_err(fmt_err)?;
-    if ty == ".f32" {
-        writeln!(ptx, "    ld.global.f32 %f11, [%rd9];").map_err(fmt_err)?;
-    } else {
-        writeln!(ptx, "    ld.global{ty} %f11, [%rd9];").map_err(fmt_err)?;
-    }
+    write_global_load_to_f32(ptx, ptx_ty, "%f11", "%rd9", "%h0")?;
 
     // Normalize
     writeln!(ptx, "    sub.f32 %f11, %f11, %f4;").map_err(fmt_err)?;
@@ -468,22 +437,13 @@ fn write_block_layer_norm(
     writeln!(ptx, "    mul.lo.u64 %rd10, %rd10, {byte_size};").map_err(fmt_err)?;
     writeln!(ptx, "    add.u64 %rd11, %rd2, %rd10;").map_err(fmt_err)?;
     writeln!(ptx, "    add.u64 %rd12, %rd3, %rd10;").map_err(fmt_err)?;
-    if ty == ".f32" {
-        writeln!(ptx, "    ld.global.f32 %f12, [%rd11];").map_err(fmt_err)?;
-        writeln!(ptx, "    ld.global.f32 %f13, [%rd12];").map_err(fmt_err)?;
-    } else {
-        writeln!(ptx, "    ld.global{ty} %f12, [%rd11];").map_err(fmt_err)?;
-        writeln!(ptx, "    ld.global{ty} %f13, [%rd12];").map_err(fmt_err)?;
-    }
+    write_global_load_to_f32(ptx, ptx_ty, "%f12", "%rd11", "%h0")?;
+    write_global_load_to_f32(ptx, ptx_ty, "%f13", "%rd12", "%h0")?;
     writeln!(ptx, "    fma.rn.f32 %f14, %f11, %f12, %f13;").map_err(fmt_err)?;
 
     // Store
     writeln!(ptx, "    add.u64 %rd13, %rd1, %rd8;").map_err(fmt_err)?;
-    if ty == ".f32" {
-        writeln!(ptx, "    st.global.f32 [%rd13], %f14;").map_err(fmt_err)?;
-    } else {
-        writeln!(ptx, "    st.global{ty} [%rd13], %f14;").map_err(fmt_err)?;
-    }
+    write_global_store_from_f32(ptx, ptx_ty, "%f14", "%rd13", "%h0")?;
     writeln!(ptx, "    add.u32 %r5, %r5, {block_size};").map_err(fmt_err)?;
     writeln!(ptx, "    bra $LN_NORM_LOOP;").map_err(fmt_err)?;
     writeln!(ptx).map_err(fmt_err)?;
@@ -524,6 +484,68 @@ fn write_smem_reduce_f32(
         stride /= 2;
     }
 
+    Ok(())
+}
+
+/// Emits a global load of one element at the byte address held in `addr_reg`,
+/// producing the value in the f32 register `dst`.
+///
+/// Generic global loads have no `.f16`/`.bf16` size specifier, so half-precision
+/// inputs are loaded as raw 16-bit values into the `.b16` scratch register
+/// `scratch_b16` and then converted up to f32 for the in-register math. f32 (and
+/// any other 32-bit element) is loaded directly.
+fn write_global_load_to_f32(
+    ptx: &mut String,
+    ptx_ty: PtxType,
+    dst: &str,
+    addr_reg: &str,
+    scratch_b16: &str,
+) -> DnnResult<()> {
+    match ptx_ty {
+        PtxType::F16 => {
+            writeln!(ptx, "    ld.global.b16 {scratch_b16}, [{addr_reg}];").map_err(fmt_err)?;
+            writeln!(ptx, "    cvt.f32.f16 {dst}, {scratch_b16};").map_err(fmt_err)?;
+        }
+        PtxType::BF16 => {
+            writeln!(ptx, "    ld.global.b16 {scratch_b16}, [{addr_reg}];").map_err(fmt_err)?;
+            writeln!(ptx, "    cvt.f32.bf16 {dst}, {scratch_b16};").map_err(fmt_err)?;
+        }
+        other => {
+            let ty = other.as_ptx_str();
+            writeln!(ptx, "    ld.global{ty} {dst}, [{addr_reg}];").map_err(fmt_err)?;
+        }
+    }
+    Ok(())
+}
+
+/// Emits a global store of the f32 register `src` to the byte address held in
+/// `addr_reg`.
+///
+/// For half-precision outputs the f32 value is rounded down to a raw 16-bit
+/// value in the `.b16` scratch register `scratch_b16` and stored with `.b16`
+/// (generic global stores have no `.f16`/`.bf16` size specifier). f32 (and any
+/// other 32-bit element) is stored directly.
+fn write_global_store_from_f32(
+    ptx: &mut String,
+    ptx_ty: PtxType,
+    src: &str,
+    addr_reg: &str,
+    scratch_b16: &str,
+) -> DnnResult<()> {
+    match ptx_ty {
+        PtxType::F16 => {
+            writeln!(ptx, "    cvt.rn.f16.f32 {scratch_b16}, {src};").map_err(fmt_err)?;
+            writeln!(ptx, "    st.global.b16 [{addr_reg}], {scratch_b16};").map_err(fmt_err)?;
+        }
+        PtxType::BF16 => {
+            writeln!(ptx, "    cvt.rn.bf16.f32 {scratch_b16}, {src};").map_err(fmt_err)?;
+            writeln!(ptx, "    st.global.b16 [{addr_reg}], {scratch_b16};").map_err(fmt_err)?;
+        }
+        other => {
+            let ty = other.as_ptx_str();
+            writeln!(ptx, "    st.global{ty} [{addr_reg}], {src};").map_err(fmt_err)?;
+        }
+    }
     Ok(())
 }
 

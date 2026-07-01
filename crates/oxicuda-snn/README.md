@@ -73,7 +73,7 @@ fn main() -> SnnResult<()> {
 
 ## Status
 
-**Alpha** -- 17,606 SLoC, 577 passing tests. API may evolve before v1.0.
+**Alpha** -- 17,606 SLoC, 845 passing tests. API may evolve before v1.0.
 
 ## License
 

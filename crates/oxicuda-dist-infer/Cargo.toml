@@ -18,5 +18,17 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# On-device GPU PTX validation harness (`src/gpu_tests.rs`). Off by default so
+# the crate builds and unit-tests on machines without a CUDA device; enable with
+# `--features gpu-tests` on a box with a real GPU to JIT-load and run every PTX
+# kernel against a CPU oracle.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
+
+[dev-dependencies]
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }

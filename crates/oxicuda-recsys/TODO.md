@@ -10,7 +10,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
 
 ## Implementation Status
 
-- **Actual SLoC:** ~17,400 total lines (64 source files)
+- **Actual SLoC:** ~19,223 total lines (65 source files)
 - **Coverage:** ALS implicit-feedback, BPR pairwise ranking, NMF multiplicative
   updates; Neural CF (GMF ⊕ MLP); Two-Tower DSSM; DeepFM (linear + 2nd-order FM
   + Deep MLP); AutoInt multi-head self-attention over field embeddings;
@@ -87,7 +87,7 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.40).
   contains `.target sm_x` × all SM versions)
 - [x] Benchmarks (`benches/recsys_ops.rs`) — PTX group (`als_step`,
   `dot_score` × 4 SM) + NDCG@10 bench + LCG RNG bench
-- **Tests:** 461 passing
+- **Tests:** 597 passing
 
 ### Future Enhancements
 
@@ -172,7 +172,7 @@ as strings. No oxicuda-driver / -memory / -launch dependency at this layer.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, workspace lints inherited)
-- Tests: 461 passing (ALS, BPR, NMF, NCF, TwoTower, DeepFM, WideDeep, SASRec,
+- Tests: 597 passing (ALS, BPR, NMF, NCF, TwoTower, DeepFM, WideDeep, SASRec,
   LightGCN, NDCG, uniform-neg, PTX × 6 SM; + adaptive importance sampler,
   sparse-AdamW optimizer, calibration metrics, DuoRec, cold-start content
   fallback, AUC-tie / NDCG-IDCG / BPR finite-difference numerical checks)

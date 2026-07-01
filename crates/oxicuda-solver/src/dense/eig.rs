@@ -14,18 +14,11 @@
 
 #![allow(dead_code)]
 
-use std::sync::Arc;
-
 use oxicuda_blas::GpuFloat;
-use oxicuda_driver::Module;
-use oxicuda_launch::{Kernel, LaunchParams};
 use oxicuda_memory::DeviceBuffer;
-use oxicuda_ptx::ir::PtxType;
-use oxicuda_ptx::prelude::*;
 
 use crate::error::{SolverError, SolverResult};
 use crate::handle::SolverHandle;
-use crate::ptx_helpers::SOLVER_BLOCK_SIZE;
 
 /// Maximum iterations for the tridiagonal QR algorithm.
 const TRIDIAG_QR_MAX_ITER: u32 = 300;
@@ -105,36 +98,48 @@ pub fn syevd<T: GpuFloat>(
         )));
     }
 
-    // Workspace for Householder scalars and tridiagonal elements.
-    let tau_size = n.saturating_sub(1) as usize * T::SIZE;
-    let diag_size = n as usize * std::mem::size_of::<f64>();
-    let off_diag_size = n.saturating_sub(1) as usize * std::mem::size_of::<f64>();
-    let ws_needed = tau_size + diag_size + off_diag_size;
-    handle.ensure_workspace(ws_needed)?;
+    // ===================================================================
+    // CPU host-fallback computation.
+    //
+    // The full on-device symmetric eigensolver (blocked Householder
+    // tridiagonalization + implicit-shift QR on the GPU) is not implemented
+    // yet. Rather than launch a no-op kernel and read back fabricated values,
+    // this routine performs the entire decomposition on the host and stages the
+    // results back to the device buffers. Results are exact; there is NO
+    // GPU acceleration of this path (see crate docs / follow-ups).
+    // ===================================================================
+    // The solver handle binds the device context/stream used for the buffer
+    // transfers below; no kernels are launched on this CPU path.
+    let _ = &handle;
+    let n_usize = n as usize;
+    let lda_usize = lda as usize;
 
-    // Step 1: Tridiagonalize.
-    let mut tau = DeviceBuffer::<T>::zeroed(n.saturating_sub(1) as usize)?;
-    tridiagonalize(handle, a, n, lda, &mut tau)?;
-
-    // Step 2: Extract tridiagonal elements.
-    let mut d = vec![0.0_f64; n as usize];
-    let mut e = vec![0.0_f64; n.saturating_sub(1) as usize];
-    extract_tridiagonal::<T>(a, n, lda, &mut d, &mut e)?;
-
-    // Step 3: QR iteration on the tridiagonal matrix.
-    let mut vectors = if job == EigJob::ValuesAndVectors {
-        let mut v = vec![0.0_f64; n as usize * n as usize];
-        // Initialize as identity.
-        for i in 0..n as usize {
-            v[i * n as usize + i] = 1.0;
+    // Download the (symmetric) matrix and build a dense column-major f64 copy.
+    let mut a_host = vec![T::gpu_zero(); a.len()];
+    a.copy_to_host(&mut a_host)?;
+    let mut sym = vec![0.0_f64; n_usize * n_usize];
+    for col in 0..n_usize {
+        for row in 0..n_usize {
+            sym[col * n_usize + row] = t_to_f64(a_host[col * lda_usize + row]);
         }
-        Some(v)
-    } else {
-        None
-    };
+    }
+    // Symmetrize from the lower triangle (only the lower triangle is defined).
+    for col in 0..n_usize {
+        for row in (col + 1)..n_usize {
+            let lower = sym[col * n_usize + row];
+            sym[row * n_usize + col] = lower;
+        }
+    }
 
+    // Step 1 (host): Householder reduction to symmetric tridiagonal form,
+    // accumulating the orthogonal reduction matrix Q1 when vectors are wanted.
+    let want_vectors = job == EigJob::ValuesAndVectors;
+    let (mut d, mut e, q1) = host_tridiagonalize(&sym, n_usize, want_vectors);
+
+    // Step 2 (host): implicit-shift QR iteration on the tridiagonal matrix,
+    // accumulating the rotations into Q1 to form the full eigenvectors.
+    let mut vectors = q1;
     let converged = tridiagonal_qr(&mut d, &mut e, n, vectors.as_deref_mut())?;
-
     if !converged {
         return Err(SolverError::ConvergenceFailure {
             iterations: TRIDIAG_QR_MAX_ITER,
@@ -142,79 +147,151 @@ pub fn syevd<T: GpuFloat>(
         });
     }
 
-    // Sort eigenvalues in ascending order (and rearrange eigenvectors).
-    sort_eigenvalues(&mut d, vectors.as_deref_mut(), n as usize);
+    // Sort eigenvalues ascending (and reorder eigenvector columns).
+    sort_eigenvalues(&mut d, vectors.as_deref_mut(), n_usize);
 
-    // Write eigenvalues back to device buffer.
+    // Write eigenvalues back to the device buffer.
     let eig_stage = stage_eigenvalues_to_device::<T>(eigenvalues.len(), &d);
     eigenvalues.copy_from_host(&eig_stage)?;
 
-    // Step 4: Back-transform eigenvectors if requested.
-    if job == EigJob::ValuesAndVectors {
-        if let Some(ref _vecs) = vectors {
-            // Full implementation: multiply Q_tridiag by Q_householder.
-            // a <- Q_householder * Q_tridiag
-            back_transform_eigenvectors(handle, a, n, lda, &tau, vectors.as_deref())?;
-        }
+    // Write eigenvectors (column-major) into A when requested.
+    if let Some(vecs) = vectors {
+        let stage = stage_eigenvectors_col_major_to_lda::<T>(&vecs, n_usize, lda_usize, a.len())?;
+        a.copy_from_host(&stage)?;
     }
 
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Tridiagonalization
-// ---------------------------------------------------------------------------
+/// Householder reduction of a dense symmetric matrix to tridiagonal form (host).
+///
+/// `sym` is the full `n x n` symmetric matrix in column-major order. Returns
+/// `(d, e, q)` where `d[i]` is the tridiagonal diagonal, `e[i] = T[i+1, i]` is
+/// the subdiagonal, and `q` (when `want_vectors`) is the column-major orthogonal
+/// matrix `Q1` with `A = Q1 · T · Q1ᵀ`; `q` is `None` otherwise.
+///
+/// Each reflector `H_k = I - β v vᵀ` is applied symmetrically (`A ← H_k A H_k`)
+/// using the rank-2 update `A ← A − v wᵀ − w vᵀ`, which is the standard,
+/// numerically stable symmetric tridiagonalization (EISPACK `tred2`-style).
+fn host_tridiagonalize(
+    sym: &[f64],
+    n: usize,
+    want_vectors: bool,
+) -> (Vec<f64>, Vec<f64>, Option<Vec<f64>>) {
+    // Working dense matrix (column-major); `at(i,j) = a[j*n + i]`.
+    let mut a = sym.to_vec();
+    let idx = |row: usize, col: usize| col * n + row;
 
-/// Reduces a symmetric matrix to tridiagonal form via blocked Householder.
-///
-/// On exit, the diagonal and first sub/superdiagonal of `a` contain T.
-/// The Householder vectors are stored in the lower triangle below the
-/// first subdiagonal, and the scalars are in `tau`.
-///
-/// The blocked algorithm processes `TRIDIAG_BLOCK_SIZE` columns at a time,
-/// using a panel factorization followed by a symmetric rank-2k update.
-fn tridiagonalize<T: GpuFloat>(
-    handle: &SolverHandle,
-    a: &mut DeviceBuffer<T>,
-    n: u32,
-    lda: u32,
-    tau: &mut DeviceBuffer<T>,
-) -> SolverResult<()> {
-    if n <= 1 {
-        return Ok(());
+    // Q accumulator (column-major), initialised to the identity.
+    let mut q = if want_vectors {
+        let mut m = vec![0.0_f64; n * n];
+        for i in 0..n {
+            m[idx(i, i)] = 1.0;
+        }
+        Some(m)
+    } else {
+        None
+    };
+
+    let mut v = vec![0.0_f64; n];
+    let mut p = vec![0.0_f64; n];
+
+    // Reflect columns 0..n-2 (the trailing 2x2 block is already tridiagonal).
+    for k in 0..n.saturating_sub(2) {
+        // Norm of the sub-column A[k+1.., k].
+        let mut norm = 0.0_f64;
+        for i in (k + 1)..n {
+            norm += a[idx(i, k)] * a[idx(i, k)];
+        }
+        norm = norm.sqrt();
+        if norm == 0.0 {
+            continue;
+        }
+        let a1 = a[idx(k + 1, k)];
+        let alpha = if a1 >= 0.0 { -norm } else { norm };
+
+        // Householder vector v (support on rows k+1..n).
+        for vi in v.iter_mut().take(n) {
+            *vi = 0.0;
+        }
+        v[k + 1] = a1 - alpha;
+        for i in (k + 2)..n {
+            v[i] = a[idx(i, k)];
+        }
+        let mut vnorm2 = 0.0_f64;
+        for &vi in v.iter().take(n).skip(k + 1) {
+            vnorm2 += vi * vi;
+        }
+        if vnorm2 == 0.0 {
+            continue;
+        }
+        let beta = 2.0 / vnorm2;
+
+        // p = beta * A * v  (restricted to indices k+1..n).
+        for pi in p.iter_mut().take(n) {
+            *pi = 0.0;
+        }
+        for i in (k + 1)..n {
+            let mut s = 0.0_f64;
+            for j in (k + 1)..n {
+                s += a[idx(i, j)] * v[j];
+            }
+            p[i] = beta * s;
+        }
+        // w = p - (beta/2)(vᵀ p) v  (reuse p as w).
+        let mut vp = 0.0_f64;
+        for i in (k + 1)..n {
+            vp += v[i] * p[i];
+        }
+        let kk = 0.5 * beta * vp;
+        for i in (k + 1)..n {
+            p[i] -= kk * v[i];
+        }
+        // Rank-2 symmetric update A -= v wᵀ + w vᵀ.
+        for j in (k + 1)..n {
+            let vj = v[j];
+            let wj = p[j];
+            for i in (k + 1)..n {
+                a[idx(i, j)] -= v[i] * wj + p[i] * vj;
+            }
+        }
+        // Restore the explicit tridiagonal column/row k.
+        a[idx(k + 1, k)] = alpha;
+        a[idx(k, k + 1)] = alpha;
+        for i in (k + 2)..n {
+            a[idx(i, k)] = 0.0;
+            a[idx(k, i)] = 0.0;
+        }
+
+        // Accumulate Q <- Q * H_k = Q - beta (Q v) vᵀ.
+        if let Some(ref mut qm) = q {
+            let mut qv = vec![0.0_f64; n];
+            for r in 0..n {
+                let mut s = 0.0_f64;
+                for j in (k + 1)..n {
+                    s += qm[idx(r, j)] * v[j];
+                }
+                qv[r] = s;
+            }
+            for col in (k + 1)..n {
+                let vc = v[col] * beta;
+                for r in 0..n {
+                    qm[idx(r, col)] -= qv[r] * vc;
+                }
+            }
+        }
     }
 
-    let sm = handle.sm_version();
-    let ptx = emit_tridiag_step::<T>(sm)?;
-    let module = Arc::new(Module::from_ptx(&ptx)?);
-    let kernel = Kernel::from_module(module, &tridiag_step_name::<T>())?;
-
-    let nb = TRIDIAG_BLOCK_SIZE.min(n - 1);
-    let num_blocks = (n - 1).div_ceil(nb);
-
-    for block_idx in 0..num_blocks {
-        let j = block_idx * nb;
-        let jb = nb.min(n - 1 - j);
-        let trailing = n - j;
-
-        // Panel tridiagonalization: compute Householder vectors for columns j..j+jb.
-        let shared_bytes = trailing * jb * T::size_u32();
-        let params = LaunchParams::new(1u32, SOLVER_BLOCK_SIZE).with_shared_mem(shared_bytes);
-
-        let a_offset = (j as u64 + j as u64 * lda as u64) * T::SIZE as u64;
-        let tau_offset = j as u64 * T::SIZE as u64;
-
-        let args = (
-            a.as_device_ptr() + a_offset,
-            tau.as_device_ptr() + tau_offset,
-            trailing,
-            jb,
-            lda,
-        );
-        kernel.launch(&params, handle.stream(), &args)?;
+    let mut d = vec![0.0_f64; n];
+    let mut e = vec![0.0_f64; n.saturating_sub(1)];
+    for i in 0..n {
+        d[i] = a[idx(i, i)];
+    }
+    for i in 0..n.saturating_sub(1) {
+        e[i] = a[idx(i + 1, i)];
     }
 
-    Ok(())
+    (d, e, q)
 }
 
 /// Converts a `T: GpuFloat` value to `f64` via bit reinterpretation.
@@ -235,38 +312,6 @@ fn from_f64_to_t<T: GpuFloat>(val: f64) -> T {
     } else {
         T::from_bits_u64(u64::from((val as f32).to_bits()))
     }
-}
-
-/// Extracts diagonal (d) and subdiagonal (e) from the tridiagonalized matrix.
-///
-/// Copies the device buffer to host and reads the diagonal (d[i] = A[i,i])
-/// and subdiagonal (e[i] = A[i+1,i]) elements in column-major layout.
-fn extract_tridiagonal<T: GpuFloat>(
-    a: &DeviceBuffer<T>,
-    n: u32,
-    lda: u32,
-    d: &mut [f64],
-    e: &mut [f64],
-) -> SolverResult<()> {
-    let n_usize = n as usize;
-    let lda_usize = lda as usize;
-    let total = lda_usize * n_usize;
-    let mut host = vec![T::gpu_zero(); total];
-    a.copy_to_host(&mut host).map_err(|e_err| {
-        SolverError::InternalError(format!("extract_tridiagonal copy_to_host failed: {e_err}"))
-    })?;
-
-    // Diagonal: d[i] = A[i,i] (column-major: host[i * lda + i])
-    for i in 0..n_usize {
-        d[i] = t_to_f64(host[i * lda_usize + i]);
-    }
-
-    // Subdiagonal: e[i] = A[i+1,i] (column-major: host[i * lda + (i+1)])
-    for i in 0..n_usize.saturating_sub(1) {
-        e[i] = t_to_f64(host[i * lda_usize + (i + 1)]);
-    }
-
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -412,39 +457,6 @@ fn sort_eigenvalues(d: &mut [f64], mut vectors: Option<&mut [f64]>, n: usize) {
     }
 }
 
-/// Back-transforms eigenvectors from tridiagonal basis to original basis.
-///
-/// Computes Q = Q_householder * Q_tridiag where Q_householder is formed from
-/// the Householder vectors stored in `a` and `tau`.
-fn back_transform_eigenvectors<T: GpuFloat>(
-    _handle: &SolverHandle,
-    a: &mut DeviceBuffer<T>,
-    n: u32,
-    lda: u32,
-    _tau: &DeviceBuffer<T>,
-    vectors: Option<&[f64]>,
-) -> SolverResult<()> {
-    // Host fallback: write the accumulated tridiagonal QR eigenvectors into A.
-    let Some(vecs) = vectors else {
-        return Ok(());
-    };
-
-    let n_usize = n as usize;
-    let lda_usize = lda as usize;
-    let required = n_usize * lda_usize;
-    if a.len() < required {
-        return Err(SolverError::DimensionMismatch(format!(
-            "back_transform_eigenvectors: matrix buffer too small ({} < {required})",
-            a.len()
-        )));
-    }
-
-    let stage = stage_eigenvectors_col_major_to_lda::<T>(vecs, n_usize, lda_usize, a.len())?;
-    a.copy_from_host(&stage)?;
-
-    Ok(())
-}
-
 fn stage_eigenvalues_to_device<T: GpuFloat>(dst_len: usize, d: &[f64]) -> Vec<T> {
     let mut out = vec![T::gpu_zero(); dst_len];
     for (idx, &val) in d.iter().enumerate() {
@@ -485,54 +497,6 @@ fn stage_eigenvectors_col_major_to_lda<T: GpuFloat>(
         }
     }
     Ok(out)
-}
-
-// ---------------------------------------------------------------------------
-// PTX kernel generation
-// ---------------------------------------------------------------------------
-
-fn tridiag_step_name<T: GpuFloat>() -> String {
-    format!("solver_tridiag_step_{}", T::NAME)
-}
-
-/// Emits PTX for one panel of the tridiagonalization.
-///
-/// Each panel processes `jb` columns of the trailing submatrix, computing
-/// Householder reflections that zero out elements two or more positions
-/// below the diagonal.
-fn emit_tridiag_step<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
-    let name = tridiag_step_name::<T>();
-    let float_ty = T::PTX_TYPE;
-
-    let ptx = KernelBuilder::new(&name)
-        .target(sm)
-        .max_threads_per_block(SOLVER_BLOCK_SIZE)
-        .param("a_ptr", PtxType::U64)
-        .param("tau_ptr", PtxType::U64)
-        .param("trailing", PtxType::U32)
-        .param("jb", PtxType::U32)
-        .param("lda", PtxType::U32)
-        .body(move |b| {
-            let tid = b.thread_id_x();
-            let trailing = b.load_param_u32("trailing");
-            let jb = b.load_param_u32("jb");
-            let lda = b.load_param_u32("lda");
-
-            // For each column k = 0..jb:
-            //   1. Compute Householder vector v from A[k+1:, k].
-            //   2. tau = 2 / (v^T v).
-            //   3. Apply symmetric Householder update:
-            //      p = tau * A * v
-            //      q = p - (tau/2)(p^T v) v
-            //      A -= v * q^T + q * v^T
-
-            let _ = (tid, trailing, jb, lda, float_ty);
-
-            b.ret();
-        })
-        .build()?;
-
-    Ok(ptx)
 }
 
 // ---------------------------------------------------------------------------
@@ -598,15 +562,72 @@ mod tests {
     }
 
     #[test]
-    fn tridiag_step_name_format() {
-        let name = tridiag_step_name::<f32>();
-        assert!(name.contains("f32"));
+    fn host_tridiagonalize_reduces_and_reconstructs() {
+        // Symmetric 4x4 (column-major == row-major for symmetric).
+        let n = 4usize;
+        let sym = vec![
+            4.0_f64, 1.0, 2.0, 0.5, // col 0
+            1.0, 3.0, 0.5, 1.5, // col 1
+            2.0, 0.5, 5.0, 1.0, // col 2
+            0.5, 1.5, 1.0, 6.0, // col 3
+        ];
+        let (d, e, q) = host_tridiagonalize(&sym, n, true);
+        let q = q.expect("vectors requested");
+        // Build T (tridiagonal) and verify Q * T * Q^T == sym.
+        let mut t = vec![0.0_f64; n * n];
+        for i in 0..n {
+            t[i * n + i] = d[i];
+        }
+        for i in 0..n - 1 {
+            t[i * n + (i + 1)] = e[i];
+            t[(i + 1) * n + i] = e[i];
+        }
+        // qt = Q * T  (col-major).
+        let at = |m: &[f64], r: usize, c: usize| m[c * n + r];
+        let mut qt = vec![0.0_f64; n * n];
+        for c in 0..n {
+            for r in 0..n {
+                let mut s = 0.0;
+                for k in 0..n {
+                    s += at(&q, r, k) * at(&t, k, c);
+                }
+                qt[c * n + r] = s;
+            }
+        }
+        // rec = qt * Q^T.
+        for c in 0..n {
+            for r in 0..n {
+                let mut s = 0.0;
+                for k in 0..n {
+                    s += qt[k * n + r] * at(&q, c, k); // Q^T[k,c] = Q[c,k]
+                }
+                let want = sym[c * n + r];
+                assert!(
+                    (s - want).abs() < 1e-10,
+                    "reconstruct [{r},{c}] {s} != {want}"
+                );
+            }
+        }
+        // Off-tridiagonal entries of T must be (near) zero by construction.
+        for i in 0..n {
+            for j in 0..n {
+                if j > i + 1 || (i > 0 && j + 1 < i) {
+                    assert!(t[j * n + i].abs() < 1e-10, "T not tridiagonal at [{i},{j}]");
+                }
+            }
+        }
     }
 
     #[test]
-    fn tridiag_step_name_f64() {
-        let name = tridiag_step_name::<f64>();
-        assert!(name.contains("f64"));
+    fn host_eig_values_match_known_2x2() {
+        // [[2,1],[1,2]] has eigenvalues 1 and 3.
+        let sym = vec![2.0_f64, 1.0, 1.0, 2.0];
+        let (mut d, mut e, _q) = host_tridiagonalize(&sym, 2, false);
+        let ok = tridiagonal_qr(&mut d, &mut e, 2, None).expect("qr");
+        assert!(ok);
+        sort_eigenvalues(&mut d, None, 2);
+        assert!((d[0] - 1.0).abs() < 1e-12, "lambda0 = {}", d[0]);
+        assert!((d[1] - 3.0).abs() < 1e-12, "lambda1 = {}", d[1]);
     }
 
     #[test]

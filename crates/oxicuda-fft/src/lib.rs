@@ -33,6 +33,9 @@
 #![warn(clippy::all)]
 #![warn(missing_docs)]
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 pub mod callbacks;
 pub mod conv_fft;
 pub mod error;

@@ -33,6 +33,9 @@ pub mod vlm;
 #[cfg(test)]
 mod verification;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 /// Convenience re-exports for common multi-modal types.

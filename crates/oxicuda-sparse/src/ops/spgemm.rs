@@ -233,9 +233,11 @@ fn emit_spgemm_symbolic_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<Strin
                 let outer_done = b.fresh_label("spgemm_sym_outer_done");
 
                 b.label(&outer_loop);
+                // Exit outer loop when a_k >= a_re (inverted skip-branch via
+                // branch_if so the `$`-prefixed label target matches `b.label`).
                 let a_pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {a_pred}, {a_k}, {a_re};"));
-                b.raw_ptx(&format!("@!{a_pred} bra {outer_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {a_pred}, {a_k}, {a_re};"));
+                b.branch_if(a_pred, &outer_done);
 
                 // Load a_col = A.col_idx[a_k]
                 let a_ci_addr = b.byte_offset_addr(a_col_idx.clone(), a_k.clone(), 4);
@@ -264,9 +266,10 @@ fn emit_spgemm_symbolic_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<Strin
                 let inner_done = b.fresh_label("spgemm_sym_inner_done");
 
                 b.label(&inner_loop);
+                // Exit inner loop when b_j >= b_re (inverted skip-branch).
                 let b_pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {b_pred}, {b_j}, {b_re};"));
-                b.raw_ptx(&format!("@!{b_pred} bra {inner_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {b_pred}, {b_j}, {b_re};"));
+                b.branch_if(b_pred, &inner_done);
 
                 // Count each column (simplified: counts all, not unique)
                 // True uniqueness requires shared-memory hash table which
@@ -359,9 +362,11 @@ fn emit_spgemm_numeric_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String
                 let outer_done = b.fresh_label("spgemm_num_outer_done");
 
                 b.label(&outer_loop);
+                // Exit outer loop when a_k >= a_re (inverted skip-branch via
+                // branch_if so the `$`-prefixed label target matches `b.label`).
                 let a_pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {a_pred}, {a_k}, {a_re};"));
-                b.raw_ptx(&format!("@!{a_pred} bra {outer_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {a_pred}, {a_k}, {a_re};"));
+                b.branch_if(a_pred, &outer_done);
 
                 // Load A value and column
                 let a_ci_addr = b.byte_offset_addr(a_col_idx.clone(), a_k.clone(), 4);
@@ -393,9 +398,10 @@ fn emit_spgemm_numeric_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String
                 let inner_done = b.fresh_label("spgemm_num_inner_done");
 
                 b.label(&inner_loop);
+                // Exit inner loop when b_j >= b_re (inverted skip-branch).
                 let b_pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {b_pred}, {b_j}, {b_re};"));
-                b.raw_ptx(&format!("@!{b_pred} bra {inner_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {b_pred}, {b_j}, {b_re};"));
+                b.branch_if(b_pred, &inner_done);
 
                 // Load B's column and value
                 let b_ci_addr = b.byte_offset_addr(b_col_idx_p.clone(), b_j.clone(), 4);
@@ -437,7 +443,27 @@ fn emit_spgemm_numeric_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
     use oxicuda_ptx::arch::SmVersion;
+
+    /// Both SpGEMM kernels (symbolic + numeric) must assemble for sm_86 in both
+    /// precisions with `$`-prefixed branch targets and no `.b64` shuffle.
+    #[test]
+    fn spgemm_symbolic_numeric_f32_f64_assemble_sm86() {
+        let sym_f32 = emit_spgemm_symbolic_kernel::<f32>(SmVersion::Sm86).expect("sym f32");
+        assert_assembles_and_clean("spgemm_symbolic_f32", &sym_f32);
+        let sym_f64 = emit_spgemm_symbolic_kernel::<f64>(SmVersion::Sm86).expect("sym f64");
+        assert_assembles_and_clean("spgemm_symbolic_f64", &sym_f64);
+
+        let num_f32 = emit_spgemm_numeric_kernel::<f32>(SmVersion::Sm86).expect("num f32");
+        assert_assembles_and_clean("spgemm_numeric_f32", &num_f32);
+        let num_f64 = emit_spgemm_numeric_kernel::<f64>(SmVersion::Sm86).expect("num f64");
+        assert_assembles_and_clean("spgemm_numeric_f64", &num_f64);
+        assert!(
+            !num_f64.contains("0F00000000"),
+            "f64 SpGEMM numeric kernel must not materialize an f32 0.0 immediate:\n{num_f64}"
+        );
+    }
 
     #[test]
     fn spgemm_symbolic_ptx_generates_f32() {

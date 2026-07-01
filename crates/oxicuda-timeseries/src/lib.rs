@@ -67,6 +67,9 @@ pub mod timemixer;
 pub mod timesnet;
 pub mod transformer;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 /// Convenience re-exports for common time-series types.
 pub mod prelude {
     pub use crate::changepoint::{

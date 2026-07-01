@@ -162,10 +162,14 @@ impl MergeSortTemplate {
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "{{").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .{ty}   %a, %b, %write_val;").map_err(|e| e.to_string())?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %bid, %partner, %dir, %cmp_int, %swap_int;"
+            "    .reg .{ty}   %a, %b, %write_val, %min_val, %max_val;"
+        )
+        .map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    .reg .u32    %ltid, %bid, %partner, %dir, %low_bit, %low_int, %want_int;"
         )
         .map_err(|e| e.to_string())?;
         writeln!(
@@ -173,18 +177,27 @@ impl MergeSortTemplate {
             "    .reg .u64    %n, %gid, %ptr, %smem_base, %tid_addr, %par_addr;"
         )
         .map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .pred   %p, %need_swap, %gt;").map_err(|e| e.to_string())?;
+        writeln!(out, "    .reg .pred   %p, %want_min, %gt, %is_low;")
+            .map_err(|e| e.to_string())?;
 
         writeln!(out, "    ld.param.u64 %ptr,  [param_data];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u64 %n,     [param_n];").map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u64      %smem_base, bsort_smem;").map_err(|e| e.to_string())?;
 
         // Load data from global to shared memory (OOB threads get identity/max value).
-        writeln!(out, "    mad.lo.u64   %tid_addr, %tid, {eb}, %smem_base;")
-            .map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    mad.wide.u32   %tid_addr, %ltid, {eb}, %smem_base;"
+        )
+        .map_err(|e| e.to_string())?;
         writeln!(out, "    setp.lt.u64  %p, %gid, %n;").map_err(|e| e.to_string())?;
         writeln!(
             out,
@@ -210,13 +223,16 @@ impl MergeSortTemplate {
                 writeln!(out, "    // stage k={k} sub j={j}").map_err(|e| e.to_string())?;
                 writeln!(out, "    bar.sync 0;").map_err(|e| e.to_string())?;
                 // Load both values.
-                writeln!(out, "    mad.lo.u64   %tid_addr, %tid, {eb}, %smem_base;")
-                    .map_err(|e| e.to_string())?;
-                writeln!(out, "    xor.b32      %partner, %tid, {j};")
+                writeln!(
+                    out,
+                    "    mad.wide.u32   %tid_addr, %ltid, {eb}, %smem_base;"
+                )
+                .map_err(|e| e.to_string())?;
+                writeln!(out, "    xor.b32      %partner, %ltid, {j};")
                     .map_err(|e| e.to_string())?;
                 writeln!(
                     out,
-                    "    mad.lo.u64   %par_addr, %partner, {eb}, %smem_base;"
+                    "    mad.wide.u32   %par_addr, %partner, {eb}, %smem_base;"
                 )
                 .map_err(|e| e.to_string())?;
                 writeln!(out, "    ld.shared.{ty} %a, [%tid_addr];").map_err(|e| e.to_string())?;
@@ -224,19 +240,36 @@ impl MergeSortTemplate {
                 // Second barrier: all loads done before any writes.
                 writeln!(out, "    bar.sync 0;").map_err(|e| e.to_string())?;
                 // Direction: ascending when (tid >> log2_k) & 1 == 0.
-                writeln!(out, "    shr.u32      %dir, %tid, {log2_k};")
+                writeln!(out, "    shr.u32      %dir, %ltid, {log2_k};")
                     .map_err(|e| e.to_string())?;
                 writeln!(out, "    and.b32      %dir, %dir, 1;").map_err(|e| e.to_string())?;
-                // need_swap = (a > b) XOR descending = (a > b) XOR (dir == 1)
+                // Compare-exchange where EACH thread writes ONLY its own slot, so
+                // both partners must agree on who keeps the min and who keeps the
+                // max — otherwise both would write the same value and the other
+                // would be lost. Thread `tid` is the LOW index of the pair when
+                // bit `j` of `tid` is 0; an ascending block (dir==0) puts the min
+                // at the low index, a descending block (dir==1) puts the max.
                 writeln!(out, "    {cmp}        %gt, %b, %a;").map_err(|e| e.to_string())?; // b < a → a > b
-                writeln!(out, "    cvt.u32.pred %cmp_int, %gt;").map_err(|e| e.to_string())?;
-                writeln!(out, "    xor.b32      %swap_int, %cmp_int, %dir;")
+                writeln!(out, "    selp.{ty}    %min_val, %b, %a, %gt;")
+                    .map_err(|e| e.to_string())?; // a>b ? b : a  = min(a,b)
+                writeln!(out, "    selp.{ty}    %max_val, %a, %b, %gt;")
+                    .map_err(|e| e.to_string())?; // a>b ? a : b  = max(a,b)
+                writeln!(out, "    and.b32      %low_bit, %ltid, {j};")
                     .map_err(|e| e.to_string())?;
-                writeln!(out, "    setp.ne.u32  %need_swap, %swap_int, 0;")
+                writeln!(out, "    setp.eq.u32  %is_low, %low_bit, 0;")
                     .map_err(|e| e.to_string())?;
-                // Each thread writes only its own slot.
-                writeln!(out, "    selp.{ty}    %write_val, %b, %a, %need_swap;")
+                writeln!(out, "    selp.u32     %low_int, 1, 0, %is_low;")
                     .map_err(|e| e.to_string())?;
+                // want_min = is_low XOR dir  (low&asc -> min ; low&desc -> max).
+                writeln!(out, "    xor.b32      %want_int, %low_int, %dir;")
+                    .map_err(|e| e.to_string())?;
+                writeln!(out, "    setp.ne.u32  %want_min, %want_int, 0;")
+                    .map_err(|e| e.to_string())?;
+                writeln!(
+                    out,
+                    "    selp.{ty}    %write_val, %min_val, %max_val, %want_min;"
+                )
+                .map_err(|e| e.to_string())?;
                 writeln!(out, "    st.shared.{ty} [%tid_addr], %write_val;")
                     .map_err(|e| e.to_string())?;
             }
@@ -303,7 +336,7 @@ impl MergeSortTemplate {
         )
         .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .u64    %addr_akm1, %addr_bjm1;").map_err(|e| e.to_string())?;
-        writeln!(out, "    .reg .u32    %tid, %bid;").map_err(|e| e.to_string())?;
+        writeln!(out, "    .reg .u32    %ltid, %bid;").map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .pred   %p, %a_leq_b, %k_valid, %j_valid;")
             .map_err(|e| e.to_string())?;
         writeln!(out, "    .reg .pred   %akm1_le_bj;").map_err(|e| e.to_string())?;
@@ -314,9 +347,14 @@ impl MergeSortTemplate {
         writeln!(out, "    ld.param.u64 %n,           [param_n];").map_err(|e| e.to_string())?;
         writeln!(out, "    ld.param.u64 %merge_len,   [param_merge_len];")
             .map_err(|e| e.to_string())?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(|e| e.to_string())?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(|e| e.to_string())?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(|e| e.to_string())?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(|e| e.to_string())?;
 
         // Out-of-bounds guard.
         writeln!(out, "    setp.ge.u64  %p, %gid, %n;").map_err(|e| e.to_string())?;
@@ -373,10 +411,15 @@ impl MergeSortTemplate {
         writeln!(out, "    ld.global.{ty} %a_km1, [%addr_akm1];").map_err(|e| e.to_string())?;
         // Load B[j] = input[right_start + j]
         writeln!(out, "    add.u64      %addr_bj, %right_start, %j;").map_err(|e| e.to_string())?;
+        // The right run is `min(merge_len, n - right_start)` long, so B[j] is only
+        // valid when BOTH j < merge_len AND right_start + j < n. Omitting the `n`
+        // bound made the binary search read past the buffer for the last (partial)
+        // pair, corrupting the co-rank and the merged tail.
+        writeln!(out, "    setp.lt.u64  %j_valid, %j, %merge_len;").map_err(|e| e.to_string())?;
+        writeln!(out, "    setp.lt.u64  %p, %addr_bj, %n;").map_err(|e| e.to_string())?;
+        writeln!(out, "    and.pred     %j_valid, %j_valid, %p;").map_err(|e| e.to_string())?;
         writeln!(out, "    mad.lo.u64   %addr_bj, %addr_bj, {eb}, %ptr_in;")
             .map_err(|e| e.to_string())?;
-        // Guard: j < merge_len means B[j] is a valid element; else treat as +inf (→ always take A).
-        writeln!(out, "    setp.lt.u64  %j_valid, %j, %merge_len;").map_err(|e| e.to_string())?;
         writeln!(out, "    @%j_valid ld.global.{ty} %bj, [%addr_bj];")
             .map_err(|e| e.to_string())?;
         // j invalid → A[k-1] is definitely ≤ "B[j]=+inf" → take more from A: lo = mid.
@@ -446,8 +489,8 @@ fn max_fill_literal(ty: PtxType) -> &'static str {
         PtxType::S32 => "0x7FFFFFFF",
         PtxType::U64 => "0xFFFFFFFFFFFFFFFF",
         PtxType::S64 => "0x7FFFFFFFFFFFFFFF",
-        PtxType::F32 => "0x7F800000",         // +inf
-        PtxType::F64 => "0x7FF0000000000000", // +inf
+        PtxType::F32 => "0f7F800000",         // +inf
+        PtxType::F64 => "0d7FF0000000000000", // +inf
         _ => "0xFFFFFFFF",
     }
 }
@@ -507,7 +550,11 @@ mod tests {
         assert!(ptx.contains("bar.sync 0"), "PTX: {ptx}");
         assert!(ptx.contains("xor.b32"), "PTX: {ptx}"); // partner = tid XOR j
         assert!(ptx.contains("selp"), "PTX: {ptx}"); // conditional swap
-        assert!(ptx.contains("cvt.u32.pred"), "PTX: {ptx}"); // swap condition
+        assert!(ptx.contains("selp.u32     %low_int"), "PTX: {ptx}"); // pred->int (low index)
+        assert!(
+            ptx.contains("%write_val, %min_val, %max_val"),
+            "compare-exchange must write min/max, not the partner's value\nPTX: {ptx}"
+        );
     }
 
     #[test]

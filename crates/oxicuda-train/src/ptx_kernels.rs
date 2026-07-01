@@ -95,7 +95,7 @@ pub fn adam_update_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred  %guard;
-    .reg .u32   %tid, %bid, %ntid, %nctaid, %gid, %stride;
+    .reg .u32   %t, %bid, %nt, %nc, %gid, %stride;
     .reg .u64   %gid64, %n64, %off;
     .reg .u64   %ap0, %ag0, %am10, %am20;
     .reg .u64   %ap,  %ag,  %am1,  %am2;
@@ -121,12 +121,12 @@ pub fn adam_update_ptx(sm: SmVersion) -> String {
     ld.param.u64  %am10, [p_m1];
     ld.param.u64  %am20, [p_m2];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
 $LOOP:
     cvt.u64.u32   %gid64, %gid;
@@ -220,7 +220,7 @@ pub fn adamw_update_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred  %guard;
-    .reg .u32   %tid, %bid, %ntid, %nctaid, %gid, %stride;
+    .reg .u32   %t, %bid, %nt, %nc, %gid, %stride;
     .reg .u64   %gid64, %n64, %off;
     .reg .u64   %ap0, %ag0, %am10, %am20;
     .reg .u64   %ap,  %ag,  %am1,  %am2;
@@ -251,12 +251,12 @@ pub fn adamw_update_ptx(sm: SmVersion) -> String {
     ld.param.u64  %am10, [p_m1];
     ld.param.u64  %am20, [p_m2];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
 $LOOP:
     cvt.u64.u32   %gid64, %gid;
@@ -353,7 +353,7 @@ pub fn sgd_update_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred  %guard, %p_nesterov;
-    .reg .u32   %tid, %bid, %ntid, %nctaid, %gid, %stride;
+    .reg .u32   %t, %bid, %nt, %nc, %gid, %stride;
     .reg .u64   %gid64, %n64, %off;
     .reg .u64   %ap0, %ag0, %av0;
     .reg .u64   %ap,  %ag,  %av;
@@ -377,12 +377,12 @@ pub fn sgd_update_ptx(sm: SmVersion) -> String {
     ld.param.u64  %ag0, [p_grad];
     ld.param.u64  %av0, [p_vel];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
 $LOOP:
     cvt.u64.u32  %gid64, %gid;
@@ -411,10 +411,6 @@ $LOOP:
     @!%p_nesterov mov.f32 %upd, %v;
 
     // p -= lr * upd
-    fma.rn.f32   %p,   %lr_r, %upd, %p;
-    // p = p + (-lr)*upd via negated lr
-    // Actually: p -= lr*upd = p + (-lr*upd)
-    // Use: neg then fma, or sub after mul:
     mul.f32      %upd, %lr_r, %upd;
     sub.f32      %p,   %p,   %upd;
 
@@ -476,7 +472,7 @@ pub fn lion_update_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred  %guard, %p_neg, %p_zero;
-    .reg .u32   %tid, %bid, %ntid, %nctaid, %gid, %stride;
+    .reg .u32   %t, %bid, %nt, %nc, %gid, %stride;
     .reg .u64   %gid64, %n64, %off;
     .reg .u64   %ap0, %ag0, %am0;
     .reg .u64   %ap,  %ag,  %am;
@@ -509,12 +505,12 @@ pub fn lion_update_ptx(sm: SmVersion) -> String {
     ld.param.u64  %ag0, [p_grad];
     ld.param.u64  %am0, [p_m1];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
 $LOOP:
     cvt.u64.u32  %gid64, %gid;
@@ -596,7 +592,7 @@ pub fn came_row_factor_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred  %guard;
-    .reg .u32   %tid, %bid, %ntid, %nctaid, %gid, %stride;
+    .reg .u32   %t, %bid, %nt, %nc, %gid, %stride;
     .reg .u64   %gid64, %nrows64, %ncols64;
     .reg .u64   %g2_base, %row_base;
     .reg .u64   %row_off, %col_off, %idx;
@@ -609,12 +605,12 @@ pub fn came_row_factor_ptx(sm: SmVersion) -> String {
     ld.param.u64  %g2_base, [p_g2];
     ld.param.u64  %row_base,[p_row];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
 $LOOP:
     cvt.u64.u32   %gid64, %gid;
@@ -678,7 +674,7 @@ pub fn came_col_factor_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred  %guard;
-    .reg .u32   %tid, %bid, %ntid, %nctaid, %gid, %stride;
+    .reg .u32   %t, %bid, %nt, %nc, %gid, %stride;
     .reg .u64   %gid64, %nrows64, %ncols64;
     .reg .u64   %g2_base, %col_base;
     .reg .u64   %row_u64, %idx;
@@ -690,12 +686,12 @@ pub fn came_col_factor_ptx(sm: SmVersion) -> String {
     ld.param.u64  %g2_base, [p_g2];
     ld.param.u64  %col_base,[p_col];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
 $LOOP:
     cvt.u64.u32   %gid64, %gid;
@@ -758,7 +754,7 @@ pub fn norm_sq_partial_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred  %guard;
-    .reg .u32   %tid, %bid, %ntid, %nctaid, %gid, %stride, %lane, %warpid, %warpn;
+    .reg .u32   %t, %bid, %nt, %nc, %gid, %stride, %lane, %wid, %warpn;
     .reg .u64   %gid64, %n64, %off;
     .reg .u64   %gbase, %pbase, %idx;
     .reg .f32   %val, %acc, %shfl;
@@ -771,15 +767,15 @@ pub fn norm_sq_partial_ptx(sm: SmVersion) -> String {
     ld.param.u64  %gbase, [p_grad];
     ld.param.u64  %pbase, [p_partial];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
-    and.b32  %lane,   %tid, 31;
-    shr.u32  %warpid, %tid, 5;
+    and.b32  %lane,   %t, 31;
+    shr.u32  %wid, %t, 5;
 
     // Thread-local accumulation (grid-stride)
     mov.f32  %acc, 0f00000000;
@@ -809,19 +805,23 @@ $REDUCE:
     // Lane 0 of each warp writes to smem
     setp.ne.u32  %guard, %lane, 0;
     @%guard bra  $SKIP_WRITE;
-    mul.lo.u32   %off,   %warpid, 4;
-    cvt.u64.u32  %idx,   %off;
+    mov.u64      %idx,   smem;
+    cvt.u64.u32  %off,   %wid;
+    shl.b64      %off,   %off, 2;
+    add.u64      %idx,   %idx, %off;
     st.shared.f32 [%idx], %acc;
 $SKIP_WRITE:
     bar.sync     0;
 
     // First warp reduces smem
-    div.u32  %warpn, %ntid, 32;
-    setp.ge.u32 %guard, %warpid, 1;
+    div.u32  %warpn, %nt, 32;
+    setp.ge.u32 %guard, %wid, 1;
     @%guard bra $STORE;
 
-    cvt.u64.u32 %idx, %lane;
-    mul.lo.u64  %idx, %idx, 4;
+    mov.u64     %idx, smem;
+    cvt.u64.u32 %off, %lane;
+    shl.b64     %off, %off, 2;
+    add.u64     %idx, %idx, %off;
     setp.lt.u32 %guard, %lane, %warpn;
     mov.f32     %acc, 0f00000000;
     @%guard ld.shared.f32 %acc, [%idx];
@@ -833,7 +833,7 @@ $SKIP_WRITE:
     shfl.sync.bfly.b32 %shfl, %acc,  1, 31, %smask;  add.f32 %acc, %acc, %shfl;
 
 $STORE:
-    setp.ne.u32 %guard, %tid, 0;
+    setp.ne.u32 %guard, %t, 0;
     @%guard bra $DONE;
     cvt.u64.u32 %idx, %bid;
     shl.b64     %idx, %idx, 2;
@@ -868,7 +868,7 @@ pub fn scale_inplace_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred %guard;
-    .reg .u32  %tid, %bid, %ntid, %nctaid, %gid, %stride;
+    .reg .u32  %t, %bid, %nt, %nc, %gid, %stride;
     .reg .u64  %gid64, %n64, %off, %xbase, %xaddr;
     .reg .f32  %val, %sc;
 
@@ -876,12 +876,12 @@ pub fn scale_inplace_ptx(sm: SmVersion) -> String {
     ld.param.f32  %sc,    [scale];
     ld.param.u64  %xbase, [p_x];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
 $LOOP:
     cvt.u64.u32  %gid64, %gid;
@@ -923,7 +923,7 @@ pub fn add_inplace_ptx(sm: SmVersion) -> String {
 )
 {{
     .reg .pred %guard;
-    .reg .u32  %tid, %bid, %ntid, %nctaid, %gid, %stride;
+    .reg .u32  %t, %bid, %nt, %nc, %gid, %stride;
     .reg .u64  %gid64, %n64, %off;
     .reg .u64  %abase, %sbase, %aaddr, %saddr;
     .reg .f32  %a, %s;
@@ -932,12 +932,12 @@ pub fn add_inplace_ptx(sm: SmVersion) -> String {
     ld.param.u64  %abase, [p_acc];
     ld.param.u64  %sbase, [p_src];
 
-    mov.u32  %tid,    %tid.x;
-    mov.u32  %bid,    %ctaid.x;
-    mov.u32  %ntid,   %ntid.x;
-    mov.u32  %nctaid, %nctaid.x;
-    mad.lo.u32 %gid,  %bid, %ntid, %tid;
-    mul.lo.u32 %stride, %ntid, %nctaid;
+    mov.u32  %t,    %tid.x;
+    mov.u32  %bid,  %ctaid.x;
+    mov.u32  %nt,   %ntid.x;
+    mov.u32  %nc,   %nctaid.x;
+    mad.lo.u32 %gid,  %bid, %nt, %t;
+    mul.lo.u32 %stride, %nt, %nc;
 
 $LOOP:
     cvt.u64.u32  %gid64, %gid;

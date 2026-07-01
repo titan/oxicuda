@@ -6,7 +6,7 @@ Mixture of Experts (MoE) primitives for OxiCUDA (Switch Transformer, GShard top-
 
 ## Implementation Status
 
-**Actual: ~13,363 SLoC (42 source files + 1 benches file) -- Coverage: full router family + expert FFN + auxiliary losses + complete MoE layer + sequence-aware / conditional / hierarchical / multi-task routing + inference-time compression + dense-checkpoint upcycling**
+**Actual: ~11,830 SLoC (42 source files + 1 benches file) -- Coverage: full router family + expert FFN + auxiliary losses + complete MoE layer + sequence-aware / conditional / hierarchical / multi-task routing + inference-time compression + dense-checkpoint upcycling**
 
 Current implementation covers Switch Transformer top-1 routing with capacity buffers and overflow token dropping, GShard-style top-K gating (softmax over experts, partial-sort top-k, optional Gaussian noise jitter via Box-Muller), Expert Choice routing (experts select preferred tokens for guaranteed load balance), Soft MoE (differentiable slot routing `D = softmax(X * Phi / sqrt(d))`, slot-aggregated expert inputs), GELU / SiLU / ReLU expert FFNs with Xavier init, SwiGLU expert `(SiLU(W1*x) (cdot) (W3*x)) * W2`, `ExpertBank` and `SwiGluBank` dispatch utilities, Switch load-balance loss `L_aux = n_e * sum f_i * P_i`, router z-loss `log^2(logsumexp(logits))`, routing entropy, expert utilization metrics, and a full `MoeLayer` combining router + expert bank + auxiliary losses. Advanced routing/compression: MoE-Mamba selective-state-space routing (`mamba_route`), Mixture-of-Depths conditional computation skip (`conditional`), differentiable per-expert capacity (`diff_capacity`), layer-conditional shared/per-layer routers (`layer_conditional`), sparse upcycling from a dense FFN checkpoint (`moe/upcycle`), and inference-time expert pruning / merging (`expert/prune_merge`).
 
@@ -91,7 +91,7 @@ Current implementation covers Switch Transformer top-1 routing with capacity buf
 
 ## Quality Status
 
-- Tests: 344 passing (12 e2e in lib.rs + module unit tests)
+- Tests: 352 passing (12 e2e in lib.rs + module unit tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0

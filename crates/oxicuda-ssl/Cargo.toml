@@ -18,11 +18,20 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# On-device GPU validation of the hand-written PTX kernels. Enables the
+# `gpu_tests` module which JIT-loads each kernel on a live CUDA device and
+# compares the result against a CPU oracle. A no-op on machines without a GPU.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name    = "ssl_ops"

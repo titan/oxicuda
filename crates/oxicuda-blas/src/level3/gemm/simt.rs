@@ -14,6 +14,7 @@ use std::fmt::Write as FmtWrite;
 use oxicuda_ptx::arch::SmVersion;
 use oxicuda_ptx::ir::PtxType;
 
+use super::precision;
 use crate::error::{BlasError, BlasResult};
 use crate::types::Transpose;
 
@@ -82,6 +83,14 @@ impl SimtGemmBuilder {
         let acc_ty = self.accumulator.as_ptx_str();
         let byte_size = self.precision.size_bytes();
         let kernel_name = self.kernel_name();
+        // When the input element precision differs from the accumulator
+        // precision, loaded elements occupy a separate `%fin` bank (in the
+        // `mem_ty` storage type) and are converted to/from the accumulator
+        // precision with `cvt`; half↔f64 routes through the `%fc` f32 scratch.
+        let needs_cvt = self.precision != self.accumulator;
+        let mem_ty = precision::mem_type(self.precision);
+        let needs_scratch = precision::needs_f32_scratch(self.precision, self.accumulator);
+        let acc_zero = self.accumulator.zero_literal();
 
         let mut ptx = String::with_capacity(4096);
 
@@ -107,10 +116,18 @@ impl SimtGemmBuilder {
         write_line(&mut ptx, ")")?;
         write_line(&mut ptx, "{")?;
 
-        // Registers
+        // Registers. The value bank `%f` is declared in the accumulator
+        // precision so every `mov`/`mul`/`fma.rn`/`ld.param` agrees with the
+        // register type that `ptxas` validates against.
         write_line(&mut ptx, "    .reg .b32 %r<32>;")?;
         write_line(&mut ptx, "    .reg .b64 %rd<16>;")?;
-        write_line(&mut ptx, "    .reg .f32 %f<16>;")?;
+        write_line(&mut ptx, &format!("    .reg {acc_ty} %f<16>;"))?;
+        if needs_cvt {
+            write_line(&mut ptx, &format!("    .reg {mem_ty} %fin<8>;"))?;
+        }
+        if needs_scratch {
+            write_line(&mut ptx, "    .reg .f32 %fc<8>;")?;
+        }
         write_line(&mut ptx, "    .reg .pred %p<4>;")?;
         write_line(&mut ptx, "")?;
 
@@ -154,7 +171,7 @@ impl SimtGemmBuilder {
         write_line(&mut ptx, "")?;
 
         // Accumulator init
-        write_line(&mut ptx, &format!("    mov{acc_ty} %f0, 0f00000000;"))?;
+        write_line(&mut ptx, &format!("    mov{acc_ty} %f0, {acc_zero};"))?;
         write_line(&mut ptx, "    mov.u32 %r11, 0;")?;
         write_line(&mut ptx, "")?;
 
@@ -180,7 +197,21 @@ impl SimtGemmBuilder {
             &format!("    mul.lo.u64 %rd3, %rd3, {byte_size};"),
         )?;
         write_line(&mut ptx, "    add.u64 %rd4, %rd0, %rd3;")?;
-        write_line(&mut ptx, &format!("    ld.global{ty} %f1, [%rd4];"))?;
+        if needs_cvt {
+            write_line(&mut ptx, &format!("    ld.global{mem_ty} %fin1, [%rd4];"))?;
+            write_line(
+                &mut ptx,
+                &precision::convert_to_acc(
+                    self.precision,
+                    self.accumulator,
+                    "%fin1",
+                    "%fc1",
+                    "%f1",
+                ),
+            )?;
+        } else {
+            write_line(&mut ptx, &format!("    ld.global{ty} %f1, [%rd4];"))?;
+        }
 
         // B element: trans_b == NoTrans => B[k, col] = B[k * ldb + col]
         //            trans_b == Trans   => B[col, k] = B[col * ldb + k]
@@ -198,7 +229,21 @@ impl SimtGemmBuilder {
             &format!("    mul.lo.u64 %rd5, %rd5, {byte_size};"),
         )?;
         write_line(&mut ptx, "    add.u64 %rd6, %rd1, %rd5;")?;
-        write_line(&mut ptx, &format!("    ld.global{ty} %f2, [%rd6];"))?;
+        if needs_cvt {
+            write_line(&mut ptx, &format!("    ld.global{mem_ty} %fin2, [%rd6];"))?;
+            write_line(
+                &mut ptx,
+                &precision::convert_to_acc(
+                    self.precision,
+                    self.accumulator,
+                    "%fin2",
+                    "%fc2",
+                    "%f2",
+                ),
+            )?;
+        } else {
+            write_line(&mut ptx, &format!("    ld.global{ty} %f2, [%rd6];"))?;
+        }
 
         // FMA
         write_line(&mut ptx, &format!("    fma.rn{acc_ty} %f0, %f1, %f2, %f0;"))?;
@@ -215,10 +260,38 @@ impl SimtGemmBuilder {
             &format!("    mul.lo.u64 %rd7, %rd7, {byte_size};"),
         )?;
         write_line(&mut ptx, "    add.u64 %rd8, %rd2, %rd7;")?;
-        write_line(&mut ptx, &format!("    ld.global{ty} %f3, [%rd8];"))?;
+        if needs_cvt {
+            write_line(&mut ptx, &format!("    ld.global{mem_ty} %fin3, [%rd8];"))?;
+            write_line(
+                &mut ptx,
+                &precision::convert_to_acc(
+                    self.precision,
+                    self.accumulator,
+                    "%fin3",
+                    "%fc3",
+                    "%f3",
+                ),
+            )?;
+        } else {
+            write_line(&mut ptx, &format!("    ld.global{ty} %f3, [%rd8];"))?;
+        }
         write_line(&mut ptx, &format!("    mul{acc_ty} %f0, %f0, %f8;"))?;
         write_line(&mut ptx, &format!("    fma.rn{acc_ty} %f0, %f9, %f3, %f0;"))?;
-        write_line(&mut ptx, &format!("    st.global{ty} [%rd8], %f0;"))?;
+        if needs_cvt {
+            write_line(
+                &mut ptx,
+                &precision::convert_from_acc(
+                    self.precision,
+                    self.accumulator,
+                    "%f0",
+                    "%fc0",
+                    "%fin0",
+                ),
+            )?;
+            write_line(&mut ptx, &format!("    st.global{mem_ty} [%rd8], %fin0;"))?;
+        } else {
+            write_line(&mut ptx, &format!("    st.global{ty} [%rd8], %f0;"))?;
+        }
         write_line(&mut ptx, "")?;
 
         write_line(&mut ptx, "$SIMT_DONE:")?;

@@ -73,7 +73,7 @@ fn twiddle_table_f64(n: usize) -> Vec<f64> {
 /// ```
 /// This is a simple gather kernel: thread `tid` reads x[tid] and writes to
 /// the correct location in y.
-fn emit_permute_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
+pub(crate) fn emit_permute_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     let ty = match prec {
         SignalPrecision::F32 => "f32",
         SignalPrecision::F64 => "f64",
@@ -122,11 +122,10 @@ fn emit_permute_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     // Compute output index:
     // even: out_idx = half   (i.e. tid/2)
     // odd:  out_idx = N - 1 - half
+    // PTX has no braced predication, so use per-instruction predication.
     @%p_even mov.u64 %out_idx, %half;
-    @!%p_even {{
-        sub.u64 %out_idx, %n, 1;
-        sub.u64 %out_idx, %out_idx, %half;
-    }}
+    @!%p_even sub.u64 %out_idx, %n, 1;
+    @!%p_even sub.u64 %out_idx, %out_idx, %half;
 
     // Store to y[out_idx]
     mul.lo.u64      %byte_off, %out_idx, {bytes};
@@ -156,7 +155,7 @@ done_permute:
 /// ```
 /// The FFT output is interleaved complex: `[Re0, Im0, Re1, Im1, …]`.
 /// The twiddle table is `[cos0, -sin0, cos1, -sin1, …]`.
-fn emit_twiddle_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
+pub(crate) fn emit_twiddle_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     let ty = match prec {
         SignalPrecision::F32 => "f32",
         SignalPrecision::F64 => "f64",

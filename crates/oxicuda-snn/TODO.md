@@ -6,7 +6,7 @@ Pure Rust Spiking Neural Network primitives covering classical neuron models, su
 
 ## Implementation Status
 
-**Actual: ~32,700 SLoC (95 files)**
+**Actual: ~26,057 SLoC (96 files)**
 
 Current implementation covers the classical spiking ML stack: LIF / IF / Izhikevich / AdEx / Poisson neurons; five surrogate-gradient families; BPTT / STBP / SLAYER training; pair-STDP, triplet-STDP, reward-modulated STDP plasticity; ANN→SNN rate conversion with threshold balancing; rate / TTFS / phase / Poisson input encodings; spiking linear / conv / pool / recurrent layers; Liquid State Machine reservoir; and analytical spike-train metrics (firing rate, ISI, CV, van Rossum, Victor-Purpura, sync index, neuronal-avalanche criticality, entropy / mutual information, population-vector decoding, spike-triggered average / covariance).
 
@@ -148,7 +148,7 @@ Current implementation covers the classical spiking ML stack: LIF / IF / Izhikev
 
 ## Quality Status
 
-- Tests: 833 passing (unit + 11 e2e integration tests in `e2e_tests.rs`; includes 23 reservoir-task / STDP-verification tests in `tasks/`)
+- Tests: 845 passing (unit + 11 e2e integration tests in `e2e_tests.rs`; includes 23 reservoir-task / STDP-verification tests in `tasks/`)
 - Warnings: 0 (`cargo clippy --all-features --all-targets -- -D warnings` clean)
 - `unwrap()` in production code: 0
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches

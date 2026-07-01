@@ -54,6 +54,9 @@ pub mod rerank;
 pub mod topk;
 pub mod vamana;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 #[cfg(test)]
 mod e2e_tests {
     use crate::distance::l2::l2_sq;

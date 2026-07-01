@@ -246,6 +246,11 @@ pub fn bilinear_interp_ptx(sm: u32) -> String {
     let zero = f32_hex(0.0_f32);
     let half = f32_hex(0.5_f32);
     let one = f32_hex(1.0_f32);
+    // PTX BUG FIX: `sub.f32 d, literal, reg` (constant as first source) is
+    // rejected by ptxas on sm_86 (CUDA 12.4).  The computation `1 - x` is
+    // expressed instead as `fma.rn.f32 d, -1.0, x, 1.0` which is valid in all
+    // PTX versions and is single-rounded (more accurate than two-op subtract).
+    let neg_one = f32_hex(-1.0_f32);
     format!(
         r#"{hdr}.visible .entry bilinear_interp(
     .param .u64 p_src,
@@ -260,7 +265,7 @@ pub fn bilinear_interp_ptx(sm: u32) -> String {
     .reg .u64  %rd<12>;
     .reg .u32  %r<24>;
     .reg .f32  %f<32>;
-    .reg .pred %p0, %p1, %p2;
+    .reg .pred %p0, %p1;
 
     ld.param.u64  %rd0, [p_src];
     ld.param.u64  %rd1, [p_out];
@@ -309,7 +314,10 @@ $BI_OUTER:
     min.f32         %f4, %f4, %f5;       // f4 = clamped src_y
 
     // floor(src_y) and frac_y
-    floor.f32       %f6, %f4;            // f6 = y0 (float)
+    // PTX BUG FIX: `floor.f32` is not recognised by ptxas 12.0 (CUDA 12.0).
+    // `cvt.rmi.f32.f32` (convert f32→f32, round toward negative infinity)
+    // is the portable floor equivalent accepted by all ptxas versions.
+    cvt.rmi.f32.f32 %f6, %f4;           // f6 = y0 = floor(src_y)
     sub.f32         %f7, %f4, %f6;       // f7 = fy = frac_y
 
     // Compute src_x = (ox + 0.5) * (in_w / out_w) - 0.5
@@ -328,7 +336,7 @@ $BI_OUTER:
     min.f32         %f12, %f12, %f13;
 
     // floor(src_x) and frac_x
-    floor.f32       %f14, %f12;          // f14 = x0 (float)
+    cvt.rmi.f32.f32 %f14, %f12;         // f14 = x0 = floor(src_x)
     sub.f32         %f15, %f12, %f14;    // f15 = fx = frac_x
 
     // Convert floor coords to integers: y0, x0, y1 = min(y0+1, in_h-1), x1 = min(x0+1, in_w-1)
@@ -382,8 +390,12 @@ $BI_OUTER:
     // top = tl * (1 - fx) + tr * fx
     // bot = bl * (1 - fx) + br * fx
     // out = top * (1 - fy) + bot * fy
-    sub.f32         %f20, {ONE}, %f15;   // 1 - fx
-    sub.f32         %f21, {ONE}, %f7;    // 1 - fy
+    //
+    // 1 - fx and 1 - fy are computed via FMA(-1.0, x, 1.0) to avoid placing
+    // a literal constant in the first source position of sub.f32, which ptxas
+    // rejects on sm_86 (CUDA: invalid PTX).
+    fma.rn.f32      %f20, {NEG_ONE}, %f15, {ONE};   // f20 = 1 - fx
+    fma.rn.f32      %f21, {NEG_ONE}, %f7,  {ONE};   // f21 = 1 - fy
 
     mul.f32         %f22, %f16, %f20;    // tl * (1-fx)
     fma.rn.f32      %f22, %f17, %f15, %f22; // + tr * fx  (= top)
@@ -413,6 +425,7 @@ $BI_DONE:
         ZERO = zero,
         HALF = half,
         ONE = one,
+        NEG_ONE = neg_one,
     )
 }
 
@@ -718,8 +731,9 @@ $RA_IX_LOOP:
     min.f32       %f21, %f21, %f23;
 
     // Bilinear interpolation at (sy, sx) in feature map channel c
-    floor.f32     %f24, %f19;             // y0f
-    floor.f32     %f25, %f21;             // x0f
+    // PTX BUG FIX: `floor.f32` is rejected by ptxas 12.0; use cvt.rmi.f32.f32
+    cvt.rmi.f32.f32 %f24, %f19;          // y0f = floor(sy)
+    cvt.rmi.f32.f32 %f25, %f21;          // x0f = floor(sx)
     sub.f32       %f26, %f19, %f24;       // fy
     sub.f32       %f27, %f21, %f25;       // fx
 
@@ -1368,7 +1382,12 @@ mod tests {
     #[test]
     fn bilinear_interp_has_floor() {
         let ptx = bilinear_interp_ptx(80);
-        assert!(ptx.contains("floor.f32"), "must use floor.f32");
+        // `floor.f32` is rejected by ptxas 12.0; the portable floor is
+        // `cvt.rmi.f32.f32` (round toward negative infinity).
+        assert!(
+            ptx.contains("cvt.rmi.f32.f32"),
+            "must use cvt.rmi.f32.f32 (portable floor) — floor.f32 is invalid in ptxas 12.0"
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@ metrics. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.27).
 
 ## Implementation Status
 
-- **Actual SLoC:** 12,038 (39 files)
+- **Actual SLoC:** 14,138 (39 files)
 - **PTX kernels:** 7 kernel generators emitted for 6 SM targets (sm_75 / 80 / 86 / 90 / 100 / 120)
 - **Coverage:** CPU reference implementation + PTX string generation for GPU execution
 
@@ -76,14 +76,14 @@ metrics. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.27).
 - [x] Targeted variant of every attack -- currently `fgsm_attack` / `pgd_attack_*` take a gradient closure but no explicit target-class API
 
 #### P2 -- Nice-to-Have (Evaluation & Tooling)
-- [ ] Stratified robust-accuracy reporter (per-class robust accuracy + worst-class accuracy)
+- [x] Stratified robust-accuracy reporter (per-class robust accuracy + worst-class accuracy)
 - [x] Gradient-masking diagnostics (Athalye 2018) -- BPDA / EOT helpers to detect obfuscated gradients in custom defences
-- [ ] Loss-landscape probing utilities -- multi-restart PGD with random initialisation distance histograms
-- [ ] Transferability matrix helper -- run attack from model A on model B and tabulate success rates
-- [ ] CIFAR-10 / ImageNet-C corruption-robustness eval wrappers on top of `robust_accuracy`
-- [ ] `certified/smoothing_lp.rs` — Lp smoothing certificates (Yang 2020): randomised smoothing under Lp norm via Neyman-Pearson optimal noise; uniform/generalised Gaussian; `LpSmoothingCertifier { p: f32, sigma: f32 }`
-- [ ] `attack/square_attack.rs` — Square Attack (Andriushchenko 2020): score-based black-box attack; random-sign square perturbations + random walk; query-efficient, no gradient required; `SquareAttack { eps, n_iters, p_init }`
-- [ ] `defense/randomised_smoothing_finetune.rs` — SmoothAdv training (Salman 2019): augment PGD adversarial training with smoothing noise; PGD on noise-augmented inputs; certified + empirical accuracy balance; `SmoothAdvConfig { sigma, eps }`
+- [x] Loss-landscape probing utilities -- multi-restart PGD with random initialisation distance histograms
+- [x] Transferability matrix helper -- run attack from model A on model B and tabulate success rates
+- [x] CIFAR-10 / ImageNet-C corruption-robustness eval wrappers on top of `robust_accuracy`
+- [x] `certified/smoothing_lp.rs` — Lp smoothing certificates (Yang 2020): randomised smoothing under Lp norm via Neyman-Pearson optimal noise; uniform/generalised Gaussian; `LpSmoothingCertifier { p: f32, sigma: f32 }`
+- [x] `attack/square_attack.rs` — Square Attack (Andriushchenko 2020): score-based black-box attack; random-sign square perturbations + random walk; query-efficient, no gradient required; `SquareAttack { eps, n_iters, p_init }`
+- [x] `defense/randomised_smoothing_finetune.rs` — SmoothAdv training (Salman 2019): augment PGD adversarial training with smoothing noise; PGD on noise-augmented inputs; certified + empirical accuracy balance; `SmoothAdvConfig { sigma, eps }`
 - [x] `detection/feature_squeezing.rs` — Feature Squeezing (Xu 2018): detect adversarial inputs by comparing predictions on original vs bit-depth-reduced / median-filtered inputs; `FeatureSqueezingDetector { threshold: f32 }`
 
 #### GPU Launcher Wiring

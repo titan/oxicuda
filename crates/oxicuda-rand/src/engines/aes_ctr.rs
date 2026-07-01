@@ -27,7 +27,7 @@ use crate::error::{RandError, RandResult};
 /// Each byte value `b` maps to `AES_SBOX[b as usize]`, implementing the
 /// SubBytes transformation defined in FIPS 197.
 #[rustfmt::skip]
-const AES_SBOX: [u8; 256] = [
+pub(crate) const AES_SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
     0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
@@ -246,7 +246,7 @@ pub fn aes_encrypt_block(block: &[u8; 16], round_keys: &[u32; 60]) -> [u8; 16] {
 /// This follows NIST SP 800-38A format where the nonce occupies the first 12
 /// bytes and the counter occupies the last 4 bytes in big-endian order.
 #[inline]
-fn build_counter_block(nonce: &[u8; 12], counter: u64) -> [u8; 16] {
+pub(crate) fn build_counter_block(nonce: &[u8; 12], counter: u64) -> [u8; 16] {
     let mut block = [0u8; 16];
     block[..12].copy_from_slice(nonce);
     // Only the lower 32 bits of the counter enter the block (big-endian)
@@ -1081,10 +1081,16 @@ fn emit_add_round_key_imm(
     round_keys: &[u32; 60],
     round: usize,
 ) {
-    let rk0 = round_keys[round * 4];
-    let rk1 = round_keys[round * 4 + 1];
-    let rk2 = round_keys[round * 4 + 2];
-    let rk3 = round_keys[round * 4 + 3];
+    // The on-device state words are little-endian byte lanes (lane 0 = row 0 =
+    // low byte), matching the `from_le_bytes` counter-block construction and the
+    // ShiftRows / MixColumns lane convention. The key schedule words from
+    // `expand_key_256` are big-endian (FIPS 197: row 0 = most-significant byte),
+    // so they must be byte-swapped before XOR or AddRoundKey would scramble the
+    // round key into the wrong rows (row 0 <-> row 3), breaking the cipher.
+    let rk0 = round_keys[round * 4].swap_bytes();
+    let rk1 = round_keys[round * 4 + 1].swap_bytes();
+    let rk2 = round_keys[round * 4 + 2].swap_bytes();
+    let rk3 = round_keys[round * 4 + 3].swap_bytes();
 
     let k0 = b.alloc_reg(PtxType::U32);
     let k1 = b.alloc_reg(PtxType::U32);

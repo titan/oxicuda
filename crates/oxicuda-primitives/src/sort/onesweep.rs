@@ -196,6 +196,8 @@ impl OnesweepTemplate {
         writeln!(out, ".shared .align 4 .u32 osw_hist[{radix}];").map_err(ferr)?;
         // Shared: resolved per-digit block-exclusive prefix.
         writeln!(out, ".shared .align 4 .u32 osw_bprefix[{radix}];").map_err(ferr)?;
+        // Shared: each thread's digit, for a STABLE within-block local rank.
+        writeln!(out, ".shared .align 4 .u32 osw_sdig[{bs}];").map_err(ferr)?;
         writeln!(
             out,
             ".visible .entry {name}(\n    \
@@ -214,12 +216,12 @@ impl OnesweepTemplate {
         writeln!(out, "    .reg .{ty}   %key;").map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u32    %tid, %bid, %nb, %shift, %digit, %old, %i, %d, %flag, %probe;"
+            "    .reg .u32    %ltid, %bid, %nb, %shift, %digit, %old, %i, %d, %flag, %probe;"
         )
         .map_err(ferr)?;
         writeln!(
             out,
-            "    .reg .u32    %agg_v, %pre_v, %base_v, %local_rank, %gbase, %cnt;"
+            "    .reg .u32    %agg_v, %pre_v, %base_v, %local_rank, %gbase, %cnt, %tp, %other;"
         )
         .map_err(ferr)?;
         writeln!(
@@ -232,8 +234,16 @@ impl OnesweepTemplate {
             "    .reg .u64    %ptr_status, %ptr_agg, %ptr_prefix, %addr, %hist_addr;"
         )
         .map_err(ferr)?;
-        writeln!(out, "    .reg .u64    %smem_h, %smem_p, %out64;").map_err(ferr)?;
-        writeln!(out, "    .reg .pred   %p, %oob, %init_p, %is_first, %done;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    .reg .u64    %smem_h, %smem_p, %smem_d, %sdig_addr, %out64;"
+        )
+        .map_err(ferr)?;
+        writeln!(
+            out,
+            "    .reg .pred   %p, %oob, %init_p, %is_first, %done, %eq;"
+        )
+        .map_err(ferr)?;
         if is64 {
             writeln!(out, "    .reg .u64    %shift64, %key_shifted;").map_err(ferr)?;
         }
@@ -247,29 +257,41 @@ impl OnesweepTemplate {
         writeln!(out, "    ld.param.u64 %n,           [param_n];").map_err(ferr)?;
         writeln!(out, "    ld.param.u32 %nb,          [param_num_blocks];").map_err(ferr)?;
         writeln!(out, "    ld.param.u32 %shift,       [param_shift];").map_err(ferr)?;
-        writeln!(out, "    mov.u32      %tid, %tid.x;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %ltid, %tid.x;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %bid, %ctaid.x;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %gid, %bid, {bs}, %tid;").map_err(ferr)?;
+        writeln!(
+            out,
+            "    cvt.u64.u32   %gid, %ltid;
+    mad.wide.u32   %gid, %bid, {bs}, %gid;"
+        )
+        .map_err(ferr)?;
         writeln!(out, "    mov.u64      %smem_h, osw_hist;").map_err(ferr)?;
         writeln!(out, "    mov.u64      %smem_p, osw_bprefix;").map_err(ferr)?;
+        writeln!(out, "    mov.u64      %smem_d, osw_sdig;").map_err(ferr)?;
 
         // Phase 1: zero the shared histogram (strided over radix bins).
-        writeln!(out, "    mov.u32      %i, %tid;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %i, %ltid;").map_err(ferr)?;
         writeln!(out, "OSW_ZERO:").map_err(ferr)?;
         writeln!(out, "    setp.ge.u32  %init_p, %i, {radix};").map_err(ferr)?;
         writeln!(out, "    @%init_p bra OSW_ZERO_DONE;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %i, 4, %smem_h;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %i, 4, %smem_h;").map_err(ferr)?;
         writeln!(out, "    st.shared.u32 [%hist_addr], 0;").map_err(ferr)?;
         writeln!(out, "    add.u32      %i, %i, {bs};").map_err(ferr)?;
         writeln!(out, "    bra OSW_ZERO;").map_err(ferr)?;
         writeln!(out, "OSW_ZERO_DONE:").map_err(ferr)?;
         writeln!(out, "    bar.sync 0;").map_err(ferr)?;
 
-        // Phase 2: each thread atomically ranks its element within its digit.
+        // Phase 2: build the per-digit histogram and a STABLE local rank.
+        //
+        // The histogram counter (`atom.shared.add`) is only used for the block
+        // AGGREGATE; its return value (the arbitrary atomic order) must NOT be
+        // used as the element's local rank — that would make the sort unstable
+        // and break the multi-pass LSD chain. Each thread instead caches its
+        // digit and computes `local_rank = #{ t' < tid : digit[t'] == digit }`.
         writeln!(out, "    setp.ge.u64  %oob, %gid, %n;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %local_rank, 0;").map_err(ferr)?;
         writeln!(out, "    mov.u32      %digit, 0;").map_err(ferr)?;
-        writeln!(out, "    @%oob bra OSW_HIST_DONE;").map_err(ferr)?;
+        writeln!(out, "    @%oob bra OSW_OOB_SDIG;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u64   %addr, %gid, {eb}, %ptr_kin;").map_err(ferr)?;
         writeln!(out, "    ld.global.{ty} %key, [%addr];").map_err(ferr)?;
         if is64 {
@@ -280,15 +302,37 @@ impl OnesweepTemplate {
             writeln!(out, "    shr.u32      %digit, %key, %shift;").map_err(ferr)?;
         }
         writeln!(out, "    and.b32      %digit, %digit, 0x{mask:X};").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %digit, 4, %smem_h;").map_err(ferr)?;
-        writeln!(out, "    atom.shared.add.u32 %local_rank, [%hist_addr], 1;").map_err(ferr)?;
+        // Cache digit and count it (atomic return discarded).
+        writeln!(out, "    mad.wide.u32   %sdig_addr, %ltid, 4, %smem_d;").map_err(ferr)?;
+        writeln!(out, "    st.shared.u32 [%sdig_addr], %digit;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %digit, 4, %smem_h;").map_err(ferr)?;
+        writeln!(out, "    atom.shared.add.u32 %old, [%hist_addr], 1;").map_err(ferr)?;
+        writeln!(out, "    bra OSW_HIST_DONE;").map_err(ferr)?;
+        writeln!(out, "OSW_OOB_SDIG:").map_err(ferr)?;
+        // Out-of-range lanes store a sentinel that never matches a real digit.
+        writeln!(out, "    mov.u32      %old, 0xFFFFFFFF;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %sdig_addr, %ltid, 4, %smem_d;").map_err(ferr)?;
+        writeln!(out, "    st.shared.u32 [%sdig_addr], %old;").map_err(ferr)?;
         writeln!(out, "OSW_HIST_DONE:").map_err(ferr)?;
         writeln!(out, "    bar.sync 0;").map_err(ferr)?;
+        // Stable rank: count earlier lanes in this block sharing the same digit.
+        writeln!(out, "    @%oob bra OSW_RANK_DONE;").map_err(ferr)?;
+        writeln!(out, "    mov.u32      %tp, 0;").map_err(ferr)?;
+        writeln!(out, "OSW_RANK:").map_err(ferr)?;
+        writeln!(out, "    setp.ge.u32  %p, %tp, %ltid;").map_err(ferr)?;
+        writeln!(out, "    @%p bra OSW_RANK_DONE;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %sdig_addr, %tp, 4, %smem_d;").map_err(ferr)?;
+        writeln!(out, "    ld.shared.u32 %other, [%sdig_addr];").map_err(ferr)?;
+        writeln!(out, "    setp.eq.u32  %eq, %other, %digit;").map_err(ferr)?;
+        writeln!(out, "    @%eq add.u32 %local_rank, %local_rank, 1;").map_err(ferr)?;
+        writeln!(out, "    add.u32      %tp, %tp, 1;").map_err(ferr)?;
+        writeln!(out, "    bra OSW_RANK;").map_err(ferr)?;
+        writeln!(out, "OSW_RANK_DONE:").map_err(ferr)?;
 
         // Phase 3: thread 0 publishes per-digit aggregates and runs the lookback
         // per digit to fill osw_bprefix[d].  (Serial over digits and blocks; a
         // warp-parallel form is a perf refinement that does not change results.)
-        writeln!(out, "    setp.ne.u32  %p, %tid, 0;").map_err(ferr)?;
+        writeln!(out, "    setp.ne.u32  %p, %ltid, 0;").map_err(ferr)?;
         writeln!(out, "    @%p bra OSW_APPLY;").map_err(ferr)?;
 
         // Publish this block's per-digit aggregates: agg[bid*radix + d] = hist[d].
@@ -296,16 +340,16 @@ impl OnesweepTemplate {
         writeln!(out, "OSW_PUB:").map_err(ferr)?;
         writeln!(out, "    setp.ge.u32  %init_p, %d, {radix};").map_err(ferr)?;
         writeln!(out, "    @%init_p bra OSW_PUB_DONE;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %d, 4, %smem_h;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %d, 4, %smem_h;").map_err(ferr)?;
         writeln!(out, "    ld.shared.u32 %cnt, [%hist_addr];").map_err(ferr)?;
         writeln!(out, "    mad.lo.u32   %i, %bid, {radix}, %d;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %i, 4, %ptr_agg;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %i, 4, %ptr_agg;").map_err(ferr)?;
         writeln!(out, "    st.global.u32 [%addr], %cnt;").map_err(ferr)?;
         writeln!(out, "    add.u32      %d, %d, 1;").map_err(ferr)?;
         writeln!(out, "    bra OSW_PUB;").map_err(ferr)?;
         writeln!(out, "OSW_PUB_DONE:").map_err(ferr)?;
         writeln!(out, "    membar.gl;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %bid, 4, %ptr_status;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %bid, 4, %ptr_status;").map_err(ferr)?;
         writeln!(out, "    atom.global.exch.b32 %flag, [%addr], {FLAG_A};").map_err(ferr)?;
 
         // For each digit d: walk predecessors to accumulate block-exclusive prefix.
@@ -319,7 +363,7 @@ impl OnesweepTemplate {
         writeln!(out, "    sub.u32      %probe, %bid, 1;").map_err(ferr)?;
         writeln!(out, "OSW_LOOKBACK:").map_err(ferr)?;
         writeln!(out, "OSW_LB_SPIN:").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %probe, 4, %ptr_status;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %probe, 4, %ptr_status;").map_err(ferr)?;
         writeln!(out, "    ld.global.u32 %flag, [%addr];").map_err(ferr)?;
         writeln!(out, "    setp.eq.u32  %p, %flag, {FLAG_X};").map_err(ferr)?;
         writeln!(out, "    @%p bra OSW_LB_SPIN;").map_err(ferr)?;
@@ -328,7 +372,7 @@ impl OnesweepTemplate {
         writeln!(out, "    setp.eq.u32  %done, %flag, {FLAG_P};").map_err(ferr)?;
         writeln!(out, "    @%done bra OSW_LB_P;").map_err(ferr)?;
         // A: add predecessor aggregate, keep walking.
-        writeln!(out, "    mad.lo.u64   %addr, %i, 4, %ptr_agg;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %i, 4, %ptr_agg;").map_err(ferr)?;
         writeln!(out, "    ld.global.u32 %agg_v, [%addr];").map_err(ferr)?;
         writeln!(out, "    add.u32      %pre_v, %pre_v, %agg_v;").map_err(ferr)?;
         writeln!(out, "    setp.eq.u32  %p, %probe, 0;").map_err(ferr)?;
@@ -339,24 +383,24 @@ impl OnesweepTemplate {
         // Inclusive prefix of this predecessor already covers all earlier blocks;
         // add it to the aggregates accumulated while walking past intervening
         // A-blocks, then stop.
-        writeln!(out, "    mad.lo.u64   %addr, %i, 4, %ptr_prefix;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %i, 4, %ptr_prefix;").map_err(ferr)?;
         writeln!(out, "    ld.global.u32 %agg_v, [%addr];").map_err(ferr)?;
         writeln!(out, "    add.u32      %pre_v, %pre_v, %agg_v;").map_err(ferr)?;
         writeln!(out, "OSW_DIGIT_STORE:").map_err(ferr)?;
         // Store block-exclusive prefix for digit d, and publish inclusive prefix.
-        writeln!(out, "    mad.lo.u64   %hist_addr, %d, 4, %smem_p;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %d, 4, %smem_p;").map_err(ferr)?;
         writeln!(out, "    st.shared.u32 [%hist_addr], %pre_v;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %hist_addr, %d, 4, %smem_h;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %d, 4, %smem_h;").map_err(ferr)?;
         writeln!(out, "    ld.shared.u32 %cnt, [%hist_addr];").map_err(ferr)?;
         writeln!(out, "    add.u32      %agg_v, %pre_v, %cnt;").map_err(ferr)?;
         writeln!(out, "    mad.lo.u32   %i, %bid, {radix}, %d;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %i, 4, %ptr_prefix;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %i, 4, %ptr_prefix;").map_err(ferr)?;
         writeln!(out, "    st.global.u32 [%addr], %agg_v;").map_err(ferr)?;
         writeln!(out, "    add.u32      %d, %d, 1;").map_err(ferr)?;
         writeln!(out, "    bra OSW_DIGIT;").map_err(ferr)?;
         writeln!(out, "OSW_DIGIT_DONE:").map_err(ferr)?;
         writeln!(out, "    membar.gl;").map_err(ferr)?;
-        writeln!(out, "    mad.lo.u64   %addr, %bid, 4, %ptr_status;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %bid, 4, %ptr_status;").map_err(ferr)?;
         writeln!(out, "    atom.global.exch.b32 %flag, [%addr], {FLAG_P};").map_err(ferr)?;
 
         // Phase 4: all threads scatter using global_base + block_prefix + rank.
@@ -364,10 +408,10 @@ impl OnesweepTemplate {
         writeln!(out, "    bar.sync 0;").map_err(ferr)?;
         writeln!(out, "    @%oob ret;").map_err(ferr)?;
         // gbase = global_base[digit]
-        writeln!(out, "    mad.lo.u64   %addr, %digit, 4, %ptr_gbase;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %addr, %digit, 4, %ptr_gbase;").map_err(ferr)?;
         writeln!(out, "    ld.global.u32 %gbase, [%addr];").map_err(ferr)?;
         // bprefix = osw_bprefix[digit]
-        writeln!(out, "    mad.lo.u64   %hist_addr, %digit, 4, %smem_p;").map_err(ferr)?;
+        writeln!(out, "    mad.wide.u32   %hist_addr, %digit, 4, %smem_p;").map_err(ferr)?;
         writeln!(out, "    ld.shared.u32 %base_v, [%hist_addr];").map_err(ferr)?;
         writeln!(out, "    add.u32      %old, %gbase, %base_v;").map_err(ferr)?;
         writeln!(out, "    add.u32      %old, %old, %local_rank;").map_err(ferr)?;

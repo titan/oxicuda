@@ -6,7 +6,7 @@ Pure-Rust implementation of the **CUDA Runtime API** (`libcudart`) surface, buil
 
 ## Implementation Status
 
-**Actual: ~4,900 SLoC across 16 files** (production; ~7,540 incl. tests)
+**Actual: ~4,856 SLoC across 14 files** (production; ~7,540 incl. tests)
 
 Covers the day-to-day surface of `cudart`: device enumeration, memory management, streams, events, kernel launch, peer-to-peer access, profiler control, and the full texture / surface object family. The crate is a thin ergonomic façade over `oxicuda-driver` -- strong Rust types for streams, events, device pointers, kernel dimensions, with `Result`-typed errors and no unwrap in production code.
 

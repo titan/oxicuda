@@ -7,8 +7,8 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 
 ## Implementation Status
 
-- **Actual SLoC:** 8,747 across 22 files
-- **Tests:** 217 unit + 3 doc = 220 passing (host/codegen surface; on-device tests are `#[cfg(target_os = "macos")]`-gated and skip without a GPU)
+- **Actual SLoC:** 7,287 across 22 files
+- **Tests:** 255 unit + 3 doc = 258 passing (host/codegen surface; on-device tests are `#[cfg(target_os = "macos")]`-gated and skip without a GPU)
 - **Status:** Full memory + compute backend with MSL, MPS interop, ANE hints, GPU FFT, plus host-side codegen/builders for `simdgroup_matrix`/df64-FP64/INT8 GEMM, MTLHeap suballocation, storage-mode planning, argument buffers, events/fences, indirect command + blit lists, GPU-family capability gating, and dispatch planning
 - **Targets:** Apple Silicon (M1/M2/M3/M4 series) and Intel Mac (discrete + integrated)
 
@@ -96,7 +96,7 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 ## Quality Status
 
 - Warnings: 0
-- Tests: 220 passing (217 unit + 3 doc)
+- Tests: 258 passing (255 unit + 3 doc)
 - unwrap() calls: 0 (production code; tests use `.expect(...)`)
 - Clippy: clean (`-D warnings`, all-features all-targets)
 

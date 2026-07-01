@@ -359,10 +359,17 @@ pub fn cg_axpy_dot_ptx(sm: u32) -> String {
     hdr + body
 }
 
-/// Per-element FEM stiffness scatter (P1 triangle).
+/// Per-element FEM P1 stiffness assembly (unconstrained dense scatter).
 ///
 /// Signature: `fem_assemble_kernel(coords, conn, k_global, n_elem, n_nodes)`
-/// For each element e, compute K_e (3x3) and scatter into global K.
+/// For each element `e`, build the full 3x3 local stiffness
+/// `K_ij = (1/(4*Area)) * (b_i*b_j + c_i*c_j)` with
+/// `b0=y1-y2, b1=y2-y0, b2=y0-y1` and `c0=x2-x1, c1=x0-x2, c2=x1-x0`, then
+/// atomically scatter `K_ij` into the dense row-major global matrix at
+/// `k_global[node_i*n_nodes + node_j]`. `k_global` is an `n_nodes x n_nodes`
+/// dense buffer (host pre-fills `n_nodes^2` zeros). This mirrors the CPU
+/// `fem::p1_triangle::p1_local_stiffness` + the dense scatter inside
+/// `fem::mass_stiffness::assemble_mass_stiffness` with no boundary elimination.
 #[must_use]
 pub fn fem_assemble_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
@@ -374,10 +381,10 @@ pub fn fem_assemble_ptx(sm: u32) -> String {
         .param .u32 p_n_nodes\n\
     )\n\
     {\n\
-        .reg .u64  %rd<16>;\n\
+        .reg .u64  %rd<24>;\n\
         .reg .u32  %r<32>;\n\
-        .reg .f32  %f<20>;\n\
-        .reg .pred %p0;\n\
+        .reg .f32  %f<48>;\n\
+        .reg .pred %p<2>;\n\
     \n\
         ld.param.u64  %rd0, [p_coords];\n\
         ld.param.u64  %rd1, [p_conn];\n\
@@ -420,7 +427,7 @@ pub fn fem_assemble_ptx(sm: u32) -> String {
         ld.global.f32 %f4, [%rd10];\n\
         ld.global.f32 %f5, [%rd10+4];\n\
     \n\
-        // area = 0.5 * ((x2-x1)*(y3-y1) - (x3-x1)*(y2-y1))\n\
+        // signed area = 0.5 * ((x1-x0)*(y2-y0) - (x2-x0)*(y1-y0))\n\
         sub.f32       %f6, %f2, %f0;\n\
         sub.f32       %f7, %f5, %f1;\n\
         sub.f32       %f8, %f4, %f0;\n\
@@ -431,11 +438,105 @@ pub fn fem_assemble_ptx(sm: u32) -> String {
         mov.f32       %f13, 0f3F000000;\n\
         mul.f32       %f14, %f12, %f13;\n\
     \n\
-        // partial scatter (atomically add to global k_global[7])\n\
-        // The host driver should follow up with full assembly; this kernel marks element processed.\n\
-        mul.wide.u32  %rd11, %r7, 4;\n\
-        add.u64       %rd12, %rd2, %rd11;\n\
-        atom.global.add.f32 %f15, [%rd12], %f14;\n\
+        // skip degenerate element if |area| < eps\n\
+        abs.f32       %f15, %f14;\n\
+        mov.f32       %f16, 0f2B8CBCCC;\n\
+        setp.lt.f32   %p0, %f15, %f16;\n\
+        @%p0 bra $FA_DONE;\n\
+    \n\
+        // inv = 1 / (4 * area)\n\
+        mov.f32       %f17, 0f40800000;\n\
+        mul.f32       %f18, %f14, %f17;\n\
+        rcp.rn.f32    %f19, %f18;\n\
+    \n\
+        // gradient coefficients b_i, c_i\n\
+        sub.f32       %f20, %f3, %f5;\n\
+        sub.f32       %f21, %f5, %f1;\n\
+        sub.f32       %f22, %f1, %f3;\n\
+        sub.f32       %f23, %f4, %f2;\n\
+        sub.f32       %f24, %f0, %f4;\n\
+        sub.f32       %f25, %f2, %f0;\n\
+    \n\
+        // (0,0): K = inv*(b0*b0 + c0*c0) -> k_global[n0*n_nodes + n0]\n\
+        mul.f32       %f30, %f23, %f23;\n\
+        fma.rn.f32    %f31, %f20, %f20, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r7, %r1, %r7;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
+    \n\
+        // (0,1): inv*(b0*b1 + c0*c1) -> [n0*n_nodes + n1]\n\
+        mul.f32       %f30, %f23, %f24;\n\
+        fma.rn.f32    %f31, %f20, %f21, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r7, %r1, %r8;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
+    \n\
+        // (0,2): inv*(b0*b2 + c0*c2) -> [n0*n_nodes + n2]\n\
+        mul.f32       %f30, %f23, %f25;\n\
+        fma.rn.f32    %f31, %f20, %f22, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r7, %r1, %r9;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
+    \n\
+        // (1,0): inv*(b1*b0 + c1*c0) -> [n1*n_nodes + n0]\n\
+        mul.f32       %f30, %f24, %f23;\n\
+        fma.rn.f32    %f31, %f21, %f20, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r8, %r1, %r7;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
+    \n\
+        // (1,1): inv*(b1*b1 + c1*c1) -> [n1*n_nodes + n1]\n\
+        mul.f32       %f30, %f24, %f24;\n\
+        fma.rn.f32    %f31, %f21, %f21, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r8, %r1, %r8;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
+    \n\
+        // (1,2): inv*(b1*b2 + c1*c2) -> [n1*n_nodes + n2]\n\
+        mul.f32       %f30, %f24, %f25;\n\
+        fma.rn.f32    %f31, %f21, %f22, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r8, %r1, %r9;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
+    \n\
+        // (2,0): inv*(b2*b0 + c2*c0) -> [n2*n_nodes + n0]\n\
+        mul.f32       %f30, %f25, %f23;\n\
+        fma.rn.f32    %f31, %f22, %f20, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r9, %r1, %r7;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
+    \n\
+        // (2,1): inv*(b2*b1 + c2*c1) -> [n2*n_nodes + n1]\n\
+        mul.f32       %f30, %f25, %f24;\n\
+        fma.rn.f32    %f31, %f22, %f21, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r9, %r1, %r8;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
+    \n\
+        // (2,2): inv*(b2*b2 + c2*c2) -> [n2*n_nodes + n2]\n\
+        mul.f32       %f30, %f25, %f25;\n\
+        fma.rn.f32    %f31, %f22, %f22, %f30;\n\
+        mul.f32       %f32, %f19, %f31;\n\
+        mad.lo.u32    %r20, %r9, %r1, %r9;\n\
+        mul.wide.u32  %rd20, %r20, 4;\n\
+        add.u64       %rd21, %rd2, %rd20;\n\
+        atom.global.add.f32 %f33, [%rd21], %f32;\n\
     \n\
     $FA_DONE:\n\
         ret;\n\

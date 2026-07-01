@@ -70,6 +70,8 @@ pub fn fake_quant_ptx(sm: u32) -> String {
     .reg .s32  tid, n, stride, idx;
     .reg .f32  x, scale, q_min, q_max, xq, one;
     .reg .pred done;
+    .reg .u32  %r<4>;
+    .reg .u64  %rd<3>;
 
     ld.param.u64  addr,  [p_data];
     ld.param.s32  n,     [p_n];
@@ -141,6 +143,8 @@ pub fn int8_quant_ptx(sm: u32) -> String {
     .reg .f32  x, scale, xq;
     .reg .s32  iq;
     .reg .pred done;
+    .reg .u32  %r<4>;
+    .reg .u64  %rd<4>;
 
     ld.param.u64  ain,   [p_in];
     ld.param.u64  aout,  [p_out];
@@ -208,6 +212,8 @@ pub fn int8_dequant_ptx(sm: u32) -> String {
     .reg .s32  idx, stride, n, iq;
     .reg .f32  scale, x;
     .reg .pred done;
+    .reg .u32  %r<4>;
+    .reg .u64  %rd<4>;
 
     ld.param.u64  ain,   [p_in];
     ld.param.u64  aout,  [p_out];
@@ -300,6 +306,10 @@ pub fn nf4_dequant_ptx(sm: u32) -> String {
     .reg .pred done;
     .reg .b32  packed, lo, hi;
     .reg .f32  vlo, vhi;
+    .reg .u32  %r<8>;
+    .reg .u64  %rd<4>;
+    .reg .f32  %f<1>;
+    .reg .pred %p<1>;
 
     // NF4 lookup table in constant memory (16 × f32)
     .shared .align 4 .f32 lut[16];
@@ -353,19 +363,25 @@ $LOOP:
     and.b32  lo, packed, 15;
     shr.b32  hi, packed, 4;
 
-    // LUT lookup (byte offset = nibble * 4)
-    mul.lo.s32 %r4, lo, 4;
-    ld.shared.f32 vlo, [lut + %r4];
-    mul.lo.s32 %r5, hi, 4;
-    ld.shared.f32 vhi, [lut + %r5];
+    // LUT lookup (byte offset = nibble * 4).  A shared-space symbol may not be
+    // combined with a register inside a memory operand (`[lut + %r]` is illegal
+    // PTX); materialise the LUT base address into a register first, then add the
+    // byte offset and dereference with a pure-register operand.
+    mov.u32    %r4, lut;
+    mul.lo.s32 %r5, lo, 4;
+    add.s32    %r5, %r5, %r4;
+    ld.shared.f32 vlo, [%r5];
+    mul.lo.s32 %r6, hi, 4;
+    add.s32    %r6, %r6, %r4;
+    ld.shared.f32 vhi, [%r6];
 
     // scale by absmax
     mul.f32 vlo, vlo, absmax;
     mul.f32 vhi, vhi, absmax;
 
     // store two f32s
-    mul.lo.s32   %r6, idx, 8;        // byte offset in output
-    cvt.u64.s32  %rd2, %r6;
+    mul.lo.s32   %r7, idx, 8;        // byte offset in output
+    cvt.u64.s32  %rd2, %r7;
     add.u64      %rd3, aout, %rd2;
     st.global.f32 [%rd3+0], vlo;
     st.global.f32 [%rd3+4], vhi;
@@ -416,6 +432,9 @@ pub fn prune_mask_ptx(sm: u32) -> String {
     .reg .s32  idx, stride, n, m;
     .reg .f32  w;
     .reg .pred done;
+    .reg .u32  %r<4>;
+    .reg .u64  %rd<4>;
+    .reg .pred %p<1>;
 
     ld.param.u64  aw,  [p_weights];
     ld.param.u64  am,  [p_mask];

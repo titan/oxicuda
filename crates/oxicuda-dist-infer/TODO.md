@@ -6,7 +6,7 @@ Distributed multi-GPU inference engine with three orthogonal parallelism axes (T
 
 ## Implementation Status
 
-**Actual: 4,374 SLoC across 26 files (includes Markdown doc-comments) / 3,279 pure Rust SLoC**
+**Actual: 7,735 SLoC across 26 files (includes Markdown doc-comments) / 3,279 pure Rust SLoC**
 
 Production-grade distributed inference infrastructure for OxiCUDA. Implements three orthogonal
 parallelism strategies and the distributed KV-cache / request-routing infrastructure needed to
@@ -109,7 +109,7 @@ The three degrees multiply to `world_size = tp * sp * ep`.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `-D warnings` across `--all-targets --all-features`)
-- Tests: 233 passing (was 209; +21 for `scheduler/rebalance.rs` autonomous-trigger / MoE-stress + `scheduler/elastic.rs` add/remove-rank planner, +3 for new `partition.rs` accessors)
+- Tests: 239 passing (was 209; +21 for `scheduler/rebalance.rs` autonomous-trigger / MoE-stress + `scheduler/elastic.rs` add/remove-rank planner, +3 for new `partition.rs` accessors)
 - unwrap() calls: 0 (production code; test helpers use `.unwrap()`/`.expect()` on infallible construction)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference simulations work; runtime collective backend returns `UnsupportedPlatform`

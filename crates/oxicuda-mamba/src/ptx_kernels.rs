@@ -175,15 +175,20 @@ $SS_DONE:
 
 // ─── Kernel 2: parallel_scan ──────────────────────────────────────────────────
 
-/// Warp-level (A, b) associative prefix scan using `shfl.sync.down`.
+/// Warp-level (A, b) associative *inclusive* prefix scan using `shfl.sync.up`.
 ///
 /// Each thread starts with `(a_i, b_i)` loaded from `p_a[i]`, `p_b[i]`.
 /// The inclusive prefix-scan monoid is `(a, b) · (a', b') = (a·a', a·b' + b)`,
 /// which recovers hidden states from discretised A/B matrices.
 ///
+/// A Hillis–Steele inclusive prefix scan must combine each lane with its
+/// **lower-indexed** (earlier) neighbour, so the butterfly reads from
+/// `lane − stride` with `shfl.sync.up` (NOT `shfl.sync.down`, which reads the
+/// later neighbour and computes neither a correct prefix nor suffix scan).
+///
 /// Warp butterfly: for stride in `[1, 2, 4, 8, 16]`:
 /// ```text
-/// (a_left, b_left) = shfl.sync.down(a, b, stride)
+/// (a_left, b_left) = shfl.sync.up(a, b, stride)   // lane − stride (earlier)
 /// a_new = a_i * a_left
 /// b_new = fma(a_i, b_left, b_i)
 /// if lane >= stride: (a_i, b_i) = (a_new, b_new)
@@ -245,10 +250,14 @@ $PS_OUTER:
     add.u64       %rd5, %rd1, %rd4;
     ld.global.f32 %f1, [%rd5];            // f1 = b_i
 
-    // ── Warp-level inclusive prefix scan ─────────────────────────────────────
+    // ── Warp-level inclusive prefix scan (Hillis–Steele, shfl.up) ────────────
+    // Each lane combines with its earlier neighbour at `lane - stride`, read via
+    // `shfl.sync.up` (clamp operand 0 = full-warp width). Reading the *later*
+    // neighbour with `shfl.down` would compute neither a prefix nor a suffix
+    // scan for this non-commutative monoid.
     // stride = 1
-    shfl.sync.down.b32  %f2, %f0, 1, 31, 0xFFFFFFFF;   // a_left
-    shfl.sync.down.b32  %f3, %f1, 1, 31, 0xFFFFFFFF;   // b_left
+    shfl.sync.up.b32  %f2, %f0, 1, 0, 0xFFFFFFFF;   // a_left = a[lane-1]
+    shfl.sync.up.b32  %f3, %f1, 1, 0, 0xFFFFFFFF;   // b_left = b[lane-1]
     setp.ge.u32   %p1, %r5, 1;
     mul.f32        %f4, %f0, %f2;          // a_new = a_i * a_left
     fma.rn.f32     %f5, %f0, %f3, %f1;    // b_new = a_i * b_left + b_i
@@ -256,8 +265,8 @@ $PS_OUTER:
     @%p1 mov.f32   %f1, %f5;
 
     // stride = 2
-    shfl.sync.down.b32  %f2, %f0, 2, 31, 0xFFFFFFFF;
-    shfl.sync.down.b32  %f3, %f1, 2, 31, 0xFFFFFFFF;
+    shfl.sync.up.b32  %f2, %f0, 2, 0, 0xFFFFFFFF;
+    shfl.sync.up.b32  %f3, %f1, 2, 0, 0xFFFFFFFF;
     setp.ge.u32   %p1, %r5, 2;
     mul.f32        %f4, %f0, %f2;
     fma.rn.f32     %f5, %f0, %f3, %f1;
@@ -265,8 +274,8 @@ $PS_OUTER:
     @%p1 mov.f32   %f1, %f5;
 
     // stride = 4
-    shfl.sync.down.b32  %f2, %f0, 4, 31, 0xFFFFFFFF;
-    shfl.sync.down.b32  %f3, %f1, 4, 31, 0xFFFFFFFF;
+    shfl.sync.up.b32  %f2, %f0, 4, 0, 0xFFFFFFFF;
+    shfl.sync.up.b32  %f3, %f1, 4, 0, 0xFFFFFFFF;
     setp.ge.u32   %p1, %r5, 4;
     mul.f32        %f4, %f0, %f2;
     fma.rn.f32     %f5, %f0, %f3, %f1;
@@ -274,8 +283,8 @@ $PS_OUTER:
     @%p1 mov.f32   %f1, %f5;
 
     // stride = 8
-    shfl.sync.down.b32  %f2, %f0, 8, 31, 0xFFFFFFFF;
-    shfl.sync.down.b32  %f3, %f1, 8, 31, 0xFFFFFFFF;
+    shfl.sync.up.b32  %f2, %f0, 8, 0, 0xFFFFFFFF;
+    shfl.sync.up.b32  %f3, %f1, 8, 0, 0xFFFFFFFF;
     setp.ge.u32   %p1, %r5, 8;
     mul.f32        %f4, %f0, %f2;
     fma.rn.f32     %f5, %f0, %f3, %f1;
@@ -283,8 +292,8 @@ $PS_OUTER:
     @%p1 mov.f32   %f1, %f5;
 
     // stride = 16
-    shfl.sync.down.b32  %f2, %f0, 16, 31, 0xFFFFFFFF;
-    shfl.sync.down.b32  %f3, %f1, 16, 31, 0xFFFFFFFF;
+    shfl.sync.up.b32  %f2, %f0, 16, 0, 0xFFFFFFFF;
+    shfl.sync.up.b32  %f3, %f1, 16, 0, 0xFFFFFFFF;
     setp.ge.u32   %p1, %r5, 16;
     mul.f32        %f4, %f0, %f2;
     fma.rn.f32     %f5, %f0, %f3, %f1;
@@ -438,22 +447,30 @@ $DC_DONE:
 /// RWKV WKV numerically-stable forward pass.
 ///
 /// Computes the WKV attention mechanism for one channel per thread,
-/// sequential over time.  Uses the running-max trick for numerical stability:
+/// sequential over time.  Uses the running-max trick for numerical stability.
+/// State is `(a = numerator sum, b = denominator sum, p = running-max pivot)`,
+/// initialised `a = b = 0`, `p = -inf`.  For each step `t` with `(k_t, v_t)`:
 ///
 /// ```text
-/// p_t = max(w + k_{t-1}, k_t)          // new running exponent pivot
-/// e1 = exp(w + k_{t-1} - p_t)          // prev state scaled
-/// e2 = exp(k_t - p_t)                  // new state scale
-/// eu = exp(u + k_t - p_t)              // u bonus
+/// // Output for step t uses its OWN pivot. The history weight is exp(p - q):
+/// // the running decay w must NOT be applied to the history here — it is only
+/// // folded in by the state update below.
+/// q   = max(p, u + k_t)
+/// e1o = exp(p - q)                     // history weight
+/// euo = exp(u + k_t - q)               // current-token bonus weight
+/// wkv_t = (e1o * a + euo * v_t) / (e1o * b + euo)
 ///
-/// wkv_t = (e1 * (a / b) + eu * v_t) / (e1 + eu)
-///       = (e1 * a + eu * v_t) / (e1 * b + eu)
-///
-/// a_new = e1 * a + e2 * v_t
-/// b_new = e1 * b + e2
+/// // State update advances the pivot by the per-channel decay w:
+/// p'  = max(p + w, k_t)
+/// e1  = exp(p + w - p')                // prev state scaled by decay
+/// e2  = exp(k_t - p')                  // new state scale
+/// a   = e1 * a + e2 * v_t
+/// b   = e1 * b + e2
+/// p   = p'
 /// ```
 ///
-/// Uses `ex2.approx.f32` + `lg2.approx.f32` + `rcp.approx.f32` + `fma.rn.f32`.
+/// This matches the CPU reference `rwkv::time_mixing::TimeMixingLayer` exactly.
+/// Uses `ex2.approx.f32` + `rcp.approx.f32` + `fma.rn.f32`.
 ///
 /// # Parameters
 ///
@@ -540,54 +557,60 @@ $WKV_TLOOP:
     add.u64       %rd6, %rd1, %rd5;
     ld.global.f32 %f6, [%rd6];            // f6 = v_t
 
-    // p_new = max(w + p_prev, k_t)
-    //       Note: w is the per-step decay (w_c), p_prev is the running max pivot.
-    //       The RWKV formulation uses: max(w + k_{{t-1}}, k_t) for stability.
-    //       We use p_prev to track the cumulative pivot.
-    add.f32       %f7, %f0, %f4;          // f7 = w + p_prev
-    max.f32       %f8, %f7, %f5;          // f8 = p_new = max(w + p_prev, k_t)
+    // ── Output for step t — uses its OWN pivot q = max(p_prev, u + k_t). ─────
+    // The history weight is exp(p_prev - q): the decay w is NOT applied here
+    // (applying it would scale the history by an extra exp(w) and is the source
+    // of a ~45% error vs the CPU reference).
+    add.f32       %f7, %f1, %f5;          // f7  = u + k_t
+    max.f32       %f8, %f4, %f7;          // f8  = q = max(p_prev, u + k_t)
 
-    // e1 = exp(w + p_prev - p_new)
-    //    = ex2( (w + p_prev - p_new) * log2e )
-    sub.f32       %f9, %f7, %f8;          // f9  = w + p_prev - p_new
+    // e1o = exp(p_prev - q)
+    sub.f32       %f9, %f4, %f8;          // f9  = p_prev - q
     mul.f32       %f10, %f9, {LOG2E};
-    ex2.approx.f32 %f10, %f10;            // f10 = e1
+    ex2.approx.f32 %f10, %f10;            // f10 = e1o (history weight)
 
-    // e2 = exp(k_t - p_new)
-    sub.f32       %f11, %f5, %f8;         // f11 = k_t - p_new
+    // euo = exp(u + k_t - q)
+    sub.f32       %f11, %f7, %f8;         // f11 = (u + k_t) - q
     mul.f32       %f12, %f11, {LOG2E};
-    ex2.approx.f32 %f12, %f12;            // f12 = e2
+    ex2.approx.f32 %f12, %f12;            // f12 = euo (bonus weight)
 
-    // eu = exp(u + k_t - p_new)
-    add.f32       %f13, %f1, %f11;        // f13 = u + k_t - p_new
-    mul.f32       %f14, %f13, {LOG2E};
-    ex2.approx.f32 %f14, %f14;            // f14 = eu
-
-    // wkv_t = (e1 * a + eu * v_t) / (e1 * b + eu)
-    mul.f32       %f15, %f10, %f2;        // f15 = e1 * a
-    fma.rn.f32    %f16, %f14, %f6, %f15; // f16 = e1*a + eu*v_t  (numerator)
-
-    mul.f32       %f17, %f10, %f3;        // f17 = e1 * b
-    add.f32       %f18, %f17, %f14;       // f18 = e1*b + eu      (denominator)
-
-    rcp.approx.f32 %f19, %f18;
-    mul.f32        %f20, %f16, %f19;      // f20 = wkv_t
+    // wkv_t = (e1o * a + euo * v_t) / (e1o * b + euo)
+    mul.f32       %f13, %f10, %f2;        // f13 = e1o * a
+    fma.rn.f32    %f14, %f12, %f6, %f13; // f14 = e1o*a + euo*v_t  (numerator)
+    mul.f32       %f15, %f10, %f3;        // f15 = e1o * b
+    add.f32       %f16, %f15, %f12;       // f16 = e1o*b + euo      (denominator)
+    rcp.approx.f32 %f17, %f16;
+    mul.f32        %f18, %f14, %f17;      // f18 = wkv_t
 
     // Store out[t * channels + c]
     add.u64       %rd6, %rd4, %rd5;
-    st.global.f32 [%rd6], %f20;
+    st.global.f32 [%rd6], %f18;
 
-    // Update running state
+    // ── State update — advances the pivot by the decay w. ───────────────────
+    // p_new = max(p_prev + w, k_t)
+    add.f32       %f19, %f4, %f0;         // f19 = p_prev + w
+    max.f32       %f20, %f19, %f5;        // f20 = p_new = max(p_prev + w, k_t)
+
+    // e1 = exp(p_prev + w - p_new)
+    sub.f32       %f21, %f19, %f20;       // f21 = p_prev + w - p_new
+    mul.f32       %f21, %f21, {LOG2E};
+    ex2.approx.f32 %f21, %f21;            // f21 = e1 (decay weight)
+
+    // e2 = exp(k_t - p_new)
+    sub.f32       %f22, %f5, %f20;        // f22 = k_t - p_new
+    mul.f32       %f22, %f22, {LOG2E};
+    ex2.approx.f32 %f22, %f22;            // f22 = e2 (input weight)
+
     // a_new = e1 * a + e2 * v_t
-    fma.rn.f32    %f21, %f12, %f6, %f15; // f21 = e1*a + e2*v_t
-    mov.f32       %f2, %f21;
+    mul.f32       %f23, %f21, %f2;        // f23 = e1 * a
+    fma.rn.f32    %f2, %f22, %f6, %f23;  // a = e1*a + e2*v_t
 
-    // b_new = e1 * b + e2
-    add.f32       %f22, %f17, %f12;       // f22 = e1*b + e2
-    mov.f32       %f3, %f22;
+    // b_new = e1 * b + e2   (read old b before overwriting)
+    mul.f32       %f23, %f21, %f3;        // f23 = e1 * b
+    add.f32       %f3, %f23, %f22;        // b = e1*b + e2
 
     // p_prev = p_new
-    mov.f32       %f4, %f8;
+    mov.f32       %f4, %f20;
 
     add.u32       %r6, %r6, 1;
     bra           $WKV_TLOOP;
@@ -1160,11 +1183,18 @@ mod tests {
     }
 
     #[test]
-    fn parallel_scan_has_shfl_sync_down() {
+    fn parallel_scan_has_shfl_sync_up() {
         let ptx = parallel_scan_ptx(80);
+        // An inclusive prefix scan must combine with the EARLIER (lower-lane)
+        // neighbour, which requires `shfl.sync.up` — `shfl.sync.down` reads the
+        // later neighbour and produces an incorrect scan.
         assert!(
-            ptx.contains("shfl.sync.down.b32"),
-            "warp prefix scan must use shfl.sync.down.b32"
+            ptx.contains("shfl.sync.up.b32"),
+            "warp prefix scan must use shfl.sync.up.b32"
+        );
+        assert!(
+            !ptx.contains("shfl.sync.down.b32"),
+            "warp prefix scan must NOT use shfl.sync.down.b32 (wrong neighbour)"
         );
     }
 

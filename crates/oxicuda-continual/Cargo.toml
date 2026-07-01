@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+readme = "README.md"
 keywords = ["gpu", "continual-learning", "lifelong", "ewc", "forgetting"]
 categories = ["science", "algorithms"]
 
@@ -17,11 +18,19 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# On-device PTX validation harness (src/gpu_tests.rs). Requires a real CUDA
+# device; tests skip gracefully when none is present.
+gpu-tests = []
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name = "continual_ops"

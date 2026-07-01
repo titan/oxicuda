@@ -18,12 +18,19 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# On-device GPU validation of the hand-written PTX kernels (RTX A4000 / sm_86).
+gpu-tests = []
+
 [dependencies]
 oxicuda-fft = { workspace = true }
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+oxicuda-driver = { workspace = true }
+oxicuda-memory = { workspace = true }
+oxicuda-launch = { workspace = true }
 
 [[bench]]
 name    = "ts_ops"

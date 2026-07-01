@@ -121,3 +121,158 @@ impl TwoTower {
         Ok(dot)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handle::LcgRng;
+
+    fn make_rng() -> LcgRng {
+        LcgRng::new(42)
+    }
+
+    #[test]
+    fn construction_succeeds() {
+        let mut rng = make_rng();
+        let model = TwoTower::new(4, 8, 3, 2, &mut rng).expect("model construction should succeed");
+        assert_eq!(model.input_dim, 4);
+        assert_eq!(model.hidden_dim, 8);
+        assert_eq!(model.output_dim, 3);
+        assert_eq!(model.user_layers.len(), 2);
+        assert_eq!(model.item_layers.len(), 2);
+        // Layer 0: 4→8 (hidden), layer 1: 8→3 (output)
+        assert_eq!(model.user_layers[0].0.len(), 8 * 4);
+        assert_eq!(model.user_layers[0].1.len(), 8);
+        assert_eq!(model.user_layers[1].0.len(), 3 * 8);
+        assert_eq!(model.user_layers[1].1.len(), 3);
+    }
+
+    #[test]
+    fn err_zero_dims() {
+        let mut rng = make_rng();
+        assert!(matches!(
+            TwoTower::new(0, 8, 3, 1, &mut rng),
+            Err(RecsysError::InvalidEmbeddingDim { .. })
+        ));
+        let mut rng2 = LcgRng::new(43);
+        assert!(matches!(
+            TwoTower::new(4, 0, 3, 1, &mut rng2),
+            Err(RecsysError::InvalidEmbeddingDim { .. })
+        ));
+    }
+
+    #[test]
+    fn err_dimension_mismatch() {
+        let mut rng = make_rng();
+        let model = TwoTower::new(4, 8, 3, 1, &mut rng).expect("model construction should succeed");
+        // input is only 3 elements but input_dim=4
+        assert!(matches!(
+            model.encode_user(&[1.0_f32, 2.0, 3.0]),
+            Err(RecsysError::DimensionMismatch { .. })
+        ));
+        assert!(matches!(
+            model.encode_item(&[1.0_f32, 2.0, 3.0]),
+            Err(RecsysError::DimensionMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn encode_identity_weights_exact() {
+        // 1-layer model: input_dim=2, output_dim=2 (no hidden dimension used).
+        // Set W = I₂, b = 0 for both towers.  The final layer has no relu,
+        // so encode(x) must equal x exactly.
+        //
+        // score([3, 5], [2, 7]) = 3·2 + 5·7 = 41.
+        let mut rng = make_rng();
+        let mut model =
+            TwoTower::new(2, 4, 2, 1, &mut rng).expect("model construction should succeed");
+        let identity_w = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let zero_b = vec![0.0_f32, 0.0];
+        model.user_layers = vec![(identity_w.clone(), zero_b.clone())];
+        model.item_layers = vec![(identity_w, zero_b)];
+
+        let user_in = [3.0_f32, 5.0];
+        let item_in = [2.0_f32, 7.0];
+        let u_emb = model
+            .encode_user(&user_in)
+            .expect("encode_user should succeed");
+        let i_emb = model
+            .encode_item(&item_in)
+            .expect("encode_item should succeed");
+
+        let eps = 1e-5_f32;
+        assert!((u_emb[0] - 3.0).abs() < eps, "u_emb[0]={}", u_emb[0]);
+        assert!((u_emb[1] - 5.0).abs() < eps, "u_emb[1]={}", u_emb[1]);
+        assert!((i_emb[0] - 2.0).abs() < eps, "i_emb[0]={}", i_emb[0]);
+        assert!((i_emb[1] - 7.0).abs() < eps, "i_emb[1]={}", i_emb[1]);
+
+        let score = model
+            .score(&user_in, &item_in)
+            .expect("score should succeed");
+        assert!((score - 41.0).abs() < eps, "score={score}, expected 41.0");
+    }
+
+    #[test]
+    fn score_equals_manual_dot_of_tower_outputs() {
+        // Verify score() == dot(encode_user(), encode_item()) for arbitrary weights.
+        let mut rng = make_rng();
+        let model = TwoTower::new(4, 6, 3, 2, &mut rng).expect("model construction should succeed");
+        let user_in = [0.1_f32, 0.2, 0.3, 0.4];
+        let item_in = [0.5_f32, 0.6, 0.7, 0.8];
+
+        let u_emb = model
+            .encode_user(&user_in)
+            .expect("encode_user should succeed");
+        let i_emb = model
+            .encode_item(&item_in)
+            .expect("encode_item should succeed");
+        let manual_dot: f32 = u_emb.iter().zip(i_emb.iter()).map(|(&a, &b)| a * b).sum();
+        let score = model
+            .score(&user_in, &item_in)
+            .expect("score should succeed");
+        let eps = 1e-5_f32;
+        assert!(
+            (score - manual_dot).abs() < eps,
+            "score={score} must equal manual dot={manual_dot}"
+        );
+    }
+
+    #[test]
+    fn encode_output_has_correct_dim() {
+        let mut rng = make_rng();
+        let model = TwoTower::new(4, 8, 3, 2, &mut rng).expect("model construction should succeed");
+        let x = [1.0_f32, 2.0, 3.0, 4.0];
+        let u = model.encode_user(&x).expect("encode_user should succeed");
+        let i = model.encode_item(&x).expect("encode_item should succeed");
+        assert_eq!(u.len(), model.output_dim);
+        assert_eq!(i.len(), model.output_dim);
+    }
+
+    #[test]
+    fn score_ordering_by_alignment() {
+        // With identity weights encode(x) = x, so score = dot(user, item).
+        // A parallel item must score strictly higher than an orthogonal one.
+        let mut rng = make_rng();
+        let mut model =
+            TwoTower::new(2, 4, 2, 1, &mut rng).expect("model construction should succeed");
+        let identity_w = vec![1.0_f32, 0.0, 0.0, 1.0];
+        let zero_b = vec![0.0_f32, 0.0];
+        model.user_layers = vec![(identity_w.clone(), zero_b.clone())];
+        model.item_layers = vec![(identity_w, zero_b)];
+
+        let user = [1.0_f32, 0.0];
+        let item_parallel = [2.0_f32, 0.0]; // dot = 2.0
+        let item_orthogonal = [0.0_f32, 1.0]; // dot = 0.0
+
+        let score_hi = model
+            .score(&user, &item_parallel)
+            .expect("score should succeed");
+        let score_lo = model
+            .score(&user, &item_orthogonal)
+            .expect("score should succeed");
+        assert!(
+            score_hi > score_lo,
+            "parallel item (score={score_hi}) must beat orthogonal item (score={score_lo})"
+        );
+    }
+}

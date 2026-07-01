@@ -6,7 +6,7 @@ Pure Rust Hyperdimensional Computing (HDC) / Vector Symbolic Architectures primi
 
 ## Implementation Status
 
-**Actual: ~21,960 SLoC (64 files)**
+**Actual: 16,640 SLoC (64 files)**
 
 Current implementation covers the canonical HDC / VSA stack: three hypervector models (binary BSC / integer MAP / complex FHRR), binding / bundling / permutation operators, item memory and associative (Hopfield-style) memory, online error-corrective HD classifier, record / n-gram / spatial-pattern encoders, Hamming / cosine / Jaccard distance metrics, and capacity analyses (Hopfield capacity, bundle SNR, required-dimension birthday-paradox bound).
 
@@ -118,7 +118,7 @@ Current implementation covers the canonical HDC / VSA stack: three hypervector m
 
 ## Quality Status
 
-- Tests: 602 unit + 1 doctest passing (incl. 22 e2e integration tests in `e2e_tests.rs`, 6 empirical scaling-law tests in `analysis/capacity.rs`)
+- Tests: 609 unit + 1 doctest passing (incl. 22 e2e integration tests in `e2e_tests.rs`, 6 empirical scaling-law tests in `analysis/capacity.rs`)
 - Warnings: 0 (`cargo clippy -p oxicuda-hdc --all-features --all-targets -- -D warnings` clean)
 - `unwrap()` in production code: 0 (only `#[cfg(test)]` uses `.expect`)
 - macOS: compiles, runtime returns `UnsupportedPlatform` for GPU launches

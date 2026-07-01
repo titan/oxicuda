@@ -6,7 +6,7 @@ GPU-accelerated Fast Fourier Transform operations, serving as a pure Rust equiva
 
 ## Implementation Status
 
-**Actual: 14,741 SLoC (44 files) -- Estimated: 63K-103K SLoC (estimation.md Vol.5 FFT portion)**
+**Actual: 15,764 SLoC (44 files) -- Estimated: 63K-103K SLoC (estimation.md Vol.5 FFT portion)**
 
 Current implementation covers the core FFT pipeline: plan creation, Stockham kernel generation, radix-2/4/8/mixed/Bluestein butterflies, C2C/R2C/C2R/2D/3D transforms, batch FFT, large FFT, and matrix transpose kernels.
 
@@ -69,7 +69,7 @@ Current implementation covers the core FFT pipeline: plan creation, Stockham ker
 
 ## Quality Status
 
-- Tests: 418 passing
+- Tests: 427 passing
 - All production code uses Result/Option (no unwrap)
 - clippy::all and missing_docs warnings enabled
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`

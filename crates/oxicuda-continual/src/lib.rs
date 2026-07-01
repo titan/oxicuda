@@ -28,6 +28,11 @@ pub mod regularization;
 pub mod replay;
 pub mod stream;
 
+// ─── On-device PTX validation (opt-in, requires a CUDA device) ────────────────
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ─── Prelude ─────────────────────────────────────────────────────────────────
 
 /// Convenience re-exports for common continual learning types.

@@ -186,6 +186,44 @@ impl PtxType {
         )
     }
 
+    /// Returns the PTX immediate literal encoding floating-point `+0.0` for this type.
+    ///
+    /// PTX requires floating-point immediates to be written as a hexadecimal
+    /// bit pattern whose width matches the operand type: single-precision uses
+    /// the `0f` prefix followed by 8 hex digits, while double-precision uses the
+    /// `0d` prefix followed by 16 hex digits. Emitting an `0f` literal into a
+    /// `.f64` instruction (or vice versa) is rejected by `ptxas` with an
+    /// "arguments mismatch" error, so codegen must select the correct form.
+    ///
+    /// Half-width types (`F16`, `BF16`) are encoded with the 32-bit `0f` form,
+    /// matching PTX's promotion of 16-bit float immediates; their zero pattern
+    /// is identical to single precision.
+    #[must_use]
+    pub const fn zero_literal(&self) -> &'static str {
+        match self {
+            Self::F64 => "0d0000000000000000",
+            _ => "0f00000000",
+        }
+    }
+
+    /// Returns the PTX floating-point conversion instruction mnemonic that
+    /// converts a value of `src` type into this (`self`) type.
+    ///
+    /// The PTX ISA requires a rounding modifier on *narrowing* float→float
+    /// conversions (e.g. `cvt.rn.f32.f64`) because precision is lost, but
+    /// forbids one on *widening* conversions (e.g. `cvt.f64.f32`) because they
+    /// are exact. The width comparison below selects the correct form; callers
+    /// are responsible for only emitting the result when `self != src`.
+    #[must_use]
+    pub fn float_cvt_mnemonic(self, src: Self) -> String {
+        let rounding = if self.bit_width() < src.bit_width() {
+            ".rn"
+        } else {
+            ""
+        };
+        format!("cvt{rounding}{}{}", self.as_ptx_str(), src.as_ptx_str())
+    }
+
     /// Returns the bit-width of a single element of this type.
     ///
     /// For sub-byte types (E2M1 = FP4), returns 4. For packed types like
@@ -754,6 +792,40 @@ mod tests {
         assert_eq!(PtxType::TF32.bit_width(), 32);
         assert_eq!(PtxType::F64.bit_width(), 64);
         assert_eq!(PtxType::B128.bit_width(), 128);
+    }
+
+    #[test]
+    fn zero_literal_matches_operand_width() {
+        // Single-precision and half types use the 32-bit 0f form.
+        assert_eq!(PtxType::F32.zero_literal(), "0f00000000");
+        assert_eq!(PtxType::F16.zero_literal(), "0f00000000");
+        assert_eq!(PtxType::BF16.zero_literal(), "0f00000000");
+        // Double precision requires the 64-bit 0d form.
+        assert_eq!(PtxType::F64.zero_literal(), "0d0000000000000000");
+    }
+
+    #[test]
+    fn float_cvt_mnemonic_selects_rounding_by_direction() {
+        // Narrowing conversions require a rounding mode.
+        assert_eq!(
+            PtxType::F32.float_cvt_mnemonic(PtxType::F64),
+            "cvt.rn.f32.f64"
+        );
+        assert_eq!(
+            PtxType::F16.float_cvt_mnemonic(PtxType::F32),
+            "cvt.rn.f16.f32"
+        );
+        assert_eq!(
+            PtxType::BF16.float_cvt_mnemonic(PtxType::F32),
+            "cvt.rn.bf16.f32"
+        );
+        // Widening conversions are exact and must omit the rounding mode.
+        assert_eq!(PtxType::F64.float_cvt_mnemonic(PtxType::F32), "cvt.f64.f32");
+        assert_eq!(PtxType::F32.float_cvt_mnemonic(PtxType::F16), "cvt.f32.f16");
+        assert_eq!(
+            PtxType::F32.float_cvt_mnemonic(PtxType::BF16),
+            "cvt.f32.bf16"
+        );
     }
 
     #[test]

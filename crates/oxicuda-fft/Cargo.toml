@@ -22,6 +22,11 @@ thiserror.workspace = true
 
 [features]
 f16 = ["dep:half", "oxicuda-blas/f16"]
+# On-device GPU validation of generated PTX kernels. Enables the `gpu_tests`
+# module (requires a live CUDA device at test time; tests skip gracefully when
+# none is present). The infra crates (`oxicuda-driver`/`-memory`/`-launch`) are
+# already normal dependencies, so no extra dev-dependencies are needed.
+gpu-tests = []
 
 [dependencies.half]
 workspace = true

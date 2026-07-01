@@ -292,7 +292,7 @@ pub fn hnsw_neighbor_eval_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %qptr, %dptr, %cptr, %optr;
-    .reg .u32 %tid, %D, %K, %cand_id, %d;
+    .reg .u32 %tidx, %D, %K, %cand_id, %d;
     .reg .f32 %acc, %qval, %dval, %diff;
     .reg .u64 %q_off, %d_off, %c_off, %o_off;
     .reg .pred %p_k, %p_d;
@@ -305,12 +305,12 @@ pub fn hnsw_neighbor_eval_ptx(sm: u32) -> String {
     ld.param.u32 %D, [param_D];
     ld.param.u32 %K, [param_K];
 
-    mov.u32 %tid, %tid.x;
-    setp.ge.u32 %p_k, %tid, %K;
+    mov.u32 %tidx, %tid.x;
+    setp.ge.u32 %p_k, %tidx, %K;
     @%p_k bra DONE;
 
     // Load candidate index
-    cvt.u64.u32 %c_off, %tid;
+    cvt.u64.u32 %c_off, %tidx;
     shl.b64 %c_off, %c_off, 2;
     add.u64 %c_off, %c_off, %cptr;
     ld.global.u32 %cand_id, [%c_off];
@@ -342,7 +342,7 @@ LOOP_D:
     bra LOOP_D;
 
 END_LOOP:
-    cvt.u64.u32 %o_off, %tid;
+    cvt.u64.u32 %o_off, %tidx;
     shl.b64 %o_off, %o_off, 2;
     add.u64 %o_off, %o_off, %optr;
     st.global.f32 [%o_off], %acc;
@@ -373,7 +373,7 @@ pub fn ivf_assign_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64 %vptr, %cptr, %aptr;
-    .reg .u32 %tid, %B, %Nc, %D;
+    .reg .u32 %tidx, %B, %Nc, %D;
     .reg .u32 %nc, %d, %best_id;
     .reg .f32 %best_dist, %cur_dist, %vval, %cval, %diff;
     .reg .u64 %v_off, %c_off, %a_off;
@@ -387,8 +387,8 @@ pub fn ivf_assign_ptx(sm: u32) -> String {
     ld.param.u32 %Nc, [param_Nc];
     ld.param.u32 %D, [param_D];
 
-    mov.u32 %tid, %tid.x;
-    setp.ge.u32 %p_b, %tid, %B;
+    mov.u32 %tidx, %tid.x;
+    setp.ge.u32 %p_b, %tidx, %B;
     @%p_b bra DONE;
 
     mov.f32 %best_dist, {inf_hex};
@@ -406,7 +406,7 @@ LOOP_D:
     setp.ge.u32 %p_d, %d, %D;
     @%p_d bra END_D;
 
-    mad.lo.u32 %v_idx, %tid, %D, %d;
+    mad.lo.u32 %v_idx, %tidx, %D, %d;
     cvt.u64.u32 %v_off, %v_idx;
     shl.b64 %v_off, %v_off, 2;
     add.u64 %v_off, %v_off, %vptr;
@@ -433,7 +433,7 @@ END_D:
     bra LOOP_NC;
 
 END_NC:
-    cvt.u64.u32 %a_off, %tid;
+    cvt.u64.u32 %a_off, %tidx;
     shl.b64 %a_off, %a_off, 2;
     add.u64 %a_off, %a_off, %aptr;
     st.global.u32 [%a_off], %best_id;
@@ -547,6 +547,14 @@ DONE:
 }
 
 /// Top-K minimum distances from N-element array (K≤64).
+///
+/// One block processes one query's N distances. The block must be launched with
+/// `blockDim.x = ntid` where `ntid` is a power of two in `[N, 64]`; threads with
+/// `tid >= N` seed `+inf` so they sort to the bottom and never appear in the
+/// top-`K` (requires `K <= N`). A full ascending bitonic sort over the shared
+/// arrays leaves the `K` smallest distances (with their original indices) in
+/// slots `0..K`, matching the crate's `topk::select::select_topk` (K smallest,
+/// sorted ascending).
 pub fn topk_select_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     let inf_hex = format!("0F{:08X}", f32::INFINITY.to_bits());
@@ -554,8 +562,8 @@ pub fn topk_select_ptx(sm: u32) -> String {
         r#"{hdr}
 // Kernel: topk_select
 // params: dists[N], out_dists[K], out_indices[K], N, K
-// One block processes one query's N distances.
-// Shared memory bitonic sort to find K minimum distances.
+// One block processes one query's N distances; blockDim.x = power-of-two in [N,64].
+// Shared-memory ascending bitonic sort to find the K minimum distances.
 .visible .entry topk_select(
     .param .u64 param_dists,
     .param .u64 param_out_dists,
@@ -564,14 +572,14 @@ pub fn topk_select_ptx(sm: u32) -> String {
     .param .u32 param_K
 )
 {{
-    .reg .u64 %dptr, %odptr, %oiptr;
-    .reg .u32 %tid, %N, %K;
-    .reg .f32 %my_dist, %cmp_dist;
-    .reg .u32 %my_idx, %cmp_idx;
-    .reg .u64 %d_off, %od_off, %oi_off;
-    .reg .pred %p_load, %p_store, %p_swap;
-    .shared .f32 sh_dists[64];
-    .shared .u32 sh_indices[64];
+    .reg .u64 %dptr, %odptr, %oiptr, %g_off, %o_off;
+    .reg .u32 %tidx, %N, %K, %n, %sbd, %sbi, %amy, %apar, %tmp;
+    .reg .u32 %k, %j, %ixj, %my_idx, %b_idx;
+    .reg .f32 %my_dist, %b_val, %inf;
+    .reg .pred %p, %p_lt, %p_lower, %p_asc, %p_keepmin, %p_xor, %p_nkeep;
+    .reg .pred %p_blt, %p_bgt, %p_t1, %p_t2, %p_take, %p_store;
+    .shared .align 4 .f32 sh_dists[64];
+    .shared .align 4 .u32 sh_indices[64];
 
     ld.param.u64 %dptr, [param_dists];
     ld.param.u64 %odptr, [param_out_dists];
@@ -579,60 +587,96 @@ pub fn topk_select_ptx(sm: u32) -> String {
     ld.param.u32 %N, [param_N];
     ld.param.u32 %K, [param_K];
 
-    mov.u32 %tid, %tid.x;
+    mov.u32 %tidx, %tid.x;
+    mov.u32 %n, %ntid.x;
+    mov.u32 %sbd, sh_dists;
+    mov.u32 %sbi, sh_indices;
+    mov.f32 %inf, {inf_hex};
 
-    // Each thread loads one element (or infinity if out of range)
-    setp.lt.u32 %p_load, %tid, %N;
-    mov.f32 %my_dist, {inf_hex};
-    mov.u32 %my_idx, %tid;
+    // Each thread loads element `tid` (or +inf if tid >= N); index = tid.
+    mov.f32 %my_dist, %inf;
+    mov.u32 %my_idx, %tidx;
+    setp.lt.u32 %p_lt, %tidx, %N;
+    @%p_lt cvt.u64.u32 %g_off, %tidx;
+    @%p_lt shl.b64 %g_off, %g_off, 2;
+    @%p_lt add.u64 %g_off, %g_off, %dptr;
+    @%p_lt ld.global.f32 %my_dist, [%g_off];
 
-    @%p_load cvt.u64.u32 %d_off, %tid;
-    @%p_load shl.b64 %d_off, %d_off, 2;
-    @%p_load add.u64 %d_off, %d_off, %dptr;
-    @%p_load ld.global.f32 %my_dist, [%d_off];
-
-    st.shared.f32 [sh_dists + %tid * 4], %my_dist;
-    st.shared.u32 [sh_indices + %tid * 4], %my_idx;
-
+    mad.lo.u32 %amy, %tidx, 4, %sbd;
+    st.shared.f32 [%amy], %my_dist;
+    mad.lo.u32 %tmp, %tidx, 4, %sbi;
+    st.shared.u32 [%tmp], %my_idx;
     bar.sync 0;
 
-    // Simple compare-and-swap pass to partially sort (bitonic-style, 2 passes)
-    // Pass 1: compare tid with tid^1
-    .reg .u32 %partner;
-    xor.b32 %partner, %tid, 1;
-    setp.lt.u32 %p_load, %partner, 64;
-    @%p_load ld.shared.f32 %cmp_dist, [sh_dists + %partner * 4];
-    @%p_load ld.shared.u32 %cmp_idx, [sh_indices + %partner * 4];
+    // Bitonic sort (ascending). Outer: k = 2,4,..,n. Inner: j = k/2,..,1.
+    mov.u32 %k, 2;
+LOOP_K:
+    setp.gt.u32 %p, %k, %n;
+    @%p bra END_K;
+    shr.u32 %j, %k, 1;
+LOOP_J:
+    setp.eq.u32 %p, %j, 0;
+    @%p bra END_J;
 
-    // If tid is even and our dist > partner: swap
-    .reg .u32 %even;
-    and.b32 %even, %tid, 1;
-    setp.eq.u32 %p_swap, %even, 0;
-    .reg .pred %p_gt;
-    setp.gt.f32 %p_gt, %my_dist, %cmp_dist;
-    and.pred %p_swap, %p_swap, %p_gt;
-    @%p_swap st.shared.f32 [sh_dists + %tid * 4], %cmp_dist;
-    @%p_swap st.shared.u32 [sh_indices + %tid * 4], %cmp_idx;
-    @%p_swap st.shared.f32 [sh_dists + %partner * 4], %my_dist;
-    @%p_swap st.shared.u32 [sh_indices + %partner * 4], %my_idx;
+    xor.b32 %ixj, %tidx, %j;
 
-    bar.sync 0;
+    // Read partner's (value, index) from shared; my own pair stays in registers.
+    mad.lo.u32 %apar, %ixj, 4, %sbd;
+    ld.shared.f32 %b_val, [%apar];
+    mad.lo.u32 %tmp, %ixj, 4, %sbi;
+    ld.shared.u32 %b_idx, [%tmp];
+    bar.sync 0;                          // all partner reads done before any write
 
-    // Write top-K results
-    setp.lt.u32 %p_store, %tid, %K;
-    @%p_store ld.shared.f32 %my_dist, [sh_dists + %tid * 4];
-    @%p_store ld.shared.u32 %my_idx, [sh_indices + %tid * 4];
+    // lower = ((tid & j) == 0); ascending = ((tid & k) == 0)
+    and.b32 %tmp, %tidx, %j;
+    setp.eq.u32 %p_lower, %tmp, 0;
+    and.b32 %tmp, %tidx, %k;
+    setp.eq.u32 %p_asc, %tmp, 0;
+    // keep_min = NOT(lower XOR ascending)
+    xor.pred %p_xor, %p_lower, %p_asc;
+    not.pred %p_keepmin, %p_xor;
+    not.pred %p_nkeep, %p_keepmin;
+    // take_partner = (keep_min & b<a) | (keep_max & b>a)
+    setp.lt.f32 %p_blt, %b_val, %my_dist;
+    setp.gt.f32 %p_bgt, %b_val, %my_dist;
+    and.pred %p_t1, %p_keepmin, %p_blt;
+    and.pred %p_t2, %p_nkeep, %p_bgt;
+    or.pred %p_take, %p_t1, %p_t2;
+    @%p_take mov.f32 %my_dist, %b_val;
+    @%p_take mov.u32 %my_idx, %b_idx;
 
-    @%p_store cvt.u64.u32 %od_off, %tid;
-    @%p_store shl.b64 %od_off, %od_off, 2;
-    @%p_store add.u64 %od_off, %od_off, %odptr;
-    @%p_store st.global.f32 [%od_off], %my_dist;
+    mad.lo.u32 %amy, %tidx, 4, %sbd;
+    st.shared.f32 [%amy], %my_dist;
+    mad.lo.u32 %tmp, %tidx, 4, %sbi;
+    st.shared.u32 [%tmp], %my_idx;
+    bar.sync 0;                          // all writes done before next read
 
-    @%p_store cvt.u64.u32 %oi_off, %tid;
-    @%p_store shl.b64 %oi_off, %oi_off, 2;
-    @%p_store add.u64 %oi_off, %oi_off, %oiptr;
-    @%p_store st.global.u32 [%oi_off], %my_idx;
+    shr.u32 %j, %j, 1;
+    bra LOOP_J;
+END_J:
+    shl.b32 %k, %k, 1;
+    bra LOOP_K;
+END_K:
 
+    // Write the K smallest (slots 0..K), already ascending.
+    setp.ge.u32 %p_store, %tidx, %K;
+    @%p_store bra DONE;
+    mad.lo.u32 %amy, %tidx, 4, %sbd;
+    ld.shared.f32 %my_dist, [%amy];
+    mad.lo.u32 %tmp, %tidx, 4, %sbi;
+    ld.shared.u32 %my_idx, [%tmp];
+
+    cvt.u64.u32 %o_off, %tidx;
+    shl.b64 %o_off, %o_off, 2;
+    add.u64 %o_off, %o_off, %odptr;
+    st.global.f32 [%o_off], %my_dist;
+
+    cvt.u64.u32 %o_off, %tidx;
+    shl.b64 %o_off, %o_off, 2;
+    add.u64 %o_off, %o_off, %oiptr;
+    st.global.u32 [%o_off], %my_idx;
+
+DONE:
     ret;
 }}
 "#

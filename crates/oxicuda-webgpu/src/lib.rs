@@ -69,3 +69,6 @@ pub use error::{WebGpuError, WebGpuResult};
 pub use fft::{FftDirection, WgslFftPlan};
 pub use planner::{DispatchGrid, Limits, Workgroup1D, Workgroup2D};
 pub use shader_ext::ScanKind;
+
+#[cfg(test)]
+mod naga_tests;

@@ -14,15 +14,22 @@
 //! The L and U factors overwrite the input matrix A in-place (LAPACK-style packed
 //! storage with unit diagonal for L implicitly assumed).
 
+use std::sync::Arc;
+
 use oxicuda_blas::types::{
     DiagType, FillMode, GpuFloat, Layout, MatrixDesc, MatrixDescMut, Side, Transpose,
 };
+use oxicuda_driver::Module;
+use oxicuda_launch::{Kernel, LaunchParams};
 use oxicuda_memory::DeviceBuffer;
 use oxicuda_ptx::prelude::*;
 
 use crate::error::{SolverError, SolverResult};
 use crate::handle::SolverHandle;
-use crate::ptx_helpers::SOLVER_BLOCK_SIZE;
+use crate::ptx_helpers::{
+    SOLVER_BLOCK_SIZE, abs_float, div_float, fma_float, load_global_float, mul_float,
+    store_global_float, sub_float,
+};
 
 /// Block size for the panel factorization step.
 const LU_BLOCK_SIZE: u32 = 64;
@@ -98,10 +105,6 @@ pub fn lu_factorize<T: GpuFloat>(
             pivots.len()
         )));
     }
-
-    // Ensure workspace is large enough for panel temporaries.
-    let panel_workspace = n as usize * LU_BLOCK_SIZE as usize * T::SIZE;
-    handle.ensure_workspace(panel_workspace)?;
 
     blocked_lu::<T>(handle, a, n, lda, pivots)
 }
@@ -465,83 +468,35 @@ fn blocked_lu<T: GpuFloat>(
             apply_panel_pivots::<T>(handle, a, lda, j, jb, pivots, right_start, n - right_start)?;
         }
 
-        // Step 3: TRSM — solve L[j:j+jb, j:j+jb] * U[j:j+jb, j+jb:n] = A[j:j+jb, j+jb:n].
+        // Step 3: Panel triangular solve — compute the U row block
+        // U[j:j+jb, j+jb:n] = L[j:j+jb, j:j+jb]^{-1} * A[j:j+jb, j+jb:n] in place.
+        //
+        // Implemented with a dedicated strided device kernel (`trsm_unit_lower`)
+        // rather than the BLAS TRSM: the matrices here are sub-blocks with
+        // leading dimension `lda > rows`, and a correct strided solve is required.
+        let right_start = j + jb;
         if right_start < n {
-            let l_desc = MatrixDesc::<T>::from_raw(
-                a.as_device_ptr() + (j as u64 + j as u64 * lda as u64) * T::SIZE as u64,
-                jb,
-                jb,
-                lda,
-                Layout::ColMajor,
-            );
-            let mut u_desc = MatrixDescMut::<T>::from_raw(
-                a.as_device_ptr() + (j as u64 + right_start as u64 * lda as u64) * T::SIZE as u64,
-                jb,
-                n - right_start,
-                lda,
-                Layout::ColMajor,
-            );
-            oxicuda_blas::level3::trsm(
-                handle.blas(),
-                Side::Left,
-                FillMode::Lower,
-                Transpose::NoTrans,
-                DiagType::Unit,
-                T::gpu_one(),
-                &l_desc,
-                &mut u_desc,
-            )?;
+            let l_ptr = a.as_device_ptr() + (j as u64 + j as u64 * lda as u64) * T::SIZE as u64;
+            let u_ptr =
+                a.as_device_ptr() + (j as u64 + right_start as u64 * lda as u64) * T::SIZE as u64;
+            launch_trsm_unit_lower::<T>(handle, l_ptr, u_ptr, jb, n - right_start, lda, lda)?;
         }
 
-        // Step 4: GEMM — update trailing matrix:
+        // Step 4: Trailing rank-`jb` update:
         // A[j+jb:n, j+jb:n] -= A[j+jb:n, j:j+jb] * A[j:j+jb, j+jb:n]
-        let remaining_rows = n.saturating_sub(j + jb);
-        let remaining_cols = n.saturating_sub(j + jb);
-        if remaining_rows > 0 && remaining_cols > 0 {
-            let a21_desc = MatrixDesc::<T>::from_raw(
-                a.as_device_ptr() + ((j + jb) as u64 + j as u64 * lda as u64) * T::SIZE as u64,
-                remaining_rows,
-                jb,
-                lda,
-                Layout::ColMajor,
-            );
-            let a12_desc = MatrixDesc::<T>::from_raw(
-                a.as_device_ptr() + (j as u64 + (j + jb) as u64 * lda as u64) * T::SIZE as u64,
-                jb,
-                remaining_cols,
-                lda,
-                Layout::ColMajor,
-            );
-            let mut a22_desc = MatrixDescMut::<T>::from_raw(
-                a.as_device_ptr()
-                    + ((j + jb) as u64 + (j + jb) as u64 * lda as u64) * T::SIZE as u64,
-                remaining_rows,
-                remaining_cols,
-                lda,
-                Layout::ColMajor,
-            );
-
-            // Compute the negative one for alpha.
-            let neg_one = T::from_bits_u64({
-                let one = T::gpu_one();
-                // Negate by XORing the sign bit.
-                let bits = one.to_bits_u64();
-                if T::SIZE == 4 {
-                    bits ^ 0x8000_0000
-                } else {
-                    bits ^ 0x8000_0000_0000_0000
-                }
-            });
-
-            oxicuda_blas::level3::gemm_api::gemm(
-                handle.blas(),
-                Transpose::NoTrans,
-                Transpose::NoTrans,
-                neg_one,
-                &a21_desc,
-                &a12_desc,
-                T::gpu_one(),
-                &mut a22_desc,
+        //
+        // Implemented with a dedicated strided device kernel (`gemm_update`) for
+        // the same leading-dimension reason as Step 3.
+        let remaining = n.saturating_sub(j + jb);
+        if remaining > 0 {
+            let a21_ptr =
+                a.as_device_ptr() + ((j + jb) as u64 + j as u64 * lda as u64) * T::SIZE as u64;
+            let u12_ptr =
+                a.as_device_ptr() + (j as u64 + (j + jb) as u64 * lda as u64) * T::SIZE as u64;
+            let a22_ptr = a.as_device_ptr()
+                + ((j + jb) as u64 + (j + jb) as u64 * lda as u64) * T::SIZE as u64;
+            launch_gemm_update::<T>(
+                handle, a21_ptr, u12_ptr, a22_ptr, remaining, remaining, jb, lda, lda, lda,
             )?;
         }
     }
@@ -549,14 +504,30 @@ fn blocked_lu<T: GpuFloat>(
     Ok(LuResult { info })
 }
 
-/// Panel factorization: factorizes columns j..j+jb of A[j:n, j:j+jb].
+/// Panel factorization: factorizes columns `j..j+jb` of `A[j:n, j:j+jb]`
+/// **on the device**.
 ///
-/// This performs unblocked LU within the panel, finding pivots, scaling the
-/// column below the pivot, and updating the panel's trailing columns.
+/// Launches a single-CTA, right-looking unblocked LU kernel (Doolittle with
+/// partial pivoting) that runs entirely in global memory — the same in-place
+/// structure used by the dense Cholesky panel. The panel is `m = n - j` rows by
+/// `jb` columns; thread `t` owns panel column `t` (`jb <= LU_BLOCK_SIZE <=
+/// SOLVER_BLOCK_SIZE`). For each pivot column `k`:
 ///
-/// Returns the panel-local info (0 if success, >0 if singular at panel-local column).
+/// 1. every owner redundantly scans column `k` (rows `k..m`) for the
+///    largest-magnitude entry, and the owner of `k` records the absolute pivot
+///    index into `pivots[j + k]`;
+/// 2. each owner swaps its column's rows `k`/`pivot` (partial pivoting across
+///    the whole panel);
+/// 3. the owner of `k` scales the sub-diagonal of column `k` by the pivot;
+/// 4. owners `k < t < jb` apply the rank-1 trailing update to their column.
+///
+/// Block-wide barriers separate the four phases so the only cross-thread
+/// dependency — reading the freshly published pivot column — is ordered.
+///
+/// Returns the panel-local info (`0` on success, `> 0` = 1-based panel column of
+/// the first (near-)zero pivot).
 fn panel_lu<T: GpuFloat>(
-    _handle: &SolverHandle,
+    handle: &SolverHandle,
     a: &mut DeviceBuffer<T>,
     n: u32,
     lda: u32,
@@ -564,127 +535,56 @@ fn panel_lu<T: GpuFloat>(
     jb: u32,
     pivots: &mut DeviceBuffer<i32>,
 ) -> SolverResult<i32> {
-    // Keep PTX generation path exercised while host fallback is active.
-    let _ = emit_panel_lu::<T>(_handle.sm_version(), jb)?;
-
-    let n_usize = n as usize;
-    let lda_usize = lda as usize;
-    let j_usize = j as usize;
-    let jb_usize = jb as usize;
-
-    let mut a_host = vec![T::gpu_zero(); a.len()];
-    a.copy_to_host(&mut a_host)?;
-
-    let mut piv_host = vec![0_i32; pivots.len()];
-    pivots.copy_to_host(&mut piv_host)?;
-
-    let mut info: i32 = 0;
-    let panel_end = (j_usize + jb_usize).min(n_usize);
-
-    for kk in 0..jb_usize {
-        let col = j_usize + kk;
-        if col >= n_usize {
-            break;
-        }
-
-        // Pivot search in column `col` over rows col..n-1.
-        let mut pivot_row = col;
-        let mut max_abs = 0.0_f64;
-        for row in col..n_usize {
-            let bits = a_host[col * lda_usize + row].to_bits_u64();
-            let val = if T::SIZE == 8 {
-                f64::from_bits(bits)
-            } else {
-                f64::from(f32::from_bits(bits as u32))
-            };
-            let abs = val.abs();
-            if abs > max_abs {
-                max_abs = abs;
-                pivot_row = row;
-            }
-        }
-
-        piv_host[col] = pivot_row as i32;
-
-        // Swap within panel columns; trailing columns are swapped later.
-        if pivot_row != col {
-            for c in j_usize..panel_end {
-                a_host.swap(c * lda_usize + col, c * lda_usize + pivot_row);
-            }
-        }
-
-        // Detect singular pivot in the panel (1-based panel-local info).
-        let pivot_bits = a_host[col * lda_usize + col].to_bits_u64();
-        let pivot_val = if T::SIZE == 8 {
-            f64::from_bits(pivot_bits)
-        } else {
-            f64::from(f32::from_bits(pivot_bits as u32))
-        };
-        if info == 0 && pivot_val.abs() <= 1e-30 {
-            info = (kk + 1) as i32;
-            continue;
-        }
-
-        // Scale below-diagonal entries in this panel column.
-        for row in (col + 1)..n_usize {
-            let x_bits = a_host[col * lda_usize + row].to_bits_u64();
-            let x = if T::SIZE == 8 {
-                f64::from_bits(x_bits)
-            } else {
-                f64::from(f32::from_bits(x_bits as u32))
-            };
-            let scaled = x / pivot_val;
-            a_host[col * lda_usize + row] = if T::SIZE == 8 {
-                T::from_bits_u64(scaled.to_bits())
-            } else {
-                T::from_bits_u64(u64::from((scaled as f32).to_bits()))
-            };
-        }
-
-        // Update trailing panel columns.
-        for c in (col + 1)..panel_end {
-            let uk_bits = a_host[c * lda_usize + col].to_bits_u64();
-            let u_kc = if T::SIZE == 8 {
-                f64::from_bits(uk_bits)
-            } else {
-                f64::from(f32::from_bits(uk_bits as u32))
-            };
-            for row in (col + 1)..n_usize {
-                let l_bits = a_host[col * lda_usize + row].to_bits_u64();
-                let l_rc = if T::SIZE == 8 {
-                    f64::from_bits(l_bits)
-                } else {
-                    f64::from(f32::from_bits(l_bits as u32))
-                };
-                let a_bits = a_host[c * lda_usize + row].to_bits_u64();
-                let a_rc = if T::SIZE == 8 {
-                    f64::from_bits(a_bits)
-                } else {
-                    f64::from(f32::from_bits(a_bits as u32))
-                };
-                let updated = a_rc - l_rc * u_kc;
-                a_host[c * lda_usize + row] = if T::SIZE == 8 {
-                    T::from_bits_u64(updated.to_bits())
-                } else {
-                    T::from_bits_u64(u64::from((updated as f32).to_bits()))
-                };
-            }
-        }
+    if jb == 0 {
+        return Ok(0);
     }
 
-    a.copy_from_host(&a_host)?;
-    pivots.copy_from_host(&piv_host)?;
+    let sm = handle.sm_version();
+    let ptx = emit_panel_lu::<T>(sm, jb)?;
+    let module = Arc::new(Module::from_ptx(&ptx)?);
+    let kernel = Kernel::from_module(module, &panel_lu_name::<T>(jb))?;
+
+    // Per-panel singular-column flag. Initialised to a positive sentinel so a
+    // `min`-reduction over (k + 1) records the first (smallest) singular column.
+    const INFO_SENTINEL: i32 = i32::MAX;
+    let info_buf = DeviceBuffer::<i32>::from_host(&[INFO_SENTINEL])?;
+
+    // Panel rows: the trailing height m = n - j.
+    let m = n.saturating_sub(j);
+
+    // One CTA; one thread per panel column. No dynamic shared memory.
+    let params = LaunchParams::new(1u32, SOLVER_BLOCK_SIZE);
+
+    let panel_offset = (j as u64 + j as u64 * lda as u64) * T::SIZE as u64;
+    let panel_ptr = a.as_device_ptr() + panel_offset;
+    let pivots_ptr = pivots.as_device_ptr();
+    let info_ptr = info_buf.as_device_ptr();
+
+    let args = (panel_ptr, pivots_ptr, info_ptr, m, jb, j, lda);
+    kernel.launch(&params, handle.stream(), &args)?;
+
+    let mut info_host = [INFO_SENTINEL];
+    info_buf.copy_to_host(&mut info_host)?;
+    let info = if info_host[0] == INFO_SENTINEL {
+        0
+    } else {
+        info_host[0]
+    };
 
     Ok(info)
 }
 
-/// Applies pivot swaps from panel factorization to columns outside the panel.
+/// Applies pivot swaps from panel factorization to columns outside the panel,
+/// **on the device**.
 ///
-/// For each pivot in `pivots[j..j+jb]`, swaps rows in the column range
-/// `[col_start..col_start+col_count]`.
+/// For each `t` in `0..jb` the row `row = j + t` is swapped with `pivots[row]`
+/// across the column range `[col_start, col_start + col_count)`. The swaps must
+/// be replayed in increasing `t` because partial-pivoting transpositions
+/// compose, so the kernel parallelises across columns (one thread per column)
+/// while each thread walks the `jb` transpositions sequentially.
 #[allow(clippy::too_many_arguments)]
 fn apply_panel_pivots<T: GpuFloat>(
-    _handle: &SolverHandle,
+    handle: &SolverHandle,
     a: &mut DeviceBuffer<T>,
     lda: u32,
     j: u32,
@@ -696,48 +596,17 @@ fn apply_panel_pivots<T: GpuFloat>(
     if col_count == 0 || jb == 0 {
         return Ok(());
     }
-
-    // Keep PTX generation path exercised while host fallback is active.
-    let _ = emit_pivot_swap::<T>(_handle.sm_version())?;
-
-    let lda_usize = lda as usize;
-    let j_usize = j as usize;
-    let jb_usize = jb as usize;
-    let col_start_usize = col_start as usize;
-    let col_end = col_start_usize + col_count as usize;
-
-    let mut a_host = vec![T::gpu_zero(); a.len()];
-    a.copy_to_host(&mut a_host)?;
-    let mut piv_host = vec![0_i32; pivots.len()];
-    pivots.copy_to_host(&mut piv_host)?;
-
-    for t in 0..jb_usize {
-        let row = j_usize + t;
-        if row >= piv_host.len() {
-            break;
-        }
-        let piv = piv_host[row].max(0) as usize;
-        if piv >= lda_usize {
-            return Err(SolverError::DimensionMismatch(format!(
-                "apply_panel_pivots: pivot index out of range ({piv} >= lda {lda_usize})"
-            )));
-        }
-        if piv == row {
-            continue;
-        }
-        for col in col_start_usize..col_end {
-            a_host.swap(col * lda_usize + row, col * lda_usize + piv);
-        }
-    }
-
-    a.copy_from_host(&a_host)?;
-
-    Ok(())
+    launch_pivot_swap::<T>(handle, a, pivots, j, jb, col_start, col_count, lda)
 }
 
-/// Applies pivot permutations to the right-hand side B.
+/// Applies pivot permutations to the right-hand side `B` **on the device**.
+///
+/// Equivalent to applying every transposition `pivots[row]` (`row = 0..n`) in
+/// forward order to each of the `nrhs` columns of `B` (column-major, leading
+/// dimension `n`). Implemented with the same device row-swap kernel as
+/// [`apply_panel_pivots`] using `j = 0`, `jb = n`, `col_start = 0`.
 fn apply_pivots_to_rhs<T: GpuFloat>(
-    _handle: &SolverHandle,
+    handle: &SolverHandle,
     b: &mut DeviceBuffer<T>,
     pivots: &DeviceBuffer<i32>,
     n: u32,
@@ -746,39 +615,102 @@ fn apply_pivots_to_rhs<T: GpuFloat>(
     if n == 0 || nrhs == 0 {
         return Ok(());
     }
+    launch_pivot_swap::<T>(handle, b, pivots, 0, n, 0, nrhs, n)
+}
 
-    // Keep PTX generation path exercised while host fallback is active.
-    let _ = emit_pivot_swap::<T>(_handle.sm_version())?;
+/// Launches the device row-swap kernel that replays the `jb` transpositions
+/// `pivots[j..j+jb]` over the column slab `[col_start, col_start + col_count)`.
+#[allow(clippy::too_many_arguments)]
+fn launch_pivot_swap<T: GpuFloat>(
+    handle: &SolverHandle,
+    a: &mut DeviceBuffer<T>,
+    pivots: &DeviceBuffer<i32>,
+    j: u32,
+    jb: u32,
+    col_start: u32,
+    col_count: u32,
+    lda: u32,
+) -> SolverResult<()> {
+    let sm = handle.sm_version();
+    let ptx = emit_pivot_swap::<T>(sm)?;
+    let module = Arc::new(Module::from_ptx(&ptx)?);
+    let kernel = Kernel::from_module(module, &pivot_swap_name::<T>())?;
 
-    let n_usize = n as usize;
-    let nrhs_usize = nrhs as usize;
+    let num_blocks = col_count.div_ceil(SOLVER_BLOCK_SIZE).max(1);
+    let params = LaunchParams::new(num_blocks, SOLVER_BLOCK_SIZE);
 
-    let mut b_host = vec![T::gpu_zero(); b.len()];
-    b.copy_to_host(&mut b_host)?;
-    let mut piv_host = vec![0_i32; pivots.len()];
-    pivots.copy_to_host(&mut piv_host)?;
+    let a_ptr = a.as_device_ptr();
+    let pivots_ptr = pivots.as_device_ptr();
+    let args = (a_ptr, pivots_ptr, j, jb, col_start, col_count, lda);
+    kernel.launch(&params, handle.stream(), &args)?;
 
-    // Apply all pivots across all RHS columns (column-major, lda = n).
-    for row in 0..n_usize {
-        if row >= piv_host.len() {
-            break;
-        }
-        let piv = piv_host[row].max(0) as usize;
-        if piv >= n_usize {
-            return Err(SolverError::DimensionMismatch(format!(
-                "apply_pivots_to_rhs: pivot index out of range ({piv} >= n {n_usize})"
-            )));
-        }
-        if piv == row {
-            continue;
-        }
-        for col in 0..nrhs_usize {
-            b_host.swap(col * n_usize + row, col * n_usize + piv);
-        }
+    Ok(())
+}
+
+/// Launches the panel triangular solve `B := L^{-1} B`, where `L` is the
+/// `jb x jb` unit-lower-triangular block (leading dimension `ldl`) and `B` is
+/// the `jb x rcols` block (leading dimension `ldb`), both column-major.
+#[allow(clippy::too_many_arguments)]
+fn launch_trsm_unit_lower<T: GpuFloat>(
+    handle: &SolverHandle,
+    l_ptr: u64,
+    b_ptr: u64,
+    jb: u32,
+    rcols: u32,
+    ldl: u32,
+    ldb: u32,
+) -> SolverResult<()> {
+    if rcols == 0 || jb == 0 {
+        return Ok(());
     }
+    let sm = handle.sm_version();
+    let ptx = emit_trsm_unit_lower::<T>(sm)?;
+    let module = Arc::new(Module::from_ptx(&ptx)?);
+    let kernel = Kernel::from_module(module, &trsm_unit_lower_name::<T>())?;
 
-    b.copy_from_host(&b_host)?;
+    let num_blocks = rcols.div_ceil(SOLVER_BLOCK_SIZE).max(1);
+    let params = LaunchParams::new(num_blocks, SOLVER_BLOCK_SIZE);
+    let args = (l_ptr, b_ptr, jb, rcols, ldl, ldb);
+    kernel.launch(&params, handle.stream(), &args)?;
+    Ok(())
+}
 
+/// Launches the trailing rank-`kk` update `C := C - A * B`, where `A` is
+/// `rrows x kk` (leading dimension `lda`), `B` is `kk x rcols` (leading
+/// dimension `ldb`) and `C` is `rrows x rcols` (leading dimension `ldc`), all
+/// column-major.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_gemm_update<T: GpuFloat>(
+    handle: &SolverHandle,
+    a_ptr: u64,
+    b_ptr: u64,
+    c_ptr: u64,
+    rrows: u32,
+    rcols: u32,
+    kk: u32,
+    lda: u32,
+    ldb: u32,
+    ldc: u32,
+) -> SolverResult<()> {
+    if rrows == 0 || rcols == 0 || kk == 0 {
+        return Ok(());
+    }
+    let sm = handle.sm_version();
+    let ptx = emit_gemm_update::<T>(sm)?;
+    let module = Arc::new(Module::from_ptx(&ptx)?);
+    let kernel = Kernel::from_module(module, &gemm_update_name::<T>())?;
+
+    // 2-D grid: the kernel maps `col` to the X dimension (bounded by `rcols`)
+    // and `row` to the Y dimension (bounded by `rrows`) via
+    // `global_thread_id_2d`. The grid must therefore size X by `rcols` and Y by
+    // `rrows`; swapping them silently drops part of `C` for non-square trailing
+    // blocks larger than one tile.
+    const TILE: u32 = 16;
+    let grid_x = rcols.div_ceil(TILE).max(1);
+    let grid_y = rrows.div_ceil(TILE).max(1);
+    let params = LaunchParams::new((grid_x, grid_y), (TILE, TILE));
+    let args = (a_ptr, b_ptr, c_ptr, rrows, rcols, kk, lda, ldb, ldc);
+    kernel.launch(&params, handle.stream(), &args)?;
     Ok(())
 }
 
@@ -794,48 +726,101 @@ fn pivot_swap_name<T: GpuFloat>() -> String {
     format!("solver_pivot_swap_{}", T::NAME)
 }
 
-/// Emits PTX for a single-CTA panel LU factorization kernel.
+fn trsm_unit_lower_name<T: GpuFloat>() -> String {
+    format!("solver_lu_trsm_ll_{}", T::NAME)
+}
+
+fn gemm_update_name<T: GpuFloat>() -> String {
+    format!("solver_lu_gemm_update_{}", T::NAME)
+}
+
+/// Emits PTX for an in-place panel triangular solve `B := L^{-1} B` with `L`
+/// unit-lower-triangular (`jb x jb`, leading dimension `ldl`) and `B`
+/// (`jb x rcols`, leading dimension `ldb`), column-major.
 ///
-/// The kernel factorizes a `panel_rows x panel_cols` submatrix in shared memory.
-/// Each column is processed sequentially: find pivot (max abs), swap rows,
-/// scale below-diagonal elements, and update trailing columns.
-fn emit_panel_lu<T: GpuFloat>(sm: SmVersion, panel_cols: u32) -> SolverResult<String> {
-    let name = panel_lu_name::<T>(panel_cols);
-    let float_ty = T::PTX_TYPE;
+/// Thread `gid` (for `gid < rcols`) owns column `gid` of `B` and performs the
+/// forward substitution `B[i,c] -= sum_{k<i} L[i,k] * B[k,c]` for `i = 0..jb`
+/// (the unit diagonal means no division). Column ownership keeps every thread
+/// independent of the others, so no barriers are needed; the sequential inner
+/// loop honours the data dependence on already-solved rows.
+pub(crate) fn emit_trsm_unit_lower<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
+    let name = trsm_unit_lower_name::<T>();
 
     let ptx = KernelBuilder::new(&name)
         .target(sm)
         .max_threads_per_block(SOLVER_BLOCK_SIZE)
-        .param("panel_ptr", PtxType::U64)
-        .param("pivots_ptr", PtxType::U64)
-        .param("panel_rows", PtxType::U32)
-        .param("panel_cols", PtxType::U32)
-        .param("lda", PtxType::U32)
+        .param("l_ptr", PtxType::U64)
+        .param("b_ptr", PtxType::U64)
+        .param("jb", PtxType::U32)
+        .param("rcols", PtxType::U32)
+        .param("ldl", PtxType::U32)
+        .param("ldb", PtxType::U32)
         .body(move |b| {
-            let tid = b.thread_id_x();
-            let panel_rows_reg = b.load_param_u32("panel_rows");
-            let panel_cols_reg = b.load_param_u32("panel_cols");
-            let lda_reg = b.load_param_u32("lda");
-            let panel_ptr = b.load_param_u64("panel_ptr");
+            let gid = b.global_thread_id_x();
+            let rcols = b.load_param_u32("rcols");
+            let inactive = b.alloc_reg(PtxType::Pred);
+            let done = b.fresh_label("trsm_done");
+            b.raw_ptx(&format!("setp.ge.u32 {inactive}, {gid}, {rcols};"));
+            b.raw_ptx(&format!("@{inactive} bra {done};"));
 
-            // Each thread handles elements in the column below the diagonal.
-            // This is a simplified single-CTA panel factorization.
-            // For each column k = 0..panel_cols:
-            //   1. Find pivot (thread 0 finds max abs in column k, rows k..panel_rows)
-            //   2. Swap pivot row with row k
-            //   3. Scale elements below diagonal: A[i,k] /= A[k,k] for i > k
-            //   4. Update trailing: A[i,j] -= A[i,k] * A[k,j] for i > k, j > k
+            let l_ptr = b.load_param_u64("l_ptr");
+            let b_ptr = b.load_param_u64("b_ptr");
+            let jb = b.load_param_u32("jb");
+            let ldl = b.load_param_u32("ldl");
+            let ldb = b.load_param_u32("ldb");
 
-            // The kernel processes panel_cols columns sequentially.
-            // Each column step uses all threads in the CTA cooperatively.
-            let _ = (
-                tid,
-                panel_rows_reg,
-                panel_cols_reg,
-                lda_reg,
-                panel_ptr,
-                float_ty,
-            );
+            // Column offset of this thread's B column: bcol = gid * ldb.
+            let bcol = b.mul_lo_u32(gid, ldb);
+
+            // i = 0..jb
+            let i = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("mov.u32 {i}, 0;"));
+            let i_loop = b.fresh_label("trsm_i");
+            let i_exit = b.fresh_label("trsm_ix");
+            b.raw_ptx(&format!("{i_loop}:"));
+            let i_done = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {i_done}, {i}, {jb};"));
+            b.raw_ptx(&format!("@{i_done} bra {i_exit};"));
+
+            // acc = B[i, c]
+            let bi_idx = b.add_u32(i.clone(), bcol.clone());
+            let bi_addr = b.byte_offset_addr(b_ptr.clone(), bi_idx, T::size_u32());
+            let acc = b.alloc_reg(T::PTX_TYPE);
+            let suffix = T::PTX_TYPE.as_ptx_str();
+            let bi_val = load_global_float::<T>(b, bi_addr.clone());
+            b.raw_ptx(&format!("mov{suffix} {acc}, {bi_val};"));
+
+            // k = 0..i: acc -= L[i,k] * B[k,c]
+            let k = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("mov.u32 {k}, 0;"));
+            let k_loop = b.fresh_label("trsm_k");
+            let k_exit = b.fresh_label("trsm_kx");
+            b.raw_ptx(&format!("{k_loop}:"));
+            let k_done = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {k_done}, {k}, {i};"));
+            b.raw_ptx(&format!("@{k_done} bra {k_exit};"));
+            // L[i,k] = l_ptr + (i + k*ldl)
+            let kldl = b.mul_lo_u32(k.clone(), ldl.clone());
+            let lik_idx = b.add_u32(i.clone(), kldl);
+            let lik_addr = b.byte_offset_addr(l_ptr.clone(), lik_idx, T::size_u32());
+            let lik = load_global_float::<T>(b, lik_addr);
+            // B[k,c] = b_ptr + (k + bcol)
+            let bk_idx = b.add_u32(k.clone(), bcol.clone());
+            let bk_addr = b.byte_offset_addr(b_ptr.clone(), bk_idx, T::size_u32());
+            let bk = load_global_float::<T>(b, bk_addr);
+            let prod = mul_float::<T>(b, lik, bk);
+            let new_acc = sub_float::<T>(b, acc.clone(), prod);
+            b.raw_ptx(&format!("mov{suffix} {acc}, {new_acc};"));
+            b.raw_ptx(&format!("add.u32 {k}, {k}, 1;"));
+            b.raw_ptx(&format!("bra {k_loop};"));
+            b.raw_ptx(&format!("{k_exit}:"));
+
+            // B[i,c] = acc  (unit diagonal: no division)
+            store_global_float::<T>(b, bi_addr, acc);
+            b.raw_ptx(&format!("add.u32 {i}, {i}, 1;"));
+            b.raw_ptx(&format!("bra {i_loop};"));
+            b.raw_ptx(&format!("{i_exit}:"));
+            b.raw_ptx(&format!("{done}:"));
 
             b.ret();
         })
@@ -844,13 +829,349 @@ fn emit_panel_lu<T: GpuFloat>(sm: SmVersion, panel_cols: u32) -> SolverResult<St
     Ok(ptx)
 }
 
-/// Emits PTX for a row-permutation kernel.
+/// Emits PTX for the trailing rank-`kk` update `C := C - A * B`, with `A`
+/// (`rrows x kk`, leading dimension `lda`), `B` (`kk x rcols`, leading dimension
+/// `ldb`) and `C` (`rrows x rcols`, leading dimension `ldc`), all column-major.
 ///
-/// Each thread handles one column: for each pivot in `pivots[j..j+jb]`,
-/// swaps rows in columns `col_start..col_start+col_count`.
-fn emit_pivot_swap<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
+/// A 2-D grid maps thread `(x, y)` to output element `C[x, y]`; each thread
+/// accumulates the dot product over the shared `kk` dimension and subtracts it
+/// from `C`. Leading dimensions are honoured explicitly so the kernel is correct
+/// for sub-matrices embedded in a larger buffer (`ld* > rows`).
+pub(crate) fn emit_gemm_update<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
+    let name = gemm_update_name::<T>();
+
+    let ptx = KernelBuilder::new(&name)
+        .target(sm)
+        .max_threads_per_block(SOLVER_BLOCK_SIZE)
+        .param("a_ptr", PtxType::U64)
+        .param("b_ptr", PtxType::U64)
+        .param("c_ptr", PtxType::U64)
+        .param("rrows", PtxType::U32)
+        .param("rcols", PtxType::U32)
+        .param("kk", PtxType::U32)
+        .param("lda", PtxType::U32)
+        .param("ldb", PtxType::U32)
+        .param("ldc", PtxType::U32)
+        .body(move |b| {
+            let (row, col) = b.global_thread_id_2d();
+            let rrows = b.load_param_u32("rrows");
+            let rcols = b.load_param_u32("rcols");
+
+            let oob_r = b.alloc_reg(PtxType::Pred);
+            let oob_c = b.alloc_reg(PtxType::Pred);
+            let done = b.fresh_label("gemm_done");
+            b.raw_ptx(&format!("setp.ge.u32 {oob_r}, {row}, {rrows};"));
+            b.raw_ptx(&format!("@{oob_r} bra {done};"));
+            b.raw_ptx(&format!("setp.ge.u32 {oob_c}, {col}, {rcols};"));
+            b.raw_ptx(&format!("@{oob_c} bra {done};"));
+
+            let a_ptr = b.load_param_u64("a_ptr");
+            let b_ptr = b.load_param_u64("b_ptr");
+            let c_ptr = b.load_param_u64("c_ptr");
+            let kk = b.load_param_u32("kk");
+            let lda = b.load_param_u32("lda");
+            let ldb = b.load_param_u32("ldb");
+            let ldc = b.load_param_u32("ldc");
+            let suffix = T::PTX_TYPE.as_ptx_str();
+
+            // acc = 0
+            let acc = b.alloc_reg(T::PTX_TYPE);
+            let zero_lit = if T::SIZE == 8 {
+                "0d0000000000000000"
+            } else {
+                "0f00000000"
+            };
+            b.raw_ptx(&format!("mov{suffix} {acc}, {zero_lit};"));
+
+            // B column offset: col * ldb.
+            let bcol = b.mul_lo_u32(col.clone(), ldb);
+
+            // k = 0..kk: acc += A[row,k] * B[k,col]
+            let k = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("mov.u32 {k}, 0;"));
+            let k_loop = b.fresh_label("gemm_k");
+            let k_exit = b.fresh_label("gemm_kx");
+            b.raw_ptx(&format!("{k_loop}:"));
+            let k_done = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {k_done}, {k}, {kk};"));
+            b.raw_ptx(&format!("@{k_done} bra {k_exit};"));
+            // A[row,k] = a_ptr + (row + k*lda)
+            let klda = b.mul_lo_u32(k.clone(), lda.clone());
+            let ark_idx = b.add_u32(row.clone(), klda);
+            let ark_addr = b.byte_offset_addr(a_ptr.clone(), ark_idx, T::size_u32());
+            let ark = load_global_float::<T>(b, ark_addr);
+            // B[k,col] = b_ptr + (k + bcol)
+            let bkc_idx = b.add_u32(k.clone(), bcol.clone());
+            let bkc_addr = b.byte_offset_addr(b_ptr.clone(), bkc_idx, T::size_u32());
+            let bkc = load_global_float::<T>(b, bkc_addr);
+            let new_acc = fma_float::<T>(b, ark, bkc, acc.clone());
+            b.raw_ptx(&format!("mov{suffix} {acc}, {new_acc};"));
+            b.raw_ptx(&format!("add.u32 {k}, {k}, 1;"));
+            b.raw_ptx(&format!("bra {k_loop};"));
+            b.raw_ptx(&format!("{k_exit}:"));
+
+            // C[row,col] = C[row,col] - acc
+            let ccol = b.mul_lo_u32(col.clone(), ldc);
+            let c_idx = b.add_u32(row.clone(), ccol);
+            let c_addr = b.byte_offset_addr(c_ptr.clone(), c_idx, T::size_u32());
+            let c_val = load_global_float::<T>(b, c_addr.clone());
+            let updated = sub_float::<T>(b, c_val, acc);
+            store_global_float::<T>(b, c_addr, updated);
+            b.raw_ptx(&format!("{done}:"));
+
+            b.ret();
+        })
+        .build()?;
+
+    Ok(ptx)
+}
+
+/// Emits a float immediate of type `T` into a fresh register.
+///
+/// Uses PTX hexadecimal float literals (`0d…` for `f64`, `0f…` for `f32`) so the
+/// exact bit pattern is preserved across the assembler.
+fn emit_float_const<T: GpuFloat>(b: &mut BodyBuilder<'_>, value: f64) -> Register {
+    let dst = b.alloc_reg(T::PTX_TYPE);
+    if T::SIZE == 8 {
+        let bits = value.to_bits();
+        b.raw_ptx(&format!("mov.f64 {dst}, 0d{bits:016X};"));
+    } else {
+        let bits = (value as f32).to_bits();
+        b.raw_ptx(&format!("mov.f32 {dst}, 0f{bits:08X};"));
+    }
+    dst
+}
+
+/// Computes the device address of a panel element given the precomputed column
+/// offset `col_off = col * lda` (column-major): `base + (row + col_off) *
+/// sizeof(T)`.
+fn panel_elem_addr<T: GpuFloat>(
+    b: &mut BodyBuilder<'_>,
+    base: &Register,
+    row: &Register,
+    col_off: &Register,
+) -> Register {
+    let idx = b.add_u32(row.clone(), col_off.clone());
+    b.byte_offset_addr(base.clone(), idx, T::size_u32())
+}
+
+/// Emits PTX for a single-CTA, in-place panel LU factorization kernel
+/// (right-looking Doolittle with partial pivoting).
+///
+/// Operates directly on the `m x panel_cols` panel held in global memory
+/// (column-major, leading dimension `lda`). Thread `t` owns panel column `t`
+/// (`panel_cols <= LU_BLOCK_SIZE <= SOLVER_BLOCK_SIZE`). For each pivot column
+/// `k = 0..panel_cols` the four phases — pivot search, row swap, column scaling
+/// and the rank-1 trailing update — are separated by block-wide barriers; the
+/// only cross-thread dependency (reading the published pivot column `k`) is
+/// therefore correctly ordered. The owner of `k` records the absolute pivot
+/// index `j + pivot_row` into `pivots[j + k]` and, on a (near-)zero pivot,
+/// `min`-reduces `k + 1` into `info` so the host can report the first singular
+/// column.
+pub(crate) fn emit_panel_lu<T: GpuFloat>(sm: SmVersion, panel_cols: u32) -> SolverResult<String> {
+    let name = panel_lu_name::<T>(panel_cols);
+    let suffix = T::PTX_TYPE.as_ptx_str();
+    // Threshold below which a pivot is treated as numerically zero (singular).
+    let tiny: f64 = 1e-30;
+
+    let ptx = KernelBuilder::new(&name)
+        .target(sm)
+        .max_threads_per_block(SOLVER_BLOCK_SIZE)
+        .param("panel_ptr", PtxType::U64)
+        .param("pivots_ptr", PtxType::U64)
+        .param("info_ptr", PtxType::U64)
+        .param("panel_rows", PtxType::U32)
+        .param("panel_cols", PtxType::U32)
+        .param("j", PtxType::U32)
+        .param("lda", PtxType::U32)
+        .body(move |b| {
+            let tid = b.thread_id_x();
+            let m = b.load_param_u32("panel_rows");
+            let nc = b.load_param_u32("panel_cols");
+            let j_reg = b.load_param_u32("j");
+            let lda = b.load_param_u32("lda");
+            let base = b.load_param_u64("panel_ptr");
+            let piv_base = b.load_param_u64("pivots_ptr");
+            let info_base = b.load_param_u64("info_ptr");
+
+            // Persistent loop registers.
+            let k = b.alloc_reg(PtxType::U32);
+            let prow = b.alloc_reg(PtxType::U32);
+            let rr = b.alloc_reg(PtxType::U32);
+            let colk = b.alloc_reg(PtxType::U32);
+            let colt = b.alloc_reg(PtxType::U32);
+            let maxabs = b.alloc_reg(T::PTX_TYPE);
+
+            b.raw_ptx(&format!("mov.u32 {k}, 0;"));
+
+            let k_loop = b.fresh_label("lu_k");
+            let k_exit = b.fresh_label("lu_kx");
+            b.raw_ptx(&format!("{k_loop}:"));
+            let k_done = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {k_done}, {k}, {nc};"));
+            b.raw_ptx(&format!("@{k_done} bra {k_exit};"));
+
+            // col offset of pivot column k: colk = k * lda.
+            b.raw_ptx(&format!("mul.lo.u32 {colk}, {k}, {lda};"));
+
+            // ---- Phase 1: pivot search (rows k..m of column k) ----------------
+            b.raw_ptx(&format!("mov.u32 {prow}, {k};"));
+            let p1_end = b.fresh_label("lu_p1e");
+            let not_active1 = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {not_active1}, {tid}, {nc};"));
+            b.raw_ptx(&format!("@{not_active1} bra {p1_end};"));
+            {
+                let zero_lit = if T::SIZE == 8 {
+                    "0d0000000000000000"
+                } else {
+                    "0f00000000"
+                };
+                b.raw_ptx(&format!("mov{suffix} {maxabs}, {zero_lit};"));
+                b.raw_ptx(&format!("mov.u32 {rr}, {k};"));
+                let s_loop = b.fresh_label("lu_s");
+                let s_exit = b.fresh_label("lu_sx");
+                b.raw_ptx(&format!("{s_loop}:"));
+                let s_done = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ge.u32 {s_done}, {rr}, {m};"));
+                b.raw_ptx(&format!("@{s_done} bra {s_exit};"));
+                let addr = panel_elem_addr::<T>(b, &base, &rr, &colk);
+                let v = load_global_float::<T>(b, addr);
+                let av = abs_float::<T>(b, v);
+                let gt = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.gt{suffix} {gt}, {av}, {maxabs};"));
+                b.raw_ptx(&format!("@{gt} mov{suffix} {maxabs}, {av};"));
+                b.raw_ptx(&format!("@{gt} mov.u32 {prow}, {rr};"));
+                b.raw_ptx(&format!("add.u32 {rr}, {rr}, 1;"));
+                b.raw_ptx(&format!("bra {s_loop};"));
+                b.raw_ptx(&format!("{s_exit}:"));
+
+                // Owner of column k records the absolute pivot index.
+                let not_owner = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ne.u32 {not_owner}, {tid}, {k};"));
+                let skip_write = b.fresh_label("lu_pw");
+                b.raw_ptx(&format!("@{not_owner} bra {skip_write};"));
+                let pglobal = b.add_u32(j_reg.clone(), prow.clone());
+                let pidx = b.add_u32(j_reg.clone(), k.clone());
+                let paddr = b.byte_offset_addr(piv_base.clone(), pidx, 4);
+                b.raw_ptx(&format!("st.global.u32 [{paddr}], {pglobal};"));
+                b.raw_ptx(&format!("{skip_write}:"));
+            }
+            b.raw_ptx(&format!("{p1_end}:"));
+            b.bar_sync(0);
+
+            // ---- Phase 2: swap rows k / prow in this thread's column ----------
+            b.raw_ptx(&format!("mul.lo.u32 {colt}, {tid}, {lda};"));
+            let p2_end = b.fresh_label("lu_p2e");
+            let not_active2 = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {not_active2}, {tid}, {nc};"));
+            b.raw_ptx(&format!("@{not_active2} bra {p2_end};"));
+            let no_swap = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.eq.u32 {no_swap}, {prow}, {k};"));
+            b.raw_ptx(&format!("@{no_swap} bra {p2_end};"));
+            {
+                let ak_addr = panel_elem_addr::<T>(b, &base, &k, &colt);
+                let ap_addr = panel_elem_addr::<T>(b, &base, &prow, &colt);
+                let vk = load_global_float::<T>(b, ak_addr.clone());
+                let vp = load_global_float::<T>(b, ap_addr.clone());
+                store_global_float::<T>(b, ak_addr, vp);
+                store_global_float::<T>(b, ap_addr, vk);
+            }
+            b.raw_ptx(&format!("{p2_end}:"));
+            b.bar_sync(0);
+
+            // ---- Phase 3: scale sub-diagonal of column k (owner of k) ---------
+            let p3_end = b.fresh_label("lu_p3e");
+            let not_owner3 = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ne.u32 {not_owner3}, {tid}, {k};"));
+            b.raw_ptx(&format!("@{not_owner3} bra {p3_end};"));
+            {
+                let akk_addr = panel_elem_addr::<T>(b, &base, &k, &colk);
+                let pivot = load_global_float::<T>(b, akk_addr);
+                let apv = abs_float::<T>(b, pivot.clone());
+                let tiny_reg = emit_float_const::<T>(b, tiny);
+                let singular = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.le{suffix} {singular}, {apv}, {tiny_reg};"));
+                let do_scale = b.fresh_label("lu_sc");
+                let after_scale = b.fresh_label("lu_sce");
+                b.raw_ptx(&format!("@!{singular} bra {do_scale};"));
+                // Singular pivot: record first singular column via min-reduction.
+                let one = one_u32(b);
+                let kp1 = b.add_u32(k.clone(), one);
+                b.raw_ptx(&format!("red.global.min.u32 [{info_base}], {kp1};"));
+                b.raw_ptx(&format!("bra {after_scale};"));
+                b.raw_ptx(&format!("{do_scale}:"));
+                b.raw_ptx(&format!("add.u32 {rr}, {k}, 1;"));
+                let c_loop = b.fresh_label("lu_c");
+                let c_exit = b.fresh_label("lu_cx");
+                b.raw_ptx(&format!("{c_loop}:"));
+                let c_done = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ge.u32 {c_done}, {rr}, {m};"));
+                b.raw_ptx(&format!("@{c_done} bra {c_exit};"));
+                let addr = panel_elem_addr::<T>(b, &base, &rr, &colk);
+                let v = load_global_float::<T>(b, addr.clone());
+                let scaled = div_float::<T>(b, v, pivot.clone());
+                store_global_float::<T>(b, addr, scaled);
+                b.raw_ptx(&format!("add.u32 {rr}, {rr}, 1;"));
+                b.raw_ptx(&format!("bra {c_loop};"));
+                b.raw_ptx(&format!("{c_exit}:"));
+                b.raw_ptx(&format!("{after_scale}:"));
+            }
+            b.raw_ptx(&format!("{p3_end}:"));
+            b.bar_sync(0);
+
+            // ---- Phase 4: rank-1 trailing update (owners k < tid < nc) --------
+            let p4_end = b.fresh_label("lu_p4e");
+            let le_k = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.le.u32 {le_k}, {tid}, {k};"));
+            b.raw_ptx(&format!("@{le_k} bra {p4_end};"));
+            let ge_nc = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {ge_nc}, {tid}, {nc};"));
+            b.raw_ptx(&format!("@{ge_nc} bra {p4_end};"));
+            {
+                // U[k, tid] lives at panel row k of this thread's column.
+                let akc_addr = panel_elem_addr::<T>(b, &base, &k, &colt);
+                let akc = load_global_float::<T>(b, akc_addr);
+                b.raw_ptx(&format!("add.u32 {rr}, {k}, 1;"));
+                let t_loop = b.fresh_label("lu_t");
+                let t_exit = b.fresh_label("lu_tx");
+                b.raw_ptx(&format!("{t_loop}:"));
+                let t_done = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ge.u32 {t_done}, {rr}, {m};"));
+                b.raw_ptx(&format!("@{t_done} bra {t_exit};"));
+                let ark_addr = panel_elem_addr::<T>(b, &base, &rr, &colk);
+                let ark = load_global_float::<T>(b, ark_addr);
+                let arc_addr = panel_elem_addr::<T>(b, &base, &rr, &colt);
+                let arc = load_global_float::<T>(b, arc_addr.clone());
+                let prod = mul_float::<T>(b, ark, akc.clone());
+                let upd = sub_float::<T>(b, arc, prod);
+                store_global_float::<T>(b, arc_addr, upd);
+                b.raw_ptx(&format!("add.u32 {rr}, {rr}, 1;"));
+                b.raw_ptx(&format!("bra {t_loop};"));
+                b.raw_ptx(&format!("{t_exit}:"));
+            }
+            b.raw_ptx(&format!("{p4_end}:"));
+            b.bar_sync(0);
+
+            b.raw_ptx(&format!("add.u32 {k}, {k}, 1;"));
+            b.raw_ptx(&format!("bra {k_loop};"));
+            b.raw_ptx(&format!("{k_exit}:"));
+
+            b.ret();
+        })
+        .build()?;
+
+    Ok(ptx)
+}
+
+/// Emits PTX for a device row-permutation (pivot replay) kernel.
+///
+/// Thread `gid` (for `gid < col_count`) owns column `col_start + gid` and
+/// replays the `jb` transpositions `pivots[j + t]` (`t = 0..jb`) in increasing
+/// order, swapping rows `j + t` and `pivots[j + t]` within its column. Column
+/// ownership makes every thread independent (no barriers needed); the sequential
+/// inner loop preserves the composition order of partial-pivoting swaps.
+pub(crate) fn emit_pivot_swap<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
     let name = pivot_swap_name::<T>();
-    let float_ty = T::PTX_TYPE;
 
     let ptx = KernelBuilder::new(&name)
         .target(sm)
@@ -864,24 +1185,57 @@ fn emit_pivot_swap<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
         .param("lda", PtxType::U32)
         .body(move |b| {
             let gid = b.global_thread_id_x();
-            let col_count_reg = b.load_param_u32("col_count");
+            let col_count = b.load_param_u32("col_count");
 
-            b.if_lt_u32(gid.clone(), col_count_reg, |b| {
-                let a_ptr = b.load_param_u64("a_ptr");
-                let col_start = b.load_param_u32("col_start");
-                let lda = b.load_param_u32("lda");
+            let inactive = b.alloc_reg(PtxType::Pred);
+            let done = b.fresh_label("sw_done");
+            b.raw_ptx(&format!("setp.ge.u32 {inactive}, {gid}, {col_count};"));
+            b.raw_ptx(&format!("@{inactive} bra {done};"));
 
-                // Compute the actual column index.
-                let col_idx = b.add_u32(gid, col_start);
+            let a_ptr = b.load_param_u64("a_ptr");
+            let piv_base = b.load_param_u64("pivots_ptr");
+            let j_reg = b.load_param_u32("j");
+            let jb = b.load_param_u32("jb");
+            let col_start = b.load_param_u32("col_start");
+            let lda = b.load_param_u32("lda");
 
-                // Column base address: a_ptr + col_idx * lda * sizeof(T)
-                let col_elem_offset = b.mul_lo_u32(col_idx, lda);
-                let _col_base = b.byte_offset_addr(a_ptr, col_elem_offset, T::size_u32());
+            // Column base address: a_ptr + (col_start + gid) * lda * sizeof(T).
+            let col_idx = b.add_u32(gid, col_start);
+            let col_off = b.mul_lo_u32(col_idx, lda);
+            let col_base = b.byte_offset_addr(a_ptr, col_off, T::size_u32());
 
-                // In the full implementation, this would loop over pivots[j..j+jb]
-                // and swap the corresponding rows.
-                let _ = float_ty;
-            });
+            // t = 0..jb: swap rows (j + t) and pivots[j + t].
+            let t = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("mov.u32 {t}, 0;"));
+            let t_loop = b.fresh_label("sw_t");
+            let t_exit = b.fresh_label("sw_tx");
+            b.raw_ptx(&format!("{t_loop}:"));
+            let t_done = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {t_done}, {t}, {jb};"));
+            b.raw_ptx(&format!("@{t_done} bra {t_exit};"));
+
+            let row = b.add_u32(j_reg.clone(), t.clone());
+            let piv_addr = b.byte_offset_addr(piv_base.clone(), row.clone(), 4);
+            let piv = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("ld.global.u32 {piv}, [{piv_addr}];"));
+
+            let same = b.alloc_reg(PtxType::Pred);
+            let skip = b.fresh_label("sw_skip");
+            b.raw_ptx(&format!("setp.eq.u32 {same}, {piv}, {row};"));
+            b.raw_ptx(&format!("@{same} bra {skip};"));
+
+            let row_addr = b.byte_offset_addr(col_base.clone(), row.clone(), T::size_u32());
+            let piv_row_addr = b.byte_offset_addr(col_base.clone(), piv.clone(), T::size_u32());
+            let vr = load_global_float::<T>(b, row_addr.clone());
+            let vp = load_global_float::<T>(b, piv_row_addr.clone());
+            store_global_float::<T>(b, row_addr, vp);
+            store_global_float::<T>(b, piv_row_addr, vr);
+
+            b.raw_ptx(&format!("{skip}:"));
+            b.raw_ptx(&format!("add.u32 {t}, {t}, 1;"));
+            b.raw_ptx(&format!("bra {t_loop};"));
+            b.raw_ptx(&format!("{t_exit}:"));
+            b.raw_ptx(&format!("{done}:"));
 
             b.ret();
         })
@@ -890,495 +1244,17 @@ fn emit_pivot_swap<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
     Ok(ptx)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ---------------------------------------------------------------------------
-    // CPU reference helpers for LU integration tests
-    // ---------------------------------------------------------------------------
-
-    /// Doolittle LU factorization (no pivoting) on a 4×4 f64 matrix.
-    ///
-    /// Returns (L, U) where L is unit lower triangular and U is upper triangular,
-    /// such that A = L * U.
-    fn doolittle_lu_4x4(a: &[[f64; 4]; 4]) -> ([[f64; 4]; 4], [[f64; 4]; 4]) {
-        let mut l = [[0.0_f64; 4]; 4];
-        let mut u = [[0.0_f64; 4]; 4];
-
-        for i in 0..4 {
-            l[i][i] = 1.0; // Unit diagonal for L.
-
-            // U row i.
-            for j in i..4 {
-                let sum: f64 = (0..i).map(|k| l[i][k] * u[k][j]).sum();
-                u[i][j] = a[i][j] - sum;
-            }
-
-            // L column i (below diagonal).
-            for j in (i + 1)..4 {
-                let sum: f64 = (0..i).map(|k| l[j][k] * u[k][i]).sum();
-                if u[i][i].abs() > 1e-15 {
-                    l[j][i] = (a[j][i] - sum) / u[i][i];
-                }
-            }
-        }
-
-        (l, u)
-    }
-
-    /// 4×4 matrix multiply (row-major).
-    fn matmul_4x4(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
-        let mut c = [[0.0_f64; 4]; 4];
-        for i in 0..4 {
-            for j in 0..4 {
-                for k in 0..4 {
-                    c[i][j] += a[i][k] * b[k][j];
-                }
-            }
-        }
-        c
-    }
-
-    // ---------------------------------------------------------------------------
-    // LU + GEMM/TRSM integration tests
-    // ---------------------------------------------------------------------------
-
-    #[test]
-    fn lu_trsm_trailing_update() {
-        // Verify Doolittle LU on a 4×4 matrix: A = L * U to tolerance 1e-10.
-        let a = [
-            [4.0_f64, 3.0, 2.0, 1.0],
-            [2.0, 5.0, 3.0, 2.0],
-            [1.0, 2.0, 6.0, 3.0],
-            [1.0, 1.0, 2.0, 7.0],
-        ];
-        let (l, u) = doolittle_lu_4x4(&a);
-
-        // L must be unit lower triangular.
-        for (i, l_row) in l.iter().enumerate() {
-            assert!(
-                (l_row[i] - 1.0).abs() < 1e-15,
-                "L[{i},{i}] must be 1.0 (unit diagonal)"
-            );
-            for (j, &val) in l_row.iter().enumerate().filter(|(j, _)| *j > i) {
-                assert!(
-                    val.abs() < 1e-15,
-                    "L[{i},{j}] = {val} must be 0.0 (upper triangle)",
-                );
-            }
-        }
-
-        // U must be upper triangular.
-        for (i, u_row) in u.iter().enumerate() {
-            for (j, &val) in u_row.iter().enumerate().filter(|(j, _)| *j < i) {
-                assert!(
-                    val.abs() < 1e-15,
-                    "U[{i},{j}] = {val} must be 0.0 (lower triangle)",
-                );
-            }
-        }
-
-        // Reconstruct: L*U must equal A.
-        let reconstructed = matmul_4x4(&l, &u);
-        for i in 0..4 {
-            for j in 0..4 {
-                assert!(
-                    (reconstructed[i][j] - a[i][j]).abs() < 1e-10,
-                    "LU[{i},{j}] = {} ≠ A[{i},{j}] = {} (diff = {})",
-                    reconstructed[i][j],
-                    a[i][j],
-                    (reconstructed[i][j] - a[i][j]).abs()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn lu_gemm_rank_update_correctness() {
-        // Verify that the GEMM trailing update for k=0 is correct on a 3×3 example.
-        //
-        // After the first column of LU (k=0):
-        //   L[:,0] is computed, U[0,:] is computed.
-        //   Trailing update: A[1:3, 1:3] -= L[1:3, 0:1] * U[0:1, 1:3]
-        //
-        // Use a = [[2, 4, 6], [1, 3, 5], [1, 2, 4]] (simple example).
-        let a = [[2.0_f64, 4.0, 6.0], [1.0, 3.0, 5.0], [1.0, 2.0, 4.0]];
-
-        // After first pivot (k=0), L column 0 = [1, a[1,0]/a[0,0], a[2,0]/a[0,0]]
-        //                                      = [1, 0.5, 0.5]
-        // U row 0 = a[0,:] = [2, 4, 6]
-        // Trailing update for A[1:3, 1:3]:
-        //   A[1,1] -= L[1,0]*U[0,1] = 3 - 0.5*4 = 1
-        //   A[1,2] -= L[1,0]*U[0,2] = 5 - 0.5*6 = 2
-        //   A[2,1] -= L[2,0]*U[0,1] = 2 - 0.5*4 = 0
-        //   A[2,2] -= L[2,0]*U[0,2] = 4 - 0.5*6 = 1
-        let l_col0 = [1.0_f64, a[1][0] / a[0][0], a[2][0] / a[0][0]];
-        let u_row0 = [a[0][0], a[0][1], a[0][2]];
-
-        // Trailing submatrix after k=0 update.
-        let mut trailing = [[0.0_f64; 2]; 2];
-        for i in 0..2 {
-            for j in 0..2 {
-                trailing[i][j] = a[i + 1][j + 1] - l_col0[i + 1] * u_row0[j + 1];
-            }
-        }
-
-        assert!(
-            (trailing[0][0] - 1.0).abs() < 1e-12,
-            "trailing[0,0] should be 1"
-        );
-        assert!(
-            (trailing[0][1] - 2.0).abs() < 1e-12,
-            "trailing[0,1] should be 2"
-        );
-        assert!(trailing[1][0].abs() < 1e-12, "trailing[1,0] should be 0");
-        assert!(
-            (trailing[1][1] - 1.0).abs() < 1e-12,
-            "trailing[1,1] should be 1"
-        );
-    }
-
-    #[test]
-    fn lu_block_size_positive() {
-        let block_size = LU_BLOCK_SIZE;
-        assert!(block_size > 0);
-        assert!(block_size <= 256);
-    }
-
-    #[test]
-    fn lu_result_info() {
-        let result = LuResult { info: 0 };
-        assert_eq!(result.info, 0);
-
-        let singular = LuResult { info: 3 };
-        assert!(singular.info > 0);
-    }
-
-    #[test]
-    fn panel_lu_name_format() {
-        let name = panel_lu_name::<f32>(64);
-        assert!(name.contains("f32"));
-        assert!(name.contains("64"));
-    }
-
-    #[test]
-    fn pivot_swap_name_format() {
-        let name = pivot_swap_name::<f64>();
-        assert!(name.contains("f64"));
-    }
-
-    #[test]
-    fn neg_one_f32() {
-        let neg = f32::from_bits_u64(f32::gpu_one().to_bits_u64() ^ 0x8000_0000);
-        assert!((neg + 1.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn neg_one_f64() {
-        let neg = f64::from_bits_u64(f64::gpu_one().to_bits_u64() ^ 0x8000_0000_0000_0000);
-        assert!((neg + 1.0).abs() < 1e-15);
-    }
-
-    // -----------------------------------------------------------------------
-    // Transposed LU solve: host reference of `lu_solve_with_transpose`
-    // -----------------------------------------------------------------------
-    //
-    // The production `lu_solve_with_transpose` operates on `DeviceBuffer`s and
-    // a `SolverHandle`, which cannot be created without a CUDA device. The
-    // helpers below re-implement the exact same triangular-substitution stages
-    // on plain `Vec<f64>` data so the algorithm — the transposed forward/back
-    // substitution and the transposed permutation — can be validated.
-
-    /// Dense LU factorization with partial pivoting (column-major, lda = n).
-    ///
-    /// Mirrors the storage produced by [`lu_factorize`]: on return `lu` holds
-    /// `L` (strict lower, implicit unit diagonal) and `U` (upper) packed in
-    /// place, and `pivots[i]` is the absolute row swapped with row `i`.
-    fn dense_lu_factorize(a: &[f64], n: usize) -> (Vec<f64>, Vec<i32>) {
-        let mut lu = a.to_vec();
-        let mut pivots = vec![0_i32; n];
-        for col in 0..n {
-            // Pivot search over rows col..n in column `col`.
-            let mut pivot_row = col;
-            let mut max_abs = 0.0_f64;
-            for row in col..n {
-                let abs = lu[col * n + row].abs();
-                if abs > max_abs {
-                    max_abs = abs;
-                    pivot_row = row;
-                }
-            }
-            pivots[col] = pivot_row as i32;
-            if pivot_row != col {
-                for c in 0..n {
-                    lu.swap(c * n + col, c * n + pivot_row);
-                }
-            }
-            let diag = lu[col * n + col];
-            for row in (col + 1)..n {
-                lu[col * n + row] /= diag;
-            }
-            for c in (col + 1)..n {
-                let u_kc = lu[c * n + col];
-                for row in (col + 1)..n {
-                    lu[c * n + row] -= lu[col * n + row] * u_kc;
-                }
-            }
-        }
-        (lu, pivots)
-    }
-
-    /// Host port of `lu_solve_with_transpose` operating on `Vec<f64>` data.
-    ///
-    /// Solves `A x = b` (`transpose = false`) or `Aᵀ x = b`
-    /// (`transpose = true`) given LU factors as produced by
-    /// [`dense_lu_factorize`]. `b` is overwritten with the solution.
-    fn dense_lu_solve(lu: &[f64], pivots: &[i32], b: &mut [f64], n: usize, transpose: bool) {
-        let lu_at = |row: usize, col: usize| lu[col * n + row];
-        if transpose {
-            // Uᵀ y = b — forward substitution (lower triangular, non-unit).
-            for k in 0..n {
-                let acc: f64 = b[..k]
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &b_i)| lu_at(i, k) * b_i)
-                    .sum();
-                b[k] = (b[k] - acc) / lu_at(k, k);
-            }
-            // Lᵀ w = y — backward substitution (upper triangular, unit).
-            for k in (0..n).rev() {
-                let acc: f64 = b[(k + 1)..]
-                    .iter()
-                    .enumerate()
-                    .map(|(offset, &b_i)| lu_at(k + 1 + offset, k) * b_i)
-                    .sum();
-                b[k] -= acc;
-            }
-            // x = Pᵀ w — pivot transpositions replayed in reverse order.
-            for row in (0..n).rev() {
-                let piv = pivots[row].max(0) as usize;
-                if piv != row {
-                    b.swap(row, piv);
-                }
-            }
-        } else {
-            // P b — pivot transpositions in forward order.
-            for (row, &piv_entry) in pivots.iter().enumerate().take(n) {
-                let piv = piv_entry.max(0) as usize;
-                if piv != row {
-                    b.swap(row, piv);
-                }
-            }
-            // L y = P b — forward substitution (lower triangular, unit).
-            for k in 0..n {
-                let acc: f64 = b[..k]
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &b_i)| lu_at(k, i) * b_i)
-                    .sum();
-                b[k] -= acc;
-            }
-            // U x = y — backward substitution (upper triangular, non-unit).
-            for k in (0..n).rev() {
-                let acc: f64 = b[(k + 1)..]
-                    .iter()
-                    .enumerate()
-                    .map(|(offset, &b_i)| lu_at(k, k + 1 + offset) * b_i)
-                    .sum();
-                b[k] = (b[k] - acc) / lu_at(k, k);
-            }
-        }
-    }
-
-    /// Dense matrix-vector product `y = M x` for column-major `M` (lda = n).
-    fn matvec(m: &[f64], x: &[f64], n: usize, transpose: bool) -> Vec<f64> {
-        let mut y = vec![0.0_f64; n];
-        for (row, y_row) in y.iter_mut().enumerate() {
-            let mut acc = 0.0_f64;
-            for (col, &x_col) in x.iter().enumerate() {
-                let elem = if transpose {
-                    m[row * n + col]
-                } else {
-                    m[col * n + row]
-                };
-                acc += elem * x_col;
-            }
-            *y_row = acc;
-        }
-        y
-    }
-
-    #[test]
-    fn lu_solve_transposed_matches_explicit_transpose() {
-        // A non-symmetric 4×4 matrix (column-major storage).
-        let n = 4;
-        let a_rows = [
-            [4.0_f64, 3.0, 2.0, 1.0],
-            [2.0, 5.0, 3.0, 2.0],
-            [1.0, 2.0, 6.0, 3.0],
-            [7.0, 1.0, 2.0, 9.0],
-        ];
-        let mut a_col = vec![0.0_f64; n * n];
-        let mut at_col = vec![0.0_f64; n * n];
-        for (i, row) in a_rows.iter().enumerate() {
-            for (j, &v) in row.iter().enumerate() {
-                a_col[j * n + i] = v; // A[i,j]
-                at_col[i * n + j] = v; // Aᵀ[j,i] = A[i,j]
-            }
-        }
-
-        let b = vec![1.0_f64, -2.0, 3.0, 0.5];
-
-        // Path 1: transposed solve on the LU factors of A.
-        let (lu_a, piv_a) = dense_lu_factorize(&a_col, n);
-        let mut x_transposed = b.clone();
-        dense_lu_solve(&lu_a, &piv_a, &mut x_transposed, n, true);
-
-        // Path 2: explicitly form Aᵀ, factor it, do a normal solve.
-        let (lu_at, piv_at) = dense_lu_factorize(&at_col, n);
-        let mut x_explicit = b.clone();
-        dense_lu_solve(&lu_at, &piv_at, &mut x_explicit, n, false);
-
-        for i in 0..n {
-            assert!(
-                (x_transposed[i] - x_explicit[i]).abs() < 1e-10,
-                "transposed solve x[{i}] = {} disagrees with explicit Aᵀ solve {}",
-                x_transposed[i],
-                x_explicit[i],
-            );
-        }
-
-        // Residual check: Aᵀ * x must reproduce b.
-        let residual = matvec(&a_col, &x_transposed, n, true);
-        for i in 0..n {
-            assert!(
-                (residual[i] - b[i]).abs() < 1e-10,
-                "Aᵀ x residual[{i}] = {} ≠ b[{i}] = {}",
-                residual[i],
-                b[i],
-            );
-        }
-    }
-
-    #[test]
-    fn lu_solve_forward_and_transposed_consistent() {
-        // For the same factors, A x = b and Aᵀ y = b must both be exact.
-        let n = 3;
-        let a_rows = [[2.0_f64, -1.0, 0.0], [-1.0, 2.0, -1.0], [0.0, -1.0, 2.0]];
-        let mut a_col = vec![0.0_f64; n * n];
-        for (i, row) in a_rows.iter().enumerate() {
-            for (j, &v) in row.iter().enumerate() {
-                a_col[j * n + i] = v;
-            }
-        }
-        let (lu, piv) = dense_lu_factorize(&a_col, n);
-
-        let b = vec![1.0_f64, 2.0, 3.0];
-
-        let mut x = b.clone();
-        dense_lu_solve(&lu, &piv, &mut x, n, false);
-        let ax = matvec(&a_col, &x, n, false);
-        for i in 0..n {
-            assert!(
-                (ax[i] - b[i]).abs() < 1e-12,
-                "A x residual[{i}] = {}",
-                (ax[i] - b[i]).abs()
-            );
-        }
-
-        let mut y = b.clone();
-        dense_lu_solve(&lu, &piv, &mut y, n, true);
-        let aty = matvec(&a_col, &y, n, true);
-        for i in 0..n {
-            assert!(
-                (aty[i] - b[i]).abs() < 1e-12,
-                "Aᵀ y residual[{i}] = {}",
-                (aty[i] - b[i]).abs()
-            );
-        }
-
-        // For this symmetric A, x and y must coincide.
-        for i in 0..n {
-            assert!(
-                (x[i] - y[i]).abs() < 1e-12,
-                "symmetric A: x[{i}]={} y[{i}]={}",
-                x[i],
-                y[i]
-            );
-        }
-    }
-
-    #[test]
-    fn lu_solve_transposed_with_pivoting() {
-        // A matrix whose first column forces a row swap during pivoting,
-        // exercising the transposed permutation `Pᵀ`.
-        let n = 3;
-        let a_rows = [[0.0_f64, 2.0, 1.0], [4.0, 1.0, 0.0], [1.0, 1.0, 3.0]];
-        let mut a_col = vec![0.0_f64; n * n];
-        for (i, row) in a_rows.iter().enumerate() {
-            for (j, &v) in row.iter().enumerate() {
-                a_col[j * n + i] = v;
-            }
-        }
-        let (lu, piv) = dense_lu_factorize(&a_col, n);
-        // Row 0 (value 0) must have been pivoted with a later row.
-        assert_ne!(piv[0], 0, "expected a pivot swap on column 0");
-
-        let b = vec![5.0_f64, -1.0, 2.0];
-        let mut x = b.clone();
-        dense_lu_solve(&lu, &piv, &mut x, n, true);
-
-        let residual = matvec(&a_col, &x, n, true);
-        for i in 0..n {
-            assert!(
-                (residual[i] - b[i]).abs() < 1e-10,
-                "pivoted Aᵀ solve residual[{i}] = {}",
-                (residual[i] - b[i]).abs()
-            );
-        }
-    }
-
-    #[test]
-    fn lu_solve_transposed_temp_dir_roundtrip() {
-        // Persist a solved system through a temp file and re-verify, per the
-        // workspace temp-file testing policy.
-        let n = 3;
-        let a_rows = [[3.0_f64, 1.0, 2.0], [6.0, 3.0, 4.0], [3.0, 1.0, 5.0]];
-        let mut a_col = vec![0.0_f64; n * n];
-        for (i, row) in a_rows.iter().enumerate() {
-            for (j, &v) in row.iter().enumerate() {
-                a_col[j * n + i] = v;
-            }
-        }
-        let (lu, piv) = dense_lu_factorize(&a_col, n);
-        let b = vec![2.0_f64, 4.0, 6.0];
-        let mut x = b.clone();
-        dense_lu_solve(&lu, &piv, &mut x, n, true);
-
-        let path = std::env::temp_dir().join("oxicuda_lu_solve_transposed_s15.txt");
-        let serialized = x
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
-        std::fs::write(&path, &serialized).expect("write temp solution");
-        let read_back = std::fs::read_to_string(&path).expect("read temp solution");
-        let _ = std::fs::remove_file(&path);
-
-        let restored: Vec<f64> = read_back
-            .split_whitespace()
-            .map(|s| s.parse::<f64>().expect("parse f64"))
-            .collect();
-        assert_eq!(restored.len(), n);
-
-        let residual = matvec(&a_col, &restored, n, true);
-        for i in 0..n {
-            assert!(
-                (residual[i] - b[i]).abs() < 1e-10,
-                "round-tripped Aᵀ solve residual[{i}] = {}",
-                (residual[i] - b[i]).abs()
-            );
-        }
-    }
+/// Allocates a `u32` register holding the constant `1`.
+fn one_u32(b: &mut BodyBuilder<'_>) -> Register {
+    let r = b.alloc_reg(PtxType::U32);
+    b.raw_ptx(&format!("mov.u32 {r}, 1;"));
+    r
 }
+
+// ---------------------------------------------------------------------------
+// Tests (in a separate file to stay under the 2000-line refactoring limit)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[path = "lu_tests.rs"]
+mod tests;

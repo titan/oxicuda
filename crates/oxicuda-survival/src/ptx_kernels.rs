@@ -129,7 +129,9 @@ pub fn cox_risk_sum_ptx(sm: u32) -> String {
     \n\
         add.u64       %rd5, %rd0, %rd3;\n\
         ld.global.f32 %f1, [%rd5];\n\
-        ex2.approx.f32 %f2, %f1;\n\
+        // exp(eta) = ex2(eta * log2(e)); ex2 is base-2, so scale first.\n\
+        mul.f32       %f3, %f1, 0f3FB8AA3B;\n\
+        ex2.approx.f32 %f2, %f3;\n\
     \n\
         // atomic add into out[0]\n\
         red.global.add.f32 [%rd2], %f2;\n\
@@ -185,7 +187,9 @@ pub fn cox_score_ptx(sm: u32) -> String {
     \n\
         add.u64       %rd6, %rd0, %rd4;\n\
         ld.global.f32 %f1, [%rd6];\n\
-        ex2.approx.f32 %f2, %f1;\n\
+        // exp(eta) = ex2(eta * log2(e)); ex2 is base-2, so scale first.\n\
+        mul.f32       %f5, %f1, 0f3FB8AA3B;\n\
+        ex2.approx.f32 %f2, %f5;\n\
     \n\
         // for k=0..p: score[k] += w * x[row*p + k]\n\
         mov.u32       %r6, 0;\n\
@@ -258,7 +262,9 @@ pub fn cox_info_ptx(sm: u32) -> String {
     \n\
         add.u64       %rd6, %rd0, %rd4;\n\
         ld.global.f32 %f1, [%rd6];\n\
-        ex2.approx.f32 %f2, %f1;\n\
+        // exp(eta) = ex2(eta * log2(e)); ex2 is base-2, so scale first.\n\
+        mul.f32       %f6, %f1, 0f3FB8AA3B;\n\
+        ex2.approx.f32 %f2, %f6;\n\
     \n\
         mov.u32       %r6, 0;\n\
     $CIN_K:\n\

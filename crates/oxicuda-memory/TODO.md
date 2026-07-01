@@ -6,7 +6,7 @@ Type-safe GPU memory management with Rust ownership semantics. RAII-based wrappe
 
 ## Implementation Status
 
-**Actual SLoC: 5,297** across **18 files** (estimated 70K-112K for all Vol.1 combined)
+**Actual SLoC: 6,451** across **18 files** (estimated 70K-112K for all Vol.1 combined)
 
 The memory crate provides the core buffer types and copy operations that all higher-level OxiCUDA crates depend on. Current implementation covers the essential buffer types with stubs for advanced features.
 
@@ -49,7 +49,7 @@ The memory crate provides the core buffer types and copy operations that all hig
 ## Quality Status
 
 - Warnings: 0
-- Tests: 256 unit + 20 doc passing (all-features); 250 unit + 20 doc (default features)
+- Tests: 275 unit + 20 doc passing (all-features); 250 unit + 20 doc (default features)
 - unwrap() calls: 0
 - Drop implementations log errors via tracing::warn, never panic
 

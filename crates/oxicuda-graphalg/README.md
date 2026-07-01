@@ -82,7 +82,7 @@ fn main() -> GraphalgResult<()> {
 
 ## Status
 
-**Alpha** — 11,913 SLoC, 327 passing tests. API may evolve before v1.0.
+**Alpha** — 11,913 SLoC, 358 passing tests. API may evolve before v1.0.
 
 ## License
 

@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.53).
 
 ## Implementation Status
 
-- **Actual SLoC:** 26,639 (89 files, including 5,676 code + 205 comments + 339 blanks; markdown 415)
-- **Tests:** 613 lib/e2e + 3 doctests passing (wired 3 orphan modules — config-struct Isomap, parametric t-SNE, SPD geodesic regression — reviving +55 tests)
+- **Actual SLoC:** 29,018 (89 files, including 5,676 code + 205 comments + 339 blanks; markdown 415)
+- **Tests:** 620 lib/e2e + 3 doctests passing (wired 3 orphan modules — config-struct Isomap, parametric t-SNE, SPD geodesic regression — reviving +55 tests)
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -119,7 +119,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 520 passing
+- Tests: 620 passing
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features

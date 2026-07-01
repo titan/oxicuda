@@ -155,3 +155,126 @@ pub fn proto_loss(
 
     Ok(total_loss / n_query as f32)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_prototypes, proto_loss, proto_predict};
+    use crate::error::MetaError;
+
+    // ── compute_prototypes: exact-mean property ──────────────────────────────
+
+    #[test]
+    fn prototypes_exact_mean_single_class() {
+        // Two shots for class 0: [0,0] and [2,2]; mean must be exactly [1,1].
+        let support_feats = vec![0.0_f32, 0.0, 2.0, 2.0];
+        let support_y = vec![0_u32, 0];
+        let protos = compute_prototypes(&support_feats, &support_y, 1, 2, 2)
+            .expect("compute_prototypes must succeed for valid inputs");
+        assert_eq!(
+            protos.len(),
+            2,
+            "prototype vector must have feat_dim elements"
+        );
+        assert_eq!(
+            protos[0], 1.0_f32,
+            "prototype[0] must be exact arithmetic mean 1.0"
+        );
+        assert_eq!(
+            protos[1], 1.0_f32,
+            "prototype[1] must be exact arithmetic mean 1.0"
+        );
+    }
+
+    #[test]
+    fn prototypes_two_classes_correct_means() {
+        // Class 0 shots: [0,0],[2,2] → mean [1,1]; class 1 shots: [8,8],[10,10] → mean [9,9].
+        let support_feats = vec![0.0_f32, 0.0, 2.0, 2.0, 8.0, 8.0, 10.0, 10.0];
+        let support_y = vec![0_u32, 0, 1, 1];
+        let protos = compute_prototypes(&support_feats, &support_y, 2, 2, 2)
+            .expect("compute_prototypes must succeed");
+        assert_eq!(protos.len(), 4);
+        assert_eq!(protos[0], 1.0_f32, "class-0 proto dim-0");
+        assert_eq!(protos[1], 1.0_f32, "class-0 proto dim-1");
+        assert_eq!(protos[2], 9.0_f32, "class-1 proto dim-0");
+        assert_eq!(protos[3], 9.0_f32, "class-1 proto dim-1");
+    }
+
+    // ── proto_predict: nearest-prototype assignment ──────────────────────────
+
+    #[test]
+    fn proto_predict_assigns_nearest_class() {
+        // proto_0=[1,1], proto_1=[9,9]; query at [1.5,1.5] is much closer to class 0.
+        let protos = vec![1.0_f32, 1.0, 9.0, 9.0];
+        // dist(query, proto_0) = 0.5² + 0.5² = 0.5
+        // dist(query, proto_1) = 7.5² + 7.5² = 112.5
+        let query = vec![1.5_f32, 1.5];
+        let preds = proto_predict(&query, &protos, 2, 2).expect("proto_predict must succeed");
+        assert_eq!(
+            preds,
+            vec![0_u32],
+            "query near class 0 must predict class 0"
+        );
+    }
+
+    #[test]
+    fn proto_predict_deterministic() {
+        // Same inputs must always yield the same predictions.
+        let protos = vec![0.0_f32, 0.0, 5.0, 5.0];
+        let query = vec![0.1_f32, 0.1, 4.9, 4.9];
+        let p1 = proto_predict(&query, &protos, 2, 2).expect("first predict must succeed");
+        let p2 = proto_predict(&query, &protos, 2, 2).expect("second predict must succeed");
+        assert_eq!(p1, p2, "predictions must be deterministic");
+    }
+
+    // ── proto_loss: analytic properties ─────────────────────────────────────
+
+    #[test]
+    fn proto_loss_nonneg_and_finite() {
+        // Negative log-softmax is always ≥ 0 and finite.
+        let protos = vec![1.0_f32, 1.0, 9.0, 9.0];
+        let query = vec![1.5_f32, 1.5];
+        let labels = vec![0_u32];
+        let loss = proto_loss(&query, &labels, &protos, 2, 2).expect("proto_loss must succeed");
+        assert!(loss >= 0.0, "loss must be non-negative, got {loss}");
+        assert!(loss.is_finite(), "loss must be finite, got {loss}");
+    }
+
+    #[test]
+    fn proto_loss_smaller_when_query_near_true_prototype() {
+        // proto_0=[0,0], proto_1=[4,4]; true label=0.
+        // Near query [0.5,0.5]: d²(q,p0)=0.5,  d²(q,p1)=24.5  → exp gap exp(-24) ≈ 3.8e-11
+        // Far  query [3.5,3.5]: d²(q,p0)=24.5, d²(q,p1)=0.5   → exp gap reversed
+        // Distances kept well below the f32 exp underflow threshold (~87.3 for normals).
+        let protos = vec![0.0_f32, 0.0, 4.0, 4.0];
+        let labels = vec![0_u32];
+        let loss_near = proto_loss(&[0.5_f32, 0.5], &labels, &protos, 2, 2)
+            .expect("proto_loss near must succeed");
+        let loss_far = proto_loss(&[3.5_f32, 3.5], &labels, &protos, 2, 2)
+            .expect("proto_loss far must succeed");
+        assert!(
+            loss_near < loss_far,
+            "query near true prototype (loss={loss_near}) must give lower loss than far (loss={loss_far})"
+        );
+    }
+
+    // ── error variants ───────────────────────────────────────────────────────
+
+    #[test]
+    fn compute_prototypes_empty_returns_error() {
+        let result = compute_prototypes(&[], &[], 2, 1, 2);
+        assert!(
+            matches!(result, Err(MetaError::EmptySupport)),
+            "empty support must return EmptySupport, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn compute_prototypes_dim_mismatch_returns_error() {
+        // Supply 3 floats but n_way*k_shot*feat_dim = 2*2*2 = 8.
+        let result = compute_prototypes(&[0.0_f32; 3], &[0_u32; 4], 2, 2, 2);
+        assert!(
+            matches!(result, Err(MetaError::DimensionMismatch { .. })),
+            "size mismatch must return DimensionMismatch, got {result:?}"
+        );
+    }
+}

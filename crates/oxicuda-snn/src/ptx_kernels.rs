@@ -104,7 +104,7 @@ pub fn surrogate_grad_ptx(sm: u32) -> String {
     let hdr = ptx_header(sm);
     let zero = f32_hex(0.0_f32);
     let one = f32_hex(1.0_f32);
-    let inv_pi = f32_hex(std::f32::consts::FRAC_1_PI);
+    let pi = f32_hex(std::f32::consts::PI);
     format!(
         r#"{hdr}// surrogate_grad_kernel: per-element surrogate derivative
 .visible .entry surrogate_grad_kernel(
@@ -171,11 +171,10 @@ $SG_SIGMOID:
 
 $SG_ATAN:
     // g = α / (π·(1 + (α(v-v_th))^2))
-    mul.f32       %f5, %f4, %f4;
-    add.f32       %f5, %f5, {ONE};
-    mul.f32       %f5, %f5, {INV_PI};    // π in denom is via 1/π
-    // g = α·(1/π)/(1 + (α(v-v_th))^2)
-    div.rn.f32    %f6, %f1, %f5;
+    mul.f32       %f5, %f4, %f4;        // (α(v-v_th))^2
+    add.f32       %f5, %f5, {ONE};      // 1 + (α(v-v_th))^2
+    mul.f32       %f5, %f5, {PI};       // π·(1 + (α(v-v_th))^2)
+    div.rn.f32    %f6, %f1, %f5;        // α / (π·(1 + (α(v-v_th))^2))
     bra $SG_STORE;
 
 $SG_TRI:
@@ -205,7 +204,7 @@ $SG_DONE:
 "#,
         ZERO = zero,
         ONE = one,
-        INV_PI = inv_pi
+        PI = pi
     )
 }
 

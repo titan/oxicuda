@@ -318,7 +318,7 @@ pub fn bilinear_pool_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %rd<8>;
-    .reg .u32  %r<16>;
+    .reg .u32  %r<17>;
     .reg .f32  %f<6>;
     .reg .pred %p0;
 
@@ -422,7 +422,7 @@ pub fn temporal_pool_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %rd<8>;
-    .reg .u32  %r<16>;
+    .reg .u32  %r<17>;
     .reg .f32  %f<6>;
     .reg .pred %p0;
 

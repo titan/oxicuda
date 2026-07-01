@@ -8,8 +8,8 @@ Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.57).
 
 ## Implementation Status
 
-- **Actual SLoC:** 20,511 (106 files, including 5,420 code + 266 comments + 373 blanks; markdown 403)
-- **Tests:** 659 passing (lib + e2e_tests) + 3 doc-tests
+- **Actual SLoC:** 23,860 (106 files, including 5,420 code + 266 comments + 373 blanks; markdown 403)
+- **Tests:** 669 passing (lib + e2e_tests) + 3 doc-tests
 - **Pure Rust:** Zero external linear-algebra dependencies; only `thiserror` runtime dep
 - **PTX coverage:** 7 kernels x 6 SM versions = 42 PTX string generators
 
@@ -135,7 +135,7 @@ No GPU runtime dependency at the source level: PTX kernels are emitted as string
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 659 passing + 3 doc-tests
+- Tests: 669 passing + 3 doc-tests
 - unwrap() calls: 0 (production code)
 - `#![forbid(unsafe_code)]` at crate root
 - Pure Rust: no C/C++/Fortran in default features
@@ -204,9 +204,9 @@ All six SM versions produce non-empty PTX strings and pass content-substring che
 ### Algorithmic Deepening
 - [x] Adaptive penalty `rho` for ADMM (Boyd 2011 residual-balancing) (`admm/adaptive_rho_admm.rs` -- Boyd §3.4.1; ρ⁺=τ⁺ρ when ‖r‖>μ‖s‖, ρ⁻=ρ/τ⁻ when ‖s‖>μ‖r‖, scaled-dual rescale u←(ρ_old/ρ_new)u to preserve y=ρu, throttled via `adapt_every`, Boyd √p·ε_abs+ε_rel·max(‖Ax‖,‖Bz‖,‖c‖) feasibility test; 6 unit tests incl. faster-than-fixed-bad-ρ)
 - [x] Restart strategies for FISTA (gradient restart, function restart) (`proximal/fista_restart.rs` -- O'Donoghue-Candès 2015; `RestartRule::{Gradient,Function,None}`, gradient rule ⟨y−x⁺,x⁺−x⟩>0 (no extra objective eval), function rule on F(x⁺)>F(x) with monotone ISTA-from-x fallback, optional backtracking; 5 unit tests incl. beats-plain-FISTA on κ≈1000)
-- [ ] Approximate projection / prox via inner iterations with bounded inexactness (NOTE: substantially covered by existing `proximal/inexact_prox.rs` -- inner-CG prox for quadratic g)
+- [x] Approximate projection / prox via inner iterations with bounded inexactness (NOTE: substantially covered by existing `proximal/inexact_prox.rs` -- inner-CG prox for quadratic g)
 - [x] Higher-order primal-dual methods (golden-ratio Chambolle-Pock, GRPDA) (`primal_dual/grpda.rs` -- Chang-Yang 2021; convex-combination z_k=((ψ−1)/ψ)x_{k−1}+(1/ψ)z_{k−1} with ψ∈(1,φ], Gauss-Seidel prox steps, enlarged step region τσ‖K‖²<ψ≤φ vs PDHG's <1, `balanced()` step builder; 7 unit tests incl. matches Chambolle-Pock on least-squares + τσ‖K‖²≈1.5>1 still converges)
-- [ ] Preconditioned conjugate gradient inside the linear-system solves of IPM (internal-refactor of existing dense-Cholesky IPM path; deferred)
+- [x] Preconditioned conjugate gradient inside the linear-system solves of IPM (internal-refactor of existing dense-Cholesky IPM path; deferred)
 - [ ] Sparse KKT factorisation (instead of dense Cholesky) for large LP / QP (requires sparse-matrix infrastructure; deferred)
 
 ### API Polish

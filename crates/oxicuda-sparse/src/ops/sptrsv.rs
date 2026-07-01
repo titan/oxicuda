@@ -259,9 +259,11 @@ fn emit_sptrsv_level_kernel<T: GpuFloat>(
                 let loop_done = b.fresh_label("sptrsv_done");
 
                 b.label(&loop_label);
+                // Exit when k >= row_end (inverted skip-branch via branch_if so
+                // the `$`-prefixed label target matches the `b.label` def).
                 let pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.lo.u32 {pred}, {k}, {re};"));
-                b.raw_ptx(&format!("@!{pred} bra {loop_done};"));
+                b.raw_ptx(&format!("setp.hs.u32 {pred}, {k}, {re};"));
+                b.branch_if(pred, &loop_done);
 
                 // Load column and value
                 let ci_addr = b.byte_offset_addr(col_idx_base.clone(), k.clone(), 4);
@@ -272,29 +274,33 @@ fn emit_sptrsv_level_kernel<T: GpuFloat>(
                 let v_addr = b.byte_offset_addr(values_base.clone(), k.clone(), elem_bytes);
                 let a_val = load_global_float::<T>(b, v_addr);
 
-                // Check if diagonal
-                let is_diag = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.eq.u32 {is_diag}, {col}, {row};"));
+                // Check if off-diagonal (col != row). Inverted skip-branch:
+                // the original tested `setp.eq` then `@!is_diag bra skip_diag`;
+                // branch to skip_diag exactly when col != row.
+                let not_diag = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ne.u32 {not_diag}, {col}, {row};"));
 
                 // If diagonal, save it; otherwise accumulate
                 let skip_diag = b.fresh_label("sptrsv_skip_diag");
                 let after_diag = b.fresh_label("sptrsv_after_diag");
-                b.raw_ptx(&format!("@!{is_diag} bra {skip_diag};"));
+                b.branch_if(not_diag, &skip_diag);
 
                 // Save diagonal value
                 let mov_suffix = if is_f64 { "f64" } else { "f32" };
                 b.raw_ptx(&format!("mov.{mov_suffix} {diag}, {a_val};"));
-                b.raw_ptx(&format!("bra {after_diag};"));
+                b.branch(&after_diag);
 
                 b.label(&skip_diag);
 
                 // Off-diagonal: check if it's a dependency column
                 if is_lower {
                     // For lower: depend on j < row
-                    let is_dep = b.alloc_reg(PtxType::Pred);
-                    b.raw_ptx(&format!("setp.lo.u32 {is_dep}, {col}, {row};"));
+                    // Skip non-dependency columns: branch when col >= row
+                    // (inverted `setp.lo` -> `setp.hs`).
+                    let not_dep = b.alloc_reg(PtxType::Pred);
+                    b.raw_ptx(&format!("setp.hs.u32 {not_dep}, {col}, {row};"));
                     let skip_acc = b.fresh_label("sptrsv_skip_acc");
-                    b.raw_ptx(&format!("@!{is_dep} bra {skip_acc};"));
+                    b.branch_if(not_dep, &skip_acc);
 
                     // Load x[col] and accumulate
                     let x_addr = b.byte_offset_addr(x_ptr.clone(), col, elem_bytes);
@@ -305,10 +311,12 @@ fn emit_sptrsv_level_kernel<T: GpuFloat>(
                     b.label(&skip_acc);
                 } else {
                     // For upper: depend on j > row
-                    let is_dep = b.alloc_reg(PtxType::Pred);
-                    b.raw_ptx(&format!("setp.hi.u32 {is_dep}, {col}, {row};"));
+                    // Skip non-dependency columns: branch when col <= row
+                    // (inverted `setp.hi` -> `setp.ls`).
+                    let not_dep = b.alloc_reg(PtxType::Pred);
+                    b.raw_ptx(&format!("setp.ls.u32 {not_dep}, {col}, {row};"));
                     let skip_acc = b.fresh_label("sptrsv_skip_acc");
-                    b.raw_ptx(&format!("@!{is_dep} bra {skip_acc};"));
+                    b.branch_if(not_dep, &skip_acc);
 
                     let x_addr = b.byte_offset_addr(x_ptr.clone(), col, elem_bytes);
                     let x_val = load_global_float::<T>(b, x_addr);
@@ -351,6 +359,31 @@ fn emit_sptrsv_level_kernel<T: GpuFloat>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+
+    /// The SpTRSV level kernel (lower and upper) must assemble for sm_86 in both
+    /// precisions with `$`-prefixed branch targets and no `.b64` shuffle.
+    #[test]
+    fn sptrsv_lower_upper_f32_f64_assemble_sm86() {
+        for fill in [FillMode::Lower, FillMode::Upper] {
+            let tag = if matches!(fill, FillMode::Lower) {
+                "lower"
+            } else {
+                "upper"
+            };
+            let f32_ptx =
+                emit_sptrsv_level_kernel::<f32>(fill, SmVersion::Sm86).expect("f32 sptrsv");
+            assert_assembles_and_clean(&format!("sptrsv_{tag}_f32"), &f32_ptx);
+
+            let f64_ptx =
+                emit_sptrsv_level_kernel::<f64>(fill, SmVersion::Sm86).expect("f64 sptrsv");
+            assert_assembles_and_clean(&format!("sptrsv_{tag}_f64"), &f64_ptx);
+            assert!(
+                !f64_ptx.contains("0F00000000"),
+                "f64 sptrsv {tag} kernel must not materialize an f32 0.0 immediate:\n{f64_ptx}"
+            );
+        }
+    }
     use oxicuda_ptx::arch::SmVersion;
 
     #[test]

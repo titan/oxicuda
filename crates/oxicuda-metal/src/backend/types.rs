@@ -60,6 +60,48 @@ impl MetalBackend {
         self.memory.as_ref().ok_or(BackendError::NotInitialized)
     }
 
+    /// Report whether `handle` refers to an imported (external) buffer.
+    ///
+    /// Returns `Some(true)` for a handle created by
+    /// [`register_external`](Self::register_external) /
+    /// [`import_buffer`](Self::import_buffer), `Some(false)` for an
+    /// [`alloc`](oxicuda_backend::ComputeBackend::alloc)-owned handle, and
+    /// `None` if the handle is unknown (e.g. already freed). Useful for
+    /// asserting that a cache-backed buffer was imported (so `free` will not
+    /// deallocate it).
+    ///
+    /// # Errors
+    /// [`BackendError::NotInitialized`] if the backend is not initialised.
+    pub fn is_imported(&self, handle: u64) -> BackendResult<Option<bool>> {
+        self.check_init()?;
+        self.memory()?
+            .is_external(handle)
+            .map_err(BackendError::from)
+    }
+
+    /// Copy `len_bytes` from device buffer `src` to device buffer `dst`
+    /// **device-to-device**, with no host round-trip. Both handles may be
+    /// [`alloc`](oxicuda_backend::ComputeBackend::alloc)-owned or imported, in
+    /// any combination.
+    ///
+    /// Useful alongside [`register_external`](Self::register_external) for
+    /// keeping data GPU-resident — e.g. copying a freshly computed result into a
+    /// consumer's cached buffer without round-tripping through host memory.
+    ///
+    /// # Errors
+    /// * [`BackendError::NotInitialized`] if the backend is not initialised.
+    /// * [`BackendError::InvalidArgument`] for an unknown handle, if
+    ///   `src == dst`, or if `len_bytes` exceeds either buffer's length.
+    pub fn copy_dtod(&self, dst: u64, src: u64, len_bytes: usize) -> BackendResult<()> {
+        self.check_init()?;
+        if len_bytes == 0 {
+            return Ok(());
+        }
+        self.memory()?
+            .copy_device_to_device(dst, src, len_bytes)
+            .map_err(BackendError::from)
+    }
+
     /// Compile (or reuse a cached) compute pipeline from `msl_source` /
     /// `function_name` and dispatch it over `total_threads` GPU threads (1-D).
     ///
@@ -132,6 +174,62 @@ impl MetalBackend {
 }
 #[cfg(target_os = "macos")]
 impl MetalBackend {
+    /// Register an **existing, externally owned** `metal::Buffer` as an oxicuda
+    /// handle so compute ops (`gemm`, `copy_*`, custom kernels) can run on it
+    /// **zero-copy**, with no host round-trip.
+    ///
+    /// This is the recommended import entry point for callers that keep their
+    /// buffers in a cache (e.g. an `Arc<metal::Buffer>`): pass a reference and
+    /// oxicuda takes its **own independent retain** for the lifetime of the
+    /// handle. Ownership stays with the caller —
+    /// [`free`](oxicuda_backend::ComputeBackend::free) and dropping the backend
+    /// release only oxicuda's retain and **never deallocate the caller's
+    /// buffer**.
+    ///
+    /// The returned `u64` handle is interchangeable with one from
+    /// [`alloc`](oxicuda_backend::ComputeBackend::alloc) and may be mixed freely
+    /// with oxicuda-owned handles in the same op (e.g. external A·B → owned C, or
+    /// fully external A·B·C).
+    ///
+    /// `len_bytes` is the logical length the handle exposes (used to bound host
+    /// copies); it must not exceed `buffer.length()`. The buffer **must** belong
+    /// to the same `metal::Device` oxicuda initialised with.
+    ///
+    /// # Errors
+    /// * [`BackendError::NotInitialized`] if [`init`](oxicuda_backend::ComputeBackend::init)
+    ///   has not been called.
+    /// * [`BackendError::InvalidArgument`] if `len_bytes` exceeds the buffer's
+    ///   physical length.
+    pub fn register_external(
+        &self,
+        buffer: &metal::Buffer,
+        len_bytes: usize,
+    ) -> BackendResult<u64> {
+        self.check_init()?;
+        self.memory()?
+            .import_external(buffer, len_bytes)
+            .map_err(BackendError::from)
+    }
+
+    /// Import an external `metal::Buffer` **by value**, returning a zero-copy
+    /// handle. Convenience wrapper over [`register_external`](Self::register_external).
+    ///
+    /// oxicuda holds the buffer alive for the handle's lifetime via its own
+    /// retain; the moved-in value is released once this call returns (its retain
+    /// is balanced by the independent retain oxicuda takes). Callers that need to
+    /// keep their own reference should clone first or use
+    /// [`register_external`](Self::register_external) with a borrow. As with
+    /// `register_external`, [`free`](oxicuda_backend::ComputeBackend::free) /
+    /// backend drop never deallocate memory still referenced by the caller.
+    ///
+    /// # Errors
+    /// Same as [`register_external`](Self::register_external).
+    pub fn import_buffer(&self, buffer: metal::Buffer, len_bytes: usize) -> BackendResult<u64> {
+        // Borrow for registration; `buffer` is dropped (its retain released) at
+        // end of scope, leaving oxicuda's own independent retain in the map.
+        self.register_external(&buffer, len_bytes)
+    }
+
     pub(super) fn dispatch_unary(
         &self,
         op: UnaryOp,

@@ -6,7 +6,7 @@ Automatic GPU kernel parameter optimization engine. Measurement-based autotuning
 
 ## Implementation Status
 
-**Actual SLoC: 15,665** across **33 files** (estimated 32K-50K for oxicuda-autotune portion of Vol.2)
+**Actual SLoC: 16,198** across **33 files** (estimated 32K-50K for oxicuda-autotune portion of Vol.2)
 
 The autotune crate provides the optimization loop that makes OxiCUDA kernels competitive: define a search space, benchmark candidates, persist the best, and dispatch at runtime with fallback tiers.
 
@@ -73,7 +73,7 @@ The autotune crate provides the optimization loop that makes OxiCUDA kernels com
 ## Quality Status
 
 - Warnings: 0
-- Tests: 466 unit + 27 doctests passing (was 448 unit + 26 doctests; +18 unit / +1 doctest from `cache/persistent_cache.rs`)
+- Tests: 467 unit + 27 doctests passing (was 448 unit + 26 doctests; +18 unit / +1 doctest from `cache/persistent_cache.rs`)
 - unwrap() calls: 0
 - ResultDb uses JSON for human-readable, debuggable persistence
 

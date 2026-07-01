@@ -302,7 +302,6 @@ $AT_INNER:
     @%p0 bra $AT_INNER_DONE;
 
     mul.lo.u32    %r10, %r9, %r1;
-    .reg .u32     %r11;
     add.u32       %r11, %r10, %r8;
     mul.wide.u32  %rd2, %r11, 4;
     add.u64       %rd3, %rd0, %rd2;
@@ -569,13 +568,11 @@ $GRAM_INNER:
 
     mul.lo.u32    %r11, %r10, %r1;
 
-    .reg .u32     %r12;
     add.u32       %r12, %r11, %r8;
     mul.wide.u32  %rd2, %r12, 4;
     add.u64       %rd3, %rd0, %rd2;
     ld.global.f32 %f1, [%rd3];
 
-    .reg .u32     %r13;
     add.u32       %r13, %r11, %r9;
     mul.wide.u32  %rd2, %r13, 4;
     add.u64       %rd3, %rd0, %rd2;
@@ -587,7 +584,6 @@ $GRAM_INNER:
 
 $GRAM_INNER_DONE:
     mul.lo.u32    %r14, %r9, %r1;
-    .reg .u32     %r15;
     add.u32       %r15, %r14, %r8;
     mul.wide.u32  %rd4, %r15, 4;
     add.u64       %rd5, %rd1, %rd4;

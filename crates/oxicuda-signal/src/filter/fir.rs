@@ -248,7 +248,6 @@ pub fn emit_fir_direct_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     .reg .u64 %k, %src, %off, %addr;
     .reg .{ty} %xk, %hk, %acc;
     .reg .pred %p_oob, %p_src_valid;
-    .reg .u64 %src_signed;
 
     ld.param.u64    %x_base, [x_ptr];
     ld.param.u64    %y_base, [y_ptr];
@@ -267,24 +266,22 @@ loop_fir:
     setp.ge.u64     %p_oob, %k, %m;
     @%p_oob bra done_fir;
 
-    // src = tid - k  (as signed comparison)
+    // src = tid - k. Valid iff 0 <= src < n. In unsigned arithmetic, when
+    // k > tid the subtraction wraps to a huge value, so a single unsigned
+    // `src < n` test covers both the lower (>= 0) and upper (< n) bounds.
     sub.u64         %src, %tid64, %k;
-    // Check src >= 0 (src < tid + 1 and ≤ 0x7FFFFFFFFFFFFFFF means it wrapped)
-    setp.gt.u64     %p_src_valid, %src, 0xFFFFFFFFFFFFFFFF;  // src ≥ 0 (unsigned)
-    // Also check src < n
-    setp.lt.u64     %p_oob, %src, %n;
-    and.pred        %p_src_valid, %p_src_valid, %p_oob;
+    setp.ge.u64     %p_src_valid, %src, %n;
+    @%p_src_valid bra skip_fir_tap;
 
-    @%p_src_valid {{
-        mul.lo.u64      %off,  %src, {bytes};
-        add.u64         %addr, %x_base, %off;
-        ld.global.{ty}  %xk, [%addr];
-        mul.lo.u64      %off,  %k, {bytes};
-        add.u64         %addr, %h_base, %off;
-        ld.global.{ty}  %hk, [%addr];
-        fma.rn.{ty}     %acc, %hk, %xk, %acc;
-    }}
+    mul.lo.u64      %off,  %src, {bytes};
+    add.u64         %addr, %x_base, %off;
+    ld.global.{ty}  %xk, [%addr];
+    mul.lo.u64      %off,  %k, {bytes};
+    add.u64         %addr, %h_base, %off;
+    ld.global.{ty}  %hk, [%addr];
+    fma.rn.{ty}     %acc, %hk, %xk, %acc;
 
+skip_fir_tap:
     add.u64         %k, %k, 1;
     bra loop_fir;
 

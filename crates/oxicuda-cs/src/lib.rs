@@ -75,6 +75,9 @@ pub use ptx_advanced::{
 #[cfg(test)]
 mod e2e_tests;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 #[cfg(test)]
 mod wave_aaa58_e2e {
     use super::*;

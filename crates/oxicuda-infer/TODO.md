@@ -6,7 +6,7 @@ vLLM-style continuous batching inference engine with PagedAttention KV cache, sp
 
 ## Implementation Status
 
-**Actual: 7,754 SLoC across 33 files (includes Markdown doc-comments) / 4,060 pure Rust SLoC**
+**Actual: 10,925 SLoC across 33 files (includes Markdown doc-comments) / 4,060 pure Rust SLoC**
 
 Production-grade GPU inference engine implementing the algorithms required for efficient large
 language-model serving: PagedAttention KV cache (Kwon et al., 2023), continuous batching
@@ -104,7 +104,7 @@ structured sampling.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 391 lib + 1 doctest passing (added radix cache, grammar FSM, sliding-window/attention-sink, KV quant, page compaction, chunked prefill, per-sequence sampling override + GQA-vs-MHA / preemption-churn verification)
+- Tests: 399 lib + 1 doctest passing (added radix cache, grammar FSM, sliding-window/attention-sink, KV quant, page compaction, chunked prefill, per-sequence sampling override + GQA-vs-MHA / preemption-churn verification)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference paths work; runtime GPU executor returns `UnsupportedPlatform`

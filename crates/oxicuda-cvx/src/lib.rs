@@ -146,3 +146,10 @@ pub use prox_ops::{
 
 #[cfg(test)]
 mod e2e_tests;
+
+/// On-device GPU validation tests (feature-gated): JIT-compile each hand-written
+/// PTX kernel, launch it on a real CUDA device, and assert numerical equivalence
+/// to the matching CPU reference. Compiled only under `--features gpu-tests` and
+/// only in test builds; every test skips gracefully if no GPU is available.
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;

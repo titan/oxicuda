@@ -6,7 +6,7 @@ Meta-learning algorithm primitives (MAML / FOMAML / ANIL / Reptile / Prototypica
 
 ## Implementation Status
 
-**Actual: 13,338 SLoC (51 source files + 1 benches file) -- Coverage: full N-way K-shot meta-learning toolkit**
+**Actual: 17,594 SLoC (51 source files + 1 benches file) -- Coverage: full N-way K-shot meta-learning toolkit**
 
 Current implementation covers MAML with second-order finite-difference outer gradients, FOMAML first-order approximation, ANIL head-only adaptation, Reptile first-order interpolation, three metric-learning few-shot heads (ProtoNet, MatchingNet, RelationNet), episode sampling, MLP backbone with Xavier init, and PTX kernels for inner SGD, Reptile interpolation, prototype distance, cosine similarity, relation score, meta-gradient accumulation, and episode sampling.
 
@@ -80,7 +80,7 @@ Current implementation covers MAML with second-order finite-difference outer gra
 - [x] R2D2 (Bertinetto et al. 2019) -- differentiable ridge-regression base learner
 - [x] DeepEMD -- Earth Mover's Distance over local features for fine-grained few-shot (metric_learning/deepemd.rs -- Zhang 2020 CVPR; cost=1-cosine over local features, Sinkhorn entropic OT plan, emd=<T,C>, EMD-to-prototype classification)
 - [x] Continual Meta-Learning (OML / ANML) -- representation learning under online updates (online/oml.rs:Oml -- RLN/PLN factorisation, frozen encoder + online head SGD, forgetting-aware FOMAML meta-step; online/anml.rs:Anml -- adds learned neuromodulatory sigmoid gate z=ReLU(PN)⊙sigmoid(NM), analytic backprop; ANML now wired into online::mod + lib prelude with 13 deterministic tests)
-- [ ] Hyperparameter meta-learning (e.g. MAML-LR, ALFA) -- learn per-task inner-loop hyperparameters
+- [x] Hyperparameter meta-learning (e.g. MAML-LR, ALFA) -- learn per-task inner-loop hyperparameters
 - [x] Self-supervised pre-training hooks (S2M2, ProtoTransfer) -- contrastive backbone before meta-training (ssl/rotation.rs:RotationHead -- 4-way rotation-prediction pretext over Conv4Backbone; ssl/proto_transfer.rs:ProtoTransferHead -- ProtoCLR per-instance contrastive pretraining (softmax over -‖q-a‖²/τ, analytic gradient through L2-norm Jacobian) + transfer_classify to downstream ProtoNet; proto_transfer now wired into ssl::mod + lib prelude with 16 deterministic tests)
 - [x] `meta/hyper_maml.rs` — HyperMAML (Przewięźlikowski 2022): hypernetwork generates fast-adapt weights rather than shared init; avoids inner-loop gradient computation; `HyperMaml { hyper_dims: Vec<usize> }`
 - [x] `meta/meta_sgd.rs` — Meta-SGD (Li 2017): learn per-parameter learning rates along with init; α learned as parameter; inner update x←x-α⊙∇L; strictly more expressive than MAML
@@ -97,7 +97,7 @@ Current implementation covers MAML with second-order finite-difference outer gra
 
 ## Quality Status
 
-- Tests: 430 passing (12 e2e in lib.rs + module unit tests; +67 over the prior 363: 15 new maml_conv_backbone + 4 new conv4 round-trip + 19 resnet12 + 13 anml + 16 proto_transfer modules brought online by wiring)
+- Tests: 530 passing (12 e2e in lib.rs + module unit tests; +67 over the prior 363: 15 new maml_conv_backbone + 4 new conv4 round-trip + 19 resnet12 + 13 anml + 16 proto_transfer modules brought online by wiring)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0 (`cargo clippy -p oxicuda-meta --all-features --all-targets -- -D warnings` clean)
 - `missing_docs` warnings: 0
@@ -125,8 +125,8 @@ Target: episode forward latency comparable to PyTorch `torchmeta` reference on `
 | Metric | Description | Actual |
 |--------|-------------|--------|
 | Files | source `.rs` files under `src/` | 54 |
-| SLoC | code lines (tokei) | 13,338 |
-| Tests | e2e + unit | 430 |
+| SLoC | code lines (tokei) | 17,594 |
+| Tests | e2e + unit | 530 |
 | Coverage | algorithms with both CPU sim + PTX kernel | 7 (Proto/Matching/Relation + MAML/FOMAML/ANIL/Reptile) |
 
 The current implementation provides a compact reference covering all canonical few-shot meta-learning algorithms used in the literature (MAML, FOMAML, ANIL, Reptile, ProtoNet, MatchingNet, RelationNet). The P0/P1/P2 future items cover more recent / specialised approaches and richer backbones.

@@ -320,8 +320,15 @@ impl MatrixExpPlan {
                     let num_coeffs = b.load_param_u32("num_coeffs");
 
                     let elem_size = if float_ty == PtxType::F32 { 4u32 } else { 8u32 };
-                    // Coefficients are always stored as f64 regardless of precision.
-                    const COEFF_SIZE: u32 = 8u32;
+                    // Coefficients are stored in the kernel's working precision
+                    // (`float_ty`). Mixing an f64 temporary into an otherwise-f32
+                    // kernel is impossible here: the PTX register allocator maps
+                    // both f32 and f64 to the single `%f` register class and
+                    // declares the whole range with one width, so an `ld.global.f64`
+                    // into that range is invalid PTX (`ptxas` rejects it and the
+                    // kernel never loads). Loading the coefficient at the working
+                    // precision keeps the kernel single-precision-clean.
+                    let coeff_size = elem_size;
                     let gid_r = b.global_thread_id_x();
 
                     // Load A[gid] — the input matrix element.
@@ -333,12 +340,12 @@ impl MatrixExpPlan {
                     // Q(x) = c[m] + x*(-c[m-2] + x*(...))  (odd terms negate for Q)
                     // Simplified scalar Horner: P = c[m], Q = c[m], then for each
                     // lower degree: P = P*x + c[k], Q = Q*x + sign(k)*c[k].
-                    // We load each coefficient from coeffs_ptr (f64 array).
+                    // We load each coefficient from coeffs_ptr (working-precision array).
                     //
                     // Loop: idx from (num_coeffs-1) down to 0.
                     // acc_p = 0, acc_q = 0.
                     // For k = num_coeffs-1 downto 0:
-                    //   load c_k from coeffs_ptr[k] (f64), convert to float_ty
+                    //   load c_k from coeffs_ptr[k]
                     //   acc_p = fma(acc_p, a_val, c_k)
                     //   sign = (-1)^k → for Q: if k is odd, negate c_k
                     //   acc_q = fma(acc_q, a_val, ±c_k)
@@ -362,20 +369,10 @@ impl MatrixExpPlan {
                     // idx_reg -= 1 (current coefficient index = idx_reg - 1 after decrement).
                     b.raw_ptx(&format!("sub.u32 {idx_reg}, {idx_reg}, 1;"));
 
-                    // Load f64 coefficient from coeffs_ptr[idx_reg].
+                    // Load the working-precision coefficient from coeffs_ptr[idx_reg].
                     let coeff_addr =
-                        b.byte_offset_addr(coeffs_ptr.clone(), idx_reg.clone(), COEFF_SIZE);
-                    let coeff_f64 = load_float(b, PtxType::F64, coeff_addr);
-
-                    // Convert coefficient to working precision.
-                    let c_k = if float_ty == PtxType::F64 {
-                        coeff_f64.clone()
-                    } else {
-                        // cvt.rn.f32.f64
-                        let dst = b.alloc_reg(PtxType::F32);
-                        b.raw_ptx(&format!("cvt.rn.f32.f64 {dst}, {coeff_f64};"));
-                        dst
-                    };
+                        b.byte_offset_addr(coeffs_ptr.clone(), idx_reg.clone(), coeff_size);
+                    let c_k = load_float(b, float_ty, coeff_addr);
 
                     // Horner step for P: acc_p = acc_p * a_val + c_k.
                     let new_acc_p = if float_ty == PtxType::F64 {

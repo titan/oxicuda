@@ -95,7 +95,7 @@ fn row_swap_name<T: GpuFloat>() -> String {
 ///
 /// Each thread handles one column: swaps `a[row1 + col * lda]` with
 /// `a[row2 + col * lda]`.
-fn generate_row_swap_ptx<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
+pub(crate) fn generate_row_swap_ptx<T: GpuFloat>(sm: SmVersion) -> SolverResult<String> {
     let name = row_swap_name::<T>();
     let float_ty = T::PTX_TYPE;
 

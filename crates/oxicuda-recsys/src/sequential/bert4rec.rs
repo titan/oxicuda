@@ -302,3 +302,145 @@ fn matmul_rows(x: &[f32], w: &[f32], n: usize, d_in: usize, d_out: usize) -> Vec
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_model(seed: u64) -> Bert4Rec {
+        let mut rng = LcgRng::new(seed);
+        Bert4Rec::new(10, 8, 2, 2, 16, &mut rng).expect("construction ok")
+    }
+
+    #[test]
+    fn rejects_invalid_construction() {
+        let mut rng = LcgRng::new(1);
+        assert!(
+            Bert4Rec::new(0, 8, 1, 1, 8, &mut rng).is_err(),
+            "n_items=0 must fail"
+        );
+        assert!(
+            Bert4Rec::new(10, 0, 1, 1, 8, &mut rng).is_err(),
+            "emb_dim=0 must fail"
+        );
+    }
+
+    #[test]
+    fn forward_masked_output_shape() {
+        let model = make_model(2);
+        // Mix of real items and the mask sentinel (usize::MAX == MASK_TOKEN)
+        let seq = [0usize, 1, usize::MAX, 3];
+        let logits = model.forward_masked(&seq).expect("forward ok");
+        assert_eq!(logits.len(), 4, "one logit vec per position");
+        for (pos, row) in logits.iter().enumerate() {
+            assert_eq!(
+                row.len(),
+                10,
+                "position {pos}: logit vec must have n_items=10 entries"
+            );
+        }
+    }
+
+    #[test]
+    fn forward_masked_rejects_empty_and_oob() {
+        let model = make_model(3);
+        // Empty sequence
+        assert!(model.forward_masked(&[]).is_err(), "empty input must fail");
+        // id=10 >= n_items=10 and not the mask sentinel → UnknownItem
+        assert!(
+            model.forward_masked(&[10]).is_err(),
+            "out-of-bounds item must fail"
+        );
+        // usize::MAX is the MASK_TOKEN sentinel and must be accepted
+        assert!(
+            model.forward_masked(&[usize::MAX]).is_ok(),
+            "mask sentinel (usize::MAX) must be accepted"
+        );
+    }
+
+    #[test]
+    fn logits_are_finite() {
+        let model = make_model(4);
+        let logits = model
+            .forward_masked(&[0, 1, usize::MAX, 2])
+            .expect("forward ok");
+        for (pos, row) in logits.iter().enumerate() {
+            for (item, &v) in row.iter().enumerate() {
+                assert!(v.is_finite(), "logit[{pos}][{item}]={v} must be finite");
+            }
+        }
+    }
+
+    #[test]
+    fn determinism_across_identical_models() {
+        // Two models initialised from the same seed must produce bit-identical outputs.
+        let model_a = make_model(5);
+        let model_b = make_model(5);
+        let seq = [0usize, 1, usize::MAX, 3, 2];
+        let out_a = model_a.forward_masked(&seq).expect("fwd a");
+        let out_b = model_b.forward_masked(&seq).expect("fwd b");
+        for (pos, (row_a, row_b)) in out_a.iter().zip(out_b.iter()).enumerate() {
+            for (item, (&a, &b)) in row_a.iter().zip(row_b.iter()).enumerate() {
+                assert_eq!(a, b, "logit[{pos}][{item}] must be bit-identical");
+            }
+        }
+    }
+
+    #[test]
+    fn mask_sequence_length_and_zero_ratio() {
+        let model = make_model(6);
+        let items = vec![0usize, 1, 2, 3, 4];
+        let mut rng = LcgRng::new(42);
+        // Length must be preserved regardless of ratio.
+        let masked_half = model.mask_sequence(&items, 0.5, &mut rng);
+        assert_eq!(masked_half.len(), items.len(), "length must be preserved");
+        // ratio=0.0: next_f32() is always >= 0, so no item is ever masked.
+        let mut rng2 = LcgRng::new(99);
+        let masked_none = model.mask_sequence(&items, 0.0, &mut rng2);
+        assert_eq!(
+            masked_none, items,
+            "ratio=0.0 must leave all items unchanged"
+        );
+    }
+
+    #[test]
+    fn mask_sequence_full_ratio_all_masked() {
+        let model = make_model(7);
+        let items = vec![0usize, 1, 2, 3, 4];
+        let mut rng = LcgRng::new(7);
+        // ratio=1.0: next_f32() ∈ [0, 1), so next_f32() < 1.0 is always true.
+        let masked = model.mask_sequence(&items, 1.0, &mut rng);
+        for (i, &m) in masked.iter().enumerate() {
+            assert_eq!(
+                m,
+                usize::MAX,
+                "ratio=1.0: position {i} must become mask sentinel (usize::MAX)"
+            );
+        }
+    }
+
+    #[test]
+    fn bidirectional_future_item_affects_earlier_positions() {
+        // BERT4Rec uses full (non-causal) attention: every position attends to every
+        // other position. Changing a future item (position 2) must change logits at
+        // an earlier position (position 0) because position 0 attends to position 2.
+        let mut rng = LcgRng::new(42);
+        let mut model = Bert4Rec::new(10, 8, 1, 1, 16, &mut rng).expect("construction ok");
+        // Zero positional embeddings so only item identity drives attention keys/values.
+        for v in &mut model.pos_emb {
+            *v = 0.0;
+        }
+        // Sequences identical at positions 0 and 1, differing only at position 2.
+        let logits_a = model.forward_masked(&[0, usize::MAX, 2]).expect("fwd a");
+        let logits_b = model.forward_masked(&[0, usize::MAX, 3]).expect("fwd b");
+        // Position-0 logits must differ (item 2 vs item 3 at position 2 changes k[2]/v[2]).
+        let differs = logits_a[0]
+            .iter()
+            .zip(logits_b[0].iter())
+            .any(|(a, b)| (a - b).abs() > 1e-6);
+        assert!(
+            differs,
+            "bidirectional attention: changing a future item must influence position-0 logits"
+        );
+    }
+}

@@ -6,7 +6,7 @@ Tabular deep-learning primitives for OxiCUDA (sparsemax / entmax-1.5, TabNet, SA
 
 ## Implementation Status
 
-**Actual: 15,823 SLoC (49 source files + 1 benches file) -- Coverage: sparse-attention probability transforms + 4 canonical tabular DL models + preprocessing + metrics**
+**Actual: 23,054 SLoC (49 source files + 1 benches file) -- Coverage: sparse-attention probability transforms + 4 canonical tabular DL models + preprocessing + metrics**
 
 Current implementation covers the canonical tabular deep-learning toolkit: sparsemax (Martins & Astudillo 2016 sort-descending k* algorithm, O(d log d)) and entmax-1.5 (alpha = 1.5 via 64-iteration bisection); TabNet (Arik & Pfister 2021) with GLU gates, BatchNorm1d, step-wise sparsemax attention, prior scales `P_i = product(gamma - M_j)` and shared + step-specific FC-BN-GLU blocks; SAINT (Somepalli et al. 2021) with row-wise multi-head self-attention plus inter-sample attention, Pre-LayerNorm FFN, and CLS mean-pool head; FT-Transformer (Gorishniy et al. 2021) with continuous feature tokenisation `x_j * w_j + b_j` per embedding dimension, categorical lookup tables, Pre-LN MHSA blocks, CLS token and linear head; NODE (Popov et al. 2019) soft oblivious decision trees with entmax-1.5 feature selection and sigmoid-smoothed splits, plus `NodeEnsemble` mean-over-trees; quantile / standard / min-max normalisers; classification metrics including AUC-ROC trapezoidal integration.
 
@@ -72,7 +72,7 @@ Current implementation covers the canonical tabular deep-learning toolkit: spars
 
 #### P2 -- Advanced / Research
 - [x] FT-Transformer with attention-bias / RoPE (`transformer/ft_rope.rs` -- RoPE rotary Q/K (Su et al. 2021 RoFormer) + T5-style learnable per-head relative attention-bias table (Raffel et al. 2020), Pre-LN blocks + CLS head)
-- [ ] NODE with TabRecord / VarOblivious variants
+- [x] NODE with TabRecord / VarOblivious variants
 - [x] Diffusion models for tabular generation (TabDDPM)
 - [x] GANs for tabular data (CTGAN / TVAE) generators (CTGAN in `gan/ctgan.rs` -- Xu 2019; mode-specific normalisation, conditional sampler, PacGAN discriminator. TVAE in `vae/tvae.rs` -- Xu 2019; mode-normalised VAE with KL + reconstruction ELBO)
 - [x] Conformal prediction wrappers for distribution-free uncertainty (`conformal/split_conformal.rs` -- Vovk 2005 / Lei et al. 2018 split conformal, Romano et al. 2019 CQR, Romano et al. 2020 APS + Sadinle et al. 2019 LAC; finite-sample `(n+1)` empirical quantile)
@@ -96,7 +96,7 @@ Current implementation covers the canonical tabular deep-learning toolkit: spars
 
 ## Quality Status
 
-- Tests: 538 passing (14 e2e in lib.rs + module unit tests, incl. 21 new backward / unified-encoder gradient-check tests)
+- Tests: 564 passing (14 e2e in lib.rs + module unit tests, incl. 21 new backward / unified-encoder gradient-check tests)
 - All production code uses `Result` / `Option` (no `unwrap()` outside tests)
 - `clippy::all` warnings: 0
 - `missing_docs` warnings: 0
