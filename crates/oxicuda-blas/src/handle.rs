@@ -19,12 +19,14 @@
 //! # }
 //! ```
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
-use oxicuda_driver::{Context, Stream};
+use oxicuda_driver::{Context, Module, Stream};
 use oxicuda_ptx::arch::SmVersion;
 
 use crate::error::{BlasError, BlasResult};
+use crate::level3::gemm::dispatch::GemmDispatcher;
 use crate::types::{MathMode, PointerMode};
 
 /// Central handle for BLAS operations.
@@ -49,6 +51,19 @@ pub struct BlasHandle {
     pointer_mode: PointerMode,
     /// SM architecture of the device, used for kernel selection.
     sm_version: SmVersion,
+    /// Persistent GEMM dispatcher. Owning it on the handle (rather than
+    /// constructing a fresh one per [`gemm`](crate::level3::gemm_api::gemm)
+    /// call) means the dispatcher's compiled-kernel cache survives across
+    /// calls, so a repeated GEMM shape re-JITs its tiled kernel only once.
+    gemm_dispatcher: GemmDispatcher,
+    /// Compiled-module cache for the non-GEMM ops (Level-1/2, reductions,
+    /// element-wise, …). Keyed by the fully-qualified kernel name — which
+    /// already encodes the op and the element precision, and the handle pins a
+    /// single context/SM version — so the name alone is a sufficient key.
+    ///
+    /// Without this, every non-GEMM call would regenerate PTX and
+    /// `cuModuleLoadData`-compile a brand-new module on each invocation.
+    module_cache: RwLock<HashMap<String, Arc<Module>>>,
 }
 
 impl BlasHandle {
@@ -95,6 +110,8 @@ impl BlasHandle {
             math_mode: MathMode::Default,
             pointer_mode: PointerMode::Host,
             sm_version,
+            gemm_dispatcher: GemmDispatcher::new(sm_version),
+            module_cache: RwLock::new(HashMap::new()),
         })
     }
 
@@ -123,6 +140,58 @@ impl BlasHandle {
     /// Returns the current pointer mode.
     pub fn pointer_mode(&self) -> PointerMode {
         self.pointer_mode
+    }
+
+    /// Returns the handle-owned GEMM dispatcher.
+    ///
+    /// The dispatcher caches compiled kernels internally; reusing this shared
+    /// instance across `gemm` calls keeps that cache warm.
+    pub(crate) fn gemm_dispatcher(&self) -> &GemmDispatcher {
+        &self.gemm_dispatcher
+    }
+
+    /// Returns a cached compiled [`Module`] for `name`, or generates its PTX
+    /// via `gen`, compiles it, caches it, and returns it.
+    ///
+    /// This is the non-GEMM analogue of [`GemmDispatcher`]'s kernel cache: the
+    /// first call for a given kernel name JIT-compiles the module; subsequent
+    /// calls reuse it, avoiding a per-call PTX regeneration and
+    /// `cuModuleLoadData`. `gen_ptx` is invoked only on a cache miss.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BlasError`] if the cache lock is poisoned, if `gen_ptx` fails,
+    /// or if the generated PTX fails to compile.
+    pub(crate) fn get_or_compile_module(
+        &self,
+        name: &str,
+        gen_ptx: impl FnOnce() -> BlasResult<String>,
+    ) -> BlasResult<Arc<Module>> {
+        // Fast path: read lock, return an existing module.
+        {
+            let cache = self
+                .module_cache
+                .read()
+                .map_err(|_| BlasError::LaunchFailed("module cache lock poisoned".into()))?;
+            if let Some(module) = cache.get(name) {
+                return Ok(Arc::clone(module));
+            }
+        }
+
+        // Slow path: generate PTX and compile outside the write lock, then
+        // insert. A concurrent compile of the same name is harmless — the map
+        // simply keeps whichever module was inserted last; every returned
+        // `Arc` stays valid for as long as a caller holds it.
+        let ptx = gen_ptx()?;
+        let module = Arc::new(Module::from_ptx(&ptx).map_err(BlasError::Cuda)?);
+        {
+            let mut cache = self
+                .module_cache
+                .write()
+                .map_err(|_| BlasError::LaunchFailed("module cache lock poisoned".into()))?;
+            cache.insert(name.to_owned(), Arc::clone(&module));
+        }
+        Ok(module)
     }
 
     // -- Mutators -------------------------------------------------------------

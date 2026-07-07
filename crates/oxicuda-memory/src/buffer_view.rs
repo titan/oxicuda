@@ -6,11 +6,18 @@
 //! values as `u32` (e.g., for bitwise operations in a kernel), or for
 //! interpreting raw byte buffers as structured types.
 //!
-//! # Size constraints
+//! # Size and alignment constraints
 //!
 //! The total byte size of the original buffer must be evenly divisible
-//! by `std::mem::size_of::<U>()`. If not, the view creation returns
-//! [`CudaError::InvalidValue`].
+//! by `std::mem::size_of::<U>()`, and the buffer's device pointer must be
+//! aligned to `std::mem::align_of::<U>()`. If either constraint is
+//! violated, the view creation returns [`CudaError::InvalidValue`].
+//! Allocations made via `cuMemAlloc`-backed buffers (e.g.
+//! [`DeviceBuffer::alloc`](crate::device_buffer::DeviceBuffer::alloc)) are
+//! always sufficiently aligned for any `U` no larger than the CUDA driver's
+//! allocation alignment guarantee, so this only rejects genuinely
+//! misaligned reinterpretations (e.g. viewing a byte-offset sub-buffer as a
+//! wider type).
 //!
 //! # Example
 //!
@@ -157,6 +164,7 @@ impl<T: Copy> DeviceBuffer<T> {
     /// Returns [`CudaError::InvalidValue`] if:
     /// - `size_of::<U>()` is zero (ZST).
     /// - The buffer's byte size is not divisible by `size_of::<U>()`.
+    /// - The buffer's device pointer is not aligned to `align_of::<U>()`.
     pub fn view_as<U: Copy>(&self) -> CudaResult<BufferView<'_, U>> {
         let u_size = std::mem::size_of::<U>();
         if u_size == 0 {
@@ -164,6 +172,10 @@ impl<T: Copy> DeviceBuffer<T> {
         }
         let byte_size = self.byte_size();
         if byte_size % u_size != 0 {
+            return Err(CudaError::InvalidValue);
+        }
+        let u_align = std::mem::align_of::<U>() as u64;
+        if self.as_device_ptr() % u_align != 0 {
             return Err(CudaError::InvalidValue);
         }
         Ok(BufferView {
@@ -184,6 +196,7 @@ impl<T: Copy> DeviceBuffer<T> {
     /// Returns [`CudaError::InvalidValue`] if:
     /// - `size_of::<U>()` is zero (ZST).
     /// - The buffer's byte size is not divisible by `size_of::<U>()`.
+    /// - The buffer's device pointer is not aligned to `align_of::<U>()`.
     pub fn view_as_mut<U: Copy>(&mut self) -> CudaResult<BufferViewMut<'_, U>> {
         let u_size = std::mem::size_of::<U>();
         if u_size == 0 {
@@ -191,6 +204,10 @@ impl<T: Copy> DeviceBuffer<T> {
         }
         let byte_size = self.byte_size();
         if byte_size % u_size != 0 {
+            return Err(CudaError::InvalidValue);
+        }
+        let u_align = std::mem::align_of::<U>() as u64;
+        if self.as_device_ptr() % u_align != 0 {
             return Err(CudaError::InvalidValue);
         }
         Ok(BufferViewMut {
@@ -279,5 +296,46 @@ mod tests {
     fn view_as_mut_signature_compiles() {
         let _: fn(&mut DeviceBuffer<f32>) -> CudaResult<BufferViewMut<'_, u32>> =
             DeviceBuffer::view_as_mut;
+    }
+
+    // -- Alignment validation (F104) -----------------------------------------
+    //
+    // These use `DeviceBuffer::from_raw`, which constructs a non-owning view
+    // over an arbitrary pointer value without touching the driver or
+    // dereferencing the pointer, so they exercise the pure pointer-arithmetic
+    // validation in `view_as`/`view_as_mut` without requiring a GPU.
+
+    #[test]
+    fn view_as_rejects_misaligned_pointer() {
+        // Byte size (8) divides evenly by `align_of::<u32>()` (4), but the
+        // pointer itself (0x1001) is not 4-byte aligned.
+        let buf = unsafe { DeviceBuffer::<u8>::from_raw(0x1001, 8) };
+        let result = buf.view_as::<u32>();
+        assert_eq!(result.err(), Some(CudaError::InvalidValue));
+    }
+
+    #[test]
+    fn view_as_accepts_aligned_pointer() {
+        let buf = unsafe { DeviceBuffer::<u8>::from_raw(0x1000, 8) };
+        let view = buf.view_as::<u32>().expect("aligned view should succeed");
+        assert_eq!(view.len(), 2);
+    }
+
+    #[test]
+    fn view_as_mut_rejects_misaligned_pointer() {
+        let mut buf = unsafe { DeviceBuffer::<u8>::from_raw(0x1002, 8) };
+        let result = buf.view_as_mut::<u64>();
+        assert_eq!(result.err(), Some(CudaError::InvalidValue));
+    }
+
+    #[test]
+    fn view_as_zero_len_null_pointer_is_aligned() {
+        // A zero-length view from a null pointer must still pass the
+        // alignment check (0 % align == 0 for any nonzero align).
+        let buf = unsafe { DeviceBuffer::<u8>::from_raw(0, 0) };
+        let view = buf
+            .view_as::<u64>()
+            .expect("null zero-length view should pass alignment check");
+        assert_eq!(view.len(), 0);
     }
 }

@@ -2,9 +2,6 @@
 //!
 //! Scales every element of vector `x` by scalar `alpha` in-place.
 
-use std::sync::Arc;
-
-use oxicuda_driver::Module;
 use oxicuda_launch::{Kernel, LaunchParams, grid_size_for};
 use oxicuda_memory::DeviceBuffer;
 use oxicuda_ptx::prelude::*;
@@ -60,9 +57,10 @@ pub fn scal<T: GpuFloat>(
         });
     }
 
-    let ptx = generate_scal_ptx::<T>(handle.sm_version())?;
-    let module = Arc::new(Module::from_ptx(&ptx)?);
-    let kernel = Kernel::from_module(module, &scal_kernel_name::<T>())?;
+    let kernel_name = scal_kernel_name::<T>();
+    let sm = handle.sm_version();
+    let module = handle.get_or_compile_module(&kernel_name, || generate_scal_ptx::<T>(sm))?;
+    let kernel = Kernel::from_module(module, &kernel_name)?;
 
     let grid = grid_size_for(n, L1_BLOCK_SIZE);
     let params = LaunchParams::new(grid, L1_BLOCK_SIZE);

@@ -945,12 +945,14 @@ fn destination_register_name(inst: &Instruction) -> Option<&str> {
         | Instruction::AtomCas { dst, .. }
         | Instruction::Dp4a { dst, .. }
         | Instruction::Dp2a { dst, .. }
-        | Instruction::Tex1d { dst, .. }
-        | Instruction::Tex2d { dst, .. }
-        | Instruction::Tex3d { dst, .. }
         | Instruction::SurfLoad { dst, .. }
         | Instruction::Redux { dst, .. }
         | Instruction::ElectSync { dst, .. } => Some(&dst.name),
+        // `tex.*.v4` defines four texel registers; report the first as the
+        // representative destination name.
+        Instruction::Tex1d { dst, .. }
+        | Instruction::Tex2d { dst, .. }
+        | Instruction::Tex3d { dst, .. } => dst.first().map(|r| r.name.as_str()),
 
         _ => None,
     }

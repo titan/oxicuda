@@ -587,16 +587,19 @@ impl WaveSize {
 
 /// HIP C++ source for a wave-64 optimised GEMM kernel.
 ///
-/// Uses `__attribute__((amdgpu_waves_per_eu(4)))` and a 64-thread
-/// `reqd_work_group_size` hint for GCN / CDNA wavefront scheduling.
+/// Uses `__attribute__((amdgpu_waves_per_eu(4)))` and a
+/// `reqd_work_group_size(64, tile_size, 1)` hint for GCN / CDNA wavefront
+/// scheduling. The block's y-extent (`tile_size`) must equal the per-block row
+/// stride so every row is covered.
 ///
-/// Grid: `dim3((n+63)/64, (m+1)/2)`, Block: `dim3(64, 2)`.
+/// Grid: `dim3((n+63)/64, (m+tile_size-1)/tile_size)`, Block:
+/// `dim3(64, tile_size)`.
 pub fn gemm_hip_wave64(tile_size: u32) -> String {
     format!(
         r#"
 extern "C"
 __attribute__((amdgpu_waves_per_eu(4)))
-__attribute__((reqd_work_group_size(64, 1, 1)))
+__attribute__((reqd_work_group_size(64, {ts}, 1)))
 __global__ void gemm_f32_wave64(
     const float* __restrict__ a,
     const float* __restrict__ b,
@@ -626,16 +629,19 @@ __global__ void gemm_f32_wave64(
 
 /// HIP C++ source for a wave-32 optimised GEMM kernel.
 ///
-/// Uses `__attribute__((amdgpu_waves_per_eu(8)))` and a 32-thread
-/// `reqd_work_group_size` hint for RDNA2+ wavefront scheduling.
+/// Uses `__attribute__((amdgpu_waves_per_eu(8)))` and a
+/// `reqd_work_group_size(32, tile_size, 1)` hint for RDNA2+ wavefront
+/// scheduling. The block's y-extent (`tile_size`) must equal the per-block row
+/// stride so every row is covered.
 ///
-/// Grid: `dim3((n+31)/32, (m+1)/2)`, Block: `dim3(32, 2)`.
+/// Grid: `dim3((n+31)/32, (m+tile_size-1)/tile_size)`, Block:
+/// `dim3(32, tile_size)`.
 pub fn gemm_hip_wave32(tile_size: u32) -> String {
     format!(
         r#"
 extern "C"
 __attribute__((amdgpu_waves_per_eu(8)))
-__attribute__((reqd_work_group_size(32, 1, 1)))
+__attribute__((reqd_work_group_size(32, {ts}, 1)))
 __global__ void gemm_f32_wave32(
     const float* __restrict__ a,
     const float* __restrict__ b,

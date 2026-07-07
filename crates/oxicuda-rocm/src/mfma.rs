@@ -122,15 +122,20 @@ pub fn arch_supports(arch: GfxArch, op: MatrixCoreOp) -> bool {
 
 // ─── MFMA kernel codegen ────────────────────────────────────────────────────
 
-/// Emit a HIP C++ GEMM micro-kernel that issues a single MFMA / WMMA matrix
-/// instruction per wavefront, for the requested `arch` and tile `op`.
+/// Emit a HIP C++ GEMM micro-kernel where each wavefront cooperatively computes
+/// one matrix-core tile, for the requested `arch` and tile `op`.
 ///
 /// The generated kernel:
 /// - declares an `extern "C" __global__` entry `mfma_gemm_<dtype>`,
 /// - uses `__launch_bounds__(64)` (one wave64 / wave32 cooperating on a tile),
-/// - issues the matching `__builtin_amdgcn_*` intrinsic with an FP32 (or FP64)
-///   accumulator fragment,
+/// - accumulates the full `op.m x op.n` tile into a per-lane FP32 (or FP64)
+///   fragment, reducing the whole K dimension for every output element,
 /// - guards the C/D store with row/col bounds.
+///
+/// This is a **portable cooperative implementation** that produces the same
+/// tile the corresponding `__builtin_amdgcn_*` MFMA/WMMA instruction (named in
+/// a comment for reference) would, without depending on the intrinsic's
+/// hardware fragment ABI. Wiring the true matrix-core intrinsic is future work.
 ///
 /// # Errors
 ///
@@ -187,26 +192,42 @@ __global__ void mfma_gemm_{dtype_tag}(
     unsigned int tile_col = hipBlockIdx_x * {nn};
     unsigned int lane     = hipThreadIdx_x % {wave};
 
-    // Per-lane accumulator fragment ({lane_blocks} elements).
+    // Per-lane accumulator fragment ({lane_blocks} elements). Each lane owns
+    // {lane_blocks} distinct (row,col) outputs of the {mm}x{nn} tile; element
+    // `i` maps to linear tile index `lane + i*{wave}`.
     {acc_ty} acc[{lane_blocks}];
     #pragma unroll
     for (int i = 0; i < {lane_blocks}; ++i) acc[i] = ({acc_ty})0;
 
-    // Iterate the K dimension in steps of {kk}, issuing one matrix op per step.
-    for (unsigned int kk = 0; kk + {kk} <= k; kk += {kk}) {{
-        // Load this lane's slice of the A and B fragments for the K-step.
-        {in_ty} a_frag = a[(tile_row + (lane % {mm})) * k + kk + (lane / {mm})];
-        {in_ty} b_frag = b[(kk + (lane % {kk})) * n + tile_col + (lane / {kk})];
-        // Matrix-core fused multiply-accumulate into the lane fragment.
-        // {builtin}(a_frag, b_frag, acc, 0, 0, 0)
-        acc[0] += ({acc_ty})a_frag * ({acc_ty})b_frag;
+    // Iterate the K dimension in steps of {kk}, contracting one matrix tile per
+    // step. This portable cooperative path computes exactly the tile the
+    // {builtin} matrix instruction would produce, without depending on the
+    // intrinsic's per-lane fragment ABI, so every output element (not just
+    // acc[0]) is fully reduced over K.
+    for (unsigned int kk = 0; kk < k; kk += {kk}) {{
+        unsigned int kend = kk + {kk};
+        if (kend > k) kend = k;
+        #pragma unroll
+        for (int i = 0; i < {lane_blocks}; ++i) {{
+            unsigned int idx = lane + i * {wave};
+            unsigned int r   = tile_row + idx / {nn};
+            unsigned int c   = tile_col + idx % {nn};
+            if (r < m && c < n) {{
+                {acc_ty} partial = ({acc_ty})0;
+                for (unsigned int p = kk; p < kend; ++p) {{
+                    partial += ({acc_ty})a[r * k + p] * ({acc_ty})b[p * n + c];
+                }}
+                acc[i] += partial;
+            }}
+        }}
     }}
 
     // Cooperative store: this lane writes its fragment elements to D.
     #pragma unroll
     for (int i = 0; i < {lane_blocks}; ++i) {{
-        unsigned int r = tile_row + ((lane + i * {wave}) / {nn});
-        unsigned int c = tile_col + ((lane + i * {wave}) % {nn});
+        unsigned int idx = lane + i * {wave};
+        unsigned int r = tile_row + idx / {nn};
+        unsigned int c = tile_col + idx % {nn};
         if (r < m && c < n) {{
             d[r * n + c] = acc[i];
         }}
@@ -376,6 +397,27 @@ mod tests {
         assert!(src.contains("__builtin_amdgcn_wmma_f32_16x16x16_f16_w32"));
         // RDNA3 native wavefront is 32.
         assert!(src.contains("__launch_bounds__(32)"));
+    }
+
+    #[test]
+    fn kernel_reduces_whole_tile_not_only_lane0() {
+        // Regression: the kernel used to accumulate a single scalar into acc[0]
+        // and leave acc[1..] zero, so most of the tile was written as 0. A
+        // correct kernel reduces the K dimension into every fragment element.
+        // wave64, 16x16 tile → lane_blocks = 256/64 = 4 (> 1).
+        let src =
+            mfma_gemm_hip(GfxArch::Gfx90a, op(16, 16, 16, MatrixDtype::Bf16)).expect("bf16 kernel");
+        // Every fragment element must be accumulated, not just acc[0].
+        assert!(
+            src.contains("acc[i] +="),
+            "kernel must reduce into the whole acc[] fragment"
+        );
+        assert!(
+            !src.contains("acc[0] +="),
+            "kernel must not accumulate into only acc[0]"
+        );
+        // Each owned output element fully reduces the K dimension.
+        assert!(src.contains("for (unsigned int p = kk; p < kend;"));
     }
 
     #[test]

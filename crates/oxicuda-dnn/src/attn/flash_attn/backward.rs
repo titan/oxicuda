@@ -224,7 +224,7 @@ fn validate_backward_shapes<T: GpuFloat>(
 
 /// Generates PTX for computing D_i = rowsum(dO * O).
 #[allow(clippy::extra_unused_type_parameters)]
-fn generate_rowsum_dot_ptx<T: GpuFloat>(
+pub(crate) fn generate_rowsum_dot_ptx<T: GpuFloat>(
     kernel_name: &str,
     sm: SmVersion,
     _head_dim: u32,
@@ -259,7 +259,9 @@ fn generate_rowsum_dot_ptx<T: GpuFloat>(
 
 /// Generates PTX for the main backward pass kernel.
 #[allow(clippy::extra_unused_type_parameters)]
-fn generate_backward_ptx<T: GpuFloat>(config: &FlashAttentionConfig) -> DnnResult<String> {
+pub(crate) fn generate_backward_ptx<T: GpuFloat>(
+    config: &FlashAttentionConfig,
+) -> DnnResult<String> {
     let kernel_name = format!(
         "flash_attn_bwd_d{}_bm{}_bn{}",
         config.head_dim, config.block_m, config.block_n

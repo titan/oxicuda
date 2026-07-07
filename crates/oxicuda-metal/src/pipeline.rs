@@ -117,18 +117,27 @@ impl MetalComputePipeline {
                     ));
                 }
             }
-            let buffers = memory.lock_buffers()?;
-            let mut bound: Vec<&metal::Buffer> = Vec::with_capacity(handles.len());
-            for handle in handles {
-                let info = buffers.get(handle).ok_or_else(|| {
-                    MetalError::InvalidArgument(format!("unknown buffer handle {handle}"))
-                })?;
-                bound.push(&info.buffer);
-            }
+            // Resolve handles to independent buffer retains under the lock, then
+            // release the lock *before* encoding + the blocking GPU wait. The
+            // encoder (and command buffer) retain their bound resources until
+            // completion, so a concurrent `free()` cannot invalidate them; this
+            // keeps unrelated `alloc`/`free`/`copy_*` calls off the critical path
+            // during the (potentially long) kernel run.
+            let bound: Vec<metal::Buffer> = {
+                let buffers = memory.lock_buffers()?;
+                let mut v = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    let info = buffers.get(handle).ok_or_else(|| {
+                        MetalError::InvalidArgument(format!("unknown buffer handle {handle}"))
+                    })?;
+                    v.push(info.buffer.to_owned());
+                }
+                v
+            };
             let command_buffer = self.command_queue.new_command_buffer();
             let encoder = command_buffer.new_compute_command_encoder();
             encoder.set_compute_pipeline_state(&self.pipeline_state);
-            for (slot, &buffer) in bound.iter().enumerate() {
+            for (slot, buffer) in bound.iter().enumerate() {
                 encoder.set_buffer(slot as u64, Some(buffer), 0);
             }
             let scalar_base = handles.len() as u64;
@@ -149,7 +158,15 @@ impl MetalComputePipeline {
             encoder.end_encoding();
             command_buffer.commit();
             command_buffer.wait_until_completed();
-            Ok(())
+            // Surface GPU-side failures (device lost, timeout/TDR, …) instead of
+            // returning Ok on a command buffer that finished in an error state.
+            match command_buffer.status() {
+                metal::MTLCommandBufferStatus::Completed => Ok(()),
+                status => Err(MetalError::CommandBufferError(format!(
+                    "compute dispatch for '{}' finished with status {status:?}",
+                    self.function_name
+                ))),
+            }
         }
         #[cfg(not(target_os = "macos"))]
         {

@@ -401,9 +401,9 @@ impl FakeQuantize {
                 b.if_lt_u32(gid.clone(), n_reg, move |b| {
                     let in_ptr = b.load_param_u64("in_ptr");
                     let scale = b.alloc_reg(PtxType::F32);
-                    b.raw_ptx(&format!("ld.param.f32 {scale}, [param_scale];"));
+                    b.raw_ptx(&format!("ld.param.f32 {scale}, [%param_scale];"));
                     let zp_s32 = b.alloc_reg(PtxType::S32);
-                    b.raw_ptx(&format!("ld.param.s32 {zp_s32}, [param_zero_point];"));
+                    b.raw_ptx(&format!("ld.param.s32 {zp_s32}, [%param_zero_point];"));
 
                     // Load input
                     let addr = b.byte_offset_addr(in_ptr, gid.clone(), 4u32);
@@ -495,9 +495,9 @@ impl FakeQuantize {
                     let grad_in_ptr = b.load_param_u64("grad_in_ptr");
 
                     let qmin_f = b.alloc_reg(PtxType::F32);
-                    b.raw_ptx(&format!("ld.param.f32 {qmin_f}, [param_qmin_float];"));
+                    b.raw_ptx(&format!("ld.param.f32 {qmin_f}, [%param_qmin_float];"));
                     let qmax_f = b.alloc_reg(PtxType::F32);
-                    b.raw_ptx(&format!("ld.param.f32 {qmax_f}, [param_qmax_float];"));
+                    b.raw_ptx(&format!("ld.param.f32 {qmax_f}, [%param_qmax_float];"));
 
                     // Load x[i]
                     let x_addr = b.byte_offset_addr(x_ptr, gid.clone(), 4u32);
@@ -596,13 +596,24 @@ impl FakeQuantize {
                 b.branch(&loop_lbl);
                 b.label(&end_lbl);
 
-                // Store partials to shared memory
+                // Store partials to shared memory. PTX address operands cannot
+                // scale a register inside the brackets (`[smem + r*4]` is
+                // invalid), so the element addresses are materialised into
+                // registers: `addr = &smem + idx * 4`.
+                let smem_min_base = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!("mov.u32 {smem_min_base}, smem_min;"));
+                let smem_max_base = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!("mov.u32 {smem_max_base}, smem_max;"));
+                let self_min_addr = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!(
-                    "st.shared.f32 [smem_min + {tid} * 4], {partial_min};"
+                    "mad.lo.u32 {self_min_addr}, {tid}, 4, {smem_min_base};"
                 ));
+                let self_max_addr = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!(
-                    "st.shared.f32 [smem_max + {tid} * 4], {partial_max};"
+                    "mad.lo.u32 {self_max_addr}, {tid}, 4, {smem_max_base};"
                 ));
+                b.raw_ptx(&format!("st.shared.f32 [{self_min_addr}], {partial_min};"));
+                b.raw_ptx(&format!("st.shared.f32 [{self_max_addr}], {partial_max};"));
                 b.bar_sync(0);
 
                 // Tree reduction
@@ -624,19 +635,35 @@ impl FakeQuantize {
                 b.branch_if(p_not, &skip);
 
                 let other = b.add_u32(tid.clone(), stride.clone());
+                let tid_min_addr = b.alloc_reg(PtxType::U32);
+                let other_min_addr = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!(
+                    "mad.lo.u32 {tid_min_addr}, {tid}, 4, {smem_min_base};"
+                ));
+                b.raw_ptx(&format!(
+                    "mad.lo.u32 {other_min_addr}, {other}, 4, {smem_min_base};"
+                ));
                 let a_min = b.alloc_reg(PtxType::F32);
                 let b_min = b.alloc_reg(PtxType::F32);
-                b.raw_ptx(&format!("ld.shared.f32 {a_min}, [smem_min + {tid} * 4];"));
-                b.raw_ptx(&format!("ld.shared.f32 {b_min}, [smem_min + {other} * 4];"));
+                b.raw_ptx(&format!("ld.shared.f32 {a_min}, [{tid_min_addr}];"));
+                b.raw_ptx(&format!("ld.shared.f32 {b_min}, [{other_min_addr}];"));
                 let m_min = b.min_f32(a_min, b_min);
-                b.raw_ptx(&format!("st.shared.f32 [smem_min + {tid} * 4], {m_min};"));
+                b.raw_ptx(&format!("st.shared.f32 [{tid_min_addr}], {m_min};"));
 
+                let tid_max_addr = b.alloc_reg(PtxType::U32);
+                let other_max_addr = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!(
+                    "mad.lo.u32 {tid_max_addr}, {tid}, 4, {smem_max_base};"
+                ));
+                b.raw_ptx(&format!(
+                    "mad.lo.u32 {other_max_addr}, {other}, 4, {smem_max_base};"
+                ));
                 let a_max = b.alloc_reg(PtxType::F32);
                 let b_max = b.alloc_reg(PtxType::F32);
-                b.raw_ptx(&format!("ld.shared.f32 {a_max}, [smem_max + {tid} * 4];"));
-                b.raw_ptx(&format!("ld.shared.f32 {b_max}, [smem_max + {other} * 4];"));
+                b.raw_ptx(&format!("ld.shared.f32 {a_max}, [{tid_max_addr}];"));
+                b.raw_ptx(&format!("ld.shared.f32 {b_max}, [{other_max_addr}];"));
                 let m_max = b.max_f32(a_max, b_max);
-                b.raw_ptx(&format!("st.shared.f32 [smem_max + {tid} * 4], {m_max};"));
+                b.raw_ptx(&format!("st.shared.f32 [{tid_max_addr}], {m_max};"));
 
                 b.label(&skip);
                 b.bar_sync(0);

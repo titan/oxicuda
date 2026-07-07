@@ -6,9 +6,9 @@
 //! `zeModuleCreate`.
 
 use super::spirv::{
-    EXECUTION_MODEL_KERNEL, FUNCTION_CONTROL_NONE, OP_F_ADD, OP_F_DIV, OP_F_MUL, OP_F_SUB,
-    OP_I_ADD, OP_I_MUL, OP_U_DIV, OP_U_LESS_THAN, OP_U_MOD, OPENCL_EXP, OPENCL_FMAX,
-    STORAGE_CLASS_FUNCTION, SpvModule, WORKGROUP_SIZE, emit_preamble, load_gid_x,
+    FUNCTION_CONTROL_NONE, OP_F_ADD, OP_F_DIV, OP_F_MUL, OP_F_SUB, OP_I_ADD, OP_I_MUL, OP_U_DIV,
+    OP_U_LESS_THAN, OP_U_MOD, OPENCL_EXP, OPENCL_FMAX, STORAGE_CLASS_FUNCTION, SpvModule,
+    emit_preamble, load_gid_x,
 };
 
 /// SPIR-V opcode for `OpISub` (integer subtract).
@@ -48,9 +48,8 @@ pub fn conv2d_spirv(
     pad_w: u32,
 ) -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "main");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_input = m.alloc_id();
     let p_filter = m.alloc_id();
@@ -66,9 +65,6 @@ pub fn conv2d_spirv(
             b.ty_ptr_cross_float,
         ],
     );
-
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
 
     // Emit constants for dimensions
     let c_n = m.alloc_id();
@@ -104,7 +100,7 @@ pub fn conv2d_spirv(
     let label_merge = m.alloc_id();
 
     // Function
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_input);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_filter);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_output);
@@ -339,9 +335,8 @@ pub fn attention_spirv(
     causal: bool,
 ) -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "main");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_q = m.alloc_id();
     let p_k = m.alloc_id();
@@ -359,9 +354,6 @@ pub fn attention_spirv(
             b.ty_ptr_cross_float,
         ],
     );
-
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
 
     // Constants
     let c_batch_heads = m.alloc_id();
@@ -385,7 +377,7 @@ pub fn attention_spirv(
     let label_body = m.alloc_id();
     let label_merge = m.alloc_id();
 
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_q);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_k);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_v);
@@ -431,6 +423,45 @@ pub fn attention_spirv(
 
     let final_max = m.alloc_id();
     m.emit_load(b.ty_float, final_max, var_max);
+
+    // ── Zero-initialize O[q_base .. q_base+head_dim) ──
+    // Pass 2 accumulates weighted-V into O via read-modify-write, so O must
+    // start at 0. Each work-item owns a disjoint O slice (q_base = gid*head_dim)
+    // so this is race-free; do NOT rely on the host pre-zeroing the buffer.
+    let var_dz = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_uint, var_dz, STORAGE_CLASS_FUNCTION);
+    m.emit_store(var_dz, b.c_uint_0);
+
+    let lbl_dz_hdr = m.alloc_id();
+    let lbl_dz_body = m.alloc_id();
+    let lbl_dz_cont = m.alloc_id();
+    let lbl_dz_merge = m.alloc_id();
+
+    m.emit_branch(lbl_dz_hdr);
+
+    m.emit_label(lbl_dz_hdr);
+    let dz_val = m.alloc_id();
+    m.emit_load(b.ty_uint, dz_val, var_dz);
+    let dz_cond = m.alloc_id();
+    m.emit(OP_U_LESS_THAN, &[b.ty_bool, dz_cond, dz_val, c_head_dim]);
+    m.emit_loop_merge(lbl_dz_merge, lbl_dz_cont);
+    m.emit_branch_conditional(dz_cond, lbl_dz_body, lbl_dz_merge);
+
+    m.emit_label(lbl_dz_body);
+    let oz_idx = m.alloc_id();
+    m.emit(OP_I_ADD, &[b.ty_uint, oz_idx, q_base, dz_val]);
+    let oz_ptr = m.alloc_id();
+    m.emit_in_bounds_ptr_access_chain(b.ty_ptr_cross_float, oz_ptr, p_o, oz_idx);
+    m.emit_store(oz_ptr, b.c_float_0);
+    m.emit_branch(lbl_dz_cont);
+
+    m.emit_label(lbl_dz_cont);
+    let dz_inc = m.alloc_id();
+    m.emit(OP_I_ADD, &[b.ty_uint, dz_inc, dz_val, b.c_uint_1]);
+    m.emit_store(var_dz, dz_inc);
+    m.emit_branch(lbl_dz_hdr);
+
+    m.emit_label(lbl_dz_merge);
 
     // ── Pass 2: accumulate exp-weighted V ──
     let var_sum_exp = m.alloc_id();

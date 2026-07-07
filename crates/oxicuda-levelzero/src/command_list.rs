@@ -216,7 +216,9 @@ impl EventScope {
         match self {
             EventScope::Device => 0,
             EventScope::HostVisible => 0x1,
-            EventScope::KernelTimestamp => 0x2,
+            // ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP = ZE_BIT(2) = 0x4 (0x2 is
+            // ZE_EVENT_POOL_FLAG_IPC).
+            EventScope::KernelTimestamp => 0x4,
         }
     }
 }
@@ -697,7 +699,8 @@ mod tests {
     #[test]
     fn event_pool_rejects_zero_capacity() {
         assert!(EventPoolDesc::new(0, EventScope::Device).is_err());
-        assert_eq!(EventScope::KernelTimestamp.ze_flags(), 0x2);
+        assert_eq!(EventScope::KernelTimestamp.ze_flags(), 0x4);
+        assert_eq!(EventScope::HostVisible.ze_flags(), 0x1);
         assert_eq!(EventScope::Device.ze_flags(), 0);
     }
 

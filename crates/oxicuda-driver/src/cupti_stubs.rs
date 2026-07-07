@@ -57,14 +57,14 @@ pub enum CuptiActivityKind {
     /// Runtime API call durations (`CUPTI_ACTIVITY_KIND_RUNTIME`).
     Runtime = 5,
     /// Concurrent kernel executions (`CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL`).
-    ConcurrentKernel = 6,
+    ConcurrentKernel = 10,
     /// CUDA stream / device / context names (`CUPTI_ACTIVITY_KIND_NAME`).
-    Name = 7,
+    Name = 11,
     /// User / driver markers (`CUPTI_ACTIVITY_KIND_MARKER`).
-    Marker = 8,
+    Marker = 12,
     /// Stream-ordered memory pool operations
     /// (`CUPTI_ACTIVITY_KIND_MEMORY_POOL`).
-    MemoryPool = 9,
+    MemoryPool = 50,
 }
 
 impl CuptiActivityKind {
@@ -440,8 +440,10 @@ mod tests {
     fn activity_kind_raw_discriminants() {
         assert_eq!(CuptiActivityKind::Memcpy.raw(), 1);
         assert_eq!(CuptiActivityKind::Kernel.raw(), 3);
-        assert_eq!(CuptiActivityKind::ConcurrentKernel.raw(), 6);
-        assert_eq!(CuptiActivityKind::MemoryPool.raw(), 9);
+        assert_eq!(CuptiActivityKind::ConcurrentKernel.raw(), 10);
+        assert_eq!(CuptiActivityKind::Name.raw(), 11);
+        assert_eq!(CuptiActivityKind::Marker.raw(), 12);
+        assert_eq!(CuptiActivityKind::MemoryPool.raw(), 50);
     }
 
     #[test]

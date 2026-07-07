@@ -302,6 +302,17 @@ impl BenchmarkEngine {
     /// benchmarking host-side overhead.  Less precise than event-based
     /// timing but works without a GPU.
     ///
+    /// # Blocking precondition
+    ///
+    /// This function provides **no GPU synchronization of its own** — it
+    /// only measures the wall-clock time of each call to `run_fn`. If
+    /// `run_fn` launches GPU work asynchronously (e.g. `cuLaunchKernel`
+    /// on a stream without waiting for it), it **must synchronize**
+    /// (e.g. `stream.synchronize()`) before returning, or only the
+    /// host-side launch overhead will be measured, not the actual kernel
+    /// execution time. Prefer [`BenchmarkEngine::benchmark`] for GPU
+    /// kernels — it records and synchronizes CUDA events automatically.
+    ///
     /// # Errors
     ///
     /// Returns [`AutotuneError::BenchmarkFailed`] if no valid samples

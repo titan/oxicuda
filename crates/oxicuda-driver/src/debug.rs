@@ -690,7 +690,12 @@ impl PrintfBuffer {
         let format_string = String::from_utf8_lossy(fmt_bytes).into_owned();
 
         let arg_count = Self::read_u32(raw, cursor)? as usize;
-        let mut args = Vec::with_capacity(arg_count);
+        // `arg_count` comes from an untrusted device buffer. Clamp the
+        // pre-allocation to what the remaining bytes could possibly encode:
+        // each argument consumes at least 5 bytes (1-byte tag + a 4-byte
+        // length/scalar), so a malformed count cannot force a huge allocation.
+        let remaining = raw.len().saturating_sub(*cursor);
+        let mut args = Vec::with_capacity(arg_count.min(remaining / 5));
         for _ in 0..arg_count {
             let tag = Self::read_u8(raw, cursor)?;
             let arg = match tag {

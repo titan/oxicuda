@@ -315,7 +315,7 @@ fn emit_depthwise_conv_body(
                 b.raw_ptx(&format!("fma.rn.f64 {acc}, {in_val}, {f_val}, {acc};"));
             }
 
-            b.label(&skip);
+            b.raw_ptx(&format!("{skip}:"));
         }
     }
 
@@ -341,6 +341,6 @@ fn emit_depthwise_conv_body(
         b.raw_ptx(&format!("st.global.f64 [{out_addr}], {activated};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }

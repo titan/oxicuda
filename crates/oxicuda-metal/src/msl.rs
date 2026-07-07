@@ -40,7 +40,10 @@ kernel void gemm_f32(
         acc += a[row * params.k + i] * b[i * params.n + col];
     }
     uint out_idx = row * params.n + col;
-    c[out_idx] = params.alpha * acc + params.beta * c[out_idx];
+    // BLAS contract: when beta==0 the C operand is not referenced, so a fresh
+    // (possibly NaN/Inf) output buffer never poisons the result via 0*NaN.
+    float prev = (params.beta == 0.0f) ? 0.0f : params.beta * c[out_idx];
+    c[out_idx] = params.alpha * acc + prev;
 }
 "#
 }
@@ -93,7 +96,9 @@ kernel void batched_gemm_f32(
         acc += a[a_off + row * params.k + i] * b[b_off + i * params.n + col];
     }
     uint out_idx = c_off + row * params.n + col;
-    c[out_idx] = params.alpha * acc + params.beta * c[out_idx];
+    // BLAS contract: beta==0 ⇒ C not referenced (avoids 0*NaN poisoning).
+    float prev = (params.beta == 0.0f) ? 0.0f : params.beta * c[out_idx];
+    c[out_idx] = params.alpha * acc + prev;
 }
 "#
 }
@@ -133,7 +138,9 @@ kernel void gemm_f16(
         acc += float(a[row * params.k + i]) * float(b[i * params.n + col]);
     }
     uint out_idx = row * params.n + col;
-    c[out_idx] = half(params.alpha * acc + params.beta * float(c[out_idx]));
+    // BLAS contract: beta==0 ⇒ C not referenced (avoids 0*NaN poisoning).
+    float prev = (params.beta == 0.0f) ? 0.0f : params.beta * float(c[out_idx]);
+    c[out_idx] = half(params.alpha * acc + prev);
 }
 "#
 }
@@ -526,6 +533,18 @@ mod tests {
         assert!(src.contains("gemm_f32"));
         assert!(src.contains("GemmParams"));
         assert!(src.contains("metal_stdlib"));
+    }
+
+    #[test]
+    fn msl_gemm_guards_c_read_on_beta_zero() {
+        // All three GEMM kernels must guard the C read on beta==0 so a fresh
+        // (uninitialised, possibly NaN) output buffer is not poisoned by 0*NaN.
+        for src in [gemm_msl(), batched_gemm_msl(), gemm_msl_f16()] {
+            assert!(
+                src.contains("params.beta == 0.0f"),
+                "GEMM kernel must guard the C read on beta==0:\n{src}"
+            );
+        }
     }
 
     #[test]

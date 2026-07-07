@@ -28,7 +28,7 @@ use oxicuda_driver::device::Device;
 use oxicuda_driver::error::{CudaError, CudaResult};
 use oxicuda_driver::stream::Stream;
 
-use crate::memory_info::{MemAdvice, mem_advise, mem_prefetch};
+use crate::memory_info::{MemAdvice, mem_advise, mem_advise_host, mem_prefetch};
 use crate::unified::UnifiedBuffer;
 
 // ---------------------------------------------------------------------------
@@ -353,11 +353,19 @@ impl Default for PrefetchPlan {
 /// * `ptr` — device pointer to the managed allocation.
 /// * `byte_size` — size of the region in bytes.
 /// * `policy` — the migration policy to apply.
-/// * `device` — the device to which hints are directed.
+/// * `device` — the device to which hints are directed for
+///   [`MigrationPolicy::ReadMostly`]. Ignored by
+///   [`MigrationPolicy::PreferHost`] (which always targets the CPU) and by
+///   [`MigrationPolicy::PreferDevice`] (which resolves its own ordinal via
+///   [`Device::get`] instead, so the advice always targets the ordinal the
+///   caller declared in the policy rather than whatever `device` happens to
+///   be).
 ///
 /// # Errors
 ///
-/// Forwards any error from the underlying driver call.
+/// Forwards any error from the underlying driver call, including
+/// [`CudaError::InvalidDevice`] if [`MigrationPolicy::PreferDevice`]'s
+/// ordinal does not name a valid device.
 /// Returns [`CudaError::InvalidValue`] if `byte_size` is zero (when
 /// policy is not `Default`).
 pub fn apply_migration_policy(
@@ -369,17 +377,19 @@ pub fn apply_migration_policy(
     match policy {
         MigrationPolicy::Default => Ok(()),
         MigrationPolicy::ReadMostly => mem_advise(ptr, byte_size, MemAdvice::SetReadMostly, device),
-        MigrationPolicy::PreferDevice(_ordinal) => {
-            // The advice targets the device passed by the caller. The ordinal
-            // in the policy variant is informational — the caller is expected
-            // to pass the corresponding Device handle.
-            mem_advise(ptr, byte_size, MemAdvice::SetPreferredLocation, device)
+        MigrationPolicy::PreferDevice(ordinal) => {
+            // Honour the ordinal declared in the policy itself rather than
+            // whatever `device` the caller happened to pass in, so the
+            // advice always targets the documented device.
+            let target = Device::get(*ordinal)?;
+            mem_advise(ptr, byte_size, MemAdvice::SetPreferredLocation, &target)
         }
         MigrationPolicy::PreferHost => {
-            // For host-preferred, we still issue SetPreferredLocation but
-            // directed at the provided device handle. In a real CUDA
-            // environment the caller would pass CU_DEVICE_CPU (-1).
-            mem_advise(ptr, byte_size, MemAdvice::SetPreferredLocation, device)
+            // Host-preferred data has no `Device` handle to target — issue
+            // the advice against the driver's `CU_DEVICE_CPU` sentinel
+            // directly instead of silently redirecting it at `device` (a
+            // GPU).
+            mem_advise_host(ptr, byte_size, MemAdvice::SetPreferredLocation)
         }
     }
 }
@@ -580,5 +590,96 @@ mod tests {
     #[test]
     fn signature_execute_plan() {
         let _: fn(&PrefetchPlan, &Stream) -> CudaResult<()> = PrefetchPlan::execute;
+    }
+
+    // -- Regression tests for F072 -------------------------------------------
+
+    #[cfg(feature = "gpu-tests")]
+    mod gpu_tests {
+        use super::*;
+        use crate::unified::UnifiedBuffer;
+
+        /// Establishes a real CUDA context on device 0. Returns `None` if no
+        /// driver/GPU is available so tests can skip gracefully.
+        fn real_context() -> Option<oxicuda_driver::context::Context> {
+            if oxicuda_driver::init().is_err() || Device::count().unwrap_or(0) == 0 {
+                return None;
+            }
+            let dev = Device::get(0).ok()?;
+            oxicuda_driver::context::Context::new(&dev).ok()
+        }
+
+        /// `MigrationPolicy::PreferHost` must direct the advice at the
+        /// driver's `CU_DEVICE_CPU` sentinel, not at whatever `Device` the
+        /// caller happens to pass in — so this must succeed on a real
+        /// managed allocation even though the passed-in device is
+        /// unrelated to "host memory".
+        #[test]
+        fn prefer_host_advises_cpu_not_passed_device() {
+            let Some(_ctx) = real_context() else {
+                eprintln!("skipping: no CUDA driver/device");
+                return;
+            };
+            let Ok(buf) = UnifiedBuffer::<f32>::alloc(256) else {
+                eprintln!("skipping: managed alloc failed");
+                return;
+            };
+            let Ok(dev) = Device::get(0) else {
+                eprintln!("skipping: no device 0");
+                return;
+            };
+            let result = apply_migration_policy(
+                buf.as_device_ptr(),
+                buf.byte_size(),
+                &MigrationPolicy::PreferHost,
+                &dev,
+            );
+            assert!(result.is_ok(), "PreferHost advice failed: {result:?}");
+        }
+
+        /// `MigrationPolicy::PreferDevice(ordinal)` must resolve and honour
+        /// its own declared ordinal rather than silently using whichever
+        /// `Device` the caller passed in: requesting an out-of-range
+        /// ordinal must fail even when a valid `device` argument is
+        /// supplied.
+        #[test]
+        fn prefer_device_honors_its_own_ordinal_not_passed_device() {
+            let Some(_ctx) = real_context() else {
+                eprintln!("skipping: no CUDA driver/device");
+                return;
+            };
+            let Ok(buf) = UnifiedBuffer::<f32>::alloc(256) else {
+                eprintln!("skipping: managed alloc failed");
+                return;
+            };
+            let Ok(dev0) = Device::get(0) else {
+                eprintln!("skipping: no device 0");
+                return;
+            };
+
+            // A valid ordinal (0) must succeed even though `dev0` is passed
+            // as the (now-ignored for this variant) `device` argument.
+            let ok_result = apply_migration_policy(
+                buf.as_device_ptr(),
+                buf.byte_size(),
+                &MigrationPolicy::PreferDevice(0),
+                &dev0,
+            );
+            assert!(ok_result.is_ok(), "PreferDevice(0) failed: {ok_result:?}");
+
+            // An out-of-range ordinal must fail — proving the policy's own
+            // ordinal is actually being resolved and used, not silently
+            // ignored in favour of `dev0`.
+            let bad_result = apply_migration_policy(
+                buf.as_device_ptr(),
+                buf.byte_size(),
+                &MigrationPolicy::PreferDevice(9999),
+                &dev0,
+            );
+            assert!(
+                bad_result.is_err(),
+                "PreferDevice(9999) unexpectedly succeeded; ordinal was not honored"
+            );
+        }
     }
 }

@@ -76,6 +76,21 @@ impl<T: GpuFloat> CooMatrix<T> {
             )));
         }
 
+        for (k, &r) in row_idx.iter().enumerate() {
+            if r < 0 || r as u32 >= rows {
+                return Err(SparseError::InvalidFormat(format!(
+                    "row_idx[{k}] = {r} out of range [0, {rows})"
+                )));
+            }
+        }
+        for (k, &c) in col_idx.iter().enumerate() {
+            if c < 0 || c as u32 >= cols {
+                return Err(SparseError::InvalidFormat(format!(
+                    "col_idx[{k}] = {c} out of range [0, {cols})"
+                )));
+            }
+        }
+
         let d_row_idx = DeviceBuffer::from_host(row_idx)?;
         let d_col_idx = DeviceBuffer::from_host(col_idx)?;
         let d_values = DeviceBuffer::from_host(values)?;
@@ -92,6 +107,16 @@ impl<T: GpuFloat> CooMatrix<T> {
     }
 
     /// Creates a COO matrix from pre-allocated device buffers.
+    ///
+    /// This is the unchecked escape hatch: only buffer *lengths* are
+    /// validated. The contents of `row_idx`/`col_idx` are **not** range
+    /// checked against `rows`/`cols`. Passing indices outside
+    /// `[0, rows)`/`[0, cols)` will cause out-of-bounds device memory
+    /// access in downstream operations (e.g. [`to_csr`](Self::to_csr),
+    /// [`to_csc`](Self::to_csc), or SpMV/SpMM kernels). Callers are
+    /// responsible for ensuring indices are in range before calling this
+    /// constructor; prefer [`from_host`](Self::from_host) when the data
+    /// originates on the host, as it validates the full range.
     ///
     /// # Errors
     ///
@@ -156,14 +181,31 @@ impl<T: GpuFloat> CooMatrix<T> {
     ///
     /// # Errors
     ///
-    /// Returns [`SparseError::Cuda`] on transfer failure.
+    /// Returns [`SparseError::Cuda`] on transfer failure. Returns
+    /// [`SparseError::InvalidFormat`] if any downloaded row or column
+    /// index is out of range (this can happen for matrices constructed
+    /// via the unchecked [`from_device`](Self::from_device) constructor).
     pub fn to_csr(&self) -> SparseResult<super::CsrMatrix<T>> {
         let (h_row_idx, h_col_idx, h_values) = self.to_host()?;
 
         // Build row pointers from row indices
         let mut row_counts = vec![0i32; self.rows as usize];
         for &r in &h_row_idx {
+            if r < 0 || r as u32 >= self.rows {
+                return Err(SparseError::InvalidFormat(format!(
+                    "row index {r} out of range for {} rows",
+                    self.rows
+                )));
+            }
             row_counts[r as usize] += 1;
+        }
+        for &c in &h_col_idx {
+            if c < 0 || c as u32 >= self.cols {
+                return Err(SparseError::InvalidFormat(format!(
+                    "col index {c} out of range for {} cols",
+                    self.cols
+                )));
+            }
         }
 
         let mut h_row_ptr = vec![0i32; self.rows as usize + 1];
@@ -199,12 +241,29 @@ impl<T: GpuFloat> CooMatrix<T> {
     ///
     /// # Errors
     ///
-    /// Returns [`SparseError::Cuda`] on transfer failure.
+    /// Returns [`SparseError::Cuda`] on transfer failure. Returns
+    /// [`SparseError::InvalidFormat`] if any downloaded row or column
+    /// index is out of range (this can happen for matrices constructed
+    /// via the unchecked [`from_device`](Self::from_device) constructor).
     pub fn to_csc(&self) -> SparseResult<super::CscMatrix<T>> {
         let (h_row_idx, h_col_idx, h_values) = self.to_host()?;
 
+        for &r in &h_row_idx {
+            if r < 0 || r as u32 >= self.rows {
+                return Err(SparseError::InvalidFormat(format!(
+                    "row index {r} out of range for {} rows",
+                    self.rows
+                )));
+            }
+        }
         let mut col_counts = vec![0i32; self.cols as usize];
         for &c in &h_col_idx {
+            if c < 0 || c as u32 >= self.cols {
+                return Err(SparseError::InvalidFormat(format!(
+                    "col index {c} out of range for {} cols",
+                    self.cols
+                )));
+            }
             col_counts[c as usize] += 1;
         }
 
@@ -296,5 +355,67 @@ mod tests {
     #[test]
     fn coo_sorted_flag() {
         // Just verify the flag API works (no GPU needed)
+    }
+
+    #[test]
+    fn coo_validation_row_idx_out_of_range() {
+        // rows = 2, so row index 2 is out of range
+        let result = CooMatrix::<f32>::from_host(2, 2, &[0, 2], &[0, 1], &[1.0, 1.0]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
+    }
+
+    #[test]
+    fn coo_validation_col_idx_out_of_range() {
+        // cols = 2, so col index -1 is out of range
+        let result = CooMatrix::<f32>::from_host(2, 2, &[0, 1], &[0, -1], &[1.0, 1.0]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// On-device validation of the unchecked `from_device` escape hatch
+// (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::gpu_handle;
+
+    /// `to_csr`/`to_csc` must reject out-of-range indices even when the
+    /// matrix was built via the unchecked `from_device` constructor,
+    /// instead of indexing a host `Vec` out of bounds or silently
+    /// producing a corrupt CSR/CSC matrix.
+    #[test]
+    fn to_csr_rejects_out_of_range_row_idx_from_device() {
+        // Keep the handle (and the CUDA context it holds current) alive for
+        // the whole test; dropping it immediately would tear down the
+        // context before the `DeviceBuffer::from_host` calls below run.
+        let Some(_handle) = gpu_handle() else {
+            return;
+        };
+        let d_row_idx = DeviceBuffer::from_host(&[0i32, 5]).expect("test: upload row_idx");
+        let d_col_idx = DeviceBuffer::from_host(&[0i32, 1]).expect("test: upload col_idx");
+        let d_values = DeviceBuffer::from_host(&[1.0f32, 1.0]).expect("test: upload values");
+        let coo = CooMatrix::<f32>::from_device(2, 2, 2, d_row_idx, d_col_idx, d_values)
+            .expect("test: build COO from device buffers (lengths are consistent)");
+
+        let result = coo.to_csr();
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
+    }
+
+    #[test]
+    fn to_csc_rejects_out_of_range_col_idx_from_device() {
+        let Some(_handle) = gpu_handle() else {
+            return;
+        };
+        let d_row_idx = DeviceBuffer::from_host(&[0i32, 1]).expect("test: upload row_idx");
+        let d_col_idx = DeviceBuffer::from_host(&[0i32, 5]).expect("test: upload col_idx");
+        let d_values = DeviceBuffer::from_host(&[1.0f32, 1.0]).expect("test: upload values");
+        let coo = CooMatrix::<f32>::from_device(2, 2, 2, d_row_idx, d_col_idx, d_values)
+            .expect("test: build COO from device buffers (lengths are consistent)");
+
+        let result = coo.to_csc();
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
     }
 }

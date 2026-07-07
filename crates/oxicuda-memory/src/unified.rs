@@ -94,6 +94,20 @@ impl<T: Copy> UnifiedBuffer<T> {
         // On 64-bit systems with UVA, the device pointer value is the same
         // as the host virtual address.
         let host_ptr = dev_ptr as *mut T;
+        // SAFETY: `host_ptr` is the host-accessible address of the managed
+        // allocation just created above, valid for `byte_size` bytes; no
+        // kernel has had a chance to touch it yet, so writing to it from the
+        // host is legal. Zero-initialising here means `as_slice`/
+        // `as_mut_slice` below never expose driver-uninitialised memory as
+        // a safe `&[T]` (all-zero bytes are a valid `T` for every in-tree
+        // usage of `UnifiedBuffer`, e.g. `u8`/`f32`). Skipped when `T` is
+        // zero-sized (byte_size == 0 despite `n > 0`) to avoid a no-op
+        // write through a possibly-unusual pointer.
+        if byte_size > 0 {
+            unsafe {
+                std::ptr::write_bytes(host_ptr.cast::<u8>(), 0, byte_size);
+            }
+        }
         Ok(Self {
             ptr: dev_ptr,
             host_ptr,
@@ -136,9 +150,9 @@ impl<T: Copy> UnifiedBuffer<T> {
     /// or context before calling this method.
     #[inline]
     pub fn as_slice(&self) -> &[T] {
-        // SAFETY: `host_ptr` is valid for `len` elements when no device
-        // kernel is concurrently accessing the memory.  The caller is
-        // responsible for proper synchronisation.
+        // SAFETY: `host_ptr` is valid for `len` elements, zero-initialised
+        // at `alloc` time, when no device kernel is concurrently accessing
+        // the memory.  The caller is responsible for proper synchronisation.
         unsafe { std::slice::from_raw_parts(self.host_ptr, self.len) }
     }
 
@@ -151,9 +165,9 @@ impl<T: Copy> UnifiedBuffer<T> {
     /// or context before calling this method.
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        // SAFETY: `host_ptr` is valid for `len` elements when no device
-        // kernel is concurrently accessing the memory.  The caller is
-        // responsible for proper synchronisation.
+        // SAFETY: `host_ptr` is valid for `len` elements, zero-initialised
+        // at `alloc` time, when no device kernel is concurrently accessing
+        // the memory.  The caller is responsible for proper synchronisation.
         unsafe { std::slice::from_raw_parts_mut(self.host_ptr, self.len) }
     }
 }
@@ -172,6 +186,71 @@ impl<T: Copy> Drop for UnifiedBuffer<T> {
                     "cuMemFree_v2 failed during UnifiedBuffer drop"
                 );
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alloc_signature_compiles() {
+        let _: fn(usize) -> CudaResult<UnifiedBuffer<f32>> = UnifiedBuffer::alloc;
+    }
+
+    #[cfg(feature = "gpu-tests")]
+    mod gpu_tests {
+        use super::*;
+
+        /// Establishes a real CUDA context on device 0. Returns `None` if no
+        /// driver/GPU is available so tests can skip gracefully.
+        fn real_context() -> Option<oxicuda_driver::context::Context> {
+            if oxicuda_driver::init().is_err()
+                || oxicuda_driver::device::Device::count().unwrap_or(0) == 0
+            {
+                return None;
+            }
+            let dev = oxicuda_driver::device::Device::get(0).ok()?;
+            oxicuda_driver::context::Context::new(&dev).ok()
+        }
+
+        /// Regression test for F070: a freshly allocated `UnifiedBuffer`
+        /// must never expose driver-uninitialised bytes through the safe
+        /// `as_slice` accessor — it must read back as all-zero.
+        #[test]
+        fn alloc_is_zero_initialized() {
+            let Some(_ctx) = real_context() else {
+                eprintln!("skipping: no CUDA driver/device");
+                return;
+            };
+            let Ok(buf) = UnifiedBuffer::<u8>::alloc(4096) else {
+                eprintln!("skipping: alloc failed");
+                return;
+            };
+            assert_eq!(buf.len(), 4096);
+            assert!(buf.as_slice().iter().all(|&b| b == 0));
+        }
+
+        #[test]
+        fn as_mut_slice_writes_are_visible() {
+            let Some(_ctx) = real_context() else {
+                eprintln!("skipping: no CUDA driver/device");
+                return;
+            };
+            let Ok(mut buf) = UnifiedBuffer::<f32>::alloc(64) else {
+                eprintln!("skipping: alloc failed");
+                return;
+            };
+            for (i, v) in buf.as_mut_slice().iter_mut().enumerate() {
+                *v = i as f32;
+            }
+            let expected: Vec<f32> = (0..64).map(|i| i as f32).collect();
+            assert_eq!(buf.as_slice(), expected.as_slice());
         }
     }
 }

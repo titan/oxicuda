@@ -116,6 +116,18 @@ pub enum WgmmaShape {
     M64N128K16,
     /// 64x256x16 tiles.
     M64N256K16,
+    /// 64x8x32 tiles (K=32; FP8 / INT8 inputs).
+    M64N8K32,
+    /// 64x16x32 tiles (K=32).
+    M64N16K32,
+    /// 64x32x32 tiles (K=32).
+    M64N32K32,
+    /// 64x64x32 tiles (K=32).
+    M64N64K32,
+    /// 64x128x32 tiles (K=32).
+    M64N128K32,
+    /// 64x256x32 tiles (K=32).
+    M64N256K32,
 }
 
 impl WgmmaShape {
@@ -129,7 +141,27 @@ impl WgmmaShape {
             Self::M64N64K16 => ".m64n64k16",
             Self::M64N128K16 => ".m64n128k16",
             Self::M64N256K16 => ".m64n256k16",
+            Self::M64N8K32 => ".m64n8k32",
+            Self::M64N16K32 => ".m64n16k32",
+            Self::M64N32K32 => ".m64n32k32",
+            Self::M64N64K32 => ".m64n64k32",
+            Self::M64N128K32 => ".m64n128k32",
+            Self::M64N256K32 => ".m64n256k32",
         }
+    }
+
+    /// Returns `true` if this shape uses K=32 (required for FP8/INT8 inputs).
+    #[must_use]
+    pub(crate) const fn is_k32(self) -> bool {
+        matches!(
+            self,
+            Self::M64N8K32
+                | Self::M64N16K32
+                | Self::M64N32K32
+                | Self::M64N64K32
+                | Self::M64N128K32
+                | Self::M64N256K32
+        )
     }
 }
 
@@ -1072,8 +1104,9 @@ pub enum Instruction {
     Tex1d {
         /// Element data type of the returned texel components.
         ty: PtxType,
-        /// Destination register receiving the fetched texel.
-        dst: Register,
+        /// Destination vector: `tex.*.v4` returns four components (RGBA), so a
+        /// full 4-register vector destination is required.
+        dst: [Register; 4],
         /// Texture reference name.
         tex_ref: String,
         /// 1D coordinate operand (`.s32`).
@@ -1086,8 +1119,8 @@ pub enum Instruction {
     Tex2d {
         /// Element data type of the returned texel components.
         ty: PtxType,
-        /// Destination register receiving the fetched texel.
-        dst: Register,
+        /// Destination vector: `tex.*.v4` returns four components (RGBA).
+        dst: [Register; 4],
         /// Texture reference name.
         tex_ref: String,
         /// X coordinate operand (`.s32`).
@@ -1102,8 +1135,8 @@ pub enum Instruction {
     Tex3d {
         /// Element data type of the returned texel components.
         ty: PtxType,
-        /// Destination register receiving the fetched texel.
-        dst: Register,
+        /// Destination vector: `tex.*.v4` returns four components (RGBA).
+        dst: [Register; 4],
         /// Texture reference name.
         tex_ref: String,
         /// X coordinate operand (`.s32`).
@@ -1163,8 +1196,9 @@ pub enum Instruction {
     Stmatrix {
         /// Destination address in shared memory.
         dst_addr: Operand,
-        /// Source register containing the matrix fragment.
-        src: Register,
+        /// Source registers containing the matrix fragments. `stmatrix.xN`
+        /// requires exactly `N` source registers (`x1`→1, `x2`→2, `x4`→4).
+        src: Vec<Register>,
         /// Matrix shape to store.
         shape: StmatrixShape,
         /// Whether to transpose during the store.
@@ -1231,6 +1265,10 @@ pub enum Instruction {
     ///
     /// Waits for all expected arrivals at a shared-memory barrier (SM >= 90).
     MbarrierWait {
+        /// Predicate destination register receiving the wait result
+        /// (`true` = the phase completed). Required by the ISA: the result is
+        /// not discardable.
+        dst: Register,
         /// Address of the mbarrier object in shared memory.
         addr: Operand,
         /// Phase bit to wait on.
@@ -1276,6 +1314,9 @@ pub enum Instruction {
         src_gmem: Register,
         /// Descriptor register (coordinate / TMA descriptor).
         desc: Register,
+        /// Mbarrier register that tracks completion of the bulk copy
+        /// (`mbarrier::complete_tx::bytes`). Required by the ISA.
+        barrier: Register,
     },
 
     // -- ldmatrix (SM >= 75) ------------------------------------------------

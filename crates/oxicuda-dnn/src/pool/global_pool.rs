@@ -139,6 +139,12 @@ fn generate_global_avg_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                 let plane_off = b.mul_lo_u32(bid.clone(), hw.clone());
                 let base_addr = b.byte_offset_addr(in_ptr, plane_off, T::size_u32());
 
+                // Base address of the shared array. PTX forbids
+                // `[sym + reg*imm]` operands, so all shared accesses index
+                // off this register-held base.
+                let smem_base = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!("mov.u32 {smem_base}, smem;"));
+
                 // Thread accumulates partial sum across the plane
                 let partial = load_float_imm::<T>(b, 0.0);
                 let i = b.alloc_reg(PtxType::U32);
@@ -163,11 +169,15 @@ fn generate_global_avg_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                 b.branch(&loop_lbl);
                 b.label(&end_lbl);
 
-                // Store partial to shared memory
+                // Store partial to shared memory (address pre-computed)
                 if T::PTX_TYPE == PtxType::F32 {
-                    b.raw_ptx(&format!("st.shared.f32 [smem + {tid} * 4], {partial};"));
+                    let st_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mad.lo.u32 {st_addr}, {tid}, 4, {smem_base};"));
+                    b.raw_ptx(&format!("st.shared.f32 [{st_addr}], {partial};"));
                 } else {
-                    b.raw_ptx(&format!("st.shared.f64 [smem + {tid} * 8], {partial};"));
+                    let st_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mad.lo.u32 {st_addr}, {tid}, 8, {smem_base};"));
+                    b.raw_ptx(&format!("st.shared.f64 [{st_addr}], {partial};"));
                 }
 
                 b.bar_sync(0);
@@ -193,19 +203,31 @@ fn generate_global_avg_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                 // Load smem[tid] and smem[tid + stride]
                 let other_idx = b.add_u32(tid.clone(), stride_reg.clone());
                 if T::PTX_TYPE == PtxType::F32 {
+                    let self_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mad.lo.u32 {self_addr}, {tid}, 4, {smem_base};"));
+                    let other_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!(
+                        "mad.lo.u32 {other_addr}, {other_idx}, 4, {smem_base};"
+                    ));
                     let a = b.alloc_reg(PtxType::F32);
                     let bv = b.alloc_reg(PtxType::F32);
-                    b.raw_ptx(&format!("ld.shared.f32 {a}, [smem + {tid} * 4];"));
-                    b.raw_ptx(&format!("ld.shared.f32 {bv}, [smem + {other_idx} * 4];"));
+                    b.raw_ptx(&format!("ld.shared.f32 {a}, [{self_addr}];"));
+                    b.raw_ptx(&format!("ld.shared.f32 {bv}, [{other_addr}];"));
                     let s = b.add_f32(a, bv);
-                    b.raw_ptx(&format!("st.shared.f32 [smem + {tid} * 4], {s};"));
+                    b.raw_ptx(&format!("st.shared.f32 [{self_addr}], {s};"));
                 } else {
+                    let self_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mad.lo.u32 {self_addr}, {tid}, 8, {smem_base};"));
+                    let other_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!(
+                        "mad.lo.u32 {other_addr}, {other_idx}, 8, {smem_base};"
+                    ));
                     let a = b.alloc_reg(PtxType::F64);
                     let bv = b.alloc_reg(PtxType::F64);
-                    b.raw_ptx(&format!("ld.shared.f64 {a}, [smem + {tid} * 8];"));
-                    b.raw_ptx(&format!("ld.shared.f64 {bv}, [smem + {other_idx} * 8];"));
+                    b.raw_ptx(&format!("ld.shared.f64 {a}, [{self_addr}];"));
+                    b.raw_ptx(&format!("ld.shared.f64 {bv}, [{other_addr}];"));
                     let s = b.add_f64(a, bv);
-                    b.raw_ptx(&format!("st.shared.f64 [smem + {tid} * 8], {s};"));
+                    b.raw_ptx(&format!("st.shared.f64 [{self_addr}], {s};"));
                 }
 
                 b.label(&skip_red);
@@ -224,11 +246,11 @@ fn generate_global_avg_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
 
                 let final_sum = if T::PTX_TYPE == PtxType::F32 {
                     let r = b.alloc_reg(PtxType::F32);
-                    b.raw_ptx(&format!("ld.shared.f32 {r}, [smem];"));
+                    b.raw_ptx(&format!("ld.shared.f32 {r}, [{smem_base}];"));
                     r
                 } else {
                     let r = b.alloc_reg(PtxType::F64);
-                    b.raw_ptx(&format!("ld.shared.f64 {r}, [smem];"));
+                    b.raw_ptx(&format!("ld.shared.f64 {r}, [{smem_base}];"));
                     r
                 };
 
@@ -274,6 +296,10 @@ fn generate_global_max_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                 let plane_off = b.mul_lo_u32(bid.clone(), hw.clone());
                 let base_addr = b.byte_offset_addr(in_ptr, plane_off, T::size_u32());
 
+                // Base address of the shared array (see global_avg note).
+                let smem_base = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!("mov.u32 {smem_base}, smem;"));
+
                 let partial = load_float_imm::<T>(b, f64::NEG_INFINITY);
                 let i = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("mov.u32 {i}, {tid};"));
@@ -297,11 +323,15 @@ fn generate_global_max_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                 b.branch(&loop_lbl);
                 b.label(&end_lbl);
 
-                // Store to shared memory
+                // Store to shared memory (address pre-computed)
                 if T::PTX_TYPE == PtxType::F32 {
-                    b.raw_ptx(&format!("st.shared.f32 [smem + {tid} * 4], {partial};"));
+                    let st_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mad.lo.u32 {st_addr}, {tid}, 4, {smem_base};"));
+                    b.raw_ptx(&format!("st.shared.f32 [{st_addr}], {partial};"));
                 } else {
-                    b.raw_ptx(&format!("st.shared.f64 [smem + {tid} * 8], {partial};"));
+                    let st_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mad.lo.u32 {st_addr}, {tid}, 8, {smem_base};"));
+                    b.raw_ptx(&format!("st.shared.f64 [{st_addr}], {partial};"));
                 }
                 b.bar_sync(0);
 
@@ -325,20 +355,32 @@ fn generate_global_max_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
 
                 let other_idx = b.add_u32(tid.clone(), stride_reg.clone());
                 if T::PTX_TYPE == PtxType::F32 {
+                    let self_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mad.lo.u32 {self_addr}, {tid}, 4, {smem_base};"));
+                    let other_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!(
+                        "mad.lo.u32 {other_addr}, {other_idx}, 4, {smem_base};"
+                    ));
                     let a = b.alloc_reg(PtxType::F32);
                     let bv = b.alloc_reg(PtxType::F32);
-                    b.raw_ptx(&format!("ld.shared.f32 {a}, [smem + {tid} * 4];"));
-                    b.raw_ptx(&format!("ld.shared.f32 {bv}, [smem + {other_idx} * 4];"));
+                    b.raw_ptx(&format!("ld.shared.f32 {a}, [{self_addr}];"));
+                    b.raw_ptx(&format!("ld.shared.f32 {bv}, [{other_addr}];"));
                     let m = b.max_f32(a, bv);
-                    b.raw_ptx(&format!("st.shared.f32 [smem + {tid} * 4], {m};"));
+                    b.raw_ptx(&format!("st.shared.f32 [{self_addr}], {m};"));
                 } else {
+                    let self_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mad.lo.u32 {self_addr}, {tid}, 8, {smem_base};"));
+                    let other_addr = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!(
+                        "mad.lo.u32 {other_addr}, {other_idx}, 8, {smem_base};"
+                    ));
                     let a = b.alloc_reg(PtxType::F64);
                     let bv = b.alloc_reg(PtxType::F64);
-                    b.raw_ptx(&format!("ld.shared.f64 {a}, [smem + {tid} * 8];"));
-                    b.raw_ptx(&format!("ld.shared.f64 {bv}, [smem + {other_idx} * 8];"));
+                    b.raw_ptx(&format!("ld.shared.f64 {a}, [{self_addr}];"));
+                    b.raw_ptx(&format!("ld.shared.f64 {bv}, [{other_addr}];"));
                     let m = b.alloc_reg(PtxType::F64);
                     b.raw_ptx(&format!("max.f64 {m}, {a}, {bv};"));
-                    b.raw_ptx(&format!("st.shared.f64 [smem + {tid} * 8], {m};"));
+                    b.raw_ptx(&format!("st.shared.f64 [{self_addr}], {m};"));
                 }
 
                 b.label(&skip_red);
@@ -357,11 +399,11 @@ fn generate_global_max_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
 
                 let final_max = if T::PTX_TYPE == PtxType::F32 {
                     let r = b.alloc_reg(PtxType::F32);
-                    b.raw_ptx(&format!("ld.shared.f32 {r}, [smem];"));
+                    b.raw_ptx(&format!("ld.shared.f32 {r}, [{smem_base}];"));
                     r
                 } else {
                     let r = b.alloc_reg(PtxType::F64);
-                    b.raw_ptx(&format!("ld.shared.f64 {r}, [smem];"));
+                    b.raw_ptx(&format!("ld.shared.f64 {r}, [{smem_base}];"));
                     r
                 };
 

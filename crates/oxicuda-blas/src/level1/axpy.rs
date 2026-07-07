@@ -3,9 +3,6 @@
 //! The classic BLAS Level 1 operation that scales vector `x` by scalar `alpha`
 //! and adds the result to vector `y` in-place.
 
-use std::sync::Arc;
-
-use oxicuda_driver::Module;
 use oxicuda_launch::{Kernel, LaunchParams, grid_size_for};
 use oxicuda_memory::DeviceBuffer;
 use oxicuda_ptx::prelude::*;
@@ -72,10 +69,12 @@ pub fn axpy<T: GpuFloat>(
         });
     }
 
-    // Generate PTX kernel.
-    let ptx = generate_axpy_ptx::<T>(handle.sm_version())?;
-    let module = Arc::new(Module::from_ptx(&ptx)?);
-    let kernel = Kernel::from_module(module, &axpy_kernel_name::<T>())?;
+    // Fetch the compiled kernel from the handle's module cache, generating and
+    // JIT-compiling its PTX only on the first call for this precision.
+    let kernel_name = axpy_kernel_name::<T>();
+    let sm = handle.sm_version();
+    let module = handle.get_or_compile_module(&kernel_name, || generate_axpy_ptx::<T>(sm))?;
+    let kernel = Kernel::from_module(module, &kernel_name)?;
 
     let grid = grid_size_for(n, L1_BLOCK_SIZE);
     let params = LaunchParams::new(grid, L1_BLOCK_SIZE);

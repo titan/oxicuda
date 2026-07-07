@@ -25,7 +25,10 @@ use oxicuda_ptx::prelude::*;
 
 use crate::error::{SolverError, SolverResult};
 use crate::handle::SolverHandle;
-use crate::ptx_helpers::SOLVER_BLOCK_SIZE;
+use crate::ptx_helpers::{
+    SOLVER_BLOCK_SIZE, abs_float, div_float, load_global_float, mul_float, sqrt_float,
+    store_global_float, sub_float,
+};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -133,6 +136,11 @@ impl BatchedSolver {
         let ws_bytes = shared_per_matrix * matrices_per_block;
         self.handle.ensure_workspace(ws_bytes)?;
 
+        // Per-batch-element failure flag: 0 on success, else the 1-based
+        // column at which the LU pivot magnitude fell below the singularity
+        // threshold (see `emit_batched_lu`).
+        let info = DeviceBuffer::<i32>::zeroed(batch_count)?;
+
         // Generate and launch batched LU PTX kernel.
         let sm = self.handle.sm_version();
         let ptx = emit_batched_lu::<T>(sm, n)?;
@@ -147,12 +155,22 @@ impl BatchedSolver {
         let args = (
             matrices.as_device_ptr(),
             pivots.as_device_ptr(),
+            info.as_device_ptr(),
             n as u32,
             batch_count as u32,
         );
         kernel.launch(&params, self.handle.stream(), &args)?;
+        // The kernel runs on `self.handle`'s own stream; an explicit
+        // synchronize (rather than relying on `copy_to_host`'s blocking
+        // memcpy to also fence *other* streams, which is not guaranteed) is
+        // required before the info readback below observes every write.
+        self.handle.stream().synchronize()?;
 
-        Ok(BatchedResult { failed_count: 0 })
+        let mut info_host = vec![0i32; batch_count];
+        info.copy_to_host(&mut info_host)?;
+        let failed_count = info_host.iter().filter(|&&v| v != 0).count();
+
+        Ok(BatchedResult { failed_count })
     }
 
     /// Batched QR factorization.
@@ -264,6 +282,11 @@ impl BatchedSolver {
         let ws_bytes = shared_per_matrix * mpb;
         self.handle.ensure_workspace(ws_bytes)?;
 
+        // Per-batch-element failure flag: 0 on success, else the 1-based
+        // column at which the diagonal was non-positive before the square
+        // root (i.e. the matrix is not SPD); see `emit_batched_cholesky`.
+        let info = DeviceBuffer::<i32>::zeroed(batch_count)?;
+
         let sm = self.handle.sm_version();
         let ptx = emit_batched_cholesky::<T>(sm, n)?;
         let module = Arc::new(Module::from_ptx(&ptx)?);
@@ -274,10 +297,23 @@ impl BatchedSolver {
         let shared_bytes = (shared_per_matrix * mpb) as u32;
         let params = LaunchParams::new(grid, block).with_shared_mem(shared_bytes);
 
-        let args = (matrices.as_device_ptr(), n as u32, batch_count as u32);
+        let args = (
+            matrices.as_device_ptr(),
+            info.as_device_ptr(),
+            n as u32,
+            batch_count as u32,
+        );
         kernel.launch(&params, self.handle.stream(), &args)?;
+        // See the matching comment in `batched_lu`: an explicit synchronize
+        // is required before the info readback below is guaranteed to see
+        // the kernel's writes.
+        self.handle.stream().synchronize()?;
 
-        Ok(BatchedResult { failed_count: 0 })
+        let mut info_host = vec![0i32; batch_count];
+        info.copy_to_host(&mut info_host)?;
+        let failed_count = info_host.iter().filter(|&&v| v != 0).count();
+
+        Ok(BatchedResult { failed_count })
     }
 
     /// Batched linear solve using LU: solve `A_i * X_i = B_i` for each `i`.
@@ -451,57 +487,275 @@ fn batched_solve_name<T: GpuFloat>(n: usize, nrhs: usize) -> String {
     format!("solver_batched_solve_{}_{}_{}", T::NAME, n, nrhs)
 }
 
+/// Computes the device address of a batched-matrix element given the
+/// precomputed column offset `col_off = col * n` (column-major, contiguous
+/// `n x n` storage per batch element): `mat_base + (row + col_off) *
+/// sizeof(T)`. Mirrors `panel_elem_addr` in `dense::lu`.
+fn batched_elem_addr<T: GpuFloat>(
+    b: &mut BodyBuilder<'_>,
+    mat_base: &Register,
+    row: &Register,
+    col_off: &Register,
+) -> Register {
+    let idx = b.add_u32(row.clone(), col_off.clone());
+    b.byte_offset_addr(mat_base.clone(), idx, T::size_u32())
+}
+
+/// Emits a float immediate of type `T` into a fresh register.
+///
+/// Uses PTX hexadecimal float literals (`0d…` for `f64`, `0f…` for `f32`) so
+/// the exact bit pattern is preserved across the assembler. Mirrors
+/// `emit_float_const` in `dense::lu`.
+fn batched_float_const<T: GpuFloat>(b: &mut BodyBuilder<'_>, value: f64) -> Register {
+    let dst = b.alloc_reg(T::PTX_TYPE);
+    if T::SIZE == 8 {
+        let bits = value.to_bits();
+        b.raw_ptx(&format!("mov.f64 {dst}, 0d{bits:016X};"));
+    } else {
+        let bits = (value as f32).to_bits();
+        b.raw_ptx(&format!("mov.f32 {dst}, 0f{bits:08X};"));
+    }
+    dst
+}
+
 /// Emits PTX for batched LU factorization with partial pivoting.
 ///
-/// Each thread block processes one (or several small) matrices entirely in
-/// shared memory. The algorithm performs column-by-column LU with partial
-/// pivoting using warp shuffle for iamax.
+/// Each thread block processes `matrices_per_block(n)` matrices (one for
+/// `n > SMALL_MATRIX_THRESHOLD`, several packed together for smaller `n`).
+/// Within a matrix, thread `t` (`t < n`) owns column `t` and the four
+/// classic right-looking Doolittle phases — pivot search, row swap, column
+/// scaling, rank-1 trailing update — are separated by block-wide barriers,
+/// mirroring [`crate::dense::lu::emit_panel_lu`] but addressing many
+/// independent `n x n` matrices per launch instead of a single panel.
+///
+/// Every thread in the block (including those that own no valid column,
+/// because `n` doesn't fill a whole thread-group, or whose matrix index is
+/// beyond `batch_count` in a partially-filled trailing block) still executes
+/// every `bar.sync` — only the per-phase *work* is predicated on an
+/// `inactive` flag — so the barriers can never see a partial subset of the
+/// CTA and deadlock.
+///
+/// On a (near-)zero pivot the owning thread writes the 1-based failing
+/// column into `info[batch_idx]` (left at `0` by the caller's zeroed buffer
+/// on success) and the factorization continues past that column exactly as
+/// [`crate::dense::lu::emit_panel_lu`] does, so the caller can report
+/// `failed_count` without the rest of the batch aborting.
 pub(crate) fn emit_batched_lu<T: GpuFloat>(sm: SmVersion, n: usize) -> SolverResult<String> {
     let name = batched_lu_name::<T>(n);
-    let float_ty = T::PTX_TYPE;
+    let suffix = T::PTX_TYPE.as_ptx_str();
+    // Threshold below which a pivot is treated as numerically zero (singular).
+    let tiny: f64 = 1e-30;
+
+    // Compile-time launch geometry (mirrors `matrices_per_block`/
+    // `compute_block_size` exactly, so the host's launch config and this
+    // kernel's batch-index arithmetic always agree).
+    let mpb = matrices_per_block(n) as u32;
+    let group_size = compute_block_size(n) / mpb;
 
     let ptx = KernelBuilder::new(&name)
         .target(sm)
         .max_threads_per_block(SOLVER_BLOCK_SIZE)
         .param("matrices_ptr", PtxType::U64)
         .param("pivots_ptr", PtxType::U64)
+        .param("info_ptr", PtxType::U64)
         .param("n", PtxType::U32)
         .param("batch_count", PtxType::U32)
         .body(move |b| {
-            let bid = b.block_id_x();
             let tid = b.thread_id_x();
+            let bid = b.block_id_x();
             let batch_count_reg = b.load_param_u32("batch_count");
             let n_reg = b.load_param_u32("n");
+            let matrices_ptr = b.load_param_u64("matrices_ptr");
+            let pivots_ptr = b.load_param_u64("pivots_ptr");
+            let info_ptr = b.load_param_u64("info_ptr");
 
-            // Compute batch index from block ID, accounting for packing.
-            // For small matrices, multiple matrices share one block.
-            // batch_idx = bid * matrices_per_block + (tid / threads_per_matrix).
+            // group_idx = tid / group_size (which matrix, within this block);
+            // tig        = tid % group_size (which column of that matrix).
+            let group_idx = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("div.u32 {group_idx}, {tid}, {group_size};"));
+            let tig = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("rem.u32 {tig}, {tid}, {group_size};"));
+            let mpb_reg = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("mov.u32 {mpb_reg}, {mpb};"));
+            let batch_idx = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!(
+                "mad.lo.u32 {batch_idx}, {bid}, {mpb_reg}, {group_idx};"
+            ));
 
-            b.if_lt_u32(bid.clone(), batch_count_reg, |b| {
-                let matrices_ptr = b.load_param_u64("matrices_ptr");
-                let pivots_ptr = b.load_param_u64("pivots_ptr");
+            // `inactive`: this thread owns no valid column of a matrix in
+            // range. Every phase below still falls through to its closing
+            // `bar.sync` for inactive threads; only the work is skipped.
+            let inactive = b.alloc_reg(PtxType::Pred);
+            let p_tig = b.alloc_reg(PtxType::Pred);
+            let p_batch = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {p_tig}, {tig}, {n_reg};"));
+            b.raw_ptx(&format!(
+                "setp.ge.u32 {p_batch}, {batch_idx}, {batch_count_reg};"
+            ));
+            b.raw_ptx(&format!("or.pred {inactive}, {p_tig}, {p_batch};"));
 
-                // Compute matrix offset: batch_idx * n * n * sizeof(T).
-                let n2 = b.mul_lo_u32(n_reg.clone(), n_reg.clone());
-                let mat_offset = b.mul_lo_u32(bid.clone(), n2.clone());
-                let _mat_base = b.byte_offset_addr(matrices_ptr, mat_offset, T::size_u32());
+            // Per-matrix base addresses (column-major, contiguous n x n).
+            let n2 = b.mul_lo_u32(n_reg.clone(), n_reg.clone());
+            let mat_offset = b.mul_lo_u32(batch_idx.clone(), n2);
+            let mat_base = b.byte_offset_addr(matrices_ptr, mat_offset, T::size_u32());
+            let piv_offset = b.mul_lo_u32(batch_idx.clone(), n_reg.clone());
+            let piv_base = b.byte_offset_addr(pivots_ptr, piv_offset, 4u32);
+            let info_addr = b.byte_offset_addr(info_ptr, batch_idx, 4u32);
 
-                // Compute pivot offset: batch_idx * n * sizeof(i32).
-                let piv_offset = b.mul_lo_u32(bid, n_reg);
-                let _piv_base = b.byte_offset_addr(pivots_ptr, piv_offset, 4u32);
+            let k = b.alloc_reg(PtxType::U32);
+            let prow = b.alloc_reg(PtxType::U32);
+            let rr = b.alloc_reg(PtxType::U32);
+            let colk = b.alloc_reg(PtxType::U32);
+            let colt = b.alloc_reg(PtxType::U32);
+            let maxabs = b.alloc_reg(T::PTX_TYPE);
 
-                // The kernel body: load matrix into shared memory, perform
-                // column-by-column LU with partial pivoting, write back.
-                //
-                // For each column k = 0..n:
-                //   1. Find pivot: thread reduction over |A[k:n, k]| for iamax.
-                //   2. Swap rows: swap row k with pivot row.
-                //   3. Scale: A[i, k] /= A[k, k] for i > k (parallel over threads).
-                //   4. Update: A[i, j] -= A[i, k] * A[k, j] for i > k, j > k.
-                //   5. Record pivot index.
+            b.raw_ptx(&format!("mov.u32 {k}, 0;"));
+            let k_loop = b.fresh_label("blu_k");
+            let k_exit = b.fresh_label("blu_kx");
+            b.raw_ptx(&format!("{k_loop}:"));
+            let k_done = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {k_done}, {k}, {n_reg};"));
+            b.raw_ptx(&format!("@{k_done} bra {k_exit};"));
 
-                let _ = (tid, float_ty);
-            });
+            b.raw_ptx(&format!("mul.lo.u32 {colk}, {k}, {n_reg};"));
+
+            // ---- Phase 1: pivot search (rows k..n of column k) -----------
+            let p1_end = b.fresh_label("blu_p1e");
+            b.raw_ptx(&format!("@{inactive} bra {p1_end};"));
+            {
+                let zero_lit = if T::SIZE == 8 {
+                    "0d0000000000000000"
+                } else {
+                    "0f00000000"
+                };
+                b.raw_ptx(&format!("mov{suffix} {maxabs}, {zero_lit};"));
+                b.raw_ptx(&format!("mov.u32 {prow}, {k};"));
+                b.raw_ptx(&format!("mov.u32 {rr}, {k};"));
+                let s_loop = b.fresh_label("blu_s");
+                let s_exit = b.fresh_label("blu_sx");
+                b.raw_ptx(&format!("{s_loop}:"));
+                let s_done = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ge.u32 {s_done}, {rr}, {n_reg};"));
+                b.raw_ptx(&format!("@{s_done} bra {s_exit};"));
+                let addr = batched_elem_addr::<T>(b, &mat_base, &rr, &colk);
+                let v = load_global_float::<T>(b, addr);
+                let av = abs_float::<T>(b, v);
+                let gt = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.gt{suffix} {gt}, {av}, {maxabs};"));
+                b.raw_ptx(&format!("@{gt} mov{suffix} {maxabs}, {av};"));
+                b.raw_ptx(&format!("@{gt} mov.u32 {prow}, {rr};"));
+                b.raw_ptx(&format!("add.u32 {rr}, {rr}, 1;"));
+                b.raw_ptx(&format!("bra {s_loop};"));
+                b.raw_ptx(&format!("{s_exit}:"));
+
+                // Owner of column k records the pivot row.
+                let not_owner = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ne.u32 {not_owner}, {tig}, {k};"));
+                let skip_write = b.fresh_label("blu_pw");
+                b.raw_ptx(&format!("@{not_owner} bra {skip_write};"));
+                let paddr = b.byte_offset_addr(piv_base.clone(), k.clone(), 4u32);
+                b.raw_ptx(&format!("st.global.u32 [{paddr}], {prow};"));
+                b.raw_ptx(&format!("{skip_write}:"));
+            }
+            b.raw_ptx(&format!("{p1_end}:"));
+            b.bar_sync(0);
+
+            // ---- Phase 2: swap rows k / prow in this thread's column -----
+            b.raw_ptx(&format!("mul.lo.u32 {colt}, {tig}, {n_reg};"));
+            let p2_end = b.fresh_label("blu_p2e");
+            b.raw_ptx(&format!("@{inactive} bra {p2_end};"));
+            let no_swap = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.eq.u32 {no_swap}, {prow}, {k};"));
+            b.raw_ptx(&format!("@{no_swap} bra {p2_end};"));
+            {
+                let ak_addr = batched_elem_addr::<T>(b, &mat_base, &k, &colt);
+                let ap_addr = batched_elem_addr::<T>(b, &mat_base, &prow, &colt);
+                let vk = load_global_float::<T>(b, ak_addr.clone());
+                let vp = load_global_float::<T>(b, ap_addr.clone());
+                store_global_float::<T>(b, ak_addr, vp);
+                store_global_float::<T>(b, ap_addr, vk);
+            }
+            b.raw_ptx(&format!("{p2_end}:"));
+            b.bar_sync(0);
+
+            // ---- Phase 3: scale sub-diagonal of column k (owner of k) ----
+            let p3_end = b.fresh_label("blu_p3e");
+            b.raw_ptx(&format!("@{inactive} bra {p3_end};"));
+            let not_owner3 = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ne.u32 {not_owner3}, {tig}, {k};"));
+            b.raw_ptx(&format!("@{not_owner3} bra {p3_end};"));
+            {
+                let akk_addr = batched_elem_addr::<T>(b, &mat_base, &k, &colk);
+                let pivot = load_global_float::<T>(b, akk_addr);
+                let apv = abs_float::<T>(b, pivot.clone());
+                let tiny_reg = batched_float_const::<T>(b, tiny);
+                let singular = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.le{suffix} {singular}, {apv}, {tiny_reg};"));
+                let do_scale = b.fresh_label("blu_sc");
+                let after_scale = b.fresh_label("blu_sce");
+                b.raw_ptx(&format!("@!{singular} bra {do_scale};"));
+                {
+                    let one = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mov.u32 {one}, 1;"));
+                    let kp1 = b.add_u32(k.clone(), one);
+                    b.raw_ptx(&format!("st.global.u32 [{info_addr}], {kp1};"));
+                }
+                b.raw_ptx(&format!("bra {after_scale};"));
+                b.raw_ptx(&format!("{do_scale}:"));
+                {
+                    b.raw_ptx(&format!("add.u32 {rr}, {k}, 1;"));
+                    let c_loop = b.fresh_label("blu_c");
+                    let c_exit = b.fresh_label("blu_cx");
+                    b.raw_ptx(&format!("{c_loop}:"));
+                    let c_done = b.alloc_reg(PtxType::Pred);
+                    b.raw_ptx(&format!("setp.ge.u32 {c_done}, {rr}, {n_reg};"));
+                    b.raw_ptx(&format!("@{c_done} bra {c_exit};"));
+                    let addr = batched_elem_addr::<T>(b, &mat_base, &rr, &colk);
+                    let v = load_global_float::<T>(b, addr.clone());
+                    let scaled = div_float::<T>(b, v, pivot.clone());
+                    store_global_float::<T>(b, addr, scaled);
+                    b.raw_ptx(&format!("add.u32 {rr}, {rr}, 1;"));
+                    b.raw_ptx(&format!("bra {c_loop};"));
+                    b.raw_ptx(&format!("{c_exit}:"));
+                }
+                b.raw_ptx(&format!("{after_scale}:"));
+            }
+            b.raw_ptx(&format!("{p3_end}:"));
+            b.bar_sync(0);
+
+            // ---- Phase 4: rank-1 trailing update (owners k < tig < n) ----
+            let p4_end = b.fresh_label("blu_p4e");
+            b.raw_ptx(&format!("@{inactive} bra {p4_end};"));
+            let le_k = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.le.u32 {le_k}, {tig}, {k};"));
+            b.raw_ptx(&format!("@{le_k} bra {p4_end};"));
+            {
+                let akc_addr = batched_elem_addr::<T>(b, &mat_base, &k, &colt);
+                let akc = load_global_float::<T>(b, akc_addr);
+                b.raw_ptx(&format!("add.u32 {rr}, {k}, 1;"));
+                let t_loop = b.fresh_label("blu_t");
+                let t_exit = b.fresh_label("blu_tx");
+                b.raw_ptx(&format!("{t_loop}:"));
+                let t_done = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ge.u32 {t_done}, {rr}, {n_reg};"));
+                b.raw_ptx(&format!("@{t_done} bra {t_exit};"));
+                let ark_addr = batched_elem_addr::<T>(b, &mat_base, &rr, &colk);
+                let ark = load_global_float::<T>(b, ark_addr);
+                let arc_addr = batched_elem_addr::<T>(b, &mat_base, &rr, &colt);
+                let arc = load_global_float::<T>(b, arc_addr.clone());
+                let prod = mul_float::<T>(b, ark, akc.clone());
+                let upd = sub_float::<T>(b, arc, prod);
+                store_global_float::<T>(b, arc_addr, upd);
+                b.raw_ptx(&format!("add.u32 {rr}, {rr}, 1;"));
+                b.raw_ptx(&format!("bra {t_loop};"));
+                b.raw_ptx(&format!("{t_exit}:"));
+            }
+            b.raw_ptx(&format!("{p4_end}:"));
+            b.bar_sync(0);
+
+            b.raw_ptx(&format!("add.u32 {k}, {k}, 1;"));
+            b.raw_ptx(&format!("bra {k_loop};"));
+            b.raw_ptx(&format!("{k_exit}:"));
 
             b.ret();
         })
@@ -570,39 +824,164 @@ pub(crate) fn emit_batched_qr<T: GpuFloat>(
 
 /// Emits PTX for batched Cholesky factorization.
 ///
-/// Each thread block processes one SPD matrix in shared memory, computing
-/// the lower triangular Cholesky factor column by column.
+/// Each thread block processes `matrices_per_block(n)` matrices, mirroring
+/// [`emit_batched_lu`]'s batch-index/inactivity-predicate scheme. Within a
+/// matrix, thread `t` (`t < n`) owns column `t`. For each pivot `k = 0..n`:
+///
+/// 1. the owner of `k` takes the square root of the (already-updated)
+///    diagonal and scales its sub-diagonal: `A[i,k] /= sqrt(A[k,k])` — or, on
+///    a non-positive diagonal, records the 1-based failing column into
+///    `info[batch_idx]` and skips the scale (the matrix is not SPD);
+/// 2. every owner `t` with `k < t < n` applies the rank-1 trailing update to
+///    its own column `A[i,t] -= A[i,k] * A[t,k]` for `i = t..n`.
+///
+/// This is the batched analogue of
+/// [`crate::dense::cholesky::emit_panel_cholesky`] (`Lower` triangle only,
+/// since batched callers always want a single fixed layout).
 pub(crate) fn emit_batched_cholesky<T: GpuFloat>(sm: SmVersion, n: usize) -> SolverResult<String> {
     let name = batched_cholesky_name::<T>(n);
-    let float_ty = T::PTX_TYPE;
+    let suffix = T::PTX_TYPE.as_ptx_str();
+
+    let mpb = matrices_per_block(n) as u32;
+    let group_size = compute_block_size(n) / mpb;
 
     let ptx = KernelBuilder::new(&name)
         .target(sm)
         .max_threads_per_block(SOLVER_BLOCK_SIZE)
         .param("matrices_ptr", PtxType::U64)
+        .param("info_ptr", PtxType::U64)
         .param("n", PtxType::U32)
         .param("batch_count", PtxType::U32)
         .body(move |b| {
-            let bid = b.block_id_x();
             let tid = b.thread_id_x();
+            let bid = b.block_id_x();
             let batch_count_reg = b.load_param_u32("batch_count");
             let n_reg = b.load_param_u32("n");
+            let matrices_ptr = b.load_param_u64("matrices_ptr");
+            let info_ptr = b.load_param_u64("info_ptr");
 
-            b.if_lt_u32(bid.clone(), batch_count_reg, |b| {
-                let matrices_ptr = b.load_param_u64("matrices_ptr");
+            let group_idx = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("div.u32 {group_idx}, {tid}, {group_size};"));
+            let tig = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("rem.u32 {tig}, {tid}, {group_size};"));
+            let mpb_reg = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!("mov.u32 {mpb_reg}, {mpb};"));
+            let batch_idx = b.alloc_reg(PtxType::U32);
+            b.raw_ptx(&format!(
+                "mad.lo.u32 {batch_idx}, {bid}, {mpb_reg}, {group_idx};"
+            ));
 
-                let n2 = b.mul_lo_u32(n_reg.clone(), n_reg.clone());
-                let mat_offset = b.mul_lo_u32(bid, n2);
-                let _mat_base = b.byte_offset_addr(matrices_ptr, mat_offset, T::size_u32());
+            let inactive = b.alloc_reg(PtxType::Pred);
+            let p_tig = b.alloc_reg(PtxType::Pred);
+            let p_batch = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {p_tig}, {tig}, {n_reg};"));
+            b.raw_ptx(&format!(
+                "setp.ge.u32 {p_batch}, {batch_idx}, {batch_count_reg};"
+            ));
+            b.raw_ptx(&format!("or.pred {inactive}, {p_tig}, {p_batch};"));
 
-                // Cholesky in shared memory:
-                // For each column k = 0..n:
-                //   1. A[k,k] = sqrt(A[k,k]) (thread 0)
-                //   2. A[i,k] /= A[k,k] for i > k (parallel)
-                //   3. A[i,j] -= A[i,k] * A[j,k] for i >= j > k (parallel)
+            let n2 = b.mul_lo_u32(n_reg.clone(), n_reg.clone());
+            let mat_offset = b.mul_lo_u32(batch_idx.clone(), n2);
+            let mat_base = b.byte_offset_addr(matrices_ptr, mat_offset, T::size_u32());
+            let info_addr = b.byte_offset_addr(info_ptr, batch_idx, 4u32);
 
-                let _ = (tid, float_ty, n_reg);
-            });
+            let k = b.alloc_reg(PtxType::U32);
+            let rr = b.alloc_reg(PtxType::U32);
+            let colk = b.alloc_reg(PtxType::U32);
+            let colt = b.alloc_reg(PtxType::U32);
+
+            b.raw_ptx(&format!("mov.u32 {k}, 0;"));
+            let k_loop = b.fresh_label("bch_k");
+            let k_exit = b.fresh_label("bch_kx");
+            b.raw_ptx(&format!("{k_loop}:"));
+            let k_done = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ge.u32 {k_done}, {k}, {n_reg};"));
+            b.raw_ptx(&format!("@{k_done} bra {k_exit};"));
+
+            b.raw_ptx(&format!("mul.lo.u32 {colk}, {k}, {n_reg};"));
+
+            // ---- Phase A: owner of column k factors the diagonal + scales
+            let pa_end = b.fresh_label("bch_pae");
+            b.raw_ptx(&format!("@{inactive} bra {pa_end};"));
+            let not_owner = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.ne.u32 {not_owner}, {tig}, {k};"));
+            b.raw_ptx(&format!("@{not_owner} bra {pa_end};"));
+            {
+                let akk_addr = batched_elem_addr::<T>(b, &mat_base, &k, &colk);
+                let akk = load_global_float::<T>(b, akk_addr.clone());
+                let zero_reg = batched_float_const::<T>(b, 0.0);
+                let non_positive = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!(
+                    "setp.le{suffix} {non_positive}, {akk}, {zero_reg};"
+                ));
+                let fail_branch = b.fresh_label("bch_fail");
+                let after_scale = b.fresh_label("bch_sce");
+                b.raw_ptx(&format!("@{non_positive} bra {fail_branch};"));
+                {
+                    let diag = sqrt_float::<T>(b, akk);
+                    store_global_float::<T>(b, akk_addr, diag.clone());
+                    b.raw_ptx(&format!("add.u32 {rr}, {k}, 1;"));
+                    let s_loop = b.fresh_label("bch_s");
+                    let s_exit = b.fresh_label("bch_sx");
+                    b.raw_ptx(&format!("{s_loop}:"));
+                    let s_done = b.alloc_reg(PtxType::Pred);
+                    b.raw_ptx(&format!("setp.ge.u32 {s_done}, {rr}, {n_reg};"));
+                    b.raw_ptx(&format!("@{s_done} bra {s_exit};"));
+                    let addr = batched_elem_addr::<T>(b, &mat_base, &rr, &colk);
+                    let v = load_global_float::<T>(b, addr.clone());
+                    let scaled = div_float::<T>(b, v, diag.clone());
+                    store_global_float::<T>(b, addr, scaled);
+                    b.raw_ptx(&format!("add.u32 {rr}, {rr}, 1;"));
+                    b.raw_ptx(&format!("bra {s_loop};"));
+                    b.raw_ptx(&format!("{s_exit}:"));
+                }
+                b.raw_ptx(&format!("bra {after_scale};"));
+                b.raw_ptx(&format!("{fail_branch}:"));
+                {
+                    let one = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mov.u32 {one}, 1;"));
+                    let kp1 = b.add_u32(k.clone(), one);
+                    b.raw_ptx(&format!("st.global.u32 [{info_addr}], {kp1};"));
+                }
+                b.raw_ptx(&format!("{after_scale}:"));
+            }
+            b.raw_ptx(&format!("{pa_end}:"));
+            b.bar_sync(0);
+
+            // ---- Phase B: owners k < tig < n apply the trailing update ----
+            b.raw_ptx(&format!("mul.lo.u32 {colt}, {tig}, {n_reg};"));
+            let pb_end = b.fresh_label("bch_pbe");
+            b.raw_ptx(&format!("@{inactive} bra {pb_end};"));
+            let le_k = b.alloc_reg(PtxType::Pred);
+            b.raw_ptx(&format!("setp.le.u32 {le_k}, {tig}, {k};"));
+            b.raw_ptx(&format!("@{le_k} bra {pb_end};"));
+            {
+                let lck_addr = batched_elem_addr::<T>(b, &mat_base, &tig, &colk);
+                let lck = load_global_float::<T>(b, lck_addr);
+                b.raw_ptx(&format!("mov.u32 {rr}, {tig};"));
+                let t_loop = b.fresh_label("bch_t");
+                let t_exit = b.fresh_label("bch_tx");
+                b.raw_ptx(&format!("{t_loop}:"));
+                let t_done = b.alloc_reg(PtxType::Pred);
+                b.raw_ptx(&format!("setp.ge.u32 {t_done}, {rr}, {n_reg};"));
+                b.raw_ptx(&format!("@{t_done} bra {t_exit};"));
+                let lik_addr = batched_elem_addr::<T>(b, &mat_base, &rr, &colk);
+                let lik = load_global_float::<T>(b, lik_addr);
+                let aic_addr = batched_elem_addr::<T>(b, &mat_base, &rr, &colt);
+                let aic = load_global_float::<T>(b, aic_addr.clone());
+                let prod = mul_float::<T>(b, lik, lck.clone());
+                let upd = sub_float::<T>(b, aic, prod);
+                store_global_float::<T>(b, aic_addr, upd);
+                b.raw_ptx(&format!("add.u32 {rr}, {rr}, 1;"));
+                b.raw_ptx(&format!("bra {t_loop};"));
+                b.raw_ptx(&format!("{t_exit}:"));
+            }
+            b.raw_ptx(&format!("{pb_end}:"));
+            b.bar_sync(0);
+
+            b.raw_ptx(&format!("add.u32 {k}, {k}, 1;"));
+            b.raw_ptx(&format!("bra {k_loop};"));
+            b.raw_ptx(&format!("{k_exit}:"));
 
             b.ret();
         })

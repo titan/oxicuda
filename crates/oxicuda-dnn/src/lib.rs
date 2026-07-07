@@ -35,6 +35,9 @@ pub mod types;
 pub(crate) mod ptx_helpers;
 pub(crate) mod tensor_util;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
 // ---------------------------------------------------------------------------
 // Re-exports
 // ---------------------------------------------------------------------------

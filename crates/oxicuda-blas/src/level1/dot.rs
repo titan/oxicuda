@@ -9,9 +9,6 @@
 //! 2. **Phase 2**: A single block reduces the partial results to the final
 //!    scalar, written to `result`.
 
-use std::sync::Arc;
-
-use oxicuda_driver::Module;
 use oxicuda_launch::{Kernel, LaunchParams, grid_size_for};
 use oxicuda_memory::DeviceBuffer;
 use oxicuda_ptx::prelude::*;
@@ -87,9 +84,9 @@ pub fn dot<T: GpuFloat>(
     // Phase 1: partial dot products per block.
     let partials = DeviceBuffer::<T>::zeroed(num_blocks as usize)?;
 
-    let ptx_p1 = generate_dot_phase1_ptx::<T>(sm)?;
-    let module_p1 = Arc::new(Module::from_ptx(&ptx_p1)?);
-    let kernel_p1 = Kernel::from_module(module_p1, &dot_phase1_name::<T>())?;
+    let p1_name = dot_phase1_name::<T>();
+    let module_p1 = handle.get_or_compile_module(&p1_name, || generate_dot_phase1_ptx::<T>(sm))?;
+    let kernel_p1 = Kernel::from_module(module_p1, &p1_name)?;
 
     let params_p1 =
         LaunchParams::new(num_blocks, L1_BLOCK_SIZE).with_shared_mem(L1_BLOCK_SIZE * T::size_u32());
@@ -105,9 +102,10 @@ pub fn dot<T: GpuFloat>(
     kernel_p1.launch(&params_p1, handle.stream(), &args_p1)?;
 
     // Phase 2: reduce partial results to a single scalar.
-    let ptx_p2 = generate_reduce_sum_phase2_ptx::<T>(sm)?;
-    let module_p2 = Arc::new(Module::from_ptx(&ptx_p2)?);
-    let kernel_p2 = Kernel::from_module(module_p2, &reduce_sum_phase2_name::<T>())?;
+    let p2_name = reduce_sum_phase2_name::<T>();
+    let module_p2 =
+        handle.get_or_compile_module(&p2_name, || generate_reduce_sum_phase2_ptx::<T>(sm))?;
+    let kernel_p2 = Kernel::from_module(module_p2, &p2_name)?;
 
     let p2_n = num_blocks;
     let p2_blocks = grid_size_for(p2_n, L1_BLOCK_SIZE);

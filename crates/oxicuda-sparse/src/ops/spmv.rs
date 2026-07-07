@@ -1068,3 +1068,224 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::{assert_close, gpu_handle};
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+    use oxicuda_memory::DeviceBuffer;
+
+    /// CPU oracle for `y = alpha * A * x + beta * y0` over a CSR matrix
+    /// (row count is derived from `row_ptr`).
+    fn cpu_csr_spmv(
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        x: &[f64],
+        y0: &[f64],
+        alpha: f64,
+        beta: f64,
+    ) -> Vec<f64> {
+        let rows = row_ptr.len() - 1;
+        let mut y = vec![0.0_f64; rows];
+        for (i, slot) in y.iter_mut().enumerate() {
+            let start = row_ptr[i] as usize;
+            let end = row_ptr[i + 1] as usize;
+            let mut acc = 0.0_f64;
+            for k in start..end {
+                acc += values[k] * x[col_idx[k] as usize];
+            }
+            *slot = alpha * acc + beta * y0[i];
+        }
+        y
+    }
+
+    /// Drive the production `spmv` op for one element type and compare to the
+    /// CPU oracle.
+    #[allow(clippy::too_many_arguments)]
+    fn run_spmv<T: GpuFloat>(
+        algo: SpMVAlgo,
+        rows: u32,
+        cols: u32,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        x: &[f64],
+        y0: &[f64],
+        alpha: f64,
+        beta: f64,
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let dev_values: Vec<T> = values.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let a = CsrMatrix::<T>::from_host(rows, cols, row_ptr, col_idx, &dev_values)
+            .expect("test: build CSR");
+        let dev_x: Vec<T> = x.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let dev_y: Vec<T> = y0.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let x_buf = DeviceBuffer::from_host(&dev_x).expect("test: upload x");
+        let y_buf = DeviceBuffer::from_host(&dev_y).expect("test: upload y");
+
+        spmv::<T>(
+            &handle,
+            algo,
+            f64_to_gpu::<T>(alpha),
+            &a,
+            x_buf.as_device_ptr(),
+            f64_to_gpu::<T>(beta),
+            y_buf.as_device_ptr(),
+        )
+        .expect("test: spmv launch");
+        handle.stream().synchronize().expect("test: sync");
+
+        let mut out = vec![T::gpu_zero(); rows as usize];
+        y_buf.copy_to_host(&mut out).expect("test: download y");
+        let got: Vec<f64> = out.iter().map(|&v| gpu_to_f64(v)).collect();
+        let want = cpu_csr_spmv(row_ptr, col_idx, values, x, y0, alpha, beta);
+        assert_close(&got, &want, tol, tag);
+    }
+
+    /// 4x4 symmetric tridiagonal-ish matrix with a dense-ish last row.
+    fn matrix_4x4() -> (u32, u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        // [ 2 -1  0  0]
+        // [-1  2 -1  0]
+        // [ 0 -1  2 -1]
+        // [ 3  0 -1  4]
+        let row_ptr = vec![0, 2, 5, 8, 11];
+        let col_idx = vec![0, 1, 0, 1, 2, 1, 2, 3, 0, 2, 3];
+        let values = vec![2.0, -1.0, -1.0, 2.0, -1.0, -1.0, 2.0, -1.0, 3.0, -1.0, 4.0];
+        (4, 4, row_ptr, col_idx, values)
+    }
+
+    /// Wider matrix (5x5, ~8 nnz/row average via banded structure) to exercise
+    /// the warp/vector kernel path.
+    fn matrix_6x6_banded() -> (u32, u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        let n = 6usize;
+        let mut row_ptr = vec![0i32];
+        let mut col_idx = Vec::new();
+        let mut values = Vec::new();
+        for i in 0..n {
+            let lo = i.saturating_sub(2);
+            let hi = (i + 3).min(n);
+            for j in lo..hi {
+                col_idx.push(j as i32);
+                values.push(if i == j { 5.0 } else { -1.0 + 0.1 * (i as f64) });
+            }
+            row_ptr.push(col_idx.len() as i32);
+        }
+        (n as u32, n as u32, row_ptr, col_idx, values)
+    }
+
+    #[test]
+    fn spmv_scalar_f64_alpha_beta() {
+        let (r, c, rp, ci, v) = matrix_4x4();
+        let x = vec![1.0, 2.0, 3.0, 4.0];
+        let y0 = vec![10.0, 20.0, 30.0, 40.0];
+        run_spmv::<f64>(
+            SpMVAlgo::Scalar,
+            r,
+            c,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            2.5,
+            -0.75,
+            1e-10,
+            "spmv_scalar_f64",
+        );
+    }
+
+    #[test]
+    fn spmv_vector_f64_alpha_beta() {
+        let (r, c, rp, ci, v) = matrix_6x6_banded();
+        let x: Vec<f64> = (0..r as usize).map(|i| 0.5 + i as f64).collect();
+        let y0: Vec<f64> = (0..r as usize).map(|i| 100.0 - i as f64).collect();
+        run_spmv::<f64>(
+            SpMVAlgo::Vector,
+            r,
+            c,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            1.5,
+            0.25,
+            1e-10,
+            "spmv_vector_f64",
+        );
+    }
+
+    #[test]
+    fn spmv_scalar_f32_alpha_beta() {
+        let (r, c, rp, ci, v) = matrix_4x4();
+        let x = vec![1.0, 2.0, 3.0, 4.0];
+        let y0 = vec![10.0, 20.0, 30.0, 40.0];
+        run_spmv::<f32>(
+            SpMVAlgo::Scalar,
+            r,
+            c,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            2.0,
+            0.5,
+            1e-4,
+            "spmv_scalar_f32",
+        );
+    }
+
+    #[test]
+    fn spmv_vector_f32_alpha_beta() {
+        let (r, c, rp, ci, v) = matrix_6x6_banded();
+        let x: Vec<f64> = (0..r as usize).map(|i| 0.5 + i as f64).collect();
+        let y0: Vec<f64> = (0..r as usize).map(|i| 7.0 + i as f64).collect();
+        run_spmv::<f32>(
+            SpMVAlgo::Vector,
+            r,
+            c,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            1.25,
+            -0.5,
+            1e-4,
+            "spmv_vector_f32",
+        );
+    }
+
+    #[test]
+    fn spmv_beta_zero_overwrites_garbage() {
+        // beta = 0 must fully overwrite the prior y (incl. any stale content).
+        let (r, c, rp, ci, v) = matrix_4x4();
+        let x = vec![1.0, 1.0, 1.0, 1.0];
+        let y0 = vec![1e9, -1e9, 5e8, -5e8];
+        run_spmv::<f64>(
+            SpMVAlgo::Scalar,
+            r,
+            c,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            1.0,
+            0.0,
+            1e-10,
+            "spmv_beta_zero",
+        );
+    }
+}

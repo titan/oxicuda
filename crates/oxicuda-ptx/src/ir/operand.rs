@@ -61,19 +61,14 @@ impl fmt::Display for ImmValue {
             Self::S32(v) => write!(f, "{v}"),
             Self::S64(v) => write!(f, "{v}"),
             Self::F32(v) => {
-                // PTX uses C-style float literals; ensure a decimal point is present.
-                if v.fract() == 0.0 {
-                    write!(f, "{v:.1}")
-                } else {
-                    write!(f, "{v}")
-                }
+                // PTX float literals must be emitted as hexadecimal bit patterns
+                // (`0f<8 hex digits>`). This is lossless for NaN/Inf/-0.0/subnormals
+                // and sidesteps PTX's parse-decimal-as-f64-then-narrow double-rounding.
+                write!(f, "0f{:08X}", v.to_bits())
             }
             Self::F64(v) => {
-                if v.fract() == 0.0 {
-                    write!(f, "{v:.1}")
-                } else {
-                    write!(f, "{v}")
-                }
+                // 64-bit hexadecimal bit pattern (`0d<16 hex digits>`).
+                write!(f, "0d{:016X}", v.to_bits())
             }
         }
     }
@@ -111,9 +106,12 @@ mod tests {
     #[test]
     fn operand_display_immediate() {
         assert_eq!(format!("{}", ImmValue::U32(42)), "42");
-        assert_eq!(format!("{}", ImmValue::F32(3.0)), "3.0");
-        assert_eq!(format!("{}", ImmValue::F32(1.5)), "1.5");
+        assert_eq!(format!("{}", ImmValue::F32(3.0)), "0f40400000");
+        assert_eq!(format!("{}", ImmValue::F32(1.5)), "0f3FC00000");
         assert_eq!(format!("{}", ImmValue::S32(-7)), "-7");
+        // NaN / infinity must be representable (Rust Display would emit unparsable text).
+        assert_eq!(format!("{}", ImmValue::F32(f32::INFINITY)), "0f7F800000");
+        assert_eq!(format!("{}", ImmValue::F64(1.0)), "0d3FF0000000000000");
     }
 
     #[test]

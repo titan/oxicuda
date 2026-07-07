@@ -562,8 +562,12 @@ impl Device {
     }
 
     /// Check if memory sync domain operations are supported.
+    ///
+    /// There is no dedicated `MEM_SYNC_DOMAIN_SUPPORTED` attribute in `cuda.h`;
+    /// support is indicated by a positive
+    /// [`MemSyncDomainCount`](CUdevice_attribute::MemSyncDomainCount).
     pub fn supports_mem_sync_domain(&self) -> CudaResult<bool> {
-        Ok(self.attribute(CUdevice_attribute::MemSyncDomainSupported)? != 0)
+        Ok(self.attribute(CUdevice_attribute::MemSyncDomainCount)? > 0)
     }
 
     /// Get the number of memory sync domains.
@@ -932,4 +936,137 @@ pub fn best_device() -> CudaResult<Option<Device>> {
         }
     }
     Ok(Some(best))
+}
+
+#[cfg(test)]
+mod managed_memory_tests {
+    use super::*;
+    use crate::context::Context;
+    use crate::ffi::{CU_MEM_ATTACH_GLOBAL, CUdeviceptr};
+    use crate::module::Module;
+    use crate::stream::Stream;
+    use std::ffi::c_void;
+
+    /// Grid-stride in-place doubling kernel, arch-portable (`.target sm_70`).
+    const DOUBLE_PTX: &str = "\
+.version 7.0
+.target sm_70
+.address_size 64
+.visible .entry dbl(
+    .param .u64 ptr,
+    .param .u32 n
+)
+{
+    .reg .b32 %r<8>;
+    .reg .b64 %rd<8>;
+    .reg .f32 %f<2>;
+    .reg .pred %p<2>;
+    ld.param.u64 %rd0, [ptr];
+    ld.param.u32 %r0, [n];
+    mov.u32 %r1, %ctaid.x;
+    mov.u32 %r2, %ntid.x;
+    mov.u32 %r3, %tid.x;
+    mad.lo.u32 %r4, %r1, %r2, %r3;
+    mov.u32 %r5, %nctaid.x;
+    mul.lo.u32 %r6, %r5, %r2;
+$LOOP:
+    setp.ge.u32 %p0, %r4, %r0;
+    @%p0 bra $DONE;
+    mul.wide.u32 %rd1, %r4, 4;
+    add.u64 %rd2, %rd0, %rd1;
+    ld.global.f32 %f0, [%rd2];
+    add.f32 %f0, %f0, %f0;
+    st.global.f32 [%rd2], %f0;
+    add.u32 %r4, %r4, %r6;
+    bra $LOOP;
+$DONE:
+    ret;
+}
+";
+
+    /// Real-hardware unified (managed) memory round-trip: allocate with
+    /// `cuMemAllocManaged`, write the inputs from the HOST directly into the
+    /// managed pointer (no `cuMemcpyHtoD`), run a GPU kernel that doubles them
+    /// in place, then read the results back from the HOST directly (no
+    /// `cuMemcpyDtoH`). This exercises the page-migration path end-to-end.
+    /// No-op when no GPU is present or managed memory is unsupported.
+    #[test]
+    fn managed_memory_round_trip_on_real_device() {
+        let Ok(dev) = Device::get(0) else {
+            return;
+        };
+        if !matches!(dev.supports_managed_memory(), Ok(true)) {
+            return;
+        }
+        let ctx = match Context::new(&dev) {
+            Ok(c) => std::sync::Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let api = crate::loader::try_driver().expect("driver present");
+
+        let module = match Module::from_ptx(DOUBLE_PTX) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let func = module.get_function("dbl").expect("dbl");
+
+        const N: usize = 1024;
+        let bytes = N * std::mem::size_of::<f32>();
+        let mut dptr: CUdeviceptr = 0;
+        crate::error::check(unsafe {
+            (api.cu_mem_alloc_managed)(&mut dptr, bytes, CU_MEM_ATTACH_GLOBAL)
+        })
+        .expect("managed alloc");
+
+        let result = (|| -> CudaResult<bool> {
+            // HOST writes directly into managed memory (no explicit copy).
+            // SAFETY: managed memory is host-accessible; `dptr` addresses N f32.
+            let host_in = unsafe { std::slice::from_raw_parts_mut(dptr as *mut f32, N) };
+            for (i, v) in host_in.iter_mut().enumerate() {
+                *v = i as f32;
+            }
+
+            // GPU kernel doubles the buffer in place.
+            let mut dptr_arg = dptr;
+            let mut n_arg: u32 = N as u32;
+            let mut params: [*mut c_void; 2] = [
+                (&mut dptr_arg as *mut CUdeviceptr).cast(),
+                (&mut n_arg as *mut u32).cast(),
+            ];
+            crate::error::check(unsafe {
+                (api.cu_launch_kernel)(
+                    func.raw(),
+                    8,
+                    1,
+                    1,
+                    128,
+                    1,
+                    1,
+                    0,
+                    stream.raw(),
+                    params.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                )
+            })?;
+            crate::error::check(unsafe { (api.cu_stream_synchronize)(stream.raw()) })?;
+
+            // HOST reads results back directly (no explicit copy).
+            // SAFETY: same managed allocation, still live until freed below.
+            let host_out = unsafe { std::slice::from_raw_parts(dptr as *const f32, N) };
+            Ok(host_out
+                .iter()
+                .enumerate()
+                .all(|(i, &v)| (v - 2.0 * i as f32).abs() <= 1e-5))
+        })();
+
+        let _ = unsafe { (api.cu_mem_free_v2)(dptr) };
+        assert!(
+            result.expect("managed round-trip"),
+            "managed memory: GPU did not double the host-written values"
+        );
+    }
 }

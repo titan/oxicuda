@@ -95,6 +95,18 @@ impl WebGpuMemoryManager {
             .get(&handle)
             .ok_or_else(|| WebGpuError::InvalidArgument(format!("unknown handle {handle}")))?;
 
+        // Reject oversize uploads before touching wgpu: `Queue::write_buffer`
+        // validates `offset + src.len() <= buffer.size` and, with no custom
+        // uncaptured-error handler installed, an overrun aborts the process via
+        // wgpu's default fatal handler.  Surface it as a clean typed error.
+        if src.len() as u64 > buf_info.size {
+            return Err(WebGpuError::InvalidArgument(format!(
+                "copy_to_device: source is {} bytes but buffer holds only {} bytes",
+                src.len(),
+                buf_info.size
+            )));
+        }
+
         self.device.queue.write_buffer(&buf_info.buffer, 0, src);
         Ok(())
     }
@@ -167,7 +179,21 @@ impl WebGpuMemoryManager {
             .map_err(|e| WebGpuError::BufferMapping(format!("{e:?}")))?;
 
         let data = slice.get_mapped_range();
-        let copy_len = dst.len().min(data.len());
+        let data_len = data.len();
+        // Match the `copy_dtoh` contract of the CPU reference backend: an
+        // oversized destination is a sizing error, not something to silently
+        // paper over by truncating (which would leave the tail of `dst` stale
+        // while still reporting success).  A destination *smaller* than the
+        // buffer is the intended "sized-by-dst" read and remains permitted.
+        if dst.len() > data_len {
+            drop(data);
+            staging.unmap();
+            return Err(WebGpuError::InvalidArgument(format!(
+                "copy_from_device: destination is {} bytes but buffer holds only {data_len} bytes",
+                dst.len(),
+            )));
+        }
+        let copy_len = dst.len();
         dst[..copy_len].copy_from_slice(&data[..copy_len]);
         drop(data);
         staging.unmap();
@@ -232,5 +258,33 @@ mod tests {
         let mm = WebGpuMemoryManager::new(dev);
         let err = mm.copy_to_device(9999, b"hello").unwrap_err();
         assert!(matches!(err, WebGpuError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn copy_to_device_oversize_errors() {
+        let Some(dev) = try_get_device() else {
+            return;
+        };
+        let mm = WebGpuMemoryManager::new(dev);
+        let h = mm.alloc(16).expect("alloc 16 bytes");
+        // 64 bytes into a 16-byte buffer must return a clean error, not panic.
+        let err = mm.copy_to_device(h, &[0u8; 64]).unwrap_err();
+        assert!(matches!(err, WebGpuError::InvalidArgument(_)));
+        mm.free(h).expect("free");
+    }
+
+    #[test]
+    fn copy_from_device_oversize_dst_errors() {
+        let Some(dev) = try_get_device() else {
+            return;
+        };
+        let mm = WebGpuMemoryManager::new(dev);
+        let h = mm.alloc(16).expect("alloc 16 bytes");
+        // Destination larger than the source buffer must error rather than
+        // silently truncate and report success.
+        let mut dst = vec![0u8; 64];
+        let err = mm.copy_from_device(&mut dst, h).unwrap_err();
+        assert!(matches!(err, WebGpuError::InvalidArgument(_)));
+        mm.free(h).expect("free");
     }
 }

@@ -44,14 +44,14 @@ impl UsmKind {
 
     /// The `ze_structure_type_t` value of the corresponding alloc descriptor.
     ///
-    /// Device → `ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC` (0x1),
-    /// Host → `ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC` (0x2). Shared uses the
+    /// Device → `ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC` (0x15),
+    /// Host → `ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC` (0x16). Shared uses the
     /// device descriptor with a chained host descriptor in `pNext`.
     #[must_use]
     pub fn alloc_desc_stype(self) -> u32 {
         match self {
-            UsmKind::Device | UsmKind::Shared => 0x1,
-            UsmKind::Host => 0x2,
+            UsmKind::Device | UsmKind::Shared => 0x15,
+            UsmKind::Host => 0x16,
         }
     }
 }
@@ -487,9 +487,9 @@ mod tests {
 
     #[test]
     fn usm_kind_desc_stypes() {
-        assert_eq!(UsmKind::Device.alloc_desc_stype(), 0x1);
-        assert_eq!(UsmKind::Host.alloc_desc_stype(), 0x2);
-        assert_eq!(UsmKind::Shared.alloc_desc_stype(), 0x1);
+        assert_eq!(UsmKind::Device.alloc_desc_stype(), 0x15);
+        assert_eq!(UsmKind::Host.alloc_desc_stype(), 0x16);
+        assert_eq!(UsmKind::Shared.alloc_desc_stype(), 0x15);
     }
 
     #[test]

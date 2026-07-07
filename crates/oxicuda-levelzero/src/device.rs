@@ -45,29 +45,34 @@ const ZE_RESULT_SUCCESS: u32 = 0;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 const ZE_DEVICE_TYPE_GPU: u32 = 1;
 
+// The following values mirror the stable oneAPI Level Zero `ze_structure_type_t`
+// enum exactly (as consumed by the real `libze_loader.so.1`): CONTEXT_DESC=0xd,
+// COMMAND_QUEUE_DESC=0xe, COMMAND_LIST_DESC=0xf, DEVICE_PROPERTIES=0x3,
+// DEVICE_MEM_ALLOC_DESC=0x15, HOST_MEM_ALLOC_DESC=0x16, MODULE_DESC=0x1d,
+// KERNEL_DESC=0x1f.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-const ZE_STRUCTURE_TYPE_CONTEXT_DESC: u32 = 0xb;
+const ZE_STRUCTURE_TYPE_CONTEXT_DESC: u32 = 0xd;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-const ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC: u32 = 0xf;
+const ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC: u32 = 0xe;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-pub(crate) const ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC: u32 = 0x9;
+pub(crate) const ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC: u32 = 0xf;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-pub(crate) const ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC: u32 = 0x1;
+pub(crate) const ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC: u32 = 0x15;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-pub(crate) const ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC: u32 = 0x2;
+pub(crate) const ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC: u32 = 0x16;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 const ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES: u32 = 0x3;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-pub(crate) const ZE_STRUCTURE_TYPE_MODULE_DESC: u32 = 0x18;
+pub(crate) const ZE_STRUCTURE_TYPE_MODULE_DESC: u32 = 0x1d;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-pub(crate) const ZE_STRUCTURE_TYPE_KERNEL_DESC: u32 = 0x1a;
+pub(crate) const ZE_STRUCTURE_TYPE_KERNEL_DESC: u32 = 0x1f;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) const ZE_MODULE_FORMAT_IL_SPIRV: u32 = 0;
@@ -122,25 +127,30 @@ pub(crate) struct ZeHostMemAllocDesc {
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 #[repr(C)]
 pub(crate) struct ZeDeviceProperties {
+    // Exact field order of the stable `ze_device_properties_t` ABI. `name` is the
+    // LAST field (real offset ~112); getting the intermediate fields wrong would
+    // read the device name from the wrong bytes.
     stype: u32,
     p_next: *const c_void,
     device_type: u32,
     vendor_id: u32,
     device_id: u32,
     _flags: u32,
-    _sub_device_ids: [u32; 64],
+    _sub_device_id: u32,
+    _core_clock_rate: u32,
+    _max_mem_alloc_size: u64,
+    _max_hardware_contexts: u32,
+    _max_command_queue_priority: u32,
+    _num_threads_per_eu: u32,
+    _physical_eu_simd_width: u32,
+    _num_eus_per_sub_slice: u32,
+    _num_sub_slices_per_slice: u32,
+    _num_slices: u32,
     _timer_resolution: u64,
     _timestamp_valid_bits: u32,
     _kernel_timestamp_valid_bits: u32,
-    name: [u8; 256],
-    _max_mem_alloc_size: u64,
-    _num_threads_per_eu: u32,
-    _physical_eu_simd_width: u32,
-    _num_eu_per_sub_slice: u32,
-    _num_sub_slices_per_slice: u32,
-    _num_slices: u32,
-    _timer_resolution_ns: u64,
     _uuid: [u8; 16],
+    name: [u8; 256],
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]

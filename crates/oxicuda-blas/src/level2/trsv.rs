@@ -35,7 +35,7 @@ use oxicuda_ptx::prelude::*;
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
-use crate::types::{DiagType, FillMode, GpuFloat, MatrixDesc, Transpose};
+use crate::types::{DiagType, FillMode, GpuFloat, Layout, MatrixDesc, Transpose};
 
 /// Maximum N for the single-block sequential kernel. Larger systems are
 /// solved via [`trsv_blocked`] (the multi-block level-set path).
@@ -86,6 +86,14 @@ pub fn trsv<T: GpuFloat>(
 ) -> BlasResult<()> {
     if n == 0 {
         return Ok(());
+    }
+
+    // The kernel addresses A as row-major; reject column-major descriptors.
+    if a.layout == Layout::ColMajor {
+        return Err(BlasError::InvalidArgument(
+            "trsv: ColMajor layout is not supported by this kernel; pass a RowMajor descriptor"
+                .to_string(),
+        ));
     }
 
     validate_trsv_args(n, a, x, incx)?;
@@ -461,7 +469,7 @@ fn generate_trsv_ptx<T: GpuFloat>(
                     // i >= 0 is always true for u32; check i < n (handles wrap-around)
                     b.raw_ptx(&format!("setp.lo.u32 {outer_pred}, {i}, {n_reg};"));
                 }
-                b.raw_ptx(&format!("@!{outer_pred} bra {outer_done};"));
+                b.raw_ptx(&format!("@!{outer_pred} bra ${outer_done};"));
 
                 // Load x[i * incx] (the current right-hand side value)
                 let xi_idx = b.alloc_reg(PtxType::U32);
@@ -492,7 +500,7 @@ fn generate_trsv_ptx<T: GpuFloat>(
                 } else {
                     b.raw_ptx(&format!("setp.lo.u32 {inner_pred}, {j}, {n_reg};"));
                 }
-                b.raw_ptx(&format!("@!{inner_pred} bra {inner_done};"));
+                b.raw_ptx(&format!("@!{inner_pred} bra ${inner_done};"));
 
                 // A[i][j] or A[j][i] depending on transpose
                 let (row, col) = if !use_trans {
@@ -672,7 +680,7 @@ fn generate_trsv_update_gemv_ptx<T: GpuFloat>(
                 b.label(&loop_label);
                 let pred = b.alloc_reg(PtxType::Pred);
                 b.raw_ptx(&format!("setp.lo.u32 {pred}, {k}, {inner_len};"));
-                b.raw_ptx(&format!("@!{pred} bra {done_label};"));
+                b.raw_ptx(&format!("@!{pred} bra ${done_label};"));
 
                 // Compute A address. row-major A with lda = stride between rows.
                 // NoTrans: A[gid][k] => (gid * lda + k) * elem_bytes

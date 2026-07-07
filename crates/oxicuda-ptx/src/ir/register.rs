@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use super::types::PtxType;
+use crate::error::PtxGenError;
 
 /// A named PTX register with an associated type.
 ///
@@ -44,10 +45,17 @@ impl fmt::Display for Register {
 /// | B64, U64, S64           | `%rd`  | `%rd0`  |
 /// | Everything else (32-bit)| `%r`   | `%r0`   |
 pub struct RegisterAllocator {
-    /// Per-prefix counters for generating unique names.
-    counters: HashMap<&'static str, u32>,
-    /// Track which (prefix, `PtxType`) pairs have been used for declarations.
-    used_types: Vec<(&'static str, PtxType)>,
+    /// Per-prefix list of each allocated register's *size class*
+    /// ([`PtxType::reg_type`]), indexed by the register's numeric id. The
+    /// vector length is the next free id for that prefix, so it doubles as the
+    /// name counter. Storing the per-index size class (rather than a single
+    /// per-prefix type) lets [`emit_declarations`](Self::emit_declarations)
+    /// declare a *heterogeneous* bank — e.g. an `f64` kernel that also needs
+    /// `f32` SFU scratch (`ex2.approx.f32` has no `f64` form), which mixes
+    /// `.b64` and `.b32` registers under the shared `%f` prefix — correctly,
+    /// instead of forcing one size on every register and having ptxas reject
+    /// the size-mismatched uses.
+    reg_types: HashMap<&'static str, Vec<PtxType>>,
     /// Explicitly named registers (e.g., `%f_x`) declared via [`Self::declare_named`].
     named_registers: Vec<(String, PtxType)>,
 }
@@ -57,8 +65,7 @@ impl RegisterAllocator {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            counters: HashMap::new(),
-            used_types: Vec::new(),
+            reg_types: HashMap::new(),
             named_registers: Vec::new(),
         }
     }
@@ -82,18 +89,12 @@ impl RegisterAllocator {
     /// ```
     pub fn alloc(&mut self, ty: PtxType) -> Register {
         let prefix = Self::prefix_for(ty);
-        let counter = self.counters.entry(prefix).or_insert(0);
-        let idx = *counter;
-        *counter += 1;
-
-        // Track this prefix/type pair for declarations (only once per pair).
-        if !self
-            .used_types
-            .iter()
-            .any(|(p, t)| *p == prefix && *t == ty)
-        {
-            self.used_types.push((prefix, ty));
-        }
+        let bank = self.reg_types.entry(prefix).or_default();
+        // The register's numeric id is its position in the bank.
+        let idx = bank.len();
+        // Record the register's size class (b16/b32/b64/pred) at this index so
+        // declarations can be emitted per-register when the bank is mixed.
+        bank.push(ty.reg_type());
 
         Register {
             name: format!("%{prefix}{idx}"),
@@ -119,6 +120,43 @@ impl RegisterAllocator {
         }
     }
 
+    /// Validates all explicitly-declared named registers.
+    ///
+    /// Rejects a named register that would produce a duplicate or illegal
+    /// `.reg` declaration:
+    /// - a name that is not a syntactically valid `%`-prefixed PTX identifier;
+    /// - a name matching the reserved allocator pattern `%(p|f|rd|r)<digits>`,
+    ///   which collides with the compact range declarations
+    ///   (`.reg .f32 %f<N>;`) that cover `%f0..%f{N-1}` etc.; or
+    /// - a name that shadows a PTX special register (`%tid`, `%laneid`,
+    ///   `%clock64`, `%envreg0`, ...).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PtxGenError::RegisterError`] describing the first offending
+    /// named register.
+    pub fn validate_named(&self) -> Result<(), PtxGenError> {
+        for (name, _) in &self.named_registers {
+            if !is_valid_reg_ident(name) {
+                return Err(PtxGenError::RegisterError(format!(
+                    "named register {name:?} is not a valid PTX register identifier"
+                )));
+            }
+            if is_reserved_allocator_name(name) {
+                return Err(PtxGenError::RegisterError(format!(
+                    "named register {name:?} collides with an allocator-generated register \
+                     (reserved pattern %(p|f|rd|r)<digits>)"
+                )));
+            }
+            if is_ptx_special_register(name) {
+                return Err(PtxGenError::RegisterError(format!(
+                    "named register {name:?} collides with a PTX special register"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Emits `.reg` declaration lines for all allocated register types.
     ///
     /// Each declaration uses the PTX range syntax (e.g., `.reg .f32 %f<4>;`)
@@ -131,18 +169,28 @@ impl RegisterAllocator {
     pub fn emit_declarations(&self) -> Vec<String> {
         let mut declarations = Vec::new();
 
-        for (prefix, count) in &self.counters {
-            if *count == 0 {
+        for (prefix, sizes) in &self.reg_types {
+            let Some(first) = sizes.first() else {
                 continue;
+            };
+            // `sizes` already holds each register's size class (reg_type).
+            if sizes.iter().all(|s| s == first) {
+                // Homogeneous bank: one compact range declaration.
+                declarations.push(format!(
+                    ".reg {} %{prefix}<{}>;",
+                    first.as_ptx_str(),
+                    sizes.len()
+                ));
+            } else {
+                // Heterogeneous bank (only the float `%f` bank can mix b16/b32/
+                // b64 — e.g. an f64 kernel with f32 SFU scratch). A single range
+                // declaration would force one size on every register and ptxas
+                // would reject the size-mismatched uses, so declare each
+                // register with its own size class.
+                for (i, size) in sizes.iter().enumerate() {
+                    declarations.push(format!(".reg {} %{prefix}{i};", size.as_ptx_str()));
+                }
             }
-            // Determine the PTX type string from the first type using this prefix.
-            let ptx_type_str = self
-                .used_types
-                .iter()
-                .find(|(p, _)| p == prefix)
-                .map_or(".b32", |(_, ty)| ty.reg_type().as_ptx_str());
-
-            declarations.push(format!(".reg {ptx_type_str} %{prefix}<{count}>;"));
         }
 
         // Emit named register declarations (e.g., `.reg .b64 %rd_off;`).
@@ -174,6 +222,86 @@ impl Default for RegisterAllocator {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Returns `true` if `name` is a syntactically valid `%`-prefixed PTX register
+/// identifier: `%[A-Za-z_][A-Za-z0-9_$]*`.
+fn is_valid_reg_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    if chars.next() != Some('%') {
+        return false;
+    }
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+}
+
+/// Returns `true` if `name` matches the reserved allocator pattern
+/// `%(p|f|rd|r)<digits>` used by [`RegisterAllocator::alloc`].
+fn is_reserved_allocator_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix('%') else {
+        return false;
+    };
+    // Try each allocator prefix; the numeric suffix must be non-empty digits.
+    for prefix in ["rd", "p", "f", "r"] {
+        if let Some(digits) = rest.strip_prefix(prefix) {
+            if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Returns `true` if `name` shadows a PTX special (built-in) register.
+fn is_ptx_special_register(name: &str) -> bool {
+    const SPECIAL: &[&str] = &[
+        "%tid",
+        "%ntid",
+        "%ctaid",
+        "%nctaid",
+        "%laneid",
+        "%warpid",
+        "%nwarpid",
+        "%smid",
+        "%nsmid",
+        "%gridid",
+        "%lanemask_eq",
+        "%lanemask_le",
+        "%lanemask_lt",
+        "%lanemask_ge",
+        "%lanemask_gt",
+        "%clock",
+        "%clock_hi",
+        "%clock64",
+        "%globaltimer",
+        "%globaltimer_lo",
+        "%globaltimer_hi",
+        "%dynamic_smem_size",
+        "%total_smem_size",
+        "%aggr_smem_size",
+        "%current_graph_exec",
+    ];
+    if SPECIAL.contains(&name) {
+        return true;
+    }
+    // The reserved shared-memory-offset family has arbitrary suffixes.
+    if name.starts_with("%reserved_smem_offset_") {
+        return true;
+    }
+    // Numeric families: %envreg0..31, %pm0..7.
+    for prefix in ["%envreg", "%pm"] {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            if !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -262,5 +390,64 @@ mod tests {
             ty: PtxType::F32,
         };
         assert_eq!(format!("{r}"), "%f0");
+    }
+
+    #[test]
+    fn validate_named_accepts_custom_names() {
+        let mut alloc = RegisterAllocator::new();
+        alloc.declare_named("%f_x", PtxType::F32);
+        alloc.declare_named("%rd_off", PtxType::B64);
+        alloc.declare_named("%p_ge", PtxType::Pred);
+        alloc.declare_named("%fd_acc", PtxType::F64);
+        assert!(alloc.validate_named().is_ok());
+    }
+
+    #[test]
+    fn validate_named_rejects_allocator_collision() {
+        let mut alloc = RegisterAllocator::new();
+        alloc.declare_named("%f0", PtxType::F32); // collides with %f<N> range
+        assert!(alloc.validate_named().is_err());
+
+        let mut alloc2 = RegisterAllocator::new();
+        alloc2.declare_named("%rd7", PtxType::B64); // collides with %rd<N>
+        assert!(alloc2.validate_named().is_err());
+    }
+
+    #[test]
+    fn validate_named_rejects_special_registers() {
+        for special in ["%clock64", "%laneid", "%envreg3", "%pm0", "%tid"] {
+            let mut alloc = RegisterAllocator::new();
+            alloc.declare_named(special, PtxType::U32);
+            assert!(
+                alloc.validate_named().is_err(),
+                "{special} must be rejected as a special register"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_named_rejects_invalid_identifier() {
+        let mut alloc = RegisterAllocator::new();
+        alloc.declare_named("no_percent", PtxType::U32);
+        assert!(alloc.validate_named().is_err());
+
+        let mut alloc2 = RegisterAllocator::new();
+        alloc2.declare_named("%1bad", PtxType::U32); // first char is a digit
+        assert!(alloc2.validate_named().is_err());
+    }
+
+    #[test]
+    fn helper_reserved_and_special_classification() {
+        assert!(is_reserved_allocator_name("%r3"));
+        assert!(is_reserved_allocator_name("%rd0"));
+        assert!(is_reserved_allocator_name("%f12"));
+        assert!(is_reserved_allocator_name("%p1"));
+        assert!(!is_reserved_allocator_name("%f_x"));
+        assert!(!is_reserved_allocator_name("%rd_off"));
+        assert!(is_ptx_special_register("%globaltimer"));
+        assert!(is_ptx_special_register("%reserved_smem_offset_begin"));
+        assert!(!is_ptx_special_register("%my_reg"));
+        assert!(is_valid_reg_ident("%f_x"));
+        assert!(!is_valid_reg_ident("%f.x"));
     }
 }

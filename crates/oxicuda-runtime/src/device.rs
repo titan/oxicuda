@@ -304,7 +304,10 @@ pub fn device_synchronize() -> CudaRtResult<()> {
     let _device = get_device()?;
     let api = try_driver().map_err(|_| CudaRtError::DriverNotAvailable)?;
     // SAFETY: FFI; driver's current context is valid.
-    unsafe { (api.cu_ctx_synchronize)() };
+    let rc = unsafe { (api.cu_ctx_synchronize)() };
+    if rc != 0 {
+        return Err(CudaRtError::from_code(rc).unwrap_or(CudaRtError::Unknown));
+    }
     Ok(())
 }
 
@@ -383,6 +386,45 @@ mod tests {
             }
             Err(e) => panic!("unexpected error: {e}"),
         }
+    }
+
+    /// Regression test for F087: `device_synchronize` previously discarded
+    /// the `cuCtxSynchronize` return code and always returned `Ok(())`.
+    /// This forces a real driver-level error (`CUDA_ERROR_INVALID_CONTEXT`)
+    /// by detaching the thread's actual current context while leaving the
+    /// Runtime-level `CURRENT_DEVICE` thread-local pointed at a still-valid
+    /// device ordinal — the same shape of failure an asynchronous kernel
+    /// error would surface at the next sync point — and asserts the error
+    /// is propagated instead of swallowed.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn device_synchronize_propagates_invalid_context_error() {
+        if set_device(0).is_err() {
+            eprintln!("skipping: no CUDA device");
+            return;
+        }
+        let api = match try_driver() {
+            Ok(a) => a,
+            Err(_) => {
+                eprintln!("skipping: driver unavailable");
+                return;
+            }
+        };
+        // Detach the thread's actual current context without updating
+        // CURRENT_DEVICE, so `device_synchronize` still believes a device is
+        // selected but the driver has nothing current to synchronize on.
+        // SAFETY: FFI; passing a null CUcontext is a supported driver
+        // operation that clears the current context of the calling thread.
+        // This test runs on its own OS thread (the standard test harness
+        // model), so no other test observes the cleared context.
+        unsafe { (api.cu_ctx_set_current)(oxicuda_driver::ffi::CUcontext::default()) };
+
+        let result = device_synchronize();
+        assert!(
+            result.is_err(),
+            "device_synchronize must propagate a driver error instead of \
+             silently returning Ok(()) when there is no current context"
+        );
     }
 
     #[test]

@@ -548,12 +548,13 @@ fn registers_written(inst: &Instruction) -> Vec<String> {
         | Instruction::Cos { dst, .. }
         | Instruction::Dp4a { dst, .. }
         | Instruction::Dp2a { dst, .. }
-        | Instruction::Tex1d { dst, .. }
-        | Instruction::Tex2d { dst, .. }
-        | Instruction::Tex3d { dst, .. }
         | Instruction::SurfLoad { dst, .. }
         | Instruction::Redux { dst, .. }
         | Instruction::ElectSync { dst, .. } => vec![dst.name.clone()],
+        // `tex.*.v4` defines four texel destination registers.
+        Instruction::Tex1d { dst, .. }
+        | Instruction::Tex2d { dst, .. }
+        | Instruction::Tex3d { dst, .. } => dst.iter().map(|r| r.name.clone()).collect(),
         _ => Vec::new(),
     }
 }

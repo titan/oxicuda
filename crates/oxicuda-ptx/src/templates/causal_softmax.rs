@@ -9,6 +9,18 @@
 //! This is exactly the masking used by autoregressive (decoder) attention:
 //! query position `i` may only attend to key positions `j <= i`.
 //!
+//! # Batched invocation
+//!
+//! `rows` may be a flattened `batch * heads * seq_len` count covering many
+//! independent causal matrices stacked in one buffer, provided every matrix
+//! shares the same `seq_len` (the row-major layout is then a plain
+//! `[batch*heads*seq_len, cols]` matrix). The kernel takes `seq_len`
+//! explicitly and re-derives the *within-matrix* row via
+//! `row_in_seq = row % seq_len` before computing the live-column count, so
+//! the causal boundary resets at the start of every matrix instead of
+//! saturating to "fully unmasked" past the first one. For a single
+//! `rows x cols` matrix, pass `seq_len == rows` (unchanged behavior).
+//!
 //! # Algorithm
 //!
 //! For each output row `i` the kernel runs the standard three-pass stable
@@ -67,10 +79,13 @@ use crate::ir::PtxType;
 /// The generated kernel signature is:
 ///
 /// ```text
-/// kernel(.u64 input, .u64 output, .u32 rows, .u32 cols)
+/// kernel(.u64 input, .u64 output, .u32 rows, .u32 cols, .u32 seq_len)
 /// ```
 ///
-/// where `input` / `output` point to row-major `rows x cols` matrices.
+/// where `input` / `output` point to row-major `rows x cols` matrices, and
+/// `seq_len` is the row count of one causal matrix (`seq_len == rows` for a
+/// single, non-batched matrix; `seq_len < rows` when `rows` flattens several
+/// batch/head matrices back to back — see the module docs).
 pub struct CausalSoftmaxTemplate {
     /// The data precision.
     pub precision: PtxType,
@@ -142,11 +157,14 @@ impl CausalSoftmaxTemplate {
     /// Kernel parameters:
     /// - `input`: pointer to the `rows x cols` input matrix (row-major)
     /// - `output`: pointer to the `rows x cols` output matrix (row-major)
-    /// - `rows`: number of rows (query positions)
+    /// - `rows`: number of rows (query positions), possibly `batch*heads*seq_len`
     /// - `cols`: number of columns (key positions)
+    /// - `seq_len`: row count of one causal matrix; the causal boundary for
+    ///   row `i` is derived from `i % seq_len`, not `i` directly, so the mask
+    ///   resets at every matrix boundary in a batched invocation.
     ///
-    /// For output row `i`, columns `j > i` are masked: they are excluded
-    /// from the max / sum and written as `0`.
+    /// For output row `i` (within its `seq_len`-row matrix), columns `j > i`
+    /// are masked: they are excluded from the max / sum and written as `0`.
     ///
     /// # Errors
     ///
@@ -176,7 +194,8 @@ impl CausalSoftmaxTemplate {
         writeln!(ptx, "    .param .u64 %param_input,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u64 %param_output,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u32 %param_rows,").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    .param .u32 %param_cols").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    .param .u32 %param_cols,").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    .param .u32 %param_seq_len").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
@@ -184,8 +203,8 @@ impl CausalSoftmaxTemplate {
         // r0  = tid.x, r1 = ctaid.x, r2 = ntid.x
         // r3  = row (global thread id)
         // r4  = rows, r5 = cols
-        // r6  = j (loop counter), r7 = upper bound (= min(row, cols-1)+1 live cols)
-        // r8  = scratch, r9 = scratch
+        // r6  = j (loop counter), r7 = upper bound (= min(row_in_seq, cols-1)+1 live cols)
+        // r8  = scratch, r9 = seq_len, r10 = row_in_seq (= row % seq_len)
         // rd0 = input base, rd1 = output base, rd2 = row base (input)
         // rd3 = row base (output), rd4 = element offset bytes, rd5 = element addr
         // f0  = max, f1 = current value, f2 = sum, f3 = exp scratch, f4 = rcp(sum)
@@ -207,6 +226,8 @@ impl CausalSoftmaxTemplate {
         // -- Bounds check: row < rows ----------------------------------------
         writeln!(ptx, "    ld.param.u32 %r4, [%param_rows];").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    ld.param.u32 %r5, [%param_cols];").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    ld.param.u32 %r9, [%param_seq_len];")
+            .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    setp.ge.u32 %p0, %r3, %r4;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    @%p0 bra $CS_DONE;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
@@ -229,11 +250,18 @@ impl CausalSoftmaxTemplate {
         writeln!(ptx, "    add.u64 %rd3, %rd1, %rd4;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
-        // -- Live-column count: live = min(row + 1, cols) --------------------
-        // Causal mask: columns j in [0, row] are live (and j must be < cols).
-        // r7 = min(row + 1, cols). The mask is thus "j < r7".
-        writeln!(ptx, "    // live = min(row + 1, cols)").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    add.u32 %r7, %r3, 1;").map_err(PtxGenError::FormatError)?;
+        // -- Live-column count: live = min(row_in_seq + 1, cols) -------------
+        // Causal mask: columns j in [0, row_in_seq] are live (j must be < cols).
+        // row_in_seq = row % seq_len re-derives the within-matrix row so the
+        // causal boundary resets at every seq_len-row matrix in a batched
+        // invocation, instead of saturating to "fully unmasked" once the flat
+        // `row` index exceeds `cols` (see module docs).
+        // r7 = min(row_in_seq + 1, cols). The mask is thus "j < r7".
+        writeln!(ptx, "    // row_in_seq = row % seq_len").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    rem.u32 %r10, %r3, %r9;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    // live = min(row_in_seq + 1, cols)")
+            .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    add.u32 %r7, %r10, 1;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    min.u32 %r7, %r7, %r5;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
@@ -392,9 +420,10 @@ mod tests {
         let ptx = t.generate().expect("should generate causal softmax f32");
         // Entry point present.
         assert!(ptx.contains(".visible .entry causal_softmax_f32("));
-        // Four parameters: input, output, rows, cols.
+        // Five parameters: input, output, rows, cols, seq_len.
         assert!(ptx.contains("%param_rows"));
         assert!(ptx.contains("%param_cols"));
+        assert!(ptx.contains("%param_seq_len"));
         // Stable softmax uses ex2.approx for exp and rcp.approx for 1/sum.
         assert!(ptx.contains("ex2.approx.f32"));
         assert!(ptx.contains("rcp.approx.f32"));
@@ -440,5 +469,23 @@ mod tests {
         assert!(ptx.contains("$CS_NORM_ZERO"));
         // The reduction passes bound their loop by the live-column register r7.
         assert!(ptx.contains("setp.ge.u32 %p1, %r6, %r7;"));
+    }
+
+    /// A batched invocation flattens `batch*heads*seq_len` matrices into one
+    /// `rows x cols` buffer; the live-column count must be derived from
+    /// `row % seq_len`, not the raw flat row, or the mask saturates to
+    /// "fully unmasked" past the first matrix (see module docs).
+    #[test]
+    fn live_count_uses_row_modulo_seq_len() {
+        let t = CausalSoftmaxTemplate {
+            precision: PtxType::F32,
+            target: SmVersion::Sm80,
+        };
+        let ptx = t.generate().expect("generate");
+        assert!(ptx.contains("%param_seq_len"));
+        assert!(ptx.contains("rem.u32 %r10, %r3, %r9;"));
+        // The live-count add/min must consume the modulo result (r10), not
+        // the raw flat row (r3).
+        assert!(ptx.contains("add.u32 %r7, %r10, 1;"));
     }
 }

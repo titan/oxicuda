@@ -277,3 +277,118 @@ mod tests {
         assert!(ptx_text.contains("mad.lo.u32"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::format::CsrMatrix;
+    use crate::gpu_test_support::{assert_close, gpu_handle};
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+
+    /// CPU oracle for `y = alpha * A * x + beta * y0` over a CSR matrix
+    /// (row count is derived from `row_ptr`).
+    fn cpu_csr_spmv(
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        x: &[f64],
+        y0: &[f64],
+        alpha: f64,
+        beta: f64,
+    ) -> Vec<f64> {
+        let rows = row_ptr.len() - 1;
+        let mut y = vec![0.0_f64; rows];
+        for (i, slot) in y.iter_mut().enumerate() {
+            let mut acc = 0.0_f64;
+            for k in row_ptr[i] as usize..row_ptr[i + 1] as usize {
+                acc += values[k] * x[col_idx[k] as usize];
+            }
+            *slot = alpha * acc + beta * y0[i];
+        }
+        y
+    }
+
+    /// Drive the production `spmv_ell` op (building ELL from CSR via the real
+    /// conversion path) and compare to the CPU oracle.
+    #[allow(clippy::too_many_arguments)]
+    fn run_ell<T: GpuFloat>(
+        rows: u32,
+        cols: u32,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        x: &[f64],
+        y0: &[f64],
+        alpha: f64,
+        beta: f64,
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let dev_values: Vec<T> = values.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let csr = CsrMatrix::<T>::from_host(rows, cols, row_ptr, col_idx, &dev_values)
+            .expect("test: build CSR");
+        let ell = EllMatrix::<T>::from_csr(&csr).expect("test: build ELL");
+
+        let dev_x: Vec<T> = x.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let dev_y: Vec<T> = y0.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let x_buf = DeviceBuffer::from_host(&dev_x).expect("test: upload x");
+        let mut y_buf = DeviceBuffer::from_host(&dev_y).expect("test: upload y");
+
+        spmv_ell::<T>(
+            &handle,
+            &ell,
+            &x_buf,
+            &mut y_buf,
+            f64_to_gpu::<T>(alpha),
+            f64_to_gpu::<T>(beta),
+        )
+        .expect("test: spmv_ell launch");
+        handle.stream().synchronize().expect("test: sync");
+
+        let mut out = vec![T::gpu_zero(); rows as usize];
+        y_buf.copy_to_host(&mut out).expect("test: download y");
+        let got: Vec<f64> = out.iter().map(|&v| gpu_to_f64(v)).collect();
+        let want = cpu_csr_spmv(row_ptr, col_idx, values, x, y0, alpha, beta);
+        assert_close(&got, &want, tol, tag);
+    }
+
+    /// Irregular row lengths force genuine ELL padding (sentinel column -1).
+    fn irregular_4x5() -> (u32, u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        // row0: 3 nnz, row1: 1 nnz, row2: 4 nnz, row3: 2 nnz
+        let row_ptr = vec![0, 3, 4, 8, 10];
+        let col_idx = vec![0, 2, 4, 1, 0, 1, 3, 4, 2, 3];
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        (4, 5, row_ptr, col_idx, values)
+    }
+
+    #[test]
+    fn ell_f64_alpha_beta() {
+        let (r, c, rp, ci, v) = irregular_4x5();
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let y0 = vec![10.0, 20.0, 30.0, 40.0];
+        run_ell::<f64>(r, c, &rp, &ci, &v, &x, &y0, 1.5, -0.5, 1e-10, "ell_f64");
+    }
+
+    #[test]
+    fn ell_f32_alpha_beta() {
+        let (r, c, rp, ci, v) = irregular_4x5();
+        let x = vec![0.5, 1.5, -2.0, 3.0, 0.25];
+        let y0 = vec![1.0, 2.0, 3.0, 4.0];
+        run_ell::<f32>(r, c, &rp, &ci, &v, &x, &y0, 2.0, 0.5, 1e-4, "ell_f32");
+    }
+
+    #[test]
+    fn ell_f64_beta_zero() {
+        let (r, c, rp, ci, v) = irregular_4x5();
+        let x = vec![1.0, 1.0, 1.0, 1.0, 1.0];
+        let y0 = vec![1e9, -1e9, 1e8, -1e8];
+        run_ell::<f64>(r, c, &rp, &ci, &v, &x, &y0, 1.0, 0.0, 1e-10, "ell_beta0");
+    }
+}

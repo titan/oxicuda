@@ -225,7 +225,7 @@ fn emit_im2col3d_body(
     let pred_c = b.alloc_reg(PtxType::Pred);
 
     b.raw_ptx(&format!("mov.u32 {c_reg}, 0;"));
-    b.label(&c_loop_label);
+    b.raw_ptx(&format!("{c_loop_label}:"));
     b.raw_ptx(&format!("setp.lo.u32 {pred_c}, {c_reg}, {c_limit};"));
     b.raw_ptx(&format!("@!{pred_c} bra {c_done_label};"));
 
@@ -313,7 +313,7 @@ fn emit_im2col3d_body(
                 b.raw_ptx(&format!("bra {store_lbl};"));
 
                 // Padding branch: store zero.
-                b.label(&skip);
+                b.raw_ptx(&format!("{skip}:"));
                 if float_type == PtxType::F32 {
                     b.raw_ptx(&format!("mov.b32 {val}, {zero_val};"));
                 } else {
@@ -321,7 +321,7 @@ fn emit_im2col3d_body(
                 }
 
                 // Store to col_matrix.
-                b.label(&store_lbl);
+                b.raw_ptx(&format!("{store_lbl}:"));
                 // dst_idx = (row_base + kernel_offset) * total_columns + gid
                 b.raw_ptx(&format!("add.u32 {tmp32}, {row_base}, {kernel_offset};"));
                 b.raw_ptx(&format!("mul.lo.u32 {dst_idx}, {tmp32}, {total_columns};"));
@@ -342,9 +342,9 @@ fn emit_im2col3d_body(
     // Advance channel counter.
     b.raw_ptx(&format!("add.u32 {c_reg}, {c_reg}, 1;"));
     b.raw_ptx(&format!("bra {c_loop_label};"));
-    b.label(&c_done_label);
+    b.raw_ptx(&format!("{c_done_label}:"));
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }
 
@@ -619,7 +619,7 @@ fn emit_col2im3d_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, p: &Col2im3
                     b.raw_ptx(&format!("add.rn.f64 {acc}, {acc}, {lval};"));
                 }
 
-                b.label(&skip);
+                b.raw_ptx(&format!("{skip}:"));
             }
         }
     }
@@ -639,7 +639,7 @@ fn emit_col2im3d_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, p: &Col2im3
         b.raw_ptx(&format!("st.global.f64 [{out_addr}], {acc};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }
 
@@ -834,7 +834,7 @@ fn emit_direct3d_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, p: &Direct3
     b.raw_ptx(&format!("mul.lo.u32 {k_times_cpg27}, {k_reg}, {cpg27};"));
 
     b.raw_ptx(&format!("mov.u32 {c_reg}, 0;"));
-    b.label(&c_loop);
+    b.raw_ptx(&format!("{c_loop}:"));
     b.raw_ptx(&format!("setp.lo.u32 {pred_c}, {c_reg}, {c_limit};"));
     b.raw_ptx(&format!("@!{pred_c} bra {c_done};"));
 
@@ -918,7 +918,7 @@ fn emit_direct3d_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, p: &Direct3
                     b.raw_ptx(&format!("add.rn.f64 {acc}, {acc}, {prod};"));
                 }
 
-                b.label(&skip);
+                b.raw_ptx(&format!("{skip}:"));
             }
         }
     }
@@ -926,7 +926,7 @@ fn emit_direct3d_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, p: &Direct3
     // Advance channel counter.
     b.raw_ptx(&format!("add.u32 {c_reg}, {c_reg}, 1;"));
     b.raw_ptx(&format!("bra {c_loop};"));
-    b.label(&c_done);
+    b.raw_ptx(&format!("{c_done}:"));
 
     b.comment("Store output");
     let out_idx64 = b.alloc_reg(PtxType::U64);
@@ -943,7 +943,7 @@ fn emit_direct3d_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, p: &Direct3
         b.raw_ptx(&format!("st.global.f64 [{out_addr}], {acc};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }
 
@@ -1169,7 +1169,7 @@ fn emit_wgrad3d_body(
     let n_loop = b.fresh_label("wg_n_loop");
     let n_done = b.fresh_label("wg_n_done");
     b.raw_ptx(&format!("mov.u32 {n_reg}, 0;"));
-    b.label(&n_loop);
+    b.raw_ptx(&format!("{n_loop}:"));
     b.raw_ptx(&format!("setp.lo.u32 {pred_n}, {n_reg}, {batch_size};"));
     b.raw_ptx(&format!("@!{pred_n} bra {n_done};"));
 
@@ -1177,7 +1177,7 @@ fn emit_wgrad3d_body(
     let od_loop = b.fresh_label("wg_od_loop");
     let od_done = b.fresh_label("wg_od_done");
     b.raw_ptx(&format!("mov.u32 {od_reg}, 0;"));
-    b.label(&od_loop);
+    b.raw_ptx(&format!("{od_loop}:"));
     b.raw_ptx(&format!(
         "setp.lo.u32 {pred_od}, {od_reg}, {};",
         dims.output_d
@@ -1203,7 +1203,7 @@ fn emit_wgrad3d_body(
     let oh_loop = b.fresh_label("wg_oh_loop");
     let oh_done = b.fresh_label("wg_oh_done");
     b.raw_ptx(&format!("mov.u32 {oh_reg}, 0;"));
-    b.label(&oh_loop);
+    b.raw_ptx(&format!("{oh_loop}:"));
     b.raw_ptx(&format!(
         "setp.lo.u32 {pred_oh}, {oh_reg}, {};",
         dims.output_h
@@ -1229,7 +1229,7 @@ fn emit_wgrad3d_body(
     let ow_loop = b.fresh_label("wg_ow_loop");
     let ow_done = b.fresh_label("wg_ow_done");
     b.raw_ptx(&format!("mov.u32 {ow_reg}, 0;"));
-    b.label(&ow_loop);
+    b.raw_ptx(&format!("{ow_loop}:"));
     b.raw_ptx(&format!(
         "setp.lo.u32 {pred_ow}, {ow_reg}, {};",
         dims.output_w
@@ -1306,27 +1306,27 @@ fn emit_wgrad3d_body(
     }
 
     // skip_ow label and ow loop end.
-    b.label(&skip_ow);
+    b.raw_ptx(&format!("{skip_ow}:"));
     b.raw_ptx(&format!("add.u32 {ow_reg}, {ow_reg}, 1;"));
     b.raw_ptx(&format!("bra {ow_loop};"));
-    b.label(&ow_done);
+    b.raw_ptx(&format!("{ow_done}:"));
 
     // skip_oh label and oh loop end.
-    b.label(&skip_oh);
+    b.raw_ptx(&format!("{skip_oh}:"));
     b.raw_ptx(&format!("add.u32 {oh_reg}, {oh_reg}, 1;"));
     b.raw_ptx(&format!("bra {oh_loop};"));
-    b.label(&oh_done);
+    b.raw_ptx(&format!("{oh_done}:"));
 
     // skip_od label and od loop end.
-    b.label(&skip_od);
+    b.raw_ptx(&format!("{skip_od}:"));
     b.raw_ptx(&format!("add.u32 {od_reg}, {od_reg}, 1;"));
     b.raw_ptx(&format!("bra {od_loop};"));
-    b.label(&od_done);
+    b.raw_ptx(&format!("{od_done}:"));
 
     // Batch loop end.
     b.raw_ptx(&format!("add.u32 {n_reg}, {n_reg}, 1;"));
     b.raw_ptx(&format!("bra {n_loop};"));
-    b.label(&n_done);
+    b.raw_ptx(&format!("{n_done}:"));
 
     // Store accumulated weight gradient.
     b.comment("Store weight gradient");
@@ -1342,6 +1342,6 @@ fn emit_wgrad3d_body(
         b.raw_ptx(&format!("st.global.f64 [{w_addr}], {acc};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }

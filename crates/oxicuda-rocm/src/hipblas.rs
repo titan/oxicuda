@@ -132,8 +132,11 @@ impl HipBlas {
                 .expect("infallible: string literal contains no null bytes");
             // SAFETY: dlopen with RTLD_NOW | RTLD_LOCAL is safe for probing
             // whether a library exists. We immediately dlclose if found.
+            // On glibc RTLD_LOCAL is 0 (0x100 is RTLD_GLOBAL), so probing must
+            // pass just RTLD_NOW to avoid promoting hipBLAS symbols into the
+            // process-global scope.
             let handle = unsafe {
-                libc_dlopen(c_path.as_ptr(), 2 /* RTLD_NOW */| 256 /* RTLD_LOCAL */)
+                libc_dlopen(c_path.as_ptr(), 2 /* RTLD_NOW | RTLD_LOCAL(0) */)
             };
             if !handle.is_null() {
                 // SAFETY: handle is a valid library handle from dlopen.
@@ -232,10 +235,25 @@ impl HipBlas {
                 "GEMM pointers must not be null".into(),
             ));
         }
-        if cfg.lda < cfg.m || cfg.ldb < cfg.k || cfg.ldc < cfg.m {
+        // Minimum leading dimensions depend on the transpose op (column-major
+        // BLAS): the *stored* A is m×k (lda≥m) only when trans_a=None, else it
+        // is k×m (lda≥k); the stored B is k×n (ldb≥k) only when trans_b=None,
+        // else n×k (ldb≥n). C is always m×n (ldc≥m).
+        let a_rows = if matches!(cfg.trans_a, HipBlasOperation::None) {
+            cfg.m
+        } else {
+            cfg.k
+        };
+        let b_rows = if matches!(cfg.trans_b, HipBlasOperation::None) {
+            cfg.k
+        } else {
+            cfg.n
+        };
+        if cfg.lda < a_rows || cfg.ldb < b_rows || cfg.ldc < cfg.m {
             return Err(RocmError::InvalidArgument(format!(
-                "GEMM leading dimensions too small: lda={}, ldb={}, ldc={}",
-                cfg.lda, cfg.ldb, cfg.ldc
+                "GEMM leading dimensions too small: lda={} (need >= {a_rows}), \
+                 ldb={} (need >= {b_rows}), ldc={} (need >= {})",
+                cfg.lda, cfg.ldb, cfg.ldc, cfg.m
             )));
         }
         Ok(())
@@ -318,6 +336,39 @@ mod tests {
         };
         let result = blas.dgemm(&cfg, 1.0, 0.0);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn leading_dim_validation_is_transpose_aware() {
+        // `validate_gemm_config` is transpose-aware: for a transposed operand
+        // the required leading dimension is the *stored* row count, not `m`/`k`.
+        let blas = HipBlas::stub();
+        let cfg = |trans_a, m, n, k, lda, ldb, ldc| HipBlasGemmConfig {
+            trans_a,
+            trans_b: HipBlasOperation::None,
+            m,
+            n,
+            k,
+            a_ptr: dummy_ptr() as *const _,
+            lda,
+            b_ptr: dummy_ptr() as *const _,
+            ldb,
+            c_ptr: dummy_ptr(),
+            ldc,
+        };
+
+        // trans_a=Transpose: stored A is k×m, so lda>=k (=4) is valid even
+        // though lda < m (=8). The old `lda < m` check wrongly rejected this.
+        let ok = cfg(HipBlasOperation::Transpose, 8, 4, 4, 4, 4, 8);
+        assert!(blas.validate_gemm_config(&ok, 1.0, 0.0).is_ok());
+
+        // trans_a=Transpose: stored A is k×m = 8×4, so lda must be >= 8. lda=4
+        // is invalid; the old `lda < m` (=4) check wrongly accepted it.
+        let bad = cfg(HipBlasOperation::Transpose, 4, 4, 8, 4, 8, 4);
+        assert!(matches!(
+            blas.validate_gemm_config(&bad, 1.0, 0.0),
+            Err(RocmError::InvalidArgument(_))
+        ));
     }
 
     #[test]

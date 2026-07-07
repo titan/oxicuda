@@ -182,45 +182,89 @@ impl WasmMemoryManager {
             .get(&handle)
             .ok_or_else(|| WebGpuError::InvalidArgument(format!("unknown handle {handle}")))?;
 
+        // `Queue::write_buffer` validates `offset + src.len() <= buffer.size`;
+        // an overrun is delivered to wgpu's default uncaptured-error handler
+        // which panics.  Reject it up front with a typed error instead.
+        if src.len() as u64 > buf_info.size {
+            return Err(WebGpuError::InvalidArgument(format!(
+                "copy_htod: source is {} bytes but buffer holds only {} bytes",
+                src.len(),
+                buf_info.size
+            )));
+        }
+
         self.device.queue.write_buffer(&buf_info.buffer, 0, src);
         Ok(())
     }
 
-    /// Download device buffer to host bytes (device-to-host copy).
+    /// Submit a device→staging copy and return the mappable staging buffer.
     ///
-    /// Uses a staging buffer with `map_async` and blocks via `pollster::block_on`.
-    /// On native WASM, callers should prefer the async variant or schedule this
-    /// on a web worker to avoid blocking the main thread.
+    /// Shared by the synchronous [`copy_dtoh`](Self::copy_dtoh) and asynchronous
+    /// [`copy_dtoh_async`](Self::copy_dtoh_async) readback paths.
+    fn submit_readback(&self, handle: u64) -> WebGpuResult<wgpu::Buffer> {
+        let buffers = self
+            .buffers
+            .lock()
+            .map_err(|_| WebGpuError::BufferMapping("mutex poisoned".into()))?;
+
+        let buf_info = buffers
+            .get(&handle)
+            .ok_or_else(|| WebGpuError::InvalidArgument(format!("unknown handle {handle}")))?;
+
+        let staging = self.device.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("oxicuda-wasm-staging"),
+            size: buf_info.size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder =
+            self.device
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("oxicuda-wasm-readback"),
+                });
+
+        encoder.copy_buffer_to_buffer(&buf_info.buffer, 0, &staging, 0, buf_info.size);
+        self.device.queue.submit(std::iter::once(encoder.finish()));
+
+        Ok(staging)
+    }
+
+    /// Copy the mapped staging data into `dst`, enforcing the sized-by-`dst`
+    /// contract: an oversized destination is rejected rather than silently
+    /// truncated (which would leave `dst`'s tail stale while reporting success).
+    fn drain_mapped(dst: &mut [u8], staging: wgpu::Buffer) -> WebGpuResult<()> {
+        let slice = staging.slice(..);
+        let data = slice.get_mapped_range();
+        let data_len = data.len();
+        if dst.len() > data_len {
+            drop(data);
+            staging.unmap();
+            return Err(WebGpuError::InvalidArgument(format!(
+                "copy_dtoh: destination is {} bytes but buffer holds only {data_len} bytes",
+                dst.len(),
+            )));
+        }
+        let copy_len = dst.len();
+        dst[..copy_len].copy_from_slice(&data[..copy_len]);
+        drop(data);
+        staging.unmap();
+        Ok(())
+    }
+
+    /// Download a device buffer to host bytes (device-to-host copy).
+    ///
+    /// This is a *blocking* readback: it maps a staging buffer and waits on the
+    /// map callback.  On a native target (including the `wasm` feature used for
+    /// testing) `Device::poll` drives completion, so this works.  On the real
+    /// `wasm32` browser main thread, however, blocking would starve the event
+    /// loop that delivers the map callback and freeze the tab — so there this
+    /// method returns [`WebGpuError::Unsupported`] and callers must use
+    /// [`copy_dtoh_async`](Self::copy_dtoh_async) instead.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn copy_dtoh(&self, dst: &mut [u8], handle: u64) -> WebGpuResult<()> {
-        let staging = {
-            let buffers = self
-                .buffers
-                .lock()
-                .map_err(|_| WebGpuError::BufferMapping("mutex poisoned".into()))?;
-
-            let buf_info = buffers
-                .get(&handle)
-                .ok_or_else(|| WebGpuError::InvalidArgument(format!("unknown handle {handle}")))?;
-
-            let staging = self.device.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("oxicuda-wasm-staging"),
-                size: buf_info.size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-
-            let mut encoder =
-                self.device
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("oxicuda-wasm-readback"),
-                    });
-
-            encoder.copy_buffer_to_buffer(&buf_info.buffer, 0, &staging, 0, buf_info.size);
-            self.device.queue.submit(std::iter::once(encoder.finish()));
-
-            staging
-        };
+        let staging = self.submit_readback(handle)?;
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -234,13 +278,91 @@ impl WasmMemoryManager {
             .map_err(|_| WebGpuError::BufferMapping("channel closed before map completed".into()))?
             .map_err(|e| WebGpuError::BufferMapping(format!("{e:?}")))?;
 
-        let data = slice.get_mapped_range();
-        let copy_len = dst.len().min(data.len());
-        dst[..copy_len].copy_from_slice(&data[..copy_len]);
-        drop(data);
-        staging.unmap();
+        Self::drain_mapped(dst, staging)
+    }
 
-        Ok(())
+    /// Blocking readback is unavailable on the `wasm32` browser main thread — it
+    /// would deadlock the single event loop that delivers the buffer-map
+    /// callback.  Use [`copy_dtoh_async`](Self::copy_dtoh_async) instead.
+    #[cfg(target_arch = "wasm32")]
+    pub fn copy_dtoh(&self, _dst: &mut [u8], _handle: u64) -> WebGpuResult<()> {
+        Err(WebGpuError::Unsupported(
+            "synchronous copy_dtoh would deadlock the browser event loop; \
+             use copy_dtoh_async"
+                .into(),
+        ))
+    }
+
+    /// Asynchronously download a device buffer to host bytes.
+    ///
+    /// Unlike [`copy_dtoh`](Self::copy_dtoh) this never blocks the calling
+    /// thread: it awaits the buffer-map completion via a future resolved from
+    /// the `map_async` callback, making it the correct readback path on the
+    /// single-threaded browser event loop.  Like `copy_dtoh`, an oversized
+    /// destination is rejected with [`WebGpuError::InvalidArgument`].
+    pub async fn copy_dtoh_async(&self, dst: &mut [u8], handle: u64) -> WebGpuResult<()> {
+        let staging = self.submit_readback(handle)?;
+
+        {
+            let slice = staging.slice(..);
+            let state = Arc::new(Mutex::new(MapState::default()));
+            let cb_state = Arc::clone(&state);
+            slice.map_async(wgpu::MapMode::Read, move |result| {
+                let mut guard = match cb_state.lock() {
+                    Ok(g) => g,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                guard.result = Some(result);
+                if let Some(waker) = guard.waker.take() {
+                    waker.wake();
+                }
+            });
+
+            // Nudge the device once so the callback can be delivered on native
+            // executors; in the browser the event loop drives this itself.
+            let _ = self.device.device.poll(wgpu::PollType::wait_indefinitely());
+
+            MapWait { state }
+                .await
+                .map_err(|e| WebGpuError::BufferMapping(format!("{e:?}")))?;
+        }
+
+        Self::drain_mapped(dst, staging)
+    }
+}
+
+/// Shared state between a `map_async` callback and the [`MapWait`] future that
+/// awaits it.
+#[derive(Default)]
+struct MapState {
+    result: Option<Result<(), wgpu::BufferAsyncError>>,
+    waker: Option<std::task::Waker>,
+}
+
+/// A minimal future that resolves once a `map_async` callback has stored its
+/// result.  Used by [`WasmMemoryManager::copy_dtoh_async`] to await a buffer
+/// map without blocking the browser event loop.
+struct MapWait {
+    state: Arc<Mutex<MapState>>,
+}
+
+impl std::future::Future for MapWait {
+    type Output = Result<(), wgpu::BufferAsyncError>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let mut guard = match self.state.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(result) = guard.result.take() {
+            std::task::Poll::Ready(result)
+        } else {
+            guard.waker = Some(cx.waker().clone());
+            std::task::Poll::Pending
+        }
     }
 }
 
@@ -501,5 +623,49 @@ mod tests {
     fn wasm_backend_init_graceful() {
         let mut b = WasmBackend::new();
         let _result = b.init();
+    }
+
+    /// Try to build a `WasmGpuDevice` for device-backed tests; returns `None`
+    /// when no adapter is available so the test skips gracefully.
+    fn try_wasm_device() -> Option<Arc<WasmGpuDevice>> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .ok()?;
+        let dev = pollster::block_on(WasmGpuDevice::from_adapter(instance, adapter)).ok()?;
+        Some(Arc::new(dev))
+    }
+
+    /// Oversized host→device upload must return a typed error, not panic via
+    /// wgpu's default uncaptured-error handler.
+    #[test]
+    fn wasm_copy_htod_oversize_errors() {
+        let Some(dev) = try_wasm_device() else {
+            return;
+        };
+        let mm = WasmMemoryManager::new(dev);
+        let h = mm.alloc(16).expect("alloc 16 bytes");
+        let err = mm.copy_htod(h, &[0u8; 64]).unwrap_err();
+        assert!(matches!(err, WebGpuError::InvalidArgument(_)));
+        mm.free(h).expect("free");
+    }
+
+    /// Device→host readback into an oversized destination must error rather than
+    /// silently truncate and report success.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn wasm_copy_dtoh_oversize_dst_errors() {
+        let Some(dev) = try_wasm_device() else {
+            return;
+        };
+        let mm = WasmMemoryManager::new(dev);
+        let h = mm.alloc(16).expect("alloc 16 bytes");
+        let mut dst = vec![0u8; 64];
+        let err = mm.copy_dtoh(&mut dst, h).unwrap_err();
+        assert!(matches!(err, WebGpuError::InvalidArgument(_)));
+        mm.free(h).expect("free");
     }
 }

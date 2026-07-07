@@ -9,17 +9,9 @@
 //! runs via the triangle-masked Tensor Core kernel in `syrk_tc`.  Otherwise it
 //! decomposes into two GEMM calls.
 
-use std::sync::Arc;
-
-use oxicuda_driver::Module;
-use oxicuda_launch::{Dim3, Kernel, LaunchParams};
-use oxicuda_ptx::ir::PtxType;
-
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
 use crate::types::{FillMode, GpuFloat, MatrixDesc, MatrixDescMut, Transpose};
-
-use super::syrk_tc;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -107,87 +99,35 @@ pub fn syr2k<T: GpuFloat>(
         return Ok(());
     }
 
-    // Tensor Core fast path: two-operand triangle-masked cross-product kernel.
+    // SYR2K = alpha * (op(A) * op(B)^T + op(B) * op(A)^T) + beta * C,
+    // decomposed into two triangle-masked GEMM calls:
+    //   Step 1: C[tri] = alpha * op1(A) * op2(B) + beta * C
+    //   Step 2: C[tri] = alpha * op1(B) * op2(A) + 1.0 * C   (beta = 1)
     //
-    // Applicable when:
-    //   - SM >= 80 (Ampere+) and n >= 32
-    //   - fill_mode is Upper or Lower (not Full)
-    //   - The element type is f32 (the generated PTX uses f32 alpha/beta).
+    // The former `syrk_tc::generate_syr2k_tc_ptx` tensor-core path was an
+    // incomplete placeholder (single k = 0 cross-term, f32-only) and is not
+    // used. Each GEMM computes the full dot product over K; both share the same
+    // triangle mask, so the opposite triangle of C is never written by either
+    // step and is preserved exactly (reference-BLAS SYR2K semantics).
     //
-    // The kernel in `syrk_tc::generate_syr2k_tc_ptx` accepts both `ptr_a` and
-    // `ptr_b` and computes the cross-product accumulation directly, writing
-    // only the requested triangle.
-    {
-        let sm = handle.sm_version();
-        let tc_eligible = syrk_tc::is_tc_applicable(sm, n)
-            && fill_mode != FillMode::Full
-            && T::PTX_TYPE == PtxType::F32;
-
-        if tc_eligible {
-            let tile = syrk_tc::syrk_tc_tile_config(sm, n);
-            let config =
-                syrk_tc::Syr2kTcConfig::new(tile.tile_m, tile.tile_n, tile.tile_k, sm, fill_mode);
-
-            // PTX generation failure falls through to the two-GEMM path.
-            if let Ok((ptx, kernel_name)) = syrk_tc::generate_syr2k_tc_ptx(&config) {
-                // Load the module (JIT-compiles PTX via the CUDA driver at
-                // runtime; returns CudaError::NotInitialized on macOS where
-                // no CUDA driver is present — falls through to GEMM below).
-                if let Ok(module) = Module::from_ptx(&ptx) {
-                    let module = Arc::new(module);
-                    let kernel =
-                        Kernel::from_module(Arc::clone(&module), &kernel_name).map_err(|e| {
-                            BlasError::LaunchFailed(format!("SYR2K TC: kernel lookup failed: {e}"))
-                        })?;
-
-                    // Grid: one tile per output NxN tile (col-tiles x row-tiles).
-                    let grid_x = n.div_ceil(tile.tile_n);
-                    let grid_y = n.div_ceil(tile.tile_m);
-                    let threads_per_block = (tile.tile_m * tile.tile_n).min(256);
-
-                    let params = LaunchParams::new(
-                        Dim3::new(grid_x, grid_y, 1),
-                        Dim3::new(threads_per_block, 1, 1),
-                    );
-
-                    // Kernel args: ptr_a, ptr_b, ptr_c, alpha(f32), beta(f32),
-                    //              n, k, lda, ldb, ldc
-                    let alpha_f32 = f32::from_bits(alpha.to_bits_u64() as u32);
-                    let beta_f32 = f32::from_bits(beta.to_bits_u64() as u32);
-                    let args = (
-                        a.ptr, b.ptr, c.ptr, alpha_f32, beta_f32, n, a_k, a.ld, b.ld, c.ld,
-                    );
-
-                    kernel
-                        .launch(&params, handle.stream(), &args)
-                        .map_err(|e| {
-                            BlasError::LaunchFailed(format!("SYR2K TC: launch failed: {e}"))
-                        })?;
-
-                    return Ok(());
-                }
-                // No CUDA driver available (e.g. macOS) — fall through to two-GEMM.
-            }
-        }
-    }
-
-    // Fallback: SYR2K = alpha * A * B^T + alpha * B * A^T + beta * C
-    // Decompose into two GEMM calls:
-    //   Step 1: C = alpha * A * B^T + beta * C       (first GEMM)
-    //   Step 2: C = alpha * B * A^T + 1.0 * C        (second GEMM, beta=1)
-
-    let (trans_left, trans_right) = match trans {
-        Transpose::NoTrans => (Transpose::NoTrans, Transpose::Trans),
-        Transpose::Trans => (Transpose::Trans, Transpose::NoTrans),
-        Transpose::ConjTrans => unreachable!(),
+    // ConjTrans was rejected above, so `trans` is NoTrans or Trans here.
+    let (trans_left, trans_right) = if trans == Transpose::NoTrans {
+        (Transpose::NoTrans, Transpose::Trans)
+    } else {
+        (Transpose::Trans, Transpose::NoTrans)
     };
 
-    // First GEMM: C = alpha * op1(A) * op2(B) + beta * C
-    super::gemm_api::gemm(handle, trans_left, trans_right, alpha, a, b, beta, c)?;
+    let mask = match fill_mode {
+        FillMode::Upper | FillMode::Lower => Some(fill_mode),
+        FillMode::Full => None,
+    };
 
-    // Second GEMM: C = alpha * op1(B) * op2(A) + 1.0 * C
+    // First GEMM: C[tri] = alpha * op1(A) * op2(B) + beta * C.
+    super::gemm_api::gemm_tri(handle, trans_left, trans_right, alpha, a, b, beta, c, mask)?;
+
+    // Second GEMM: C[tri] = alpha * op1(B) * op2(A) + 1.0 * C.
     let one = T::gpu_one();
-    super::gemm_api::gemm(handle, trans_left, trans_right, alpha, b, a, one, c)?;
+    super::gemm_api::gemm_tri(handle, trans_left, trans_right, alpha, b, a, one, c, mask)?;
 
     Ok(())
 }

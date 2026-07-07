@@ -655,26 +655,27 @@ fn test_new_device_attribute_discriminants() {
         105
     );
 
-    // RDMA and fabric
+    // RDMA and fabric (fabric handle support is attribute 128 in cuda.h)
     assert_eq!(
         CUdevice_attribute::GpuDirectRdmaWithCudaVmmSupported as i32,
         110
     );
-    assert_eq!(CUdevice_attribute::GpuDirectRdmaFabricSupported as i32, 131);
+    assert_eq!(CUdevice_attribute::GpuDirectRdmaFabricSupported as i32, 128);
 
     // Timeline semaphore and sync domain
     assert_eq!(
         CUdevice_attribute::TimelineSemaphoreInteropSupported as i32,
-        113
+        114
     );
-    assert_eq!(CUdevice_attribute::MemSyncDomainSupported as i32, 130);
+    assert_eq!(CUdevice_attribute::MemSyncDomainCount as i32, 126);
 
     // Unified function pointers
-    assert_eq!(CUdevice_attribute::UnifiedFunctionPointers as i32, 125);
+    assert_eq!(CUdevice_attribute::UnifiedFunctionPointers as i32, 129);
 
-    // Texture gather
-    assert_eq!(CUdevice_attribute::MaxTexture2DGatherWidth as i32, 44);
-    assert_eq!(CUdevice_attribute::MaxTexture2DGatherHeight as i32, 45);
+    // Texture gather (CAN_TEX2D_GATHER is 44; the gather width/height are 45/46)
+    assert_eq!(CUdevice_attribute::CanTex2dGather as i32, 44);
+    assert_eq!(CUdevice_attribute::MaxTexture2DGatherWidth as i32, 45);
+    assert_eq!(CUdevice_attribute::MaxTexture2DGatherHeight as i32, 46);
 
     // Alt 3D texture
     assert_eq!(CUdevice_attribute::MaxTexture3DWidthAlt as i32, 47);
@@ -682,10 +683,10 @@ fn test_new_device_attribute_discriminants() {
     assert_eq!(CUdevice_attribute::MaxTexture3DDepthAlt as i32, 49);
 
     // Reserved shared memory
-    assert_eq!(CUdevice_attribute::ReservedSharedMemoryPerBlock as i32, 112);
+    assert_eq!(CUdevice_attribute::ReservedSharedMemoryPerBlock as i32, 111);
 
     // Access policy window
-    assert_eq!(CUdevice_attribute::AccessPolicyMaxWindowSize as i32, 111);
+    assert_eq!(CUdevice_attribute::MaxAccessPolicyWindowSize as i32, 109);
 }
 
 #[test]
@@ -798,8 +799,9 @@ fn test_no_discriminant_overlap() {
         CUdevice_attribute::MaxPersistingL2CacheSize as i32,
         CUdevice_attribute::MaxAccessPolicyWindowSize as i32,
         CUdevice_attribute::GpuDirectRdmaWithCudaVmmSupported as i32,
-        CUdevice_attribute::AccessPolicyMaxWindowSize as i32,
         CUdevice_attribute::ReservedSharedMemoryPerBlock as i32,
+        CUdevice_attribute::SparseCudaArraySupported as i32,
+        CUdevice_attribute::ReadOnlyHostRegisterSupported as i32,
         CUdevice_attribute::TimelineSemaphoreInteropSupported as i32,
         CUdevice_attribute::MemoryPoolsSupported as i32,
         CUdevice_attribute::GpuDirectRdmaSupported as i32,
@@ -814,8 +816,6 @@ fn test_no_discriminant_overlap() {
         CUdevice_attribute::UnifiedFunctionPointers as i32,
         CUdevice_attribute::NumaConfig as i32,
         CUdevice_attribute::NumaId as i32,
-        CUdevice_attribute::MaxTimelineSemaphoreInteropSupported as i32,
-        CUdevice_attribute::MemSyncDomainSupported as i32,
         CUdevice_attribute::GpuDirectRdmaFabricSupported as i32,
         CUdevice_attribute::MulticastSupported as i32,
         CUdevice_attribute::MpsEnabled as i32,

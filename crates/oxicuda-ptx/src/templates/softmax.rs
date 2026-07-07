@@ -288,9 +288,10 @@ impl SoftmaxTemplate {
         writeln!(ptx, "    .param .u64 %param_output,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u32 %param_batch_size").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+        // `.maxntid` must precede the body brace with no trailing semicolon.
+        writeln!(ptx, "    .maxntid {block_size}, 1, 1").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
-        writeln!(ptx, "    .maxntid {block_size}, 1, 1;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b32 %r<16>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b64 %rd<12>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .f32 %f<16>;").map_err(PtxGenError::FormatError)?;
@@ -692,8 +693,9 @@ fn emit_mb_header(
         writeln!(ptx, "    {p}{sep}").map_err(PtxGenError::FormatError)?;
     }
     writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+    // `.maxntid` must precede the body brace with no trailing semicolon.
+    writeln!(ptx, "    .maxntid {threads_per_block}, 1, 1").map_err(PtxGenError::FormatError)?;
     writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
-    writeln!(ptx, "    .maxntid {threads_per_block}, 1, 1;").map_err(PtxGenError::FormatError)?;
     writeln!(ptx, "    .reg .b32 %r<32>;").map_err(PtxGenError::FormatError)?;
     writeln!(ptx, "    .reg .b64 %rd<32>;").map_err(PtxGenError::FormatError)?;
     writeln!(ptx, "    .reg .f32 %f<32>;").map_err(PtxGenError::FormatError)?;

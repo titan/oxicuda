@@ -615,7 +615,7 @@ fn emit_pad_and_fft_body(
     b.raw_ptx(&format!("bra {store_label};"));
 
     // Zero branch
-    b.label(&zero_label);
+    b.raw_ptx(&format!("{zero_label}:"));
     if float_type == PtxType::F32 {
         b.raw_ptx(&format!("mov.b32 {val}, 0F00000000;"));
     } else {
@@ -623,7 +623,7 @@ fn emit_pad_and_fft_body(
     }
 
     // Store padded real and zero imaginary
-    b.label(&store_label);
+    b.raw_ptx(&format!("{store_label}:"));
     b.comment("Store to padded_re[gid] and zero padded_im[gid]");
 
     let gid64 = b.alloc_reg(PtxType::U64);
@@ -657,7 +657,7 @@ fn emit_pad_and_fft_body(
         log2_floor(fft_w),
     ));
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }
 
@@ -747,7 +747,7 @@ fn emit_pointwise_multiply_body(
     let pred_ic = b.alloc_reg(PtxType::Pred);
 
     b.raw_ptx(&format!("mov.u32 {ic_reg}, 0;"));
-    b.label(&loop_label);
+    b.raw_ptx(&format!("{loop_label}:"));
     b.raw_ptx(&format!(
         "setp.lo.u32 {pred_ic}, {ic_reg}, {p_in_channels};"
     ));
@@ -825,7 +825,7 @@ fn emit_pointwise_multiply_body(
     // Increment ic
     b.raw_ptx(&format!("add.u32 {ic_reg}, {ic_reg}, 1;"));
     b.raw_ptx(&format!("bra {loop_label};"));
-    b.label(&loop_end);
+    b.raw_ptx(&format!("{loop_end}:"));
 
     // Store result
     b.comment("Store complex product to output");
@@ -847,7 +847,7 @@ fn emit_pointwise_multiply_body(
         b.raw_ptx(&format!("st.global.f64 [{addr64}], {acc_im};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 
     // Suppress unused variable warnings
@@ -989,7 +989,7 @@ fn emit_ifft_and_crop_body(
         b.raw_ptx(&format!("st.global.f64 [{addr64}], {val};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }
 

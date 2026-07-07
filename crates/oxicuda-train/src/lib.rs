@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn e2e_zero_stage2_with_adamw() {
         let cfg = ZeroConfig::stage2(0, 1); // single rank = normal training
-        let mut zero = ZeroOptimizer::new(GpuAdamW::new(1e-3), cfg);
+        let mut zero = ZeroOptimizer::new(GpuAdamW::new(1e-3), cfg).expect("valid ZeRO config");
         let mut params = vec![{
             let mut p = ParamTensor::new(vec![1.0_f32; 16], "w");
             p.set_grad(vec![0.5_f32; 16])

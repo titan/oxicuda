@@ -66,11 +66,17 @@ impl CooperativeLaunch {
     /// All thread blocks in the grid will be scheduled simultaneously,
     /// enabling them to synchronize via `cooperative_groups::grid_group::sync()`.
     ///
-    /// On a real GPU, this calls `cuLaunchCooperativeKernel`. The current
-    /// implementation delegates to the standard `cuLaunchKernel` since
-    /// `cuLaunchCooperativeKernel` is not yet loaded in the driver API
-    /// function table. The cooperative semantics are honored by the driver
-    /// when the kernel binary supports cooperative groups.
+    /// This calls `cuLaunchCooperativeKernel` (via
+    /// [`oxicuda_driver::cooperative_launch::cooperative_launch`]), which
+    /// guarantees that every thread block in the grid is resident on the
+    /// GPU simultaneously. That guarantee is required for grid-wide
+    /// synchronization to be well-defined: a plain `cuLaunchKernel` launch
+    /// (as used by [`Kernel::launch`](crate::kernel::Kernel::launch)) makes
+    /// no such promise, so a kernel that calls
+    /// `cooperative_groups::this_grid().sync()` could deadlock (blocks that
+    /// never get scheduled never reach the barrier) or observe stale data
+    /// (blocks racing ahead before others have started) if launched that
+    /// way.
     ///
     /// # Parameters
     ///
@@ -83,8 +89,13 @@ impl CooperativeLaunch {
     ///
     /// * [`CudaError::InvalidValue`] if grid or block dimensions are zero.
     /// * [`CudaError::CooperativeLaunchTooLarge`] if the grid exceeds the
-    ///   maximum cooperative blocks for the kernel configuration.
+    ///   maximum cooperative grid size the device can run simultaneously.
+    ///   This is enforced authoritatively by the driver, which accounts for
+    ///   the device's full SM count (unlike the single-SM
+    ///   [`max_active_blocks`](Self::max_active_blocks) query).
     /// * [`CudaError::NotInitialized`] if the CUDA driver is unavailable.
+    /// * [`CudaError::NotSupported`] on platforms without a CUDA driver
+    ///   (e.g. macOS).
     /// * Other [`CudaError`] variants on driver failure.
     pub fn launch<A: KernelArgs>(
         kernel: &Kernel,
@@ -103,23 +114,18 @@ impl CooperativeLaunch {
             return Err(CudaError::InvalidValue);
         }
 
-        // For cooperative launch, the total grid size must not exceed the
-        // max active blocks. We check the X*Y*Z product against the limit.
-        let total_blocks = params.grid.total() as u64;
-        let block_threads = params.block.total();
-        let max = Self::max_active_blocks_inner(
-            kernel,
-            block_threads as i32,
-            params.shared_mem_bytes as usize,
-        )?;
-
-        if total_blocks > max as u64 {
-            return Err(CudaError::CooperativeLaunchTooLarge);
-        }
-
-        // Delegate to standard launch. On a real GPU with
-        // cuLaunchCooperativeKernel loaded, we would call that instead.
-        kernel.launch(params, stream, args)
+        let config = oxicuda_driver::cooperative_launch::CooperativeLaunchConfig {
+            grid_dim: (params.grid.x, params.grid.y, params.grid.z),
+            block_dim: (params.block.x, params.block.y, params.block.z),
+            shared_mem_bytes: params.shared_mem_bytes,
+            stream: Some(stream.raw()),
+        };
+        let param_ptrs = args.as_param_ptrs();
+        oxicuda_driver::cooperative_launch::cooperative_launch(
+            kernel.function(),
+            &config,
+            &param_ptrs,
+        )
     }
 
     /// Queries the maximum number of active blocks per streaming
@@ -266,9 +272,10 @@ mod tests {
 
     #[test]
     fn cooperative_max_blocks_constraint_signature() {
-        // CooperativeLaunch.launch checks total_blocks > max_active_blocks and
-        // returns CooperativeLaunchTooLarge. Verify the function signature compiles
-        // (actual invocation requires a real Kernel and GPU).
+        // CooperativeLaunch::launch can return CooperativeLaunchTooLarge
+        // (enforced by the driver's real cuLaunchCooperativeKernel call
+        // when the grid does not fit). Verify the function signature
+        // compiles (actual invocation requires a real Kernel and GPU).
         let _: fn(&Kernel, &LaunchParams, &Stream, &(u64, u32)) -> CudaResult<()> =
             CooperativeLaunch::launch;
     }
@@ -282,5 +289,88 @@ mod tests {
             dbg.contains("CooperativeLaunch"),
             "Debug output must contain type name, got: {dbg}"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // On-device regression test (F032): CooperativeLaunch::launch must call the
+    // real cuLaunchCooperativeKernel, not a plain cuLaunchKernel gated by an
+    // over-strict, single-SM manual pre-check.
+    // ---------------------------------------------------------------------------
+
+    /// A minimal, arch-portable empty kernel (no parameters).
+    #[cfg(feature = "gpu-tests")]
+    const NOOP_PTX: &str = "\
+.version 7.0
+.target sm_70
+.address_size 64
+.visible .entry noop_kernel()
+{
+    ret;
+}
+";
+
+    /// Regression test for the bug where `CooperativeLaunch::launch`'s manual
+    /// pre-check compared the *total* grid size against
+    /// `max_active_blocks_per_sm` — a *per-SM* quantity — without multiplying
+    /// by the device's SM count, so it incorrectly rejected grids that
+    /// legitimately span multiple SMs (the normal case for any real
+    /// cooperative launch). It also never called the real
+    /// `cuLaunchCooperativeKernel`, so even a grid that passed the pre-check
+    /// would silently run as an ordinary (non-cooperative) launch. This test
+    /// launches a grid sized to span every SM at full per-SM occupancy —
+    /// which the old pre-check would have rejected on any GPU with more than
+    /// one SM — and asserts it now succeeds via the real cooperative launch
+    /// path. Self-skips if there is no GPU/driver.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn cooperative_launch_succeeds_across_all_sms() {
+        use std::sync::Arc;
+
+        let Ok(dev) = oxicuda_driver::device::Device::get(0) else {
+            return;
+        };
+        let ctx = match oxicuda_driver::context::Context::new(&dev) {
+            Ok(c) => Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let module = match oxicuda_driver::module::Module::from_ptx(NOOP_PTX) {
+            Ok(m) => Arc::new(m),
+            Err(_) => return,
+        };
+        let kernel = match Kernel::from_module(module, "noop_kernel") {
+            Ok(k) => k,
+            Err(_) => return,
+        };
+
+        let block_size: u32 = 128;
+        let max_per_sm = match CooperativeLaunch::max_active_blocks(&kernel, block_size, 0) {
+            Ok(m) if m > 0 => m,
+            _ => return,
+        };
+        let sm_count = match dev.multiprocessor_count() {
+            Ok(c) if c > 0 => c as u32,
+            _ => return,
+        };
+
+        // Grid spans every SM at full per-SM occupancy: legitimate on real
+        // hardware, and strictly greater than `max_active_blocks_per_sm`
+        // alone whenever the device has more than one SM (true of every
+        // real discrete GPU, e.g. the RTX A4000 has 48 SMs).
+        let grid_x = max_per_sm * sm_count;
+        let params = LaunchParams::new(grid_x, block_size);
+
+        let result = CooperativeLaunch::launch(&kernel, &params, &stream, &());
+        assert!(
+            result.is_ok(),
+            "cooperative launch spanning all {sm_count} SMs \
+             ({max_per_sm} blocks/SM) must succeed, got {result:?}"
+        );
+        stream
+            .synchronize()
+            .expect("stream sync after cooperative launch");
     }
 }

@@ -383,11 +383,16 @@ pub(crate) fn jit_failure_from_log(source: CudaError, log: JitLog) -> CudaError 
 pub struct Module {
     /// Raw CUDA module handle.
     raw: CUmodule,
+    /// The context that owned this module at load time, used to skip the driver
+    /// unload if that context was torn down first (avoids a use-after-free).
+    /// `None` when no tracked context was current — see
+    /// [`crate::context::current_ctx_owner`].
+    owner: crate::context::CtxOwner,
 }
 
-// SAFETY: CUDA modules are safe to send between threads when properly
-// synchronised via the driver API.
-unsafe impl Send for Module {}
+// `Module` is `Send + Sync` by auto-derivation: its only field is a `CUmodule`
+// handle (a plain driver-side identifier). The CUDA Driver API is thread-safe,
+// so no manual `unsafe impl` is required.
 
 /// Size of the JIT log buffers in bytes.
 const JIT_LOG_BUFFER_SIZE: usize = 4096;
@@ -411,7 +416,10 @@ impl Module {
             &mut raw,
             c_ptx.as_ptr().cast::<c_void>()
         ))?;
-        Ok(Self { raw })
+        Ok(Self {
+            raw,
+            owner: crate::context::current_ctx_owner(),
+        })
     }
 
     /// Loads a module from PTX source with explicit JIT compiler options.
@@ -497,7 +505,13 @@ impl Module {
         if let Err(e) = result {
             return Err(jit_failure_from_log(e, log));
         }
-        Ok((Self { raw }, log))
+        Ok((
+            Self {
+                raw,
+                owner: crate::context::current_ctx_owner(),
+            },
+            log,
+        ))
     }
 
     /// Retrieves a kernel function by name from this module.
@@ -537,6 +551,14 @@ impl Module {
 
 impl Drop for Module {
     fn drop(&mut self) {
+        // Hold the registry lock across the unload, and skip it entirely if the
+        // owning context was already torn down (its `cuCtxDestroy` already
+        // unloaded this module — calling `cuModuleUnload` again would be a
+        // use-after-free).
+        let map = crate::context::lock_live_ctxs();
+        if !crate::context::owner_is_live(&map, self.owner) {
+            return;
+        }
         if let Ok(api) = try_driver() {
             let rc = unsafe { (api.cu_module_unload)(self.raw) };
             if rc != 0 {

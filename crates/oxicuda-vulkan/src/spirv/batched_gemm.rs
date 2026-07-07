@@ -56,6 +56,13 @@ pub fn batched_gemm_compute_shader() -> Vec<u32> {
     m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, b.ty_fn_void);
     m.emit_label(label_entry);
 
+    // SPIR-V requires all Function-storage OpVariables to be declared in the
+    // first (entry) basic block, so allocate them here before any branch.
+    let var_i = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_uint, var_i, STORAGE_CLASS_FUNCTION);
+    let var_acc = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
+
     // Load GlobalInvocationId.x and .z
     let gid_x = load_gid_x(&mut m, &b);
     // Load GlobalInvocationId.z (batch index)
@@ -105,13 +112,8 @@ pub fn batched_gemm_compute_shader() -> Vec<u32> {
     let col = m.alloc_id();
     m.emit(OP_U_MOD, &[b.ty_uint, col, gid_x, param_n]);
 
-    // Loop variable and accumulator
-    let var_i = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_i, STORAGE_CLASS_FUNCTION);
+    // Initialise the loop counter and accumulator (declared in the entry block).
     m.emit_store(var_i, b.c_uint_0);
-
-    let var_acc = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
     m.emit_store(var_acc, b.c_float_0);
 
     m.emit_branch(label_loop_header);

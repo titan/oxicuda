@@ -67,6 +67,11 @@ pub struct VulkanBackend {
     initialized: bool,
     /// Cache of compiled compute pipelines keyed by SPIR-V content hash.
     pipeline_cache: Mutex<HashMap<ShaderKey, Arc<VulkanComputePipeline>>>,
+    /// Serialises a synchronous dispatch (descriptor-set allocation, recording,
+    /// submission and descriptor-pool reset) so that the shared command pool,
+    /// queue and per-pipeline descriptor pool are accessed by one thread at a
+    /// time, as Vulkan's external-synchronisation contract requires.
+    dispatch_lock: Mutex<()>,
 }
 
 impl VulkanBackend {
@@ -79,6 +84,7 @@ impl VulkanBackend {
             async_manager: None,
             initialized: false,
             pipeline_cache: Mutex::new(HashMap::new()),
+            dispatch_lock: Mutex::new(()),
         }
     }
 
@@ -209,46 +215,51 @@ impl ComputeBackend for VulkanBackend {
 
     fn gemm(
         &self,
-        _trans_a: BackendTranspose,
-        _trans_b: BackendTranspose,
+        trans_a: BackendTranspose,
+        trans_b: BackendTranspose,
         m: usize,
         n: usize,
         k: usize,
         alpha: f64,
         a_ptr: u64,
-        _lda: usize,
+        lda: usize,
         b_ptr: u64,
-        _ldb: usize,
+        ldb: usize,
         beta: f64,
         c_ptr: u64,
-        _ldc: usize,
+        ldc: usize,
     ) -> BackendResult<()> {
         self.check_init()?;
         // Zero-dimension GEMM is a no-op.
         if m == 0 || n == 0 || k == 0 {
             return Ok(());
         }
+        // The SPIR-V GEMM kernel only supports contiguous, non-transposed,
+        // row-major operands (`op(A)` = A of shape m×k with lda==k, `op(B)` = B
+        // of shape k×n with ldb==n, C of shape m×n with ldc==n). Reject anything
+        // else instead of silently computing the wrong product.
+        Self::check_gemm_layout(trans_a, trans_b, n, k, lda, ldb, ldc)?;
         self.dispatch_gemm(m, n, k, alpha as f32, a_ptr, b_ptr, beta as f32, c_ptr)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn batched_gemm(
         &self,
-        _trans_a: BackendTranspose,
-        _trans_b: BackendTranspose,
+        trans_a: BackendTranspose,
+        trans_b: BackendTranspose,
         m: usize,
         n: usize,
         k: usize,
         alpha: f64,
         a_ptr: u64,
-        _lda: usize,
+        lda: usize,
         stride_a: usize,
         b_ptr: u64,
-        _ldb: usize,
+        ldb: usize,
         stride_b: usize,
         beta: f64,
         c_ptr: u64,
-        _ldc: usize,
+        ldc: usize,
         stride_c: usize,
         batch_count: usize,
     ) -> BackendResult<()> {
@@ -257,6 +268,8 @@ impl ComputeBackend for VulkanBackend {
         if batch_count == 0 || m == 0 || n == 0 || k == 0 {
             return Ok(());
         }
+        // Same layout constraints as `gemm` apply per batch matrix.
+        Self::check_gemm_layout(trans_a, trans_b, n, k, lda, ldb, ldc)?;
         self.dispatch_batched_gemm(
             m,
             n,
@@ -653,6 +666,26 @@ impl VulkanBackend {
 
         let vk_dev = device.device();
 
+        // Serialise the whole synchronous dispatch: this guards the shared
+        // command pool + queue and the per-pipeline descriptor pool (a cached
+        // Arc), making the descriptor-pool reset below safe.
+        let _dispatch_guard = self
+            .dispatch_lock
+            .lock()
+            .map_err(|_| BackendError::DeviceError("dispatch lock poisoned".into()))?;
+
+        // Reclaim any descriptor set allocated by a previous dispatch of this
+        // cached pipeline (its work has completed synchronously). Without this
+        // the single-slot pool is exhausted after the first dispatch and every
+        // subsequent allocation fails with VK_ERROR_OUT_OF_POOL_MEMORY.
+        unsafe {
+            vk_dev.reset_descriptor_pool(
+                pipeline.descriptor_pool(),
+                vk::DescriptorPoolResetFlags::empty(),
+            )
+        }
+        .map_err(|e| BackendError::DeviceError(format!("reset_descriptor_pool: {e}")))?;
+
         // Allocate a descriptor set from the pipeline's pool.
         let ds_layout = pipeline.descriptor_set_layout();
         let ds_alloc_info = vk::DescriptorSetAllocateInfo::default()
@@ -732,6 +765,22 @@ impl VulkanBackend {
         let pipeline = self.get_or_create_pipeline(spv, bindings)?;
 
         let vk_dev = device.device();
+
+        // Serialise the whole synchronous dispatch (see `run_compute`).
+        let _dispatch_guard = self
+            .dispatch_lock
+            .lock()
+            .map_err(|_| BackendError::DeviceError("dispatch lock poisoned".into()))?;
+
+        // Reclaim any descriptor set allocated by a previous dispatch of this
+        // cached pipeline before allocating a fresh one.
+        unsafe {
+            vk_dev.reset_descriptor_pool(
+                pipeline.descriptor_pool(),
+                vk::DescriptorPoolResetFlags::empty(),
+            )
+        }
+        .map_err(|e| BackendError::DeviceError(format!("reset_descriptor_pool: {e}")))?;
 
         let ds_layout = pipeline.descriptor_set_layout();
         let ds_alloc_info = vk::DescriptorSetAllocateInfo::default()
@@ -879,6 +928,34 @@ impl VulkanBackend {
 
         self.free_params_buffer(params);
         result
+    }
+
+    /// Validate that a GEMM call matches the layout the SPIR-V kernel supports:
+    /// non-transposed, contiguous row-major operands with `lda == k`,
+    /// `ldb == n`, `ldc == n`. Returns `InvalidArgument` otherwise so callers
+    /// get an explicit error instead of a silently-wrong result.
+    fn check_gemm_layout(
+        trans_a: BackendTranspose,
+        trans_b: BackendTranspose,
+        n: usize,
+        k: usize,
+        lda: usize,
+        ldb: usize,
+        ldc: usize,
+    ) -> BackendResult<()> {
+        if trans_a != BackendTranspose::NoTrans || trans_b != BackendTranspose::NoTrans {
+            return Err(BackendError::InvalidArgument(
+                "vulkan gemm: transposed operands (trans_a/trans_b) are not supported".into(),
+            ));
+        }
+        if lda != k || ldb != n || ldc != n {
+            return Err(BackendError::InvalidArgument(format!(
+                "vulkan gemm: only contiguous row-major layout is supported \
+                 (require lda==k, ldb==n, ldc==n; got lda={lda}, ldb={ldb}, ldc={ldc}, \
+                 k={k}, n={n})"
+            )));
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1519,6 +1596,49 @@ mod tests {
         b.free(a).expect("free a");
         b.free(bv).expect("free b");
         b.free(c).expect("free c");
+    }
+
+    #[test]
+    fn gemm_transpose_and_strided_rejected_requires_vulkan() {
+        let Some(b) = try_init() else { return };
+        // Transposed A must be rejected (not silently computed as A·B).
+        assert!(matches!(
+            b.gemm(
+                BackendTranspose::Trans,
+                BackendTranspose::NoTrans,
+                2,
+                2,
+                2,
+                1.0,
+                0,
+                2,
+                0,
+                2,
+                0.0,
+                0,
+                2,
+            ),
+            Err(BackendError::InvalidArgument(_))
+        ));
+        // Mismatched leading dimension (lda != k) must be rejected.
+        assert!(matches!(
+            b.gemm(
+                BackendTranspose::NoTrans,
+                BackendTranspose::NoTrans,
+                2,
+                2,
+                2,
+                1.0,
+                0,
+                4,
+                0,
+                2,
+                0.0,
+                0,
+                2,
+            ),
+            Err(BackendError::InvalidArgument(_))
+        ));
     }
 
     // ── Conv2D tests ────────────────────────────────────────

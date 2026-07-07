@@ -63,12 +63,11 @@ pub struct DevicePool {
     round_robin: AtomicUsize,
 }
 
-// SAFETY: All fields are Send+Sync:
-// - `entries` is a Vec of (Device, Arc<Context>); Device is Copy+Send+Sync,
-//   Arc<Context> is Send (Context is Send).
-// - AtomicUsize is Send+Sync.
-unsafe impl Send for DevicePool {}
-unsafe impl Sync for DevicePool {}
+// `DevicePool` is `Send + Sync` by auto-derivation: `entries` is a
+// `Vec<(Device, Arc<Context>)>` where `Device` is `Copy + Send + Sync` and
+// `Context` is `Send + Sync` (so `Arc<Context>` is `Send + Sync`), and
+// `round_robin` is an `AtomicUsize` (`Send + Sync`). No manual `unsafe impl`
+// is required, which lets the compiler re-check the bound if a field changes.
 
 impl DevicePool {
     /// Creates a new pool with contexts for all available devices.
@@ -106,6 +105,15 @@ impl DevicePool {
         let mut entries = Vec::with_capacity(devices.len());
         for dev in devices {
             let ctx = Context::new(dev)?;
+            // `cuCtxCreate` pushes the new context onto the creating thread's
+            // context stack and makes it current. Pop it immediately so the
+            // pool holds "floating" contexts: after this loop the creating
+            // thread's context state is exactly what it was before, and pool
+            // drop later destroys only non-current contexts (no destroyed
+            // context is ever left current on this thread). Per the module
+            // contract, callers must call `Context::set_current` before issuing
+            // driver calls.
+            Context::pop_current()?;
             entries.push((*dev, Arc::new(ctx)));
         }
         Ok(Self {
@@ -239,6 +247,21 @@ mod tests {
         let result = DevicePool::with_devices(&[]);
         assert!(result.is_err());
         assert_eq!(result.err(), Some(CudaError::InvalidValue),);
+    }
+
+    /// Locks in the crate's threading contract: the public RAII wrappers and
+    /// the pool are all `Send + Sync`. If a future change adds a non-thread-safe
+    /// field, this stops compiling (the auto-traits are no longer smuggled in
+    /// via a blanket manual `unsafe impl`).
+    #[test]
+    fn driver_types_are_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Context>();
+        assert_send_sync::<crate::stream::Stream>();
+        assert_send_sync::<crate::event::Event>();
+        assert_send_sync::<crate::module::Module>();
+        assert_send_sync::<crate::primary_context::PrimaryContext>();
+        assert_send_sync::<DevicePool>();
     }
 
     #[test]

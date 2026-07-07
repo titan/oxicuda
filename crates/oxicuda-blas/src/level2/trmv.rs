@@ -15,14 +15,14 @@
 
 use std::sync::Arc;
 
-use oxicuda_driver::Module;
+use oxicuda_driver::{CudaError, Module, Stream};
 use oxicuda_launch::{Kernel, LaunchParams, grid_size_for};
 use oxicuda_memory::DeviceBuffer;
 use oxicuda_ptx::prelude::*;
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
-use crate::types::{DiagType, FillMode, GpuFloat, MatrixDesc, Transpose};
+use crate::types::{DiagType, FillMode, GpuFloat, Layout, MatrixDesc, Transpose};
 
 /// Default block size for TRMV kernels.
 const TRMV_BLOCK_SIZE: u32 = 256;
@@ -60,11 +60,20 @@ pub fn trmv<T: GpuFloat>(
         return Ok(());
     }
 
+    // The kernel addresses A as row-major; reject column-major descriptors.
+    if a.layout == Layout::ColMajor {
+        return Err(BlasError::InvalidArgument(
+            "trmv: ColMajor layout is not supported by this kernel; pass a RowMajor descriptor"
+                .to_string(),
+        ));
+    }
+
     validate_trmv_args(n, a, x, incx)?;
 
-    // The operation is in-place (x = op(A)*x), so we need a copy of x to
-    // read from while writing to x. Allocate a temporary device buffer.
-    let x_copy = copy_device_buffer(x)?;
+    // The operation is in-place (x = op(A)*x), so we snapshot x into a scratch
+    // buffer to read from while writing to x. The snapshot is enqueued on the
+    // handle's stream so it is ordered before the kernel that consumes it.
+    let x_copy = copy_device_buffer(x, handle.stream())?;
 
     let ptx = generate_trmv_ptx::<T>(handle.sm_version(), uplo, trans, diag)?;
     let module = Arc::new(Module::from_ptx(&ptx)?);
@@ -86,6 +95,11 @@ pub fn trmv<T: GpuFloat>(
             incx as u32,
         ),
     )?;
+
+    // The scratch snapshot must outlive the kernel that reads it; synchronise
+    // the stream before `x_copy` is dropped so the kernel has finished reading.
+    handle.stream().synchronize().map_err(BlasError::Cuda)?;
+    drop(x_copy);
 
     Ok(())
 }
@@ -118,10 +132,33 @@ fn validate_trmv_args<T: GpuFloat>(
     Ok(())
 }
 
-/// Creates a device-to-device copy of a buffer.
-fn copy_device_buffer<T: GpuFloat>(src: &DeviceBuffer<T>) -> BlasResult<DeviceBuffer<T>> {
+/// Creates a device-to-device copy of a buffer, ordered on `stream`.
+///
+/// The copy is enqueued on `stream` via `cuMemcpyDtoDAsync_v2` so it is
+/// sequenced before any kernel later launched on the same stream. If the
+/// driver does not export the async DtoD entry point
+/// ([`CudaError::NotSupported`]), we fall back to synchronising the stream
+/// (draining prior work) and then performing the legacy synchronous copy,
+/// which keeps the snapshot correctly ordered.
+fn copy_device_buffer<T: GpuFloat>(
+    src: &DeviceBuffer<T>,
+    stream: &Stream,
+) -> BlasResult<DeviceBuffer<T>> {
     let mut dst = DeviceBuffer::<T>::alloc(src.len())?;
-    oxicuda_memory::copy::copy_dtod(&mut dst, src)?;
+    let byte_size = src.len() * T::SIZE;
+    match oxicuda_driver::memory_info::memcpy_device_to_device_async(
+        dst.as_device_ptr(),
+        src.as_device_ptr(),
+        byte_size,
+        stream,
+    ) {
+        Ok(()) => {}
+        Err(CudaError::NotSupported) => {
+            stream.synchronize().map_err(BlasError::Cuda)?;
+            oxicuda_memory::copy::copy_dtod(&mut dst, src)?;
+        }
+        Err(e) => return Err(BlasError::Cuda(e)),
+    }
     Ok(dst)
 }
 
@@ -192,13 +229,13 @@ fn generate_trmv_ptx<T: GpuFloat>(
                     b.raw_ptx(&format!("add.u32 {gid_plus1}, {gid}, 1;"));
                     b.raw_ptx(&format!("setp.lo.u32 {pred}, {j}, {gid_plus1};"));
                 }
-                b.raw_ptx(&format!("@!{pred} bra {done_label};"));
+                b.raw_ptx(&format!("@!{pred} bra ${done_label};"));
 
                 // For unit diagonal, skip the diagonal element (add x[i] later)
                 if is_unit {
                     let diag_pred = b.alloc_reg(PtxType::Pred);
                     b.raw_ptx(&format!("setp.eq.u32 {diag_pred}, {j}, {gid};"));
-                    b.raw_ptx(&format!("@{diag_pred} bra {skip_diag_label};"));
+                    b.raw_ptx(&format!("@{diag_pred} bra ${skip_diag_label};"));
                 }
 
                 // Compute A address:

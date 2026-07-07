@@ -165,6 +165,17 @@ pub fn validate_ptx(ptx: &str) -> ValidationResult {
     // Try to determine target architecture for limit checking
     let target_sm = extract_target_sm(ptx);
 
+    // A `.target` that we cannot recognize silently disables SM-compatibility
+    // and shared-memory-limit checks below (they degrade to no-ops). Surface a
+    // warning so this loss of coverage is visible rather than silent.
+    if ptx.contains(".target") && target_sm.is_none() {
+        let target_str = extract_target_string(ptx).unwrap_or_else(|| "<missing>".to_string());
+        warnings.push(format!(
+            "unrecognized .target '{target_str}'; SM-compatibility and \
+             shared-memory-limit checks were skipped"
+        ));
+    }
+
     // Check shared memory limits
     check_shared_memory(ptx, target_sm, &mut errors, &mut warnings);
 
@@ -232,6 +243,20 @@ fn extract_target_sm(ptx: &str) -> Option<SmVersion> {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 2 {
                 return parse_sm_version(parts[1].trim_end_matches(';'));
+            }
+        }
+    }
+    None
+}
+
+/// Extracts the raw target token (e.g. `"sm_123"`) from `.target`, if present.
+fn extract_target_string(ptx: &str) -> Option<String> {
+    for line in ptx.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(".target") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 {
+                return Some(parts[1].trim_end_matches(';').to_string());
             }
         }
     }
@@ -432,7 +457,7 @@ const REGISTER_PRESSURE_WARNING_THRESHOLD: usize = 200;
 /// - `%h\d+`  — f16 registers
 fn check_register_pressure(
     ptx: &str,
-    errors: &mut Vec<ValidationError>,
+    _errors: &mut Vec<ValidationError>,
     warnings: &mut Vec<String>,
 ) {
     use std::collections::HashSet;
@@ -486,10 +511,17 @@ fn check_register_pressure(
 
     let count = seen.len();
     if count > MAX_REGISTERS_PER_THREAD {
-        errors.push(ValidationError::RegisterPressureExceeded {
-            count,
-            max_allowed: MAX_REGISTERS_PER_THREAD,
-        });
+        // A count above 255 is NOT invalid PTX: the names counted here are
+        // *virtual* registers, and ptxas spills whatever cannot fit into the
+        // 255 physical per-thread registers to local memory. Report it as a
+        // warning (performance hint) rather than a hard error. The
+        // `RegisterPressureExceeded` error variant is retained for API
+        // stability but is no longer produced by this heuristic.
+        warnings.push(format!(
+            "virtual register count ({count}) exceeds the physical per-thread \
+             limit of {MAX_REGISTERS_PER_THREAD}; ptxas will spill excess \
+             registers to local memory (performance may suffer)"
+        ));
     } else if count > REGISTER_PRESSURE_WARNING_THRESHOLD {
         warnings.push(format!(
             "register count ({count}) is approaching the per-thread limit of \
@@ -802,13 +834,15 @@ fn collect_src_register_names(inst: &Instruction) -> Vec<String> {
         }
         Instruction::Stmatrix { dst_addr, src, .. } => {
             push_operand_names(dst_addr, &mut names);
-            names.push(src.name.clone());
+            for r in src {
+                names.push(r.name.clone());
+            }
         }
         Instruction::MbarrierInit { addr, count } => {
             push_operand_names(addr, &mut names);
             push_operand_names(count, &mut names);
         }
-        Instruction::MbarrierWait { addr, phase } => {
+        Instruction::MbarrierWait { addr, phase, .. } => {
             push_operand_names(addr, &mut names);
             push_operand_names(phase, &mut names);
         }
@@ -839,10 +873,12 @@ fn collect_src_register_names(inst: &Instruction) -> Vec<String> {
             dst_smem,
             src_gmem,
             desc,
+            barrier,
         } => {
             names.push(dst_smem.name.clone());
             names.push(src_gmem.name.clone());
             names.push(desc.name.clone());
+            names.push(barrier.name.clone());
         }
         Instruction::Ldmatrix { src_addr, .. } => {
             push_operand_names(src_addr, &mut names);
@@ -898,12 +934,15 @@ fn dst_register_name(inst: &Instruction) -> Option<String> {
         | Instruction::LoadParam { dst, .. }
         | Instruction::Dp4a { dst, .. }
         | Instruction::Dp2a { dst, .. }
-        | Instruction::Tex1d { dst, .. }
-        | Instruction::Tex2d { dst, .. }
-        | Instruction::Tex3d { dst, .. }
         | Instruction::SurfLoad { dst, .. }
         | Instruction::Redux { dst, .. }
-        | Instruction::ElectSync { dst, .. } => Some(dst.name.clone()),
+        | Instruction::ElectSync { dst, .. }
+        // `mbarrier.try_wait.parity` writes its predicate result register.
+        | Instruction::MbarrierWait { dst, .. } => Some(dst.name.clone()),
+        // `tex.*.v4` defines four texel registers; the first is representative.
+        Instruction::Tex1d { dst, .. }
+        | Instruction::Tex2d { dst, .. }
+        | Instruction::Tex3d { dst, .. } => dst.first().map(|r| r.name.clone()),
         Instruction::Mma { d_regs, .. } => d_regs.first().map(|r| r.name.clone()),
         Instruction::Wgmma { d_regs, .. } => d_regs.first().map(|r| r.name.clone()),
         _ => None,
@@ -948,6 +987,9 @@ pub fn validate_ir_instructions(instructions: &[Instruction]) -> IrValidationRes
 
     let consistency_result = validate_memory_consistency(instructions);
     result.merge(&consistency_result);
+
+    let branch_result = validate_branch_labels(instructions);
+    result.merge(&branch_result);
 
     // Type checking for arithmetic instructions
     for (idx, inst) in instructions.iter().enumerate() {
@@ -1007,6 +1049,49 @@ pub fn validate_register_lifetimes(instructions: &[Instruction]) -> IrValidation
                 }
             }
             _ => {}
+        }
+    }
+
+    result
+}
+
+/// Validate branch targets and label definitions.
+///
+/// A `bra ${target}` is only legal if a matching `${target}:` label exists,
+/// and each label name may be defined at most once. ptxas rejects both an
+/// undefined branch target and a duplicated label, so flag them at the IR
+/// level (where the offending instruction index is still available).
+#[must_use]
+pub fn validate_branch_labels(instructions: &[Instruction]) -> IrValidationResult {
+    let mut result = IrValidationResult {
+        errors: Vec::new(),
+        warnings: Vec::new(),
+    };
+
+    // First pass: collect label definitions and flag duplicates.
+    let mut labels: HashSet<&str> = HashSet::new();
+    for (idx, inst) in instructions.iter().enumerate() {
+        if let Instruction::Label(name) = inst {
+            if !labels.insert(name.as_str()) {
+                result.errors.push(IrValidationError {
+                    instruction_index: idx,
+                    kind: IrErrorKind::InvalidOperand,
+                    message: format!("duplicate label definition '{name}'"),
+                });
+            }
+        }
+    }
+
+    // Second pass: every branch target must resolve to a defined label.
+    for (idx, inst) in instructions.iter().enumerate() {
+        if let Instruction::Branch { target, .. } = inst {
+            if !labels.contains(target.as_str()) {
+                result.errors.push(IrValidationError {
+                    instruction_index: idx,
+                    kind: IrErrorKind::InvalidOperand,
+                    message: format!("branch target '{target}' has no matching label"),
+                });
+            }
         }
     }
 
@@ -1190,6 +1275,30 @@ fn validate_tensor_core_operands(inst: &Instruction, idx: usize, result: &mut Ir
                     message: "wgmma instruction requires non-empty destination registers".to_string(),
                 });
             }
+        Instruction::Ldmatrix {
+            num_fragments,
+            dst_regs,
+            ..
+        } => {
+            if !matches!(num_fragments, 1 | 2 | 4) {
+                result.errors.push(IrValidationError {
+                    instruction_index: idx,
+                    kind: IrErrorKind::InvalidOperand,
+                    message: format!(
+                        "ldmatrix num_fragments must be 1, 2, or 4 (got {num_fragments})"
+                    ),
+                });
+            } else if dst_regs.len() != *num_fragments as usize {
+                result.errors.push(IrValidationError {
+                    instruction_index: idx,
+                    kind: IrErrorKind::InvalidOperand,
+                    message: format!(
+                        "ldmatrix declares {} destination register(s) but num_fragments is {num_fragments}",
+                        dst_regs.len()
+                    ),
+                });
+            }
+        }
         _ => {}
     }
 }

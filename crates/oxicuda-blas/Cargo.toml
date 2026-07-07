@@ -28,6 +28,11 @@ default = []
 f16 = ["dep:half"]
 tensor-core = []
 all-precisions = ["f16"]
+# On-device GPU validation tests (`src/gpu_tests.rs`). Enables `f16` so the
+# Ampere `mma.sync.m16n8k16` HMMA path can be launched with real `half::f16`
+# host buffers. Requires a CUDA driver + device at runtime; every test skips
+# gracefully when none is present.
+gpu-tests = ["f16"]
 
 [package.metadata.docs.rs]
 all-features = true

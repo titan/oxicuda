@@ -3,7 +3,8 @@
 //! Implements the [`ComputeBackend`] trait from `oxicuda-backend` using
 //! `wgpu` for cross-platform GPU compute (Vulkan, Metal, DX12, WebGPU).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use oxicuda_backend::{
     BackendError, BackendResult, BackendTranspose, BinaryOp, ComputeBackend, ReduceOp, UnaryOp,
@@ -47,6 +48,41 @@ fn map_reduce_op(op: ReduceOp) -> &'static str {
     }
 }
 
+/// Packed (minimum) leading dimensions for the row-major GEMM kernel.
+///
+/// The WGSL kernel stores `op(A)`'s physical buffer as `m×k` (or its transpose
+/// `k×m`), `op(B)` as `k×n` (or `n×k`), and `C` as `m×n`, all row-major.  The
+/// leading dimension is the physical row stride, so the tightly-packed value is
+/// the width of each stored row.  A caller may pass a larger `ld` (padded /
+/// sub-matrix view), which the shader honours; a smaller one is invalid.
+fn packed_gemm_lds(
+    trans_a: BackendTranspose,
+    trans_b: BackendTranspose,
+    m: usize,
+    n: usize,
+    k: usize,
+) -> (usize, usize, usize) {
+    let lda = if trans_a == BackendTranspose::NoTrans {
+        k
+    } else {
+        m
+    };
+    let ldb = if trans_b == BackendTranspose::NoTrans {
+        n
+    } else {
+        k
+    };
+    (lda, ldb, n)
+}
+
+/// Convert a leading dimension to `u32` for the shader uniform, erroring on
+/// overflow instead of silently wrapping.
+fn lead_dim_u32(name: &str, value: usize) -> BackendResult<u32> {
+    u32::try_from(value).map_err(|_| {
+        BackendError::InvalidArgument(format!("gemm: {name} {value} exceeds u32 range"))
+    })
+}
+
 // ─── Backend struct ──────────────────────────────────────────────────────────
 
 /// Cross-platform GPU compute backend backed by `wgpu`.
@@ -62,6 +98,11 @@ pub struct WebGpuBackend {
     device: Option<Arc<WebGpuDevice>>,
     memory: Option<Arc<WebGpuMemoryManager>>,
     initialized: bool,
+    /// Cache of compiled compute pipelines keyed by a stable `(op, tile/size)`
+    /// string.  WGSL front-end parsing plus backend-ISA compilation is
+    /// heavyweight and depends only on the key, so every hot-path compute op
+    /// reuses its pipeline instead of rebuilding one per invocation.
+    pipeline_cache: Mutex<HashMap<String, wgpu::ComputePipeline>>,
 }
 
 impl WebGpuBackend {
@@ -71,7 +112,51 @@ impl WebGpuBackend {
             device: None,
             memory: None,
             initialized: false,
+            pipeline_cache: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Return a compiled compute pipeline for `key`, building it from the WGSL
+    /// produced by `build` on the first request and caching it for reuse.
+    ///
+    /// `key` must uniquely identify the shader source (e.g. `"gemm:8"`,
+    /// `"unary:relu"`); `label` is the wgpu debug label.
+    fn cached_pipeline(
+        &self,
+        key: &str,
+        label: &str,
+        build: impl FnOnce() -> String,
+    ) -> BackendResult<wgpu::ComputePipeline> {
+        let mut cache = self
+            .pipeline_cache
+            .lock()
+            .map_err(|_| BackendError::DeviceError("pipeline cache mutex poisoned".into()))?;
+
+        if let Some(pipeline) = cache.get(key) {
+            return Ok(pipeline.clone());
+        }
+
+        let dev = self.device()?;
+        let wgsl = build();
+        let shader_mod = dev
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
+                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+            });
+        let pipeline = dev
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: None,
+                module: &shader_mod,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+
+        cache.insert(key.to_string(), pipeline.clone());
+        Ok(pipeline)
     }
 
     /// Return an error if the backend is not yet initialised.
@@ -156,23 +241,10 @@ impl WebGpuBackend {
         let mem = self.memory()?;
         let op_str = map_reduce_op(op);
 
-        let wgsl = shader::reduction_nd_wgsl(op_str);
-        let shader_mod = dev
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("oxicuda-reduce-nd"),
-                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
-            });
-        let pipeline = dev
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("oxicuda-reduce-nd"),
-                layout: None,
-                module: &shader_mod,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let pipeline =
+            self.cached_pipeline(&format!("reduce_nd:{op_str}"), "oxicuda-reduce-nd", || {
+                shader::reduction_nd_wgsl(op_str)
+            })?;
 
         // Build the uniform buffer: 8 × u32 = 32 bytes (16-byte aligned).
         let mut params_bytes = [0u8; 32];
@@ -293,26 +365,22 @@ impl WebGpuBackend {
         let dev = self.device()?;
         let mem = self.memory()?;
 
+        // The FP16 GEMM shader declares `enable f16;`; naga rejects that module
+        // unless the device enabled the SHADER_F16 feature.  Fail loudly with a
+        // typed error instead of emitting an invalid module (which surfaces as a
+        // process-fatal uncaptured validation error).
+        if !dev.supports_f16 {
+            return Err(BackendError::Unsupported(
+                "f16 GEMM requires the SHADER_F16 device feature, \
+                 which this adapter does not support"
+                    .into(),
+            ));
+        }
+
         let tile_size: u32 = 8;
-        let wgsl = shader::gemm_wgsl_f16(tile_size);
-
-        let shader_mod = dev
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("oxicuda-gemm-f16"),
-                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
-            });
-
-        let pipeline = dev
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("oxicuda-gemm-f16"),
-                layout: None,
-                module: &shader_mod,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let pipeline = self.cached_pipeline("gemm_f16", "oxicuda-gemm-f16", || {
+            shader::gemm_wgsl_f16(tile_size)
+        })?;
 
         let bgl = pipeline.get_bind_group_layout(0);
 
@@ -442,12 +510,12 @@ impl ComputeBackend for WebGpuBackend {
         k: usize,
         alpha: f64,
         a_ptr: u64,
-        _lda: usize,
+        lda: usize,
         b_ptr: u64,
-        _ldb: usize,
+        ldb: usize,
         beta: f64,
         c_ptr: u64,
-        _ldc: usize,
+        ldc: usize,
     ) -> BackendResult<()> {
         self.check_init()?;
         // Zero-dimension matrices are trivially done.
@@ -465,31 +533,28 @@ impl ComputeBackend for WebGpuBackend {
         let mem = self.memory()?;
 
         let tile_size: u32 = 8;
-        let wgsl = shader::gemm_wgsl(tile_size);
-
-        let shader_mod = dev
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("oxicuda-gemm"),
-                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
-            });
-
-        let pipeline = dev
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("oxicuda-gemm"),
-                layout: None,
-                module: &shader_mod,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let pipeline =
+            self.cached_pipeline("gemm", "oxicuda-gemm", || shader::gemm_wgsl(tile_size))?;
 
         let bgl = pipeline.get_bind_group_layout(0);
 
+        // The row-major WGSL kernel honours the leading dimensions carried in
+        // `GemmParams`; validate they are at least the packed extent (the same
+        // check the CPU reference backend performs) so a too-small stride is a
+        // clean error rather than an out-of-bounds read.
+        let (expected_lda, expected_ldb, expected_ldc) = packed_gemm_lds(trans_a, trans_b, m, n, k);
+        if lda < expected_lda || ldb < expected_ldb || ldc < expected_ldc {
+            return Err(BackendError::InvalidArgument(
+                "gemm: leading dimension smaller than matrix extent".into(),
+            ));
+        }
+        let lda_u32 = lead_dim_u32("lda", lda)?;
+        let ldb_u32 = lead_dim_u32("ldb", ldb)?;
+        let ldc_u32 = lead_dim_u32("ldc", ldc)?;
+
         // Build uniform buffer for GemmParams { m, n, k, alpha, beta,
-        // trans_a, trans_b, _pad } — 8 × 4 = 32 bytes (16-byte aligned).
-        let mut params_bytes = [0u8; 32];
+        // trans_a, trans_b, lda, ldb, ldc, _pad } — 12 × 4 = 48 bytes.
+        let mut params_bytes = [0u8; 48];
         params_bytes[0..4].copy_from_slice(&(m as u32).to_le_bytes());
         params_bytes[4..8].copy_from_slice(&(n as u32).to_le_bytes());
         params_bytes[8..12].copy_from_slice(&(k as u32).to_le_bytes());
@@ -497,11 +562,14 @@ impl ComputeBackend for WebGpuBackend {
         params_bytes[16..20].copy_from_slice(&(beta as f32).to_le_bytes());
         params_bytes[20..24].copy_from_slice(&trans_a_flag.to_le_bytes());
         params_bytes[24..28].copy_from_slice(&trans_b_flag.to_le_bytes());
-        // bytes 28..32 are zero padding.
+        params_bytes[28..32].copy_from_slice(&lda_u32.to_le_bytes());
+        params_bytes[32..36].copy_from_slice(&ldb_u32.to_le_bytes());
+        params_bytes[36..40].copy_from_slice(&ldc_u32.to_le_bytes());
+        // bytes 40..48 are zero padding.
 
         let uniform_buf = dev.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("oxicuda-gemm-params"),
-            size: 32,
+            size: 48,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -580,14 +648,14 @@ impl ComputeBackend for WebGpuBackend {
         k: usize,
         alpha: f64,
         a_ptr: u64,
-        _lda: usize,
+        lda: usize,
         stride_a: usize,
         b_ptr: u64,
-        _ldb: usize,
+        ldb: usize,
         stride_b: usize,
         beta: f64,
         c_ptr: u64,
-        _ldc: usize,
+        ldc: usize,
         stride_c: usize,
         batch_count: usize,
     ) -> BackendResult<()> {
@@ -607,32 +675,28 @@ impl ComputeBackend for WebGpuBackend {
         let mem = self.memory()?;
 
         let tile_size: u32 = 8;
-        let wgsl = shader::batched_gemm_wgsl(tile_size);
-
-        let shader_mod = dev
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("oxicuda-batched-gemm"),
-                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
-            });
-
-        let pipeline = dev
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("oxicuda-batched-gemm"),
-                layout: None,
-                module: &shader_mod,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let pipeline = self.cached_pipeline("batched_gemm", "oxicuda-batched-gemm", || {
+            shader::batched_gemm_wgsl(tile_size)
+        })?;
 
         let bgl = pipeline.get_bind_group_layout(0);
 
+        // Validate leading dimensions against the packed extents (per-batch row
+        // strides) before threading them into the uniform.
+        let (expected_lda, expected_ldb, expected_ldc) = packed_gemm_lds(trans_a, trans_b, m, n, k);
+        if lda < expected_lda || ldb < expected_ldb || ldc < expected_ldc {
+            return Err(BackendError::InvalidArgument(
+                "batched_gemm: leading dimension smaller than matrix extent".into(),
+            ));
+        }
+        let lda_u32 = lead_dim_u32("lda", lda)?;
+        let ldb_u32 = lead_dim_u32("ldb", ldb)?;
+        let ldc_u32 = lead_dim_u32("ldc", ldc)?;
+
         // BatchedGemmParams: m, n, k, alpha, beta, batch_count, stride_a,
-        // stride_b, stride_c, trans_a, trans_b — 11 × 4 = 44 bytes.
-        // Uniform buffers need 16-byte alignment, so 44 rounds up to 48.
-        let mut params_bytes = [0u8; 48];
+        // stride_b, stride_c, trans_a, trans_b, lda, ldb, ldc — 14 × 4 = 56
+        // bytes.  Uniform buffers need 16-byte alignment, so 56 rounds up to 64.
+        let mut params_bytes = [0u8; 64];
         params_bytes[0..4].copy_from_slice(&(m as u32).to_le_bytes());
         params_bytes[4..8].copy_from_slice(&(n as u32).to_le_bytes());
         params_bytes[8..12].copy_from_slice(&(k as u32).to_le_bytes());
@@ -644,11 +708,14 @@ impl ComputeBackend for WebGpuBackend {
         params_bytes[32..36].copy_from_slice(&(stride_c as u32).to_le_bytes());
         params_bytes[36..40].copy_from_slice(&trans_a_flag.to_le_bytes());
         params_bytes[40..44].copy_from_slice(&trans_b_flag.to_le_bytes());
-        // bytes 44..48 are padding zeros
+        params_bytes[44..48].copy_from_slice(&lda_u32.to_le_bytes());
+        params_bytes[48..52].copy_from_slice(&ldb_u32.to_le_bytes());
+        params_bytes[52..56].copy_from_slice(&ldc_u32.to_le_bytes());
+        // bytes 56..64 are padding zeros
 
         let uniform_buf = dev.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("oxicuda-batched-gemm-params"),
-            size: 48,
+            size: 64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -972,23 +1039,11 @@ impl ComputeBackend for WebGpuBackend {
         // ── Pass 1: per-workgroup reduction ─────────────────────────────────
         let wg_count = (n_elements as u32).div_ceil(256);
 
-        let pass1_wgsl = shader::reduction_wgsl(op_str);
-        let pass1_shader = dev
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("oxicuda-reduce-pass1"),
-                source: wgpu::ShaderSource::Wgsl(pass1_wgsl.into()),
-            });
-        let pass1_pipeline = dev
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("oxicuda-reduce-pass1"),
-                layout: None,
-                module: &pass1_shader,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let pass1_pipeline = self.cached_pipeline(
+            &format!("reduce_pass1:{op_str}"),
+            "oxicuda-reduce-pass1",
+            || shader::reduction_wgsl(op_str),
+        )?;
 
         // Partial-sums buffer (temporary).
         let partial_buf = dev.device.create_buffer(&wgpu::BufferDescriptor {
@@ -1042,23 +1097,11 @@ impl ComputeBackend for WebGpuBackend {
         };
 
         // ── Pass 2: final reduction of partial sums ─────────────────────────
-        let pass2_wgsl = shader::reduction_final_wgsl(op_str);
-        let pass2_shader = dev
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("oxicuda-reduce-pass2"),
-                source: wgpu::ShaderSource::Wgsl(pass2_wgsl.into()),
-            });
-        let pass2_pipeline = dev
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("oxicuda-reduce-pass2"),
-                layout: None,
-                module: &pass2_shader,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let pass2_pipeline = self.cached_pipeline(
+            &format!("reduce_pass2:{op_str}"),
+            "oxicuda-reduce-pass2",
+            || shader::reduction_final_wgsl(op_str),
+        )?;
 
         // FinalReduceParams { num_groups: u32 }.
         let mut p2_params = [0u8; 4];
@@ -1154,25 +1197,9 @@ impl ComputeBackend for WebGpuBackend {
         let mem = self.memory()?;
 
         let op_str = map_unary_op(op);
-        let wgsl = shader::elementwise_wgsl(op_str);
-
-        let shader_mod = dev
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("oxicuda-unary"),
-                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
-            });
-
-        let pipeline = dev
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("oxicuda-unary"),
-                layout: None,
-                module: &shader_mod,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let pipeline = self.cached_pipeline(&format!("unary:{op_str}"), "oxicuda-unary", || {
+            shader::elementwise_wgsl(op_str)
+        })?;
 
         let bgl = pipeline.get_bind_group_layout(0);
 
@@ -1243,25 +1270,10 @@ impl ComputeBackend for WebGpuBackend {
         let mem = self.memory()?;
 
         let op_str = map_binary_op(op);
-        let wgsl = shader::binary_wgsl(op_str);
-
-        let shader_mod = dev
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("oxicuda-binary"),
-                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
-            });
-
-        let pipeline = dev
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("oxicuda-binary"),
-                layout: None,
-                module: &shader_mod,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        let pipeline =
+            self.cached_pipeline(&format!("binary:{op_str}"), "oxicuda-binary", || {
+                shader::binary_wgsl(op_str)
+            })?;
 
         let bgl = pipeline.get_bind_group_layout(0);
 

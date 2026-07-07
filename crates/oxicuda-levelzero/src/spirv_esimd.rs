@@ -376,6 +376,11 @@ const CAPABILITY_COOPERATIVE_MATRIX_KHR: u32 = 6022;
 /// `Float8EXT` capability — 8-bit float component type (SPV_EXT_float8).
 const CAPABILITY_FLOAT8_EXT: u32 = 6212;
 
+/// `Float8E4M3EXT` FP-encoding operand for `OpTypeFloat` (SPV_EXT_float8).
+const FLOAT8_E4M3_EXT: u32 = 4214;
+/// `Float8E5M2EXT` FP-encoding operand for `OpTypeFloat` (SPV_EXT_float8).
+const FLOAT8_E5M2_EXT: u32 = 4215;
+
 const ADDRESSING_MODEL_LOGICAL: u32 = 0;
 const MEMORY_MODEL_GLSL450: u32 = 1;
 const EXECUTION_MODEL_GLCOMPUTE: u32 = 5;
@@ -471,9 +476,15 @@ pub fn gemm_fp8_coop_matrix_spirv(
 
     push_inst(&mut words, OP_TYPE_VOID, &[ty_void]);
     push_inst(&mut words, OP_TYPE_INT, &[ty_u32, 32, 0]);
-    // 8-bit float component; the format's exponent/mantissa is metadata for the
-    // driver. SPIR-V models the width; we tag the encoding in the generator.
-    push_inst(&mut words, OP_TYPE_FLOAT, &[ty_f8, 8]);
+    // 8-bit float component. Under SPV_EXT_float8, an 8-bit OpTypeFloat MUST
+    // carry an FP-encoding operand selecting E4M3 vs E5M2 — without it the type
+    // is invalid AND both formats would emit identical bytes. Selecting the
+    // encoding from `format` makes E4M3/E5M2 produce distinct, valid modules.
+    let fp8_encoding = match format {
+        Fp8Format::E4m3 => FLOAT8_E4M3_EXT,
+        Fp8Format::E5m2 => FLOAT8_E5M2_EXT,
+    };
+    push_inst(&mut words, OP_TYPE_FLOAT, &[ty_f8, 8, fp8_encoding]);
     push_inst(&mut words, OP_TYPE_FLOAT, &[ty_f32, 32]);
 
     push_inst(&mut words, OP_CONSTANT, &[ty_u32, c_m, tile_m]);
@@ -523,10 +534,6 @@ pub fn gemm_fp8_coop_matrix_spirv(
     push_inst(&mut words, OP_LABEL, &[label]);
     push_inst(&mut words, OP_RETURN, &[]);
     push_inst(&mut words, OP_FUNCTION_END, &[]);
-
-    // Reference the cooperative-matrix type ids so the format selection is
-    // observably encoded (different formats → different exponent metadata).
-    let _ = (ty_cmat_a, ty_cmat_b, ty_cmat_c, format.exponent_bits());
 
     words[3] = next_id;
     words
@@ -724,5 +731,31 @@ mod tests {
         let words = gemm_fp8_coop_matrix_spirv(Fp8Format::E4m3, 8, 32, 16);
         let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_ne_bytes()).collect();
         assert_eq!(bytes.len() % 4, 0);
+    }
+
+    #[test]
+    fn fp8_e4m3_and_e5m2_produce_distinct_binaries() {
+        let e4m3 = gemm_fp8_coop_matrix_spirv(Fp8Format::E4m3, 8, 16, 16);
+        let e5m2 = gemm_fp8_coop_matrix_spirv(Fp8Format::E5m2, 8, 16, 16);
+        assert_ne!(
+            e4m3, e5m2,
+            "the two FP8 encodings must yield distinct SPIR-V modules"
+        );
+    }
+
+    #[test]
+    fn fp8_type_carries_encoding_operand() {
+        // The 8-bit OpTypeFloat must carry the SPV_EXT_float8 FP-encoding operand
+        // selecting E4M3 (4214) vs E5M2 (4215).
+        let e4m3 = decode(&gemm_fp8_coop_matrix_spirv(Fp8Format::E4m3, 8, 16, 16));
+        let e5m2 = decode(&gemm_fp8_coop_matrix_spirv(Fp8Format::E5m2, 8, 16, 16));
+        let enc = |insts: &[(u32, Vec<u32>)]| -> Option<u32> {
+            insts
+                .iter()
+                .find(|(op, ops)| *op == OP_TYPE_FLOAT && ops.get(1) == Some(&8))
+                .and_then(|(_, ops)| ops.get(2).copied())
+        };
+        assert_eq!(enc(&e4m3), Some(FLOAT8_E4M3_EXT));
+        assert_eq!(enc(&e5m2), Some(FLOAT8_E5M2_EXT));
     }
 }

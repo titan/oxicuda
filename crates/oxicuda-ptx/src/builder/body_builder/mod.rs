@@ -188,6 +188,19 @@ impl<'a> BodyBuilder<'a> {
         dst
     }
 
+    /// Reads the 64-bit `%clock64` cycle counter into a fresh `U64` register.
+    ///
+    /// Unlike the 32-bit special registers, `%clock64` requires a `U64`
+    /// destination so the emitted `mov.u64` matches the register width.
+    pub fn clock64(&mut self) -> Register {
+        let dst = self.regs.alloc(PtxType::U64);
+        self.emit(Instruction::MovSpecial {
+            dst: dst.clone(),
+            special: SpecialReg::Clock64,
+        });
+        dst
+    }
+
     // ════════════════════════════════════════════════════════════════════
     //  Integer Arithmetic
     // ════════════════════════════════════════════════════════════════════
@@ -1415,31 +1428,25 @@ impl<'a> BodyBuilder<'a> {
     /// Emits `wgmma.mma_async.sync.aligned.m64n128k16.f32.f16.f16`
     /// Warpgroup MMA async for Hopper (`sm_90+`) computing a 64×128 tile.
     ///
-    /// This operates on warpgroup-level fragments:
-    /// - `a_desc`: A operand descriptor (shared memory descriptor string)
-    /// - `b_desc`: B operand descriptor
-    /// - Accumulator: 64 f32 registers (managed by the warpgroup implicitly)
+    /// This is a thin convenience wrapper over the structured
+    /// [`wgmma_mma_async_f16`] builder for the common `M64N128K16` shape. It
+    /// allocates the accumulator registers and emits a well-formed
+    /// `Instruction::Wgmma`, returning the destination register list.
     ///
-    /// Emits raw PTX via `raw_ptx` since wgmma is not yet in the structured IR.
+    /// - `desc_a`: A operand shared-memory descriptor register
+    /// - `desc_b`: B operand shared-memory descriptor register
     ///
     /// # Errors
     ///
     /// Returns `PtxGenError` when the target SM is below 90 (Hopper).
+    ///
+    /// [`wgmma_mma_async_f16`]: BodyBuilder::wgmma_mma_async_f16
     pub fn wgmma_mma_async_m64n128k16_f16(
         &mut self,
-        a_desc: &str,
-        b_desc: &str,
-    ) -> Result<(), PtxGenError> {
-        if !self.target.capabilities().has_wgmma {
-            return Err(PtxGenError::GenerationFailed(format!(
-                "wgmma.mma_async requires SM >= 90 (Hopper), target is {}",
-                self.target
-            )));
-        }
-        self.raw_ptx(&format!(
-            "wgmma.mma_async.sync.aligned.m64n128k16.f32.f16.f16 {{...}}, {a_desc}, {b_desc}, 1, 1, 1, 0, 0;"
-        ));
-        Ok(())
+        desc_a: Register,
+        desc_b: Register,
+    ) -> Result<Vec<Register>, PtxGenError> {
+        self.wgmma_mma_async_f16(crate::ir::WgmmaShape::M64N128K16, desc_a, desc_b)
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -1621,10 +1628,15 @@ impl<'a> BodyBuilder<'a> {
     ///
     /// Named registers (e.g., `%f_x`, `%rd_off`, `%p_ge`) found in the text
     /// are automatically declared based on their prefix:
-    /// - `%f_*`  → `.reg .f32`
+    /// - `%fd_*` → `.reg .b64` (f64 scalar)
+    /// - `%fh_*` → `.reg .b16` (f16 scalar)
+    /// - `%f_*`  → `.reg .b32` (f32 scalar)
     /// - `%rd_*` → `.reg .b64`
     /// - `%r_*`  → `.reg .b32`
     /// - `%p_*`  → `.reg .pred`
+    ///
+    /// The `%fd_`/`%fh_` prefixes are matched before `%f_` so that raw f64/f16
+    /// code gets the correct register width (a bare `%f_*` register is 32-bit).
     pub fn raw_ptx(&mut self, text: &str) {
         // Auto-declare named registers found in the raw text.
         let mut i = 0;
@@ -1640,7 +1652,13 @@ impl<'a> BodyBuilder<'a> {
                 let name = &text[start..i];
                 // Only declare names containing an underscore (custom names)
                 if name.contains('_') {
-                    let ty = if name.starts_with("%rd_") {
+                    let ty = if name.starts_with("%fd_") {
+                        // f64 scalar (declared `.b64`). Checked before `%f_`.
+                        PtxType::F64
+                    } else if name.starts_with("%fh_") {
+                        // f16 scalar (declared `.b16`). Checked before `%f_`.
+                        PtxType::F16
+                    } else if name.starts_with("%rd_") {
                         PtxType::B64
                     } else if name.starts_with("%f_") {
                         PtxType::F32

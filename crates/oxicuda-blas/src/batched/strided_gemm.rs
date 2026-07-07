@@ -15,11 +15,11 @@
 //! D_i = d_base + batch_idx * stride_d
 //! ```
 
+use oxicuda_driver::CudaError;
 use oxicuda_driver::ffi::CUdeviceptr;
 use oxicuda_launch::{Dim3, Kernel, LaunchParams};
 use oxicuda_ptx::arch::SmVersion;
 use oxicuda_ptx::templates::gemm::{EpilogueKind, GemmTemplate};
-use std::sync::Arc;
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
@@ -60,33 +60,38 @@ fn validate_strided_args<T: GpuFloat>(
         ));
     }
 
-    let rows_a = match trans_a {
-        Transpose::NoTrans => m,
+    // The per-batch kernel addresses matrices as row-major, so a leading
+    // dimension is a *row stride* and must be at least the column count of the
+    // physically stored matrix: k for an untransposed A (m x k) or m for a
+    // transposed A (stored k x m), and symmetrically for B. C and D are always
+    // stored m x n, so their leading dimension must be at least n.
+    let cols_a = match trans_a {
+        Transpose::NoTrans => k,
+        Transpose::Trans | Transpose::ConjTrans => m,
+    };
+    let cols_b = match trans_b {
+        Transpose::NoTrans => n,
         Transpose::Trans | Transpose::ConjTrans => k,
     };
-    let rows_b = match trans_b {
-        Transpose::NoTrans => k,
-        Transpose::Trans | Transpose::ConjTrans => n,
-    };
 
-    if lda < rows_a {
+    if lda < cols_a {
         return Err(BlasError::InvalidDimension(format!(
-            "lda ({lda}) must be >= rows of op(A) ({rows_a})"
+            "lda ({lda}) must be >= columns of stored A ({cols_a})"
         )));
     }
-    if ldb < rows_b {
+    if ldb < cols_b {
         return Err(BlasError::InvalidDimension(format!(
-            "ldb ({ldb}) must be >= rows of op(B) ({rows_b})"
+            "ldb ({ldb}) must be >= columns of stored B ({cols_b})"
         )));
     }
-    if ldc < m {
+    if ldc < n {
         return Err(BlasError::InvalidDimension(format!(
-            "ldc ({ldc}) must be >= m ({m})"
+            "ldc ({ldc}) must be >= n ({n})"
         )));
     }
-    if ldd < m {
+    if ldd < n {
         return Err(BlasError::InvalidDimension(format!(
-            "ldd ({ldd}) must be >= m ({m})"
+            "ldd ({ldd}) must be >= n ({n})"
         )));
     }
 
@@ -122,22 +127,11 @@ fn build_gemm_template<T: GpuFloat>(sm: SmVersion) -> GemmTemplate {
     }
 }
 
-/// Generates a strided batched GEMM PTX kernel and returns both the PTX text
-/// and the kernel entry-point name.
-fn generate_strided_gemm_ptx<T: GpuFloat>(
-    sm: SmVersion,
-    m: u32,
-    n: u32,
-    k: u32,
-    trans_a: Transpose,
-    trans_b: Transpose,
-) -> BlasResult<(String, String)> {
-    let _ = (m, n, k, trans_a, trans_b);
-
-    let template = build_gemm_template::<T>(sm);
-    let kernel_name = template.kernel_name();
-    let ptx = template.generate()?;
-    Ok((ptx, kernel_name))
+/// Applies a signed byte `offset` to a device pointer, wrapping on overflow.
+///
+/// Batch strides are signed element counts, so `offset` may be negative.
+fn ptr_offset(base: CUdeviceptr, offset: i64) -> CUdeviceptr {
+    (base as i64).wrapping_add(offset) as CUdeviceptr
 }
 
 // ---------------------------------------------------------------------------
@@ -219,50 +213,93 @@ pub fn gemm_strided_batched<T: GpuFloat>(
     )?;
 
     let sm = handle.sm_version();
-    let (ptx_source, kernel_name) = generate_strided_gemm_ptx::<T>(sm, m, n, k, trans_a, trans_b)?;
 
-    let module = oxicuda_driver::Module::from_ptx(&ptx_source).map_err(BlasError::Cuda)?;
-    let module = Arc::new(module);
+    // The per-batch kernel is the naive NoTrans, tightly packed row-major
+    // GEMM (`GemmTemplate`). It cannot express transposition or a leading
+    // dimension different from the tight width, so those cases are rejected —
+    // matching how the single-GEMM path treats them — rather than being
+    // launched with a mismatched argument layout (the previous behaviour,
+    // which passed a 17-field tuple to an 8-parameter kernel and read/wrote
+    // wild device pointers).
+    if trans_a != Transpose::NoTrans || trans_b != Transpose::NoTrans {
+        return Err(BlasError::UnsupportedOperation(
+            "strided batched GEMM currently supports only NoTrans A and B".into(),
+        ));
+    }
+    if lda != k || ldb != n || ldc != n || ldd != n {
+        return Err(BlasError::UnsupportedOperation(
+            "strided batched GEMM currently requires tightly packed row-major matrices \
+             (lda = k, ldb = n, ldc = ldd = n)"
+                .into(),
+        ));
+    }
+
+    // Compile (once) the naive GEMM kernel and reuse it from the handle cache.
+    let template = build_gemm_template::<T>(sm);
+    let kernel_name = template.kernel_name();
+    let module =
+        handle.get_or_compile_module(&kernel_name, || template.generate().map_err(Into::into))?;
     let kernel = Kernel::from_module(module, &kernel_name).map_err(BlasError::Cuda)?;
 
-    // 3-D grid: (tile_x, tile_y, batch_count)
-    let grid = Dim3::new(m.div_ceil(TILE_M), n.div_ceil(TILE_N), batch_count);
-    let block = Dim3::new(TILE_M, TILE_N, 1);
-    let params = LaunchParams::new(grid, block);
+    // Flat 1-D launch: the naive kernel derives a global linear id and walks
+    // M*N with a grid-stride loop, so it is correct under any geometry.
+    let total_elems = u64::from(m) * u64::from(n);
+    let block_threads = 256u32;
+    let grid_x = total_elems
+        .div_ceil(u64::from(block_threads))
+        .clamp(1, u64::from(u32::MAX)) as u32;
+    let params = LaunchParams::new(Dim3::new(grid_x, 1, 1), Dim3::new(block_threads, 1, 1));
 
     let alpha_bits = alpha.to_bits_u64();
     let beta_bits = beta.to_bits_u64();
 
-    // Convert element strides to byte strides for the kernel.
+    // Convert element strides to signed byte strides for per-batch offsets.
     let elem_bytes = T::SIZE as i64;
     let byte_stride_a = stride_a.saturating_mul(elem_bytes);
     let byte_stride_b = stride_b.saturating_mul(elem_bytes);
     let byte_stride_c = stride_c.saturating_mul(elem_bytes);
     let byte_stride_d = stride_d.saturating_mul(elem_bytes);
 
-    let args = (
-        m,
-        n,
-        k,
-        alpha_bits,
-        a,
-        lda,
-        byte_stride_a,
-        b,
-        ldb,
-        byte_stride_b,
-        beta_bits,
-        c,
-        ldc,
-        byte_stride_c,
-        d,
-        ldd,
-        byte_stride_d,
-    );
+    // Byte span of one tight m x n matrix, for the C -> D snapshot below.
+    let mn_bytes = m as usize * n as usize * T::SIZE;
 
-    kernel
-        .launch(&params, handle.stream(), &args)
-        .map_err(|e| BlasError::LaunchFailed(e.to_string()))
+    for i in 0..i64::from(batch_count) {
+        let a_i = ptr_offset(a, i.wrapping_mul(byte_stride_a));
+        let b_i = ptr_offset(b, i.wrapping_mul(byte_stride_b));
+        let c_i = ptr_offset(c, i.wrapping_mul(byte_stride_c));
+        let d_i = ptr_offset(d, i.wrapping_mul(byte_stride_d));
+
+        // The kernel computes `param_c = alpha*A_i*B_i + beta*param_c` in place.
+        // When D differs from C we first snapshot C_i into D_i (stream-ordered)
+        // and run the kernel in place on D_i, so the result is
+        // `D_i = alpha*A_i*B_i + beta*C_i`. Copying also avoids reading
+        // uninitialised D when beta == 0.
+        if d_i != c_i {
+            match oxicuda_driver::memory_info::memcpy_device_to_device_async(
+                d_i,
+                c_i,
+                mn_bytes,
+                handle.stream(),
+            ) {
+                Ok(()) => {}
+                Err(CudaError::NotSupported) => {
+                    handle.stream().synchronize().map_err(BlasError::Cuda)?;
+                    oxicuda_driver::memory_info::memcpy_device_to_device(d_i, c_i, mn_bytes)
+                        .map_err(BlasError::Cuda)?;
+                }
+                Err(e) => return Err(BlasError::Cuda(e)),
+            }
+        }
+
+        // Kernel arg order matches the single-GEMM dispatcher:
+        // (a, b, c, m, n, k, alpha_bits, beta_bits).
+        let args = (a_i, b_i, d_i, m, n, k, alpha_bits, beta_bits);
+        kernel
+            .launch(&params, handle.stream(), &args)
+            .map_err(|e| BlasError::LaunchFailed(e.to_string()))?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -355,12 +392,13 @@ mod tests {
 
     #[test]
     fn validate_transposed_lda() {
-        // trans_a == Trans => rows_a = k = 16, so lda = 16 is valid
+        // Row-major convention: trans_a == Trans stores A as k x m, so its row
+        // stride (lda) must be >= m = 64; lda = 64 is the tight case.
         let res = validate_strided_args::<f32>(
             64,
             64,
             16,
-            16,
+            64,
             64,
             64,
             64,
@@ -373,5 +411,27 @@ mod tests {
             Transpose::NoTrans,
         );
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_row_major_lda_too_small() {
+        // NoTrans A is m x k, so lda must be >= k = 64; lda = 32 is rejected.
+        let res = validate_strided_args::<f32>(
+            48,
+            40,
+            64,
+            32,
+            40,
+            40,
+            40,
+            1024,
+            1024,
+            1024,
+            1024,
+            2,
+            Transpose::NoTrans,
+            Transpose::NoTrans,
+        );
+        assert!(res.is_err());
     }
 }

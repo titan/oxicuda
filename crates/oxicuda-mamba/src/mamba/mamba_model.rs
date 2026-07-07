@@ -95,6 +95,7 @@ impl MambaConfig {
 // ─── MambaModelWeights ───────────────────────────────────────────────────────
 
 /// All learnable weights for a full Mamba language model.
+#[derive(Debug, Clone)]
 pub struct MambaModelWeights {
     /// Token embedding matrix: `[vocab_size, d_model]`.
     pub embedding: Vec<f32>,
@@ -108,18 +109,22 @@ pub struct MambaModelWeights {
 
 impl MambaModelWeights {
     /// Allocate all weight tensors and zero-initialize them.
-    pub fn zeros(config: &MambaConfig) -> Self {
-        let block_cfg = config
-            .block_config()
-            .expect("MambaConfig must be valid to construct weights");
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Propagates any error from `MambaConfig::block_config` if `config`
+    /// was constructed by directly setting its (public) fields to invalid
+    /// values rather than going through [`MambaConfig::new`].
+    pub fn zeros(config: &MambaConfig) -> MambaResult<Self> {
+        let block_cfg = config.block_config()?;
+        Ok(Self {
             embedding: vec![0.0_f32; config.vocab_size * config.d_model],
             layers: (0..config.n_layers)
                 .map(|_| MambaBlockWeights::zeros(&block_cfg))
                 .collect(),
             norm_f: vec![0.0_f32; config.d_model],
             lm_head: vec![0.0_f32; config.vocab_size * config.d_model],
-        }
+        })
     }
 
     /// Initialize with small random weights from a normal distribution.
@@ -127,10 +132,14 @@ impl MambaModelWeights {
     /// Each block uses `MambaBlockWeights::random`, which sets `a_log` and
     /// `norm_weight` to their paper defaults. The final `norm_f` is set to 1.0
     /// and the embedding / lm_head are drawn from N(0, 1) scaled by 0.02.
-    pub fn random(config: &MambaConfig, rng: &mut LcgRng) -> Self {
-        let block_cfg = config
-            .block_config()
-            .expect("MambaConfig must be valid to construct weights");
+    ///
+    /// # Errors
+    ///
+    /// Propagates any error from `MambaConfig::block_config` if `config`
+    /// was constructed by directly setting its (public) fields to invalid
+    /// values rather than going through [`MambaConfig::new`].
+    pub fn random(config: &MambaConfig, rng: &mut LcgRng) -> MambaResult<Self> {
+        let block_cfg = config.block_config()?;
         let emb_size = config.vocab_size * config.d_model;
         let mut embedding = vec![0.0_f32; emb_size];
         rng.fill_normal(&mut embedding);
@@ -147,12 +156,12 @@ impl MambaModelWeights {
         for v in &mut lm_head {
             *v *= 0.02;
         }
-        Self {
+        Ok(Self {
             embedding,
             layers,
             norm_f,
             lm_head,
-        }
+        })
     }
 }
 
@@ -353,10 +362,33 @@ mod tests {
 
     // ── MambaModelWeights ─────────────────────────────────────────────────────
 
+    // `MambaConfig`'s fields are all `pub`, so a caller can build one directly
+    // (bypassing the validation in `MambaConfig::new`) with e.g. `d_state: 0`.
+    // `MambaModelWeights::zeros`/`random` must report this via `MambaResult`
+    // rather than panicking (regression for a prior `.expect(...)` on an
+    // invalid config).
+    #[test]
+    fn model_weights_zeros_rejects_invalid_config_instead_of_panicking() {
+        let mut cfg = MambaConfig::tiny();
+        cfg.d_state = 0; // invalid: bypasses `MambaConfig::new` validation
+        let err = MambaModelWeights::zeros(&cfg).expect_err("should reject invalid config");
+        assert!(matches!(err, MambaError::InvalidSsmOrder(0)));
+    }
+
+    #[test]
+    fn model_weights_random_rejects_invalid_config_instead_of_panicking() {
+        let mut cfg = MambaConfig::tiny();
+        cfg.d_conv = 0; // invalid: bypasses `MambaConfig::new` validation
+        let mut rng = LcgRng::new(1);
+        let err =
+            MambaModelWeights::random(&cfg, &mut rng).expect_err("should reject invalid config");
+        assert!(matches!(err, MambaError::Internal(_)));
+    }
+
     #[test]
     fn model_weights_zeros_shapes() {
         let cfg = MambaConfig::tiny();
-        let w = MambaModelWeights::zeros(&cfg);
+        let w = MambaModelWeights::zeros(&cfg).expect("weights");
         assert_eq!(
             w.embedding.len(),
             cfg.vocab_size * cfg.d_model,
@@ -375,7 +407,7 @@ mod tests {
     #[test]
     fn model_forward_shape() {
         let cfg = MambaConfig::tiny();
-        let weights = MambaModelWeights::zeros(&cfg);
+        let weights = MambaModelWeights::zeros(&cfg).expect("weights");
         let model = MambaModel::new(cfg.clone(), weights).expect("valid model");
         let token_ids = [0_usize, 1, 2];
         let logits = model.forward(&token_ids).expect("forward");
@@ -390,7 +422,7 @@ mod tests {
     fn model_forward_finite() {
         let cfg = MambaConfig::tiny();
         let mut rng = LcgRng::new(42);
-        let weights = MambaModelWeights::random(&cfg, &mut rng);
+        let weights = MambaModelWeights::random(&cfg, &mut rng).expect("weights");
         let model = MambaModel::new(cfg.clone(), weights).expect("valid model");
         let token_ids: Vec<usize> = (0..5).map(|i| i % cfg.vocab_size).collect();
         let logits = model.forward(&token_ids).expect("forward");
@@ -403,7 +435,7 @@ mod tests {
     fn model_next_token_in_vocab() {
         let cfg = MambaConfig::tiny();
         let mut rng = LcgRng::new(99);
-        let weights = MambaModelWeights::random(&cfg, &mut rng);
+        let weights = MambaModelWeights::random(&cfg, &mut rng).expect("weights");
         let model = MambaModel::new(cfg.clone(), weights).expect("valid model");
         let context = [1_usize, 2, 3];
         let tok = model.next_token(&context).expect("next_token");
@@ -418,7 +450,7 @@ mod tests {
     fn model_next_token_deterministic() {
         let cfg = MambaConfig::tiny();
         let mut rng = LcgRng::new(77);
-        let weights = MambaModelWeights::random(&cfg, &mut rng);
+        let weights = MambaModelWeights::random(&cfg, &mut rng).expect("weights");
         let model = MambaModel::new(cfg, weights).expect("valid model");
         let context = [5_usize, 10, 15];
         let tok1 = model.next_token(&context).expect("next_token first");
@@ -430,7 +462,7 @@ mod tests {
     fn model_greedy_decode_5_steps() {
         let cfg = MambaConfig::tiny();
         let mut rng = LcgRng::new(55);
-        let weights = MambaModelWeights::random(&cfg, &mut rng);
+        let weights = MambaModelWeights::random(&cfg, &mut rng).expect("weights");
         let model = MambaModel::new(cfg.clone(), weights).expect("valid model");
         let mut context = vec![0_usize];
         for _ in 0..5 {
@@ -449,7 +481,7 @@ mod tests {
     fn model_zero_weights_logits_zero() {
         // With all weights zero (embedding=0, lm_head=0), all logits should be 0.
         let cfg = MambaConfig::tiny();
-        let weights = MambaModelWeights::zeros(&cfg);
+        let weights = MambaModelWeights::zeros(&cfg).expect("weights");
         let model = MambaModel::new(cfg.clone(), weights).expect("valid model");
         let token_ids = [0_usize, 1];
         let logits = model.forward(&token_ids).expect("forward");
@@ -464,7 +496,7 @@ mod tests {
     #[test]
     fn model_config_accessors() {
         let cfg = MambaConfig::tiny();
-        let weights = MambaModelWeights::zeros(&cfg);
+        let weights = MambaModelWeights::zeros(&cfg).expect("weights");
         let model = MambaModel::new(cfg.clone(), weights).expect("valid model");
         assert_eq!(model.config().vocab_size, cfg.vocab_size);
         assert_eq!(model.config().d_model, cfg.d_model);
@@ -475,7 +507,7 @@ mod tests {
     fn model_large_context() {
         let cfg = MambaConfig::tiny();
         let mut rng = LcgRng::new(13);
-        let weights = MambaModelWeights::random(&cfg, &mut rng);
+        let weights = MambaModelWeights::random(&cfg, &mut rng).expect("weights");
         let model = MambaModel::new(cfg.clone(), weights).expect("valid model");
         let token_ids: Vec<usize> = (0..32).map(|i| i % cfg.vocab_size).collect();
         let logits = model.forward(&token_ids).expect("forward on large context");
@@ -493,7 +525,7 @@ mod tests {
     #[test]
     fn model_forward_empty_input() {
         let cfg = MambaConfig::tiny();
-        let weights = MambaModelWeights::zeros(&cfg);
+        let weights = MambaModelWeights::zeros(&cfg).expect("weights");
         let model = MambaModel::new(cfg, weights).expect("valid model");
         let err = model.forward(&[]).expect_err("should fail on empty input");
         assert!(matches!(err, MambaError::EmptyInput(_)));
@@ -502,7 +534,7 @@ mod tests {
     #[test]
     fn model_forward_token_out_of_vocab() {
         let cfg = MambaConfig::tiny();
-        let weights = MambaModelWeights::zeros(&cfg);
+        let weights = MambaModelWeights::zeros(&cfg).expect("weights");
         let model = MambaModel::new(cfg.clone(), weights).expect("valid model");
         let token_ids = [cfg.vocab_size]; // exactly one past the end
         let err = model.forward(&token_ids).expect_err("should fail");

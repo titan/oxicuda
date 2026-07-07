@@ -55,6 +55,7 @@ fn build_sum_kernel(handle: &BlasHandle, ptx_type: PtxType) -> BlasResult<(Kerne
     let ptx_source = template
         .generate()
         .map_err(|e| BlasError::PtxGeneration(format!("reduce_sum (for variance): {e}")))?;
+    let ptx_source = super::ptx_fixup::relocate_perf_directives(&ptx_source);
     let module = Arc::new(
         Module::from_ptx(&ptx_source)
             .map_err(|e| BlasError::LaunchFailed(format!("module load for variance/sum: {e}")))?,
@@ -71,6 +72,7 @@ fn build_scale_kernel(handle: &BlasHandle, ptx_type: PtxType) -> BlasResult<(Ker
     let ptx_source = template
         .generate()
         .map_err(|e| BlasError::PtxGeneration(format!("scale (for variance): {e}")))?;
+    let ptx_source = super::ptx_fixup::relocate_perf_directives(&ptx_source);
     let module =
         Arc::new(Module::from_ptx(&ptx_source).map_err(|e| {
             BlasError::LaunchFailed(format!("module load for variance/scale: {e}"))

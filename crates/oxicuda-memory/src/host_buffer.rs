@@ -76,6 +76,18 @@ impl<T: Copy> PinnedBuffer<T> {
         // SAFETY: `cu_mem_alloc_host_v2` writes a valid host pointer on success.
         let rc = unsafe { (api.cu_mem_alloc_host_v2)(&mut raw_ptr, byte_size) };
         oxicuda_driver::check(rc)?;
+        // SAFETY: `raw_ptr` was just allocated by `cu_mem_alloc_host_v2` and
+        // is valid for `byte_size` bytes; zero-initialising it here means
+        // `as_slice`/`as_mut_slice` below never expose driver-uninitialised
+        // memory as a safe `&[T]` (all-zero bytes are a valid `T` for every
+        // in-tree usage of `PinnedBuffer`, e.g. `u8`/`f32`). Skipped when
+        // `T` is zero-sized (byte_size == 0 despite `n > 0`) to avoid a
+        // no-op write through a possibly-unusual pointer.
+        if byte_size > 0 {
+            unsafe {
+                std::ptr::write_bytes(raw_ptr.cast::<u8>(), 0, byte_size);
+            }
+        }
         Ok(Self {
             ptr: raw_ptr.cast::<T>(),
             len: n,
@@ -126,7 +138,8 @@ impl<T: Copy> PinnedBuffer<T> {
     #[inline]
     pub fn as_slice(&self) -> &[T] {
         // SAFETY: `self.ptr` is a valid, aligned allocation of `self.len`
-        // elements, and we have `&self` so no mutable alias exists.
+        // elements, zero-initialised at `alloc` time, and we have `&self` so
+        // no mutable alias exists.
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
 
@@ -134,7 +147,8 @@ impl<T: Copy> PinnedBuffer<T> {
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         // SAFETY: `self.ptr` is a valid, aligned allocation of `self.len`
-        // elements, and we have `&mut self` so no other alias exists.
+        // elements, zero-initialised at `alloc` time, and we have `&mut self`
+        // so no other alias exists.
         unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
 }
@@ -168,6 +182,70 @@ impl<T: Copy> Drop for PinnedBuffer<T> {
                     "cuMemFreeHost failed during PinnedBuffer drop"
                 );
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alloc_signature_compiles() {
+        let _: fn(usize) -> CudaResult<PinnedBuffer<f32>> = PinnedBuffer::alloc;
+    }
+
+    #[cfg(feature = "gpu-tests")]
+    mod gpu_tests {
+        use super::*;
+
+        /// Establishes a real CUDA context on device 0 so driver calls that
+        /// require a current context (e.g. `cuMemAllocHost_v2`) succeed.
+        /// Returns `None` if no driver/GPU is available, so tests can skip
+        /// gracefully.
+        fn real_context() -> Option<oxicuda_driver::context::Context> {
+            if oxicuda_driver::init().is_err()
+                || oxicuda_driver::device::Device::count().unwrap_or(0) == 0
+            {
+                return None;
+            }
+            let dev = oxicuda_driver::device::Device::get(0).ok()?;
+            oxicuda_driver::context::Context::new(&dev).ok()
+        }
+
+        /// Regression test for F070: a freshly allocated `PinnedBuffer` must
+        /// never expose driver-uninitialised bytes through the safe
+        /// `as_slice`/`Deref` accessors — it must read back as all-zero.
+        #[test]
+        fn alloc_is_zero_initialized() {
+            let Some(_ctx) = real_context() else {
+                eprintln!("skipping: no CUDA driver/device");
+                return;
+            };
+            let Ok(buf) = PinnedBuffer::<u8>::alloc(4096) else {
+                eprintln!("skipping: alloc failed");
+                return;
+            };
+            assert_eq!(buf.len(), 4096);
+            assert!(buf.as_slice().iter().all(|&b| b == 0));
+        }
+
+        #[test]
+        fn from_slice_round_trips() {
+            let Some(_ctx) = real_context() else {
+                eprintln!("skipping: no CUDA driver/device");
+                return;
+            };
+            let data: Vec<f32> = (0..64).map(|i| i as f32).collect();
+            let Ok(buf) = PinnedBuffer::from_slice(&data) else {
+                eprintln!("skipping: alloc failed");
+                return;
+            };
+            assert_eq!(&*buf, data.as_slice());
         }
     }
 }

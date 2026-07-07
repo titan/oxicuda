@@ -12,6 +12,40 @@ use crate::{device::MetalDevice, memory::MetalMemoryManager, pipeline::MetalComp
 #[cfg(target_os = "macos")]
 use super::functions::next_power_of_2;
 
+/// Validate that a GEMM request uses a layout the Metal reference kernels
+/// actually honour.
+///
+/// The MSL GEMM kernels ([`crate::msl::gemm_msl`], [`crate::msl::batched_gemm_msl`],
+/// [`crate::msl::gemm_msl_f16`]) index the operands row-major with the leading
+/// dimension pinned to `k`/`n` (`a[row*k+i]`, `b[i*n+col]`, `c[row*n+col]`) and
+/// have no notion of a transpose mode. Honouring the `trans_*`/`ld*` arguments
+/// would require threading them into the shader; until that exists we must
+/// **reject** any call that would otherwise be silently mis-computed rather than
+/// return a wrong result. Only the contiguous, non-transposed natural layout
+/// (`lda == k`, `ldb == n`, `ldc == n`) is accepted.
+pub(super) fn validate_gemm_layout(
+    trans_a: BackendTranspose,
+    trans_b: BackendTranspose,
+    n: usize,
+    k: usize,
+    lda: usize,
+    ldb: usize,
+    ldc: usize,
+) -> BackendResult<()> {
+    if trans_a != BackendTranspose::NoTrans || trans_b != BackendTranspose::NoTrans {
+        return Err(BackendError::Unsupported(
+            "Metal GEMM supports only NoTrans operands; transpose modes are not implemented".into(),
+        ));
+    }
+    if lda != k || ldb != n || ldc != n {
+        return Err(BackendError::Unsupported(format!(
+            "Metal GEMM supports only contiguous natural leading dimensions \
+             (expected lda={k}, ldb={n}, ldc={n}); got lda={lda}, ldb={ldb}, ldc={ldc}"
+        )));
+    }
+    Ok(())
+}
+
 /// Apple Metal GPU compute backend.
 ///
 /// On macOS this selects the system-default Metal device and allocates
@@ -247,11 +281,12 @@ impl MetalBackend {
             UnaryOp::Abs => "abs",
             UnaryOp::Neg => "neg",
         };
-        let device = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
         let memory = self.memory()?;
         let msl = crate::msl::elementwise_msl(op_str);
-        let pipeline = crate::pipeline::MetalComputePipeline::new(device, &msl, "elementwise_f32")
-            .map_err(BackendError::from)?;
+        // Reuse a cached compiled pipeline (keyed on function name + MSL source
+        // hash) instead of recompiling the shader + creating a command queue on
+        // every call.
+        let pipeline = self.custom_pipeline(&msl, "elementwise_f32")?;
         let buffers = memory.lock_buffers().map_err(BackendError::from)?;
         let input_info = buffers.get(&input_ptr).ok_or_else(|| {
             BackendError::InvalidArgument(format!("unknown input handle {input_ptr}"))
@@ -297,11 +332,10 @@ impl MetalBackend {
             BinaryOp::Max => "max",
             BinaryOp::Min => "min",
         };
-        let device = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
         let memory = self.memory()?;
         let msl = crate::msl::binary_msl(op_str);
-        let pipeline = crate::pipeline::MetalComputePipeline::new(device, &msl, "binary_f32")
-            .map_err(BackendError::from)?;
+        // Reuse a cached compiled pipeline instead of recompiling per call.
+        let pipeline = self.custom_pipeline(&msl, "binary_f32")?;
         let buffers = memory.lock_buffers().map_err(BackendError::from)?;
         let a_info = buffers
             .get(&a_ptr)
@@ -349,7 +383,6 @@ impl MetalBackend {
             ReduceOp::Min => "min",
             ReduceOp::Mean => "mean",
         };
-        let device = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
         let memory = self.memory()?;
         let outer_size: usize = shape[..axis].iter().product::<usize>().max(1);
         let reduce_size = shape[axis];
@@ -361,8 +394,8 @@ impl MetalBackend {
             )));
         }
         let fn_name = crate::msl::reduction_function_name(op_str);
-        let pipeline = crate::pipeline::MetalComputePipeline::new(device, &msl, fn_name)
-            .map_err(BackendError::from)?;
+        // Reuse a cached compiled pipeline instead of recompiling per call.
+        let pipeline = self.custom_pipeline(&msl, fn_name)?;
         let buffers = memory.lock_buffers().map_err(BackendError::from)?;
         let input_info = buffers.get(&input_ptr).ok_or_else(|| {
             BackendError::InvalidArgument(format!("unknown input handle {input_ptr}"))
@@ -410,11 +443,10 @@ impl MetalBackend {
         c_ptr: u64,
         _ldc: usize,
     ) -> BackendResult<()> {
-        let device = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
         let memory = self.memory()?;
         let msl = crate::msl::gemm_msl();
-        let pipeline = crate::pipeline::MetalComputePipeline::new(device, msl, "gemm_f32")
-            .map_err(BackendError::from)?;
+        // Reuse a cached compiled pipeline instead of recompiling per call.
+        let pipeline = self.custom_pipeline(msl, "gemm_f32")?;
         let buffers = memory.lock_buffers().map_err(BackendError::from)?;
         let a_info = buffers
             .get(&a_ptr)
@@ -485,11 +517,10 @@ impl MetalBackend {
         stride_c: usize,
         batch_count: usize,
     ) -> BackendResult<()> {
-        let device = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
         let memory = self.memory()?;
         let msl = crate::msl::batched_gemm_msl();
-        let pipeline = crate::pipeline::MetalComputePipeline::new(device, msl, "batched_gemm_f32")
-            .map_err(BackendError::from)?;
+        // Reuse a cached compiled pipeline instead of recompiling per call.
+        let pipeline = self.custom_pipeline(msl, "batched_gemm_f32")?;
         let buffers = memory.lock_buffers().map_err(BackendError::from)?;
         let a_info = buffers
             .get(&a_ptr)
@@ -555,29 +586,28 @@ impl MetalBackend {
     #[allow(clippy::too_many_arguments)]
     pub fn gemm_f16(
         &self,
-        _trans_a: BackendTranspose,
-        _trans_b: BackendTranspose,
+        trans_a: BackendTranspose,
+        trans_b: BackendTranspose,
         m: usize,
         n: usize,
         k: usize,
         alpha: f32,
         a_ptr: u64,
-        _lda: usize,
+        lda: usize,
         b_ptr: u64,
-        _ldb: usize,
+        ldb: usize,
         beta: f32,
         c_ptr: u64,
-        _ldc: usize,
+        ldc: usize,
     ) -> BackendResult<()> {
         self.check_init()?;
         if m == 0 || n == 0 || k == 0 {
             return Ok(());
         }
-        let device = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
+        validate_gemm_layout(trans_a, trans_b, n, k, lda, ldb, ldc)?;
         let memory = self.memory()?;
         let msl = crate::msl::gemm_msl_f16();
-        let pipeline = crate::pipeline::MetalComputePipeline::new(device, msl, "gemm_f16")
-            .map_err(BackendError::from)?;
+        let pipeline = self.custom_pipeline(msl, "gemm_f16")?;
         let buffers = memory.lock_buffers().map_err(BackendError::from)?;
         let a_info = buffers
             .get(&a_ptr)
@@ -724,5 +754,102 @@ impl MetalBackend {
     ) -> BackendResult<()> {
         self.check_init()?;
         Err(BackendError::DeviceError("Metal requires macOS".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_gemm_layout;
+    use oxicuda_backend::{BackendError, BackendTranspose};
+
+    #[test]
+    fn natural_layout_accepted() {
+        // NoTrans/NoTrans with lda=k, ldb=n, ldc=n is the one supported layout.
+        assert!(
+            validate_gemm_layout(
+                BackendTranspose::NoTrans,
+                BackendTranspose::NoTrans,
+                /*n*/ 4,
+                /*k*/ 3,
+                /*lda*/ 3,
+                /*ldb*/ 4,
+                /*ldc*/ 4,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn transpose_b_rejected() {
+        // The common `y = x @ W.T` (trans_b = Trans) op must be rejected loudly
+        // rather than silently mis-computed.
+        let err = validate_gemm_layout(
+            BackendTranspose::NoTrans,
+            BackendTranspose::Trans,
+            4,
+            3,
+            3,
+            4,
+            4,
+        )
+        .unwrap_err();
+        assert!(matches!(err, BackendError::Unsupported(_)));
+    }
+
+    #[test]
+    fn transpose_a_rejected() {
+        let err = validate_gemm_layout(
+            BackendTranspose::Trans,
+            BackendTranspose::NoTrans,
+            4,
+            3,
+            3,
+            4,
+            4,
+        )
+        .unwrap_err();
+        assert!(matches!(err, BackendError::Unsupported(_)));
+    }
+
+    #[test]
+    fn strided_leading_dims_rejected() {
+        // A strided sub-matrix view (lda > k) reads the wrong elements in the
+        // row-major kernel, so it must be rejected.
+        assert!(matches!(
+            validate_gemm_layout(
+                BackendTranspose::NoTrans,
+                BackendTranspose::NoTrans,
+                4,
+                3,
+                /*lda*/ 8,
+                4,
+                4,
+            ),
+            Err(BackendError::Unsupported(_))
+        ));
+        assert!(matches!(
+            validate_gemm_layout(
+                BackendTranspose::NoTrans,
+                BackendTranspose::NoTrans,
+                4,
+                3,
+                3,
+                /*ldb*/ 9,
+                4,
+            ),
+            Err(BackendError::Unsupported(_))
+        ));
+        assert!(matches!(
+            validate_gemm_layout(
+                BackendTranspose::NoTrans,
+                BackendTranspose::NoTrans,
+                4,
+                3,
+                3,
+                4,
+                /*ldc*/ 9,
+            ),
+            Err(BackendError::Unsupported(_))
+        ));
     }
 }

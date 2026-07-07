@@ -30,7 +30,7 @@
 //!
 //! let cfg = ZeroConfig::stage1(0, 1); // rank 0 of 1 worker
 //! let base = GpuAdam::new(1e-3);
-//! let mut zero = ZeroOptimizer::new(base, cfg);
+//! let mut zero = ZeroOptimizer::new(base, cfg).expect("valid ZeRO config");
 //!
 //! let mut params = vec![{
 //!     let mut p = ParamTensor::new(vec![1.0f32; 4], "w");
@@ -72,9 +72,9 @@ pub struct ZeroConfig {
 impl ZeroConfig {
     /// Create a ZeRO-1 configuration.
     ///
-    /// # Errors
-    ///
-    /// Returns `InvalidRank` if `rank >= world_size`.
+    /// This constructor itself is infallible; call [`ZeroConfig::validate`]
+    /// (or construct a [`ZeroOptimizer`] via [`ZeroOptimizer::new`], which
+    /// validates internally) to check `rank < world_size`.
     pub fn stage1(rank: usize, world_size: usize) -> Self {
         Self {
             stage: ZeroStage::Stage1,
@@ -164,13 +164,13 @@ impl<O: GpuOptimizer> ZeroOptimizer<O> {
     /// # Errors
     ///
     /// Returns `InvalidRank` if the config is invalid.
-    pub fn new(base: O, config: ZeroConfig) -> Self {
-        config.validate().expect("ZeroConfig is invalid");
-        Self {
+    pub fn new(base: O, config: ZeroConfig) -> TrainResult<Self> {
+        config.validate()?;
+        Ok(Self {
             base,
             config,
             step_count: 0,
-        }
+        })
     }
 
     /// Reference to the underlying base optimizer.
@@ -377,7 +377,8 @@ mod tests {
     fn zero_stage1_matches_base() {
         // With world_size=1, ZeRO-1 should produce identical results to the base.
         let mut base = GpuAdam::new(1e-3);
-        let mut zero = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage1(0, 1));
+        let mut zero = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage1(0, 1))
+            .expect("valid ZeRO config");
 
         let data = vec![1.0_f32; 8];
         let grad = vec![0.5_f32; 8];
@@ -441,25 +442,33 @@ mod tests {
     }
 
     #[test]
-    fn invalid_rank_panics() {
-        // First: validate() itself should return Err
-        let _validation_err = std::panic::catch_unwind(|| {
-            let cfg = ZeroConfig::stage1(5, 4); // rank 5 >= world_size 4
-            cfg.validate()
-                .expect("validate called inside catch_unwind so panic is caught"); // should fail validation
-        });
-        // ZeroOptimizer::new calls validate().expect(), so it should panic
-        let result2 = std::panic::catch_unwind(|| {
-            ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage1(5, 4));
-        });
-        assert!(result2.is_err(), "should panic for invalid rank");
+    fn invalid_rank_errors() {
+        // validate() itself should return Err for rank >= world_size
+        let cfg = ZeroConfig::stage1(5, 4); // rank 5 >= world_size 4
+        assert!(matches!(
+            cfg.validate(),
+            Err(TrainError::InvalidRank {
+                rank: 5,
+                world_size: 4
+            })
+        ));
+
+        // ZeroOptimizer::new propagates the same validation error instead of panicking
+        let result = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage1(5, 4));
+        assert!(matches!(
+            result,
+            Err(TrainError::InvalidRank {
+                rank: 5,
+                world_size: 4
+            })
+        ));
     }
 
     #[test]
     fn zero_stage3_updates_only_owned_shard() {
         // world_size=2, rank=0 → owns [0..2] of a 4-element param
         let cfg = ZeroConfig::stage3(0, 2);
-        let mut zero = ZeroOptimizer::new(GpuAdam::new(1e-2), cfg);
+        let mut zero = ZeroOptimizer::new(GpuAdam::new(1e-2), cfg).expect("valid ZeRO config");
         let mut params = vec![param_with_grad(vec![2.0_f32; 4], vec![1.0_f32; 4])];
         zero.step(&mut params)
             .expect("ZeRO stage3 optimizer step should succeed");
@@ -486,9 +495,12 @@ mod tests {
 
     #[test]
     fn zero_name() {
-        let z1 = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage1(0, 1));
-        let z2 = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage2(0, 1));
-        let z3 = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage3(0, 1));
+        let z1 = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage1(0, 1))
+            .expect("valid ZeRO config");
+        let z2 = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage2(0, 1))
+            .expect("valid ZeRO config");
+        let z3 = ZeroOptimizer::new(GpuAdam::new(1e-3), ZeroConfig::stage3(0, 1))
+            .expect("valid ZeRO config");
         assert_eq!(z1.name(), "ZeRO-1");
         assert_eq!(z2.name(), "ZeRO-2");
         assert_eq!(z3.name(), "ZeRO-3");

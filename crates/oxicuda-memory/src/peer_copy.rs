@@ -30,6 +30,7 @@ use std::ffi::c_int;
 
 use oxicuda_driver::device::Device;
 use oxicuda_driver::error::{CudaError, CudaResult};
+use oxicuda_driver::ffi::CUcontext;
 use oxicuda_driver::loader::try_driver;
 use oxicuda_driver::primary_context::PrimaryContext;
 use oxicuda_driver::stream::Stream;
@@ -59,6 +60,12 @@ pub fn can_access_peer(device: &Device, peer: &Device) -> CudaResult<bool> {
 /// After calling this function, kernels and copy operations running on `device`
 /// can directly read from and write to memory allocated on `peer`.
 ///
+/// This temporarily makes `device`'s primary context current on the calling
+/// thread in order to issue `cuCtxEnablePeerAccess`; the thread's previously
+/// current context (possibly none) is always restored before returning,
+/// even on error, so this function never permanently clobbers the caller's
+/// current context.
+///
 /// # Errors
 ///
 /// * [`CudaError::PeerAccessAlreadyEnabled`] if peer access is already enabled.
@@ -67,27 +74,45 @@ pub fn can_access_peer(device: &Device, peer: &Device) -> CudaResult<bool> {
 pub fn enable_peer_access(device: &Device, peer: &Device) -> CudaResult<()> {
     let api = try_driver()?;
 
+    // Capture the caller's current context (possibly null) so it can be
+    // restored before returning; otherwise making `device`'s primary
+    // context current below would permanently leak into the caller's
+    // thread-local CUDA state.
+    let mut prev = CUcontext::default();
+    oxicuda_driver::error::check(unsafe { (api.cu_ctx_get_current)(&mut prev) })?;
+
     // Retain both primary contexts.  The peer context handle is needed by
     // cuCtxEnablePeerAccess; the device context is set as current so that the
     // enable operation applies to it.
     let dev_ctx = PrimaryContext::retain(device)?;
     let peer_ctx = PrimaryContext::retain(peer)?;
 
-    // Make the device context current on this thread.
-    oxicuda_driver::error::check(unsafe { (api.cu_ctx_set_current)(dev_ctx.raw()) })?;
+    // Make the device context current on this thread, then enable access
+    // from it to the peer context.
+    let rc = oxicuda_driver::error::check(unsafe { (api.cu_ctx_set_current)(dev_ctx.raw()) })
+        .and_then(|()| {
+            oxicuda_driver::error::check(unsafe {
+                (api.cu_ctx_enable_peer_access)(peer_ctx.raw(), 0)
+            })
+        });
 
-    // Enable access from the current (device) context to the peer context.
-    let rc =
-        oxicuda_driver::error::check(unsafe { (api.cu_ctx_enable_peer_access)(peer_ctx.raw(), 0) });
+    // Restore the caller's previous context on every exit path, before
+    // releasing our retains, so a possibly-destroyed primary context is
+    // never left current on this thread (restoring null is legal).
+    let restore_rc = oxicuda_driver::error::check(unsafe { (api.cu_ctx_set_current)(prev) });
 
     // Release retained contexts regardless of outcome.
     let _ = peer_ctx.release();
     let _ = dev_ctx.release();
 
-    rc
+    rc.and(restore_rc)
 }
 
 /// Disables peer access from `device`'s primary context to `peer`'s primary context.
+///
+/// Like [`enable_peer_access`], this temporarily makes `device`'s primary
+/// context current and always restores the caller's previous context
+/// before returning, even on error.
 ///
 /// # Errors
 ///
@@ -95,18 +120,25 @@ pub fn enable_peer_access(device: &Device, peer: &Device) -> CudaResult<()> {
 pub fn disable_peer_access(device: &Device, peer: &Device) -> CudaResult<()> {
     let api = try_driver()?;
 
+    let mut prev = CUcontext::default();
+    oxicuda_driver::error::check(unsafe { (api.cu_ctx_get_current)(&mut prev) })?;
+
     let dev_ctx = PrimaryContext::retain(device)?;
     let peer_ctx = PrimaryContext::retain(peer)?;
 
-    oxicuda_driver::error::check(unsafe { (api.cu_ctx_set_current)(dev_ctx.raw()) })?;
+    let rc = oxicuda_driver::error::check(unsafe { (api.cu_ctx_set_current)(dev_ctx.raw()) })
+        .and_then(|()| {
+            oxicuda_driver::error::check(unsafe {
+                (api.cu_ctx_disable_peer_access)(peer_ctx.raw())
+            })
+        });
 
-    let rc =
-        oxicuda_driver::error::check(unsafe { (api.cu_ctx_disable_peer_access)(peer_ctx.raw()) });
+    let restore_rc = oxicuda_driver::error::check(unsafe { (api.cu_ctx_set_current)(prev) });
 
     let _ = peer_ctx.release();
     let _ = dev_ctx.release();
 
-    rc
+    rc.and(restore_rc)
 }
 
 /// Copies data between device buffers on different GPUs (synchronous).
@@ -231,12 +263,30 @@ pub fn copy_peer_region<T: Copy>(
 
 /// Copies data between device buffers on different GPUs (asynchronous).
 ///
-/// The copy is enqueued on `stream` and may not be complete when this
-/// function returns.  Both buffers must have the same length.
+/// The copy is enqueued on `stream`.  Both buffers must have the same
+/// length.
+///
+/// # Context lifetime
+///
+/// `cuMemcpyPeerAsync` only *enqueues* the copy; the driver may still be
+/// executing it on `stream` after this function returns. Releasing both
+/// primary-context retains immediately after enqueuing (as this function
+/// used to do) could drop a primary context's driver refcount to zero —
+/// and possibly destroy it — while the copy is still in flight. Because
+/// `oxicuda-driver` does not yet expose `cuLaunchHostFunc` (which would let
+/// the release be deferred to a stream callback without blocking the
+/// caller), this function instead synchronises `stream` before releasing
+/// the retains, so they provably outlive the copy they protect. This means
+/// the function blocks until the copy completes, trading away some of the
+/// "fire and forget" ergonomics the name implies in exchange for
+/// correctness; callers that need true overlap should retain the primary
+/// contexts themselves for the lifetime of their own stream usage.
 ///
 /// # Errors
 ///
 /// * [`CudaError::InvalidValue`] if buffer lengths do not match.
+/// * Other driver errors from `cuMemcpyPeerAsync` or the post-copy
+///   `cuStreamSynchronize`.
 pub fn copy_peer_async<T: Copy>(
     dst: &mut DeviceBuffer<T>,
     dst_device: &Device,
@@ -264,10 +314,18 @@ pub fn copy_peer_async<T: Copy>(
         )
     });
 
+    // Only wait for completion if the copy was actually enqueued; on
+    // enqueue failure there is nothing in flight to protect the contexts
+    // from.
+    let sync_rc = match &rc {
+        Ok(()) => stream.synchronize(),
+        Err(_) => Ok(()),
+    };
+
     let _ = src_ctx.release();
     let _ = dst_ctx.release();
 
-    rc
+    rc.and(sync_rc)
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +420,67 @@ mod tests {
         assert_eq!(out, [0, 0, 0, 0, 0, 12, 13, 14]);
     }
 
+    /// Regression test for F074: previously `copy_peer_async` released both
+    /// primary-context retains immediately after enqueuing the copy, before
+    /// it necessarily completed. The fix synchronises `stream` before
+    /// releasing, so the copy's effects must already be visible on
+    /// read-back even without an explicit `stream.synchronize()` call here.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn copy_peer_async_within_device_completes_before_returning() {
+        if oxicuda_driver::init().is_err() {
+            eprintln!("skipping: CUDA init failed");
+            return;
+        }
+        let device = match Device::get(0) {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("skipping: no CUDA device");
+                return;
+            }
+        };
+        let ctx = match oxicuda_driver::context::Context::new(&device) {
+            Ok(c) => std::sync::Arc::new(c),
+            Err(_) => {
+                eprintln!("skipping: context creation failed");
+                return;
+            }
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("skipping: stream creation failed");
+                return;
+            }
+        };
+
+        let host_src: Vec<u32> = (100..108).collect();
+        let src = match DeviceBuffer::<u32>::from_host(&host_src) {
+            Ok(b) => b,
+            Err(_) => {
+                eprintln!("skipping: device alloc failed");
+                return;
+            }
+        };
+        let mut dst = match DeviceBuffer::<u32>::from_host(&[0u32; 8]) {
+            Ok(b) => b,
+            Err(_) => {
+                eprintln!("skipping: device alloc failed");
+                return;
+            }
+        };
+
+        if copy_peer_async(&mut dst, &device, &src, &device, &stream).is_err() {
+            eprintln!("skipping: copy_peer_async failed");
+            return;
+        }
+        // Deliberately no `stream.synchronize()` here: the fix under test
+        // must already have waited for completion internally.
+        let mut out = [0u32; 8];
+        dst.copy_to_host(&mut out).expect("copy back failed");
+        assert_eq!(out, [100, 101, 102, 103, 104, 105, 106, 107]);
+    }
+
     #[test]
     fn copy_peer_region_rejects_out_of_bounds() {
         // Pure validation path — no GPU needed because the bounds check
@@ -389,5 +508,98 @@ mod tests {
                 let _ = can_access_peer(&dev0, &dev1);
             }
         }
+    }
+
+    /// Regression test for F073: even when the underlying
+    /// `cuCtxEnablePeerAccess` call fails (as it must for a device paired
+    /// with itself — there is no real peer hardware to test against on this
+    /// single-GPU box), `enable_peer_access` must restore whatever context
+    /// was current on the calling thread before it retained/activated the
+    /// device's primary context.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn enable_peer_access_restores_previous_context_on_error() {
+        if oxicuda_driver::init().is_err() {
+            eprintln!("skipping: CUDA init failed");
+            return;
+        }
+        let device = match Device::get(0) {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("skipping: no CUDA device");
+                return;
+            }
+        };
+        // A distinct, non-primary context that is current on this thread
+        // for the duration of the test, so we can detect whether
+        // `enable_peer_access` leaves some other context (e.g. the primary
+        // context it retains internally) current afterwards.
+        let ctx = match oxicuda_driver::context::Context::new(&device) {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("skipping: context creation failed");
+                return;
+            }
+        };
+        let api = oxicuda_driver::loader::try_driver().expect("driver present");
+
+        let mut before = CUcontext::default();
+        oxicuda_driver::error::check(unsafe { (api.cu_ctx_get_current)(&mut before) })
+            .expect("cuCtxGetCurrent failed");
+
+        // A device cannot enable peer access with itself; this is expected
+        // to fail, but the context must still be restored.
+        let _ = enable_peer_access(&device, &device);
+
+        let mut after = CUcontext::default();
+        oxicuda_driver::error::check(unsafe { (api.cu_ctx_get_current)(&mut after) })
+            .expect("cuCtxGetCurrent failed");
+        assert_eq!(
+            before, after,
+            "enable_peer_access must restore the caller's previous context"
+        );
+        drop(ctx);
+    }
+
+    /// Same guarantee as
+    /// [`enable_peer_access_restores_previous_context_on_error`] but for
+    /// `disable_peer_access`.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn disable_peer_access_restores_previous_context_on_error() {
+        if oxicuda_driver::init().is_err() {
+            eprintln!("skipping: CUDA init failed");
+            return;
+        }
+        let device = match Device::get(0) {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("skipping: no CUDA device");
+                return;
+            }
+        };
+        let ctx = match oxicuda_driver::context::Context::new(&device) {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("skipping: context creation failed");
+                return;
+            }
+        };
+        let api = oxicuda_driver::loader::try_driver().expect("driver present");
+
+        let mut before = CUcontext::default();
+        oxicuda_driver::error::check(unsafe { (api.cu_ctx_get_current)(&mut before) })
+            .expect("cuCtxGetCurrent failed");
+
+        let _ = disable_peer_access(&device, &device);
+
+        let mut after = CUcontext::default();
+        oxicuda_driver::error::check(unsafe { (api.cu_ctx_get_current)(&mut after) })
+            .expect("cuCtxGetCurrent failed");
+        assert_eq!(
+            before, after,
+            "disable_peer_access must restore the caller's previous context"
+        );
+        drop(ctx);
     }
 }

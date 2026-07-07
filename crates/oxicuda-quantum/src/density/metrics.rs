@@ -1,6 +1,7 @@
 use num_complex::Complex;
 
 use crate::density::density::DensityMatrix;
+use crate::error::{QuantumError, QuantumResult};
 
 type Complex32 = Complex<f32>;
 
@@ -15,19 +16,28 @@ pub fn purity(dm: &DensityMatrix) -> f32 {
 /// For small matrices (dim ≤ 4) we use a direct matrix-sqrt approach via
 /// eigenvalue decomposition (power iteration approximation for 2×2 and 4×4).
 /// For pure states, simplifies to |⟨ψ₁|ψ₂⟩|².
-#[must_use]
-pub fn fidelity(dm1: &DensityMatrix, dm2: &DensityMatrix) -> f32 {
+///
+/// # Errors
+///
+/// Returns [`QuantumError::DimensionMismatch`] if `dm1` and `dm2` do not act
+/// on the same dimension.
+pub fn fidelity(dm1: &DensityMatrix, dm2: &DensityMatrix) -> QuantumResult<f32> {
     let dim = dm1.dim;
-    assert_eq!(dim, dm2.dim, "density matrices must have same dimension");
+    if dim != dm2.dim {
+        return Err(QuantumError::DimensionMismatch {
+            expected: dim,
+            got: dm2.dim,
+        });
+    }
 
-    match dim {
+    Ok(match dim {
         1 => {
             // trivially 1
             1.0_f32
         }
         2 => fidelity_2x2(dm1, dm2),
         _ => fidelity_trace_approximation(dm1, dm2),
-    }
+    })
 }
 
 /// For 2×2 density matrices compute fidelity via Uhlmann formula.
@@ -141,5 +151,16 @@ mod tests {
         let dm = DensityMatrix::from_pure_state(&sv);
         let s = von_neumann_entropy(&dm);
         assert!(s.abs() < 1e-5, "entropy={s}");
+    }
+
+    #[test]
+    fn fidelity_rejects_dimension_mismatch() {
+        let sv1 = StateVector::new_zero_state(1)
+            .expect("n_qubits=1 is a valid qubit count so zero-state construction cannot fail");
+        let sv2 = StateVector::new_zero_state(2)
+            .expect("n_qubits=2 is a valid qubit count so zero-state construction cannot fail");
+        let dm2 = DensityMatrix::from_pure_state(&sv1);
+        let dm4 = DensityMatrix::from_pure_state(&sv2);
+        assert!(fidelity(&dm2, &dm4).is_err());
     }
 }

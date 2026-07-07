@@ -198,7 +198,14 @@ fn generate_block_scale_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                 b.branch(&loop_lbl);
                 b.label(&end_lbl);
 
-                b.raw_ptx(&format!("st.shared.f32 [smem + {tid} * 4], {partial};"));
+                // PTX address operands cannot scale a register inside the
+                // brackets (`[smem + r*4]` is invalid), so the element address
+                // must be materialised into a register: `addr = &smem + idx*4`.
+                let smem_base = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!("mov.u32 {smem_base}, smem;"));
+                let self_addr = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!("mad.lo.u32 {self_addr}, {tid}, 4, {smem_base};"));
+                b.raw_ptx(&format!("st.shared.f32 [{self_addr}], {partial};"));
                 b.bar_sync(0);
 
                 // Tree reduction
@@ -219,10 +226,16 @@ fn generate_block_scale_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                 let other = b.add_u32(tid.clone(), stride.clone());
                 let a = b.alloc_reg(PtxType::F32);
                 let bv = b.alloc_reg(PtxType::F32);
-                b.raw_ptx(&format!("ld.shared.f32 {a}, [smem + {tid} * 4];"));
-                b.raw_ptx(&format!("ld.shared.f32 {bv}, [smem + {other} * 4];"));
+                let tid_addr = b.alloc_reg(PtxType::U32);
+                let other_addr = b.alloc_reg(PtxType::U32);
+                b.raw_ptx(&format!("mad.lo.u32 {tid_addr}, {tid}, 4, {smem_base};"));
+                b.raw_ptx(&format!(
+                    "mad.lo.u32 {other_addr}, {other}, 4, {smem_base};"
+                ));
+                b.raw_ptx(&format!("ld.shared.f32 {a}, [{tid_addr}];"));
+                b.raw_ptx(&format!("ld.shared.f32 {bv}, [{other_addr}];"));
                 let m = b.max_f32(a, bv);
-                b.raw_ptx(&format!("st.shared.f32 [smem + {tid} * 4], {m};"));
+                b.raw_ptx(&format!("st.shared.f32 [{tid_addr}], {m};"));
                 b.label(&skip_r);
                 b.bar_sync(0);
                 b.raw_ptx(&format!("shr.u32 {stride}, {stride}, 1;"));

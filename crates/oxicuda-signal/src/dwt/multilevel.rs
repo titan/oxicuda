@@ -93,7 +93,13 @@ pub fn multilevel_forward(
             "levels must be ≥ 1".to_owned(),
         ));
     }
-    let min_len = 1 << levels;
+    if levels >= usize::BITS as usize {
+        return Err(SignalError::InvalidParameter(format!(
+            "levels {levels} too large (max {})",
+            usize::BITS - 1
+        )));
+    }
+    let min_len = 1usize << levels;
     if x.len() < min_len {
         return Err(SignalError::InvalidSize(format!(
             "Signal length {} too short for {levels}-level DWT (need ≥ {})",
@@ -307,6 +313,24 @@ mod tests {
     fn test_multilevel_zero_levels() {
         let x = vec![1.0_f64; 8];
         let result = multilevel_forward(&x, WaveletFamily::Haar, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multilevel_levels_overflow_rejected() {
+        // `1 << levels` on a `usize` would panic (debug) or silently mask
+        // (release) once `levels >= usize::BITS`. Both must now return a
+        // clean `InvalidParameter` error instead.
+        let x = vec![1.0_f64; 8];
+        let result = multilevel_forward(&x, WaveletFamily::Haar, usize::BITS as usize);
+        assert!(result.is_err());
+        let result = multilevel_forward(&x, WaveletFamily::Haar, usize::BITS as usize + 5);
+        assert!(result.is_err());
+        let result = multilevel_forward(&x, WaveletFamily::Haar, usize::MAX);
+        assert!(result.is_err());
+        // One below the boundary is still a legitimate (if absurd) request
+        // that should fail only for lacking enough samples, not overflow.
+        let result = multilevel_forward(&x, WaveletFamily::Haar, usize::BITS as usize - 1);
         assert!(result.is_err());
     }
 

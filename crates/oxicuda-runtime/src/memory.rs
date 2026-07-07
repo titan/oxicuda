@@ -15,7 +15,10 @@
 
 use std::ffi::c_void;
 
-use oxicuda_driver::loader::try_driver;
+use oxicuda_driver::ffi::{
+    CU_MEMORYTYPE_DEVICE, CU_MEMORYTYPE_UNIFIED, CU_POINTER_ATTRIBUTE_MEMORY_TYPE,
+};
+use oxicuda_driver::loader::{DriverApi, try_driver};
 
 use crate::error::{CudaRtError, CudaRtResult};
 use crate::stream::CudaStream;
@@ -324,6 +327,39 @@ pub fn malloc_pitch(width_bytes: usize, height: usize) -> CudaRtResult<(DevicePt
 
 // ─── Memcpy ──────────────────────────────────────────────────────────────────
 
+/// Classify a raw pointer as host- or device-resident by querying the
+/// driver's `cuPointerGetAttribute(CU_POINTER_ATTRIBUTE_MEMORY_TYPE)`.
+///
+/// Used to resolve [`MemcpyKind::Default`] (`cudaMemcpyDefault`) into a
+/// concrete direction, mirroring unified-addressing semantics.
+///
+/// If the query fails (e.g. the pointer is an unregistered plain host
+/// pointer that the driver has never seen), the pointer is conservatively
+/// classified as [`MemLocation::Host`] — the same convention used by
+/// `oxicuda-memory`'s `query_registered_pointer_info`.
+fn classify(api: &DriverApi, ptr: u64) -> MemLocation {
+    let mut mem_type: u32 = 0;
+    // SAFETY: FFI; mem_type is a valid stack-allocated u32 and ptr is either
+    // a device address or a host address (both are legal CUdeviceptr-typed
+    // arguments to cuPointerGetAttribute — the driver reports failure for
+    // pointers it does not recognise).
+    let rc = unsafe {
+        (api.cu_pointer_get_attribute)(
+            (&raw mut mem_type).cast::<c_void>(),
+            CU_POINTER_ATTRIBUTE_MEMORY_TYPE,
+            ptr,
+        )
+    };
+    if rc != 0 {
+        return MemLocation::Host;
+    }
+    if mem_type == CU_MEMORYTYPE_DEVICE || mem_type == CU_MEMORYTYPE_UNIFIED {
+        MemLocation::Device
+    } else {
+        MemLocation::Host
+    }
+}
+
 /// Synchronously copy `count` bytes between memory regions.
 ///
 /// Mirrors `cudaMemcpy`.
@@ -371,11 +407,14 @@ pub unsafe fn memcpy(
             unsafe { (api.cu_memcpy_dtod_v2)(dst_ptr, src_ptr, count) }
         }
         MemcpyKind::Default => {
-            // Fall back to H2D (common case; real implementation would use
-            // cuPointerGetAttribute to determine actual memory type).
-            let dst_ptr = dst as u64;
-            // SAFETY: FFI.
-            unsafe { (api.cu_memcpy_htod_v2)(dst_ptr, src, count) }
+            // Infer the concrete direction from each pointer's residency,
+            // matching `cudaMemcpyDefault`'s unified-addressing semantics.
+            let resolved =
+                MemcpyKind::resolve(classify(api, src as u64), classify(api, dst as u64));
+            // SAFETY: same src/dst/count contract as this call; `resolved`
+            // is never `Default` (see `MemcpyKind::resolve`), so this cannot
+            // recurse further.
+            return unsafe { memcpy(dst, src, count, resolved) };
         }
     };
     if rc != 0 {
@@ -412,7 +451,7 @@ pub unsafe fn memcpy_async(
             unsafe { std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, count) };
             0u32
         }
-        MemcpyKind::HostToDevice | MemcpyKind::Default => {
+        MemcpyKind::HostToDevice => {
             let dst_ptr = dst as u64;
             // SAFETY: FFI; caller guarantees validity.
             unsafe { (api.cu_memcpy_htod_async_v2)(dst_ptr, src, count, stream.raw()) }
@@ -428,6 +467,15 @@ pub unsafe fn memcpy_async(
             let src_ptr = src as u64;
             // SAFETY: FFI.
             unsafe { (api.cu_memcpy_dtod_v2)(dst_ptr, src_ptr, count) }
+        }
+        MemcpyKind::Default => {
+            // Infer the concrete direction from each pointer's residency,
+            // matching `cudaMemcpyDefault`'s unified-addressing semantics.
+            let resolved =
+                MemcpyKind::resolve(classify(api, src as u64), classify(api, dst as u64));
+            // SAFETY: same src/dst/count/stream contract as this call;
+            // `resolved` is never `Default`, so this cannot recurse further.
+            return unsafe { memcpy_async(dst, src, count, resolved, stream) };
         }
     };
     if rc != 0 {
@@ -777,5 +825,154 @@ mod tests {
             MemcpyKind::resolve(MemLocation::Device, MemLocation::Device),
             MemcpyKind::DeviceToDevice
         );
+    }
+
+    /// Regression test for F088: `MemcpyKind::Default` must infer the real
+    /// transfer direction from pointer residency instead of unconditionally
+    /// issuing `cuMemcpyHtoD`. Exercises H2D → D2D → D2H, all requested with
+    /// `MemcpyKind::Default`, and verifies the round-tripped data survives
+    /// each hop unmodified.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn memcpy_default_resolves_h2d_d2d_d2h_roundtrip() {
+        if crate::device::set_device(0).is_err() {
+            eprintln!("skipping: no CUDA device");
+            return;
+        }
+        let host_src: Vec<u32> = (0..64).collect();
+        let bytes = std::mem::size_of_val(host_src.as_slice());
+
+        let dev_a = match malloc(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skipping: device alloc failed");
+                return;
+            }
+        };
+        let dev_b = match malloc(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skipping: device alloc failed");
+                let _ = free(dev_a);
+                return;
+            }
+        };
+
+        // H2D via Default: driver must classify `host_src` as host-resident
+        // and `dev_a` as device-resident, resolving to HostToDevice.
+        // SAFETY: host_src is a valid, non-overlapping source slice; dev_a is
+        // a freshly allocated device buffer of the same byte length.
+        unsafe {
+            memcpy(
+                dev_a.0 as *mut c_void,
+                host_src.as_ptr() as *const c_void,
+                bytes,
+                MemcpyKind::Default,
+            )
+        }
+        .expect("H2D via MemcpyKind::Default failed");
+
+        // D2D via Default: both endpoints are device-resident, resolving to
+        // DeviceToDevice.
+        // SAFETY: dev_a and dev_b are distinct, non-overlapping device
+        // allocations of the same byte length.
+        unsafe {
+            memcpy(
+                dev_b.0 as *mut c_void,
+                dev_a.0 as *const c_void,
+                bytes,
+                MemcpyKind::Default,
+            )
+        }
+        .expect("D2D via MemcpyKind::Default failed");
+
+        // D2H via Default: `dev_b` is device-resident and `host_dst` is
+        // host-resident, resolving to DeviceToHost.
+        let mut host_dst = vec![0u32; host_src.len()];
+        // SAFETY: dev_b is a valid device allocation; host_dst is a valid,
+        // non-overlapping mutable destination slice of the same byte length.
+        unsafe {
+            memcpy(
+                host_dst.as_mut_ptr() as *mut c_void,
+                dev_b.0 as *const c_void,
+                bytes,
+                MemcpyKind::Default,
+            )
+        }
+        .expect("D2H via MemcpyKind::Default failed");
+
+        assert_eq!(
+            host_dst, host_src,
+            "data must survive H2D->D2D->D2H via Default unchanged"
+        );
+
+        let _ = free(dev_a);
+        let _ = free(dev_b);
+    }
+
+    /// Regression test for F088 (async path): `memcpy_async` with
+    /// `MemcpyKind::Default` must also resolve to a concrete direction
+    /// rather than assuming HostToDevice.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn memcpy_async_default_resolves_h2d_and_d2h_roundtrip() {
+        if crate::device::set_device(0).is_err() {
+            eprintln!("skipping: no CUDA device");
+            return;
+        }
+        let stream = match crate::stream::stream_create() {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("skipping: stream creation failed");
+                return;
+            }
+        };
+        let host_src: Vec<u32> = (100..164).collect();
+        let bytes = std::mem::size_of_val(host_src.as_slice());
+        let dev_a = match malloc(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skipping: device alloc failed");
+                let _ = crate::stream::stream_destroy(stream);
+                return;
+            }
+        };
+
+        // SAFETY: host_src outlives the call; dev_a is a valid device
+        // allocation of the same byte length; stream is valid.
+        unsafe {
+            memcpy_async(
+                dev_a.0 as *mut c_void,
+                host_src.as_ptr() as *const c_void,
+                bytes,
+                MemcpyKind::Default,
+                &stream,
+            )
+        }
+        .expect("async H2D via MemcpyKind::Default failed");
+        crate::stream::stream_synchronize(stream).expect("stream sync failed");
+
+        let mut host_dst = vec![0u32; host_src.len()];
+        // SAFETY: dev_a is valid; host_dst is a valid, non-overlapping
+        // mutable destination slice of the same byte length; stream is valid.
+        unsafe {
+            memcpy_async(
+                host_dst.as_mut_ptr() as *mut c_void,
+                dev_a.0 as *const c_void,
+                bytes,
+                MemcpyKind::Default,
+                &stream,
+            )
+        }
+        .expect("async D2H via MemcpyKind::Default failed");
+        crate::stream::stream_synchronize(stream).expect("stream sync failed");
+
+        assert_eq!(
+            host_dst, host_src,
+            "data must survive async H2D->D2H via Default unchanged"
+        );
+
+        let _ = free(dev_a);
+        let _ = crate::stream::stream_destroy(stream);
     }
 }

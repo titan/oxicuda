@@ -312,7 +312,7 @@ mod tests {
     fn e2e_mamba_model_decode() {
         let config = MambaConfig::tiny(); // vocab=256, D=32, 2 layers
         let mut rng = make_rng();
-        let weights = MambaModelWeights::random(&config, &mut rng);
+        let weights = MambaModelWeights::random(&config, &mut rng).expect("weights");
         let model = MambaModel::new(config.clone(), weights).expect("MambaModel must construct");
         // 5-step greedy decode starting from token 0
         let mut context = vec![0usize];

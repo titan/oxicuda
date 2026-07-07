@@ -83,10 +83,10 @@ mod tests {
                          add.u64 %rd_a, {a_ptr}, %rd_off;\n    \
                          add.u64 %rd_b, {b_ptr}, %rd_off;\n    \
                          add.u64 %rd_c, {c_ptr}, %rd_off;\n    \
-                         ld.global.f16 %f_a, [%rd_a];\n    \
-                         ld.global.f16 %f_b, [%rd_b];\n    \
-                         add.f16 %f_c, %f_a, %f_b;\n    \
-                         st.global.f16 [%rd_c], %f_c;"
+                         ld.global.f16 %fh_a, [%rd_a];\n    \
+                         ld.global.f16 %fh_b, [%rd_b];\n    \
+                         add.f16 %fh_c, %fh_a, %fh_b;\n    \
+                         st.global.f16 [%rd_c], %fh_c;"
                     ));
                 });
                 b.ret();
@@ -119,10 +119,10 @@ mod tests {
                          add.u64 %rd_a, {a_ptr}, %rd_off;\n    \
                          add.u64 %rd_b, {b_ptr}, %rd_off;\n    \
                          add.u64 %rd_c, {c_ptr}, %rd_off;\n    \
-                         ld.global.f64 %f_a, [%rd_a];\n    \
-                         ld.global.f64 %f_b, [%rd_b];\n    \
-                         add.f64 %f_c, %f_a, %f_b;\n    \
-                         st.global.f64 [%rd_c], %f_c;"
+                         ld.global.f64 %fd_a, [%rd_a];\n    \
+                         ld.global.f64 %fd_b, [%rd_b];\n    \
+                         add.f64 %fd_c, %fd_a, %fd_b;\n    \
+                         st.global.f64 [%rd_c], %fd_c;"
                     ));
                 });
                 b.ret();
@@ -274,6 +274,16 @@ mod tests {
             ptx.contains("add.f16") || ptx.contains("fma.rn.f16"),
             "f16 PTX must contain f16 add; got:\n{ptx}"
         );
+        // The f16 scalar registers must be declared with 16-bit width, not the
+        // 32-bit width a bare `%f_*` name would produce.
+        assert!(
+            ptx.contains(".reg .b16 %fh_a;"),
+            "f16 registers must be declared '.reg .b16'; got:\n{ptx}"
+        );
+        assert!(
+            !ptx.contains(".reg .b32 %fh_a;"),
+            "f16 registers must not be declared 32-bit; got:\n{ptx}"
+        );
     }
 
     #[test]
@@ -299,6 +309,16 @@ mod tests {
         assert!(
             ptx.contains("add.f64") || ptx.contains("fma.rn.f64"),
             "f64 PTX must contain f64 add; got:\n{ptx}"
+        );
+        // The f64 scalar registers must be declared with 64-bit width, not the
+        // 32-bit width a bare `%f_*` name would produce.
+        assert!(
+            ptx.contains(".reg .b64 %fd_a;"),
+            "f64 registers must be declared '.reg .b64'; got:\n{ptx}"
+        );
+        assert!(
+            !ptx.contains(".reg .b32 %fd_a;"),
+            "f64 registers must not be declared 32-bit; got:\n{ptx}"
         );
     }
 

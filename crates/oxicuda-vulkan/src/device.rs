@@ -46,7 +46,11 @@ impl VulkanDevice {
         let instance = Self::create_instance(&entry)?;
 
         let physical_devices = unsafe { instance.enumerate_physical_devices() }
-            .map_err(|e| VulkanError::VkError(e.as_raw(), "enumerate_physical_devices".into()))?;
+            .map_err(|e| VulkanError::VkError(e.as_raw(), "enumerate_physical_devices".into()))
+            .inspect_err(|_| {
+                // On failure we must clean up the instance (ash does not).
+                unsafe { instance.destroy_instance(None) };
+            })?;
 
         if physical_devices.is_empty() {
             unsafe { instance.destroy_instance(None) };
@@ -54,7 +58,10 @@ impl VulkanDevice {
         }
 
         let (physical_device, compute_queue_family, queue_count) =
-            Self::select_device(&instance, &physical_devices)?;
+            Self::select_device(&instance, &physical_devices).inspect_err(|_| {
+                // On failure we must clean up the instance (ash does not).
+                unsafe { instance.destroy_instance(None) };
+            })?;
 
         let device_name = Self::get_device_name(&instance, physical_device);
 
@@ -170,8 +177,26 @@ impl VulkanDevice {
             .queue_family_index(compute_queue_family)
             .queue_priorities(&queue_priorities);
 
-        let device_create_info = vk::DeviceCreateInfo::default()
+        // Query whether the physical device supports timeline semaphores; the
+        // `VulkanSemaphore::new_timeline` / `signal` / `wait` API requires the
+        // `timelineSemaphore` feature to be *enabled* at device creation (merely
+        // requesting api_version 1.2 does not enable it).
+        let timeline_supported = {
+            let mut timeline_features = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
+            let mut features2 =
+                vk::PhysicalDeviceFeatures2::default().push_next(&mut timeline_features);
+            unsafe { instance.get_physical_device_features2(physical_device, &mut features2) };
+            timeline_features.timeline_semaphore == vk::TRUE
+        };
+
+        let mut enable_timeline =
+            vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
+
+        let mut device_create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(std::slice::from_ref(&queue_create_info));
+        if timeline_supported {
+            device_create_info = device_create_info.push_next(&mut enable_timeline);
+        }
 
         unsafe { instance.create_device(physical_device, &device_create_info, None) }
             .map_err(|e| VulkanError::VkError(e.as_raw(), format!("create_device: {e}")))

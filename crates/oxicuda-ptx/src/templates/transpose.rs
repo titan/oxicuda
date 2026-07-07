@@ -183,11 +183,11 @@ impl TransposeTemplate {
         writeln!(ptx, "    .param .u32 %param_width,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u32 %param_height").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
-
-        // Thread block dimensions
-        writeln!(ptx, "    .maxntid {tile_dim}, {block_rows}, 1;")
+        // `.maxntid` must precede the body brace with no trailing semicolon
+        // (a 2-D thread-block tuning hint here: tile_dim x block_rows x 1).
+        writeln!(ptx, "    .maxntid {tile_dim}, {block_rows}, 1")
             .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
         // Register declarations
         writeln!(ptx, "    .reg .u32 %r<{reg_count}>;").map_err(PtxGenError::FormatError)?;

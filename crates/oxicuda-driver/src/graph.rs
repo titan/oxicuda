@@ -9,11 +9,23 @@
 //! This module exposes a Rust-side graph representation that records
 //! operations as nodes with explicit dependency edges. [`Graph::instantiate`]
 //! translates that representation into the native CUDA Graph API
-//! (`cuGraphCreate`, `cuGraphAdd*Node`, `cuGraphInstantiate`) whenever a
-//! CUDA driver is available, and [`GraphExec::launch`] issues a real
-//! `cuGraphLaunch`. On macOS (or any host without a driver) the graph is
-//! still built and validated CPU-side, and launching reports
-//! [`CudaError::NotInitialized`].
+//! (`cuGraphCreate` + `cuGraphInstantiate`) whenever a CUDA driver is
+//! available, and [`GraphExec::launch`] issues a real `cuGraphLaunch`. On macOS
+//! (or any host without a driver) the graph is still built and validated
+//! CPU-side, and launching reports [`CudaError::NotInitialized`].
+//!
+//! # Node lowering (important)
+//!
+//! A [`GraphNode`] stores only an operation *specification* — a kernel name,
+//! copy direction/size, or memset size/value — and carries **no** resolved
+//! `CUfunction` or device pointers. Kernel / memcpy / memset nodes therefore
+//! cannot yet be lowered to their real `cuGraphAddKernelNode` /
+//! `cuGraphAddMemcpyNode` / `cuGraphAddMemsetNode` form: they are added as
+//! `cuGraphAddEmptyNode` barriers. The instantiated graph faithfully
+//! reproduces the node count and dependency **topology**, but a `cuGraphLaunch`
+//! performs none of those operations' work (`instantiate` logs a
+//! `tracing::warn!` when any such node is lowered). Only genuine
+//! [`GraphNode::Empty`] barriers are represented exactly.
 //!
 //! # Example
 //!
@@ -363,6 +375,7 @@ impl Graph {
             execution_order,
             raw_graph,
             raw_exec,
+            owner: crate::context::current_ctx_owner(),
         })
     }
 
@@ -401,6 +414,28 @@ impl Graph {
         // A topological order of the in-memory nodes — guaranteed acyclic
         // because `instantiate` runs `topological_sort` first.
         let order = self.topological_sort()?;
+
+        // HONESTY: `GraphNode` carries only an operation *specification*
+        // (kernel name, copy direction/size, memset size/value) — no resolved
+        // `CUfunction` or device pointers — so kernel / memcpy / memset nodes
+        // cannot yet be lowered to their real `cuGraphAdd*Node` form. They are
+        // added as `cuGraphAddEmptyNode` barriers, so a subsequent
+        // `cuGraphLaunch` reproduces the DAG *topology* but performs **none** of
+        // their work. Warn loudly so a successful `launch()` is never mistaken
+        // for the nodes' operations having executed.
+        let lowered_nodes = self
+            .nodes
+            .iter()
+            .filter(|n| !matches!(n, GraphNode::Empty))
+            .count();
+        if lowered_nodes > 0 {
+            tracing::warn!(
+                lowered_nodes,
+                "instantiating CUDA graph: {lowered_nodes} kernel/memcpy/memset node(s) \
+                 are lowered to empty barriers (cuGraphAddEmptyNode) and will NOT perform \
+                 their operation; only the dependency topology executes",
+            );
+        }
 
         // 1. Create an empty CUgraph.
         let mut raw_graph = CUgraph::default();
@@ -560,6 +595,11 @@ pub struct GraphExec {
     raw_graph: Option<crate::ffi::CUgraph>,
     /// Real `CUgraphExec` handle, when a driver backed instantiation.
     raw_exec: Option<crate::ffi::CUgraphExec>,
+    /// The context that owned the driver handles at instantiation, used to skip
+    /// the driver destroys if that context was torn down first (avoids a
+    /// use-after-free). `None` when no tracked context was current — see
+    /// [`crate::context::current_ctx_owner`].
+    owner: crate::context::CtxOwner,
 }
 
 impl GraphExec {
@@ -627,6 +667,14 @@ impl std::fmt::Debug for GraphExec {
 
 impl Drop for GraphExec {
     fn drop(&mut self) {
+        // Hold the registry lock across the destroys, and skip them entirely if
+        // the owning context was already torn down (its `cuCtxDestroy` already
+        // freed these graph objects — destroying them again would be a
+        // use-after-free).
+        let map = crate::context::lock_live_ctxs();
+        if !crate::context::owner_is_live(&map, self.owner) {
+            return;
+        }
         // Release driver handles in reverse construction order: the
         // executable graph first, then the source graph.
         if let Ok(api) = crate::loader::try_driver() {
@@ -800,6 +848,180 @@ impl StreamCapture {
         }
 
         Ok(graph)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StreamGraphCapture — real driver-backed stream capture
+// ---------------------------------------------------------------------------
+
+/// Driver-backed CUDA stream capture.
+///
+/// Where [`StreamCapture`] is a CPU-side recorder (it only logs operation
+/// *specifications*), `StreamGraphCapture` drives the real
+/// `cuStreamBeginCapture_v2` / `cuStreamEndCapture` API. The caller begins
+/// capture on a live [`Stream`], submits ordinary GPU work to that stream
+/// (kernel launches, async memset/memcpy) which the driver records instead of
+/// executing, and [`end`](Self::end) finalises the captured `CUgraph` into a
+/// launchable [`GraphExec`]. Launching that exec replays the captured work.
+///
+/// Requires a driver with stream-capture support (CUDA 10.0+); otherwise
+/// [`begin`](Self::begin) returns [`CudaError::NotSupported`].
+pub struct StreamGraphCapture<'s> {
+    stream: &'s Stream,
+    active: bool,
+}
+
+impl<'s> StreamGraphCapture<'s> {
+    /// Begins driver-backed capture on `stream` with the given capture mode
+    /// (e.g. [`CU_STREAM_CAPTURE_MODE_GLOBAL`](crate::ffi::CU_STREAM_CAPTURE_MODE_GLOBAL)).
+    ///
+    /// # Errors
+    ///
+    /// * [`CudaError::NotInitialized`] when no driver is loaded.
+    /// * [`CudaError::NotSupported`] when the driver predates stream capture.
+    /// * Any [`CudaError`] mapped from `cuStreamBeginCapture_v2`.
+    pub fn begin(stream: &'s Stream, mode: crate::ffi::CUstreamCaptureMode) -> CudaResult<Self> {
+        let api = crate::loader::try_driver()?;
+        let begin = api.cu_stream_begin_capture.ok_or(CudaError::NotSupported)?;
+        // SAFETY: `begin` was resolved from the driver; `stream.raw()` is a
+        // live `CUstream` and `mode` is a documented capture-mode value.
+        crate::error::check(unsafe { begin(stream.raw(), mode) })?;
+        Ok(Self {
+            stream,
+            active: true,
+        })
+    }
+
+    /// Returns whether the capture is still active (not yet ended).
+    #[inline]
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Reports the driver's capture status for the stream
+    /// (`cuStreamIsCapturing`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates driver-load failures and any error from
+    /// `cuStreamIsCapturing`.
+    pub fn capture_status(&self) -> CudaResult<crate::ffi::CUstreamCaptureStatus> {
+        let api = crate::loader::try_driver()?;
+        let is_capturing = api.cu_stream_is_capturing.ok_or(CudaError::NotSupported)?;
+        let mut status = crate::ffi::CU_STREAM_CAPTURE_STATUS_NONE;
+        // SAFETY: resolved from the driver; live stream, valid out-pointer.
+        crate::error::check(unsafe { is_capturing(self.stream.raw(), &mut status) })?;
+        Ok(status)
+    }
+
+    /// Ends capture and instantiates the captured `CUgraph` into a launchable
+    /// [`GraphExec`].
+    ///
+    /// The returned exec's [`node_count`](GraphExec::node_count) reflects the
+    /// number of nodes the driver actually captured (queried via
+    /// `cuGraphGetNodes`), and [`launch`](GraphExec::launch) replays the
+    /// captured work via `cuGraphLaunch`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates driver-load failures and any error from `cuStreamEndCapture`
+    /// or graph instantiation. On instantiation failure the captured graph is
+    /// destroyed before returning so the driver object does not leak.
+    pub fn end(mut self) -> CudaResult<GraphExec> {
+        let api = crate::loader::try_driver()?;
+        let end = api.cu_stream_end_capture.ok_or(CudaError::NotSupported)?;
+        let mut raw_graph = crate::ffi::CUgraph::default();
+        // SAFETY: resolved from the driver; live stream, valid out-pointer.
+        crate::error::check(unsafe { end(self.stream.raw(), &mut raw_graph) })?;
+        self.active = false;
+
+        let build = || -> CudaResult<GraphExec> {
+            // Build a CPU-side model with the captured node count so
+            // `GraphExec::node_count()` is truthful. The driver-side topology
+            // is the source of truth for launch; the model is a linear chain
+            // of that many empty nodes (the captured DAG's exact edges are not
+            // re-queried — only its size).
+            let node_count = Self::query_node_count(api, raw_graph).unwrap_or(0);
+            let mut model = Graph::new();
+            let mut prev: Option<usize> = None;
+            for _ in 0..node_count {
+                let idx = model.add_empty_node();
+                if let Some(p) = prev {
+                    model.add_dependency(p, idx)?;
+                }
+                prev = Some(idx);
+            }
+            let execution_order = model.topological_sort().unwrap_or_default();
+            // `instantiate_driver_graph` ignores `&self`; a throwaway graph
+            // gives access to the shared instantiation path.
+            let raw_exec = Graph::new().instantiate_driver_graph(api, raw_graph)?;
+            Ok(GraphExec {
+                graph: model,
+                execution_order,
+                raw_graph: Some(raw_graph),
+                raw_exec: Some(raw_exec),
+                owner: crate::context::current_ctx_owner(),
+            })
+        };
+
+        match build() {
+            Ok(exec) => Ok(exec),
+            Err(e) => {
+                if let Some(destroy) = api.cu_graph_destroy {
+                    // SAFETY: `destroy` resolved from the driver; `raw_graph`
+                    // is the live handle just produced by end-capture.
+                    let rc = unsafe { destroy(raw_graph) };
+                    if rc != 0 {
+                        tracing::warn!(
+                            cuda_error = rc,
+                            "cuGraphDestroy failed while unwinding end_capture"
+                        );
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Queries the number of nodes in a captured graph via `cuGraphGetNodes`
+    /// (null node pointer returns just the count).
+    fn query_node_count(
+        api: &crate::loader::DriverApi,
+        graph: crate::ffi::CUgraph,
+    ) -> CudaResult<usize> {
+        let get_nodes = api.cu_graph_get_nodes.ok_or(CudaError::NotSupported)?;
+        let mut count: usize = 0;
+        // SAFETY: resolved from the driver; `graph` is live, a null nodes
+        // pointer with a valid count out-pointer is the documented
+        // count-query form.
+        crate::error::check(unsafe { get_nodes(graph, std::ptr::null_mut(), &mut count) })?;
+        Ok(count)
+    }
+}
+
+impl Drop for StreamGraphCapture<'_> {
+    fn drop(&mut self) {
+        // If the caller dropped the capture without ending it, terminate the
+        // capture so the stream is not left in a capturing state, and destroy
+        // any graph the driver hands back.
+        if !self.active {
+            return;
+        }
+        let Ok(api) = crate::loader::try_driver() else {
+            return;
+        };
+        if let Some(end) = api.cu_stream_end_capture {
+            let mut g = crate::ffi::CUgraph::default();
+            // SAFETY: resolved from the driver; live stream, valid out-pointer.
+            let _ = unsafe { end(self.stream.raw(), &mut g) };
+            if !g.0.is_null() {
+                if let Some(destroy) = api.cu_graph_destroy {
+                    // SAFETY: `g` is the live graph returned by end-capture.
+                    let _ = unsafe { destroy(g) };
+                }
+            }
+        }
     }
 }
 
@@ -1223,15 +1445,22 @@ mod tests {
         let exec = g.instantiate().expect("diamond DAG instantiates");
         assert_eq!(exec.node_count(), 4);
 
-        // With a context current and a graph-capable driver, the graph must
-        // be driver-backed and `cuGraphLaunch` must succeed.
-        if exec.is_driver_backed() {
-            exec.launch(&stream)
-                .expect("cuGraphLaunch on a real graph succeeds");
-            stream
-                .synchronize()
-                .expect("stream synchronises after graph launch");
-        }
+        // A context is current and any driver from the CUDA 10.0+ era exposes
+        // the Graph API (`cuGraphAddEmptyNode` / `cuGraphInstantiate` /
+        // `cuGraphLaunch`). With a real device present the graph MUST therefore
+        // be driver-backed — otherwise the launch below would be silently
+        // skipped and the test would pass vacuously without ever exercising the
+        // driver path.
+        assert!(
+            exec.is_driver_backed(),
+            "a real CUDA device is present but the graph is not driver-backed; \
+             the cuGraph* FFI entry points failed to load"
+        );
+        exec.launch(&stream)
+            .expect("cuGraphLaunch on a real graph succeeds");
+        stream
+            .synchronize()
+            .expect("stream synchronises after graph launch");
     }
 
     /// A driver-backed graph can be relaunched repeatedly on the same stream.
@@ -1259,13 +1488,114 @@ mod tests {
         g.add_dependency(a, b).ok();
 
         let exec = g.instantiate().expect("chain instantiates");
-        if exec.is_driver_backed() {
-            // The whole point of a graph: cheap repeated submission.
-            for _ in 0..8 {
-                exec.launch(&stream)
-                    .expect("repeated cuGraphLaunch succeeds");
-            }
-            stream.synchronize().expect("stream synchronises");
+        // A real device is present, so the Graph API must be driver-backed
+        // (see `real_graph_instantiate_and_launch`); a CPU-only fallback here
+        // would make the repeated-launch assertion vacuous.
+        assert!(
+            exec.is_driver_backed(),
+            "a real CUDA device is present but the graph is not driver-backed"
+        );
+        // The whole point of a graph: cheap repeated submission.
+        for _ in 0..8 {
+            exec.launch(&stream)
+                .expect("repeated cuGraphLaunch succeeds");
         }
+        stream.synchronize().expect("stream synchronises");
+    }
+
+    /// End-to-end **real stream capture** round-trip on the GPU: capture an
+    /// async memset of a device buffer, instantiate the captured graph, launch
+    /// it, and verify the replayed memset wrote the expected pattern to device
+    /// memory — i.e. `cuGraphLaunch` output matches the CPU simulation of the
+    /// captured op (the `oxicuda-graph` TODO:164 hardware check).
+    #[test]
+    fn real_stream_capture_memset_round_trip() {
+        use crate::context::Context;
+        use crate::device::Device;
+        use crate::ffi::{
+            CU_STREAM_CAPTURE_MODE_GLOBAL, CU_STREAM_CAPTURE_STATUS_ACTIVE, CUdeviceptr,
+        };
+
+        let device = match Device::get(0) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        let ctx = match Context::new(&device) {
+            Ok(c) => std::sync::Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        let api = crate::loader::try_driver().expect("driver present");
+        // Skip cleanly if this driver lacks stream capture or async memset.
+        if api.cu_stream_begin_capture.is_none() || api.cu_memset_d32_async.is_none() {
+            return;
+        }
+
+        const N: usize = 256;
+        const MAGIC: u32 = 0xABCD_1234;
+        let bytes = N * std::mem::size_of::<u32>();
+
+        // Allocate and zero-initialise the device buffer.
+        let mut dptr: CUdeviceptr = 0;
+        crate::error::check(unsafe { (api.cu_mem_alloc_v2)(&mut dptr, bytes) }).expect("alloc");
+        crate::error::check(unsafe { (api.cu_memset_d32_v2)(dptr, 0, N) }).expect("zero-init");
+
+        let run = || -> CudaResult<Vec<u32>> {
+            // Begin capture and record an async memset to MAGIC on the stream.
+            let cap = StreamGraphCapture::begin(&stream, CU_STREAM_CAPTURE_MODE_GLOBAL)?;
+            if let Ok(status) = cap.capture_status() {
+                assert_eq!(
+                    status, CU_STREAM_CAPTURE_STATUS_ACTIVE,
+                    "stream must report active capture after begin"
+                );
+            }
+            let memset_async = api.cu_memset_d32_async.expect("async memset");
+            // SAFETY: `dptr` is a live N-element u32 allocation; while capture
+            // is active this call is recorded into the graph, not executed.
+            crate::error::check(unsafe { memset_async(dptr, MAGIC, N, stream.raw()) })?;
+            let exec = cap.end()?;
+
+            assert!(
+                exec.is_driver_backed(),
+                "captured graph must be driver-backed"
+            );
+            assert!(exec.node_count() >= 1, "capture recorded no nodes");
+
+            // Capture records but does not execute: the buffer is still zero.
+            // (This synchronous copy runs after capture has ended, so it does
+            // not invalidate the capture.)
+            let mut pre = vec![0u32; N];
+            crate::error::check(unsafe {
+                (api.cu_memcpy_dtoh_v2)(pre.as_mut_ptr().cast(), dptr, bytes)
+            })?;
+            assert!(
+                pre.iter().all(|&v| v == 0),
+                "capture must not execute the recorded memset"
+            );
+
+            // Replaying the graph performs the memset on the device.
+            exec.launch(&stream)?;
+            crate::error::check(unsafe { (api.cu_stream_synchronize)(stream.raw()) })?;
+            let mut out = vec![0u32; N];
+            crate::error::check(unsafe {
+                (api.cu_memcpy_dtoh_v2)(out.as_mut_ptr().cast(), dptr, bytes)
+            })?;
+            Ok(out)
+        };
+
+        let result = run();
+        // Always release the device allocation, even on failure.
+        let _ = unsafe { (api.cu_mem_free_v2)(dptr) };
+
+        let out = result.expect("stream-capture round-trip");
+        // CPU simulation of the captured op: every element becomes MAGIC.
+        assert!(
+            out.iter().all(|&v| v == MAGIC),
+            "replayed captured graph did not memset device memory to MAGIC"
+        );
     }
 }

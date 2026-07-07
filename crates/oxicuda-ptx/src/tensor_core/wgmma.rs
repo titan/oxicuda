@@ -116,6 +116,12 @@ impl WgmmaConfig {
             WgmmaShape::M64N64K16 => (64, 64, 16),
             WgmmaShape::M64N128K16 => (64, 128, 16),
             WgmmaShape::M64N256K16 => (64, 256, 16),
+            WgmmaShape::M64N8K32 => (64, 8, 32),
+            WgmmaShape::M64N16K32 => (64, 16, 32),
+            WgmmaShape::M64N32K32 => (64, 32, 32),
+            WgmmaShape::M64N64K32 => (64, 64, 32),
+            WgmmaShape::M64N128K32 => (64, 128, 32),
+            WgmmaShape::M64N256K32 => (64, 256, 32),
         }
     }
 

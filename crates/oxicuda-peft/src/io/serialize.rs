@@ -174,6 +174,19 @@ impl AdapterPayload {
             let name_len = cur.read_u32()? as usize;
             let name = cur.read_utf8(name_len)?;
             let elem_len = cur.read_u32()? as usize;
+            // Bound the claimed element count against what's actually left in the buffer
+            // *before* allocating: a forged length prefix must not be able to drive
+            // `Vec::with_capacity` into an OOM abort on a tiny malformed file. The trailing
+            // checksum can't be forged away with this check (it's just a byte-budget bound),
+            // and the FNV checksum below still catches any in-bounds tampering.
+            let remaining = bytes.len().saturating_sub(cur.pos);
+            if elem_len.saturating_mul(4) > remaining {
+                return Err(PeftError::CorruptData {
+                    msg: format!(
+                        "tensor '{name}' claims {elem_len} f32 elements but only {remaining} bytes remain"
+                    ),
+                });
+            }
             let mut data = Vec::with_capacity(elem_len);
             for _ in 0..elem_len {
                 data.push(cur.read_f32()?);
@@ -399,6 +412,28 @@ mod tests {
         let back = AdapterPayload::load_from_file(&path).expect("load must succeed");
         assert_eq!(p, back);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn forged_tensor_length_prefix_is_rejected_without_huge_allocation() {
+        // Build a minimal one-tensor container by hand, then forge the `elem_len` field to a
+        // value far larger than the remaining buffer could possibly hold. Before the fix this
+        // drove `Vec::with_capacity(elem_len)` straight to an allocator abort; now it must be
+        // rejected as `CorruptData` without ever attempting the allocation.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC);
+        bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // tensor_count = 1
+        let name = "t";
+        bytes.extend_from_slice(&u32::try_from(name.len()).expect("fits u32").to_le_bytes());
+        bytes.extend_from_slice(name.as_bytes());
+        // Forge an enormous element count while the file itself stays tiny.
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        // No tensor data, no checksum: the file is deliberately truncated right after the
+        // forged length prefix.
+        let err = AdapterPayload::from_bytes(&bytes)
+            .expect_err("forged element count must be rejected, not allocated");
+        assert!(matches!(err, PeftError::CorruptData { .. }));
     }
 
     #[test]

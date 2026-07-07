@@ -441,6 +441,34 @@ pub const CU_LAUNCH_PARAM_END: *mut c_void = std::ptr::null_mut();
 #[allow(dead_code)]
 type GraphNodeName = *const c_char;
 
+// =========================================================================
+// Stream-capture mode (`CUstreamCaptureMode`)
+// =========================================================================
+
+/// Capture mode passed to `cuStreamBeginCapture_v2`.
+///
+/// Mirrors the CUDA `CUstreamCaptureMode` enum: `GLOBAL` (0) installs a
+/// process-wide capture so unsafe API calls from any thread are detected,
+/// `THREAD_LOCAL` (1) restricts that detection to the capturing thread, and
+/// `RELAXED` (2) disables it entirely.
+pub type CUstreamCaptureMode = u32;
+
+/// Process-wide capture: unsafe calls from any thread invalidate the capture.
+pub const CU_STREAM_CAPTURE_MODE_GLOBAL: CUstreamCaptureMode = 0;
+/// Thread-local capture: only the capturing thread is checked.
+pub const CU_STREAM_CAPTURE_MODE_THREAD_LOCAL: CUstreamCaptureMode = 1;
+/// Relaxed capture: no unsafe-call detection.
+pub const CU_STREAM_CAPTURE_MODE_RELAXED: CUstreamCaptureMode = 2;
+
+/// Capture status returned by `cuStreamIsCapturing` (`CUstreamCaptureStatus`).
+///
+/// `0` = not capturing, `1` = actively capturing, `2` = invalidated.
+pub type CUstreamCaptureStatus = u32;
+/// The stream is not currently capturing.
+pub const CU_STREAM_CAPTURE_STATUS_NONE: CUstreamCaptureStatus = 0;
+/// The stream is actively capturing.
+pub const CU_STREAM_CAPTURE_STATUS_ACTIVE: CUstreamCaptureStatus = 1;
+
 #[cfg(test)]
 mod tests {
     use super::*;

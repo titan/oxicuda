@@ -157,17 +157,18 @@ impl MultiDeviceDispatcher {
     ///
     /// Returns a [`Vec<WorkSlice>`] covering `[0, m)` with no gaps or overlap.
     pub fn partition(&self, m: usize) -> RocmResult<Vec<WorkSlice>> {
+        // Reject an empty dispatcher *before* the `m == 0` fast path, which
+        // indexes `self.devices[0]` and would otherwise panic on an empty list.
+        let n = self.active_device_count();
+        if n == 0 {
+            return Err(RocmError::NoSuitableDevice);
+        }
         if m == 0 {
             return Ok(vec![WorkSlice {
                 device_id: self.devices[0].id,
                 row_start: 0,
                 row_end: 0,
             }]);
-        }
-
-        let n = self.active_device_count();
-        if n == 0 {
-            return Err(RocmError::NoSuitableDevice);
         }
         if n == 1 {
             let id = self.devices[0].id;
@@ -289,6 +290,16 @@ mod tests {
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].row_end, 512);
         assert_eq!(slices[0].device_id, 0);
+    }
+
+    #[test]
+    fn empty_dispatcher_partition_zero_errors_not_panics() {
+        // Regression: partition(0) used to index devices[0] before the empty
+        // guard, panicking on an empty dispatcher. It must return NoSuitableDevice
+        // consistently for any m.
+        let d = MultiDeviceDispatcher::from_devices(Vec::new(), MultiDeviceConfig::default());
+        assert!(matches!(d.partition(0), Err(RocmError::NoSuitableDevice)));
+        assert!(matches!(d.partition(1), Err(RocmError::NoSuitableDevice)));
     }
 
     #[test]

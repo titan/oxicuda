@@ -31,7 +31,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxicuda-dist-infer = "0.4.0"
+oxicuda-dist-infer = "0.4.1"
 ```
 
 ```rust

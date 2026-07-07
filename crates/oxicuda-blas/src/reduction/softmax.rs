@@ -43,6 +43,7 @@ fn build_softmax_kernel(
     let ptx_source = template
         .generate()
         .map_err(|e| BlasError::PtxGeneration(format!("softmax (row_size={row_size}): {e}")))?;
+    let ptx_source = super::ptx_fixup::relocate_perf_directives(&ptx_source);
     let module = Arc::new(
         Module::from_ptx(&ptx_source)
             .map_err(|e| BlasError::LaunchFailed(format!("module load for softmax: {e}")))?,
@@ -138,8 +139,12 @@ pub fn softmax<T: GpuFloat>(
     // Launch configuration depends on the strategy:
     // - Warp shuffle (cols <= 32): each warp handles one row, so we need
     //   `rows` warps total. Block size = 256 (8 warps per block).
-    // - Shared memory (cols > 32): one block per row, block size = cols
-    //   rounded up to power of 2.
+    // - Shared memory (cols > 32): one block per row. The shared-memory
+    //   kernel (`SoftmaxTemplate::generate_shared_memory`) caps its thread
+    //   count at `next_power_of_two(cols).min(256)` and grid-strides over the
+    //   row, so the launch MUST use the identical block size — launching more
+    //   threads than the kernel's `.maxntid` makes `cuLaunchKernel` fail with
+    //   `CUDA_ERROR_INVALID_VALUE`.
     let (grid, block) = if cols <= 32 {
         // Warps per block = block_size / 32
         let block_size: u32 = 256;
@@ -147,8 +152,8 @@ pub fn softmax<T: GpuFloat>(
         let num_blocks = grid_size_for(rows, warps_per_block);
         (num_blocks, block_size)
     } else {
-        // One block per row, block size = next power of two >= cols
-        let block_size = cols.next_power_of_two();
+        // One block per row; mirror the kernel's capped thread count.
+        let block_size = cols.next_power_of_two().min(256);
         (rows, block_size)
     };
 
@@ -272,8 +277,9 @@ fn softmax_multi_block<T: GpuFloat>(
 /// module. Used by the multi-block softmax dispatcher to build both the
 /// reduce and finalize kernels.
 fn build_kernel_from_ptx(ptx_source: &str, kernel_name: &str) -> BlasResult<Kernel> {
+    let ptx_source = super::ptx_fixup::relocate_perf_directives(ptx_source);
     let module = Arc::new(
-        Module::from_ptx(ptx_source)
+        Module::from_ptx(&ptx_source)
             .map_err(|e| BlasError::LaunchFailed(format!("module load for {kernel_name}: {e}")))?,
     );
     Kernel::from_module(module, kernel_name)

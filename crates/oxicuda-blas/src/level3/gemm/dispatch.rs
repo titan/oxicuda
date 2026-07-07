@@ -12,7 +12,7 @@ use oxicuda_launch::{Dim3, Kernel, LaunchParams};
 use oxicuda_ptx::prelude::*;
 
 use crate::error::{BlasError, BlasResult};
-use crate::types::{MathMode, Transpose};
+use crate::types::{FillMode, MathMode, Transpose};
 
 // ---------------------------------------------------------------------------
 // Problem description
@@ -107,6 +107,20 @@ pub enum GemmCategory {
 // Internal cache types
 // ---------------------------------------------------------------------------
 
+/// How a compiled GEMM kernel is launched (grid/block geometry and argument
+/// tuple), which depends on which code generator produced it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GemmLaunchKind {
+    /// Tiled [`GemmTemplate`] kernel — 8 args
+    /// `(a, b, c, m, n, k, alpha, beta)`, tight row-major NoTrans A*B, launched
+    /// with the tile-config grid/block and a grid-stride loop over M*N.
+    Template,
+    /// [`SimtGemmBuilder`](super::simt::SimtGemmBuilder) kernel — 11 args
+    /// `(a, b, c, m, n, k, lda, ldb, ldc, alpha, beta)`, one thread per output
+    /// element with a 16x16 block. Handles all four transpose combinations.
+    Simt,
+}
+
 /// A compiled GEMM kernel together with its launch metadata.
 struct CompiledGemm {
     /// The CUDA module that owns the compiled kernel.
@@ -117,6 +131,8 @@ struct CompiledGemm {
     tile_config: TileConfig,
     /// Dynamic shared memory requirement in bytes.
     shared_mem_bytes: u32,
+    /// Launch geometry / argument shape for this kernel.
+    launch_kind: GemmLaunchKind,
 }
 
 /// Key for the compiled-kernel cache.
@@ -126,6 +142,10 @@ struct GemmKernelKey {
     output_type: PtxType,
     trans_a: Transpose,
     trans_b: Transpose,
+    /// Triangle-write mask baked into the (SIMT) kernel. `None` for a full
+    /// write; distinguishes masked SYRK/SYR2K kernels from the plain GEMM
+    /// kernel in the cache.
+    fill_mode: Option<FillMode>,
     tile_config: TileConfig,
 }
 
@@ -166,6 +186,10 @@ impl GemmDispatcher {
     /// * `c_ptr` — device pointer to matrix C (output).
     /// * `alpha_bits` — alpha scalar as raw bits (`u64`).
     /// * `beta_bits` — beta scalar as raw bits (`u64`).
+    /// * `fill_mode` — optional triangle-write mask. `None` (or `Some(Full)`)
+    ///   writes the whole output; `Some(Upper)`/`Some(Lower)` leaves the
+    ///   opposite triangle of `C` untouched (used by SYRK / SYR2K). Masked
+    ///   requests always take the SIMT kernel.
     /// * `stream` — the CUDA stream for the launch.
     ///
     /// # Errors
@@ -181,24 +205,72 @@ impl GemmDispatcher {
         c_ptr: u64,
         alpha_bits: u64,
         beta_bits: u64,
+        fill_mode: Option<FillMode>,
         stream: &oxicuda_driver::Stream,
     ) -> BlasResult<()> {
         let category = self.classify(problem);
         let tile_config = self.heuristic_tile_config(problem, &category);
-        let compiled = self.get_or_compile(problem, &tile_config)?;
-        let grid = Self::compute_grid(problem, &compiled.tile_config);
-        let block = Self::compute_block(&compiled.tile_config);
-        let params = LaunchParams::new(grid, block).with_shared_mem(compiled.shared_mem_bytes);
+        let compiled = self.get_or_compile(problem, &tile_config, fill_mode)?;
 
-        // Kernel arguments: a_ptr, b_ptr, c_ptr, m, n, k, alpha, beta
-        let args = (
-            a_ptr, b_ptr, c_ptr, problem.m, problem.n, problem.k, alpha_bits, beta_bits,
-        );
+        match compiled.launch_kind {
+            GemmLaunchKind::Template => {
+                let grid = Self::compute_grid(problem, &compiled.tile_config);
+                let block = Self::compute_block(&compiled.tile_config);
+                let params =
+                    LaunchParams::new(grid, block).with_shared_mem(compiled.shared_mem_bytes);
 
-        compiled
-            .kernel
-            .launch(&params, stream, &args)
-            .map_err(|e| BlasError::LaunchFailed(format!("GEMM kernel launch failed: {e}")))?;
+                // Kernel arguments: a_ptr, b_ptr, c_ptr, m, n, k, alpha, beta
+                let args = (
+                    a_ptr, b_ptr, c_ptr, problem.m, problem.n, problem.k, alpha_bits, beta_bits,
+                );
+                compiled
+                    .kernel
+                    .launch(&params, stream, &args)
+                    .map_err(|e| {
+                        BlasError::LaunchFailed(format!("GEMM kernel launch failed: {e}"))
+                    })?;
+            }
+            GemmLaunchKind::Simt => {
+                // Tight row-major leading dimensions for op(A)/op(B)/C. The SIMT
+                // kernel reads A as `A[i*lda + j]` (NoTrans) / `A[j*lda + i]`
+                // (Trans), so lda is the physical column count of the stored
+                // matrix: k when A is untransposed (physical m x k), m when A is
+                // transposed (physical k x m). Likewise for B and C (always
+                // m x n → ldc = n).
+                let lda = if problem.trans_a == Transpose::NoTrans {
+                    problem.k
+                } else {
+                    problem.m
+                };
+                let ldb = if problem.trans_b == Transpose::NoTrans {
+                    problem.n
+                } else {
+                    problem.k
+                };
+                let ldc = problem.n;
+
+                const SIMT_TILE: u32 = 16;
+                let grid = Dim3::new(
+                    problem.n.div_ceil(SIMT_TILE),
+                    problem.m.div_ceil(SIMT_TILE),
+                    1,
+                );
+                let block = Dim3::new(SIMT_TILE, SIMT_TILE, 1);
+                let params = LaunchParams::new(grid, block);
+
+                // Kernel arguments: a, b, c, m, n, k, lda, ldb, ldc, alpha, beta
+                let args = (
+                    a_ptr, b_ptr, c_ptr, problem.m, problem.n, problem.k, lda, ldb, ldc,
+                    alpha_bits, beta_bits,
+                );
+                compiled
+                    .kernel
+                    .launch(&params, stream, &args)
+                    .map_err(|e| {
+                        BlasError::LaunchFailed(format!("SIMT GEMM kernel launch failed: {e}"))
+                    })?;
+            }
+        }
 
         Ok(())
     }
@@ -461,12 +533,22 @@ impl GemmDispatcher {
         &self,
         problem: &GemmProblem,
         tile_config: &TileConfig,
+        fill_mode: Option<FillMode>,
     ) -> BlasResult<Arc<CompiledGemm>> {
+        // A triangle mask can only be honoured by the SIMT kernel (the tiled
+        // `GemmTemplate` always writes a full tile), so a masked request is
+        // normalised away for the plain full-write cache key.
+        let mask = match fill_mode {
+            Some(FillMode::Upper) | Some(FillMode::Lower) => fill_mode,
+            None | Some(FillMode::Full) => None,
+        };
+
         let key = GemmKernelKey {
             input_type: problem.input_type,
             output_type: problem.output_type,
             trans_a: problem.trans_a,
             trans_b: problem.trans_b,
+            fill_mode: mask,
             tile_config: tile_config.clone(),
         };
 
@@ -481,45 +563,78 @@ impl GemmDispatcher {
             }
         }
 
-        // Slow path: generate PTX, compile, cache under write lock.
-        let template = GemmTemplate {
-            tile_m: tile_config.tile_m,
-            tile_n: tile_config.tile_n,
-            tile_k: tile_config.tile_k,
-            warp_m: tile_config.warp_m,
-            warp_n: tile_config.warp_n,
-            precision: problem.input_type,
-            accumulator: problem.output_type,
-            use_tensor_core: tile_config.use_tensor_core,
-            stages: tile_config.stages,
-            target: self.sm_version,
-            epilogue: EpilogueKind::LinearCombination,
+        // Slow path: generate PTX and compile. The tiled `GemmTemplate` only
+        // computes NoTrans A*B and always writes a full tile, so any transposed
+        // operand OR any triangle-write mask is routed to the SIMT builder
+        // (which honours lda/ldb/ldc for all four (trans_a, trans_b)
+        // combinations and can skip stores outside the requested triangle).
+        // Without this, a transposed GEMM silently returned the untransposed
+        // product and a masked GEMM clobbered the off-triangle.
+        let transposed =
+            problem.trans_a != Transpose::NoTrans || problem.trans_b != Transpose::NoTrans;
+        let use_simt = transposed || mask.is_some();
+
+        let (module, kernel, shared_mem_bytes, launch_kind) = if use_simt {
+            let builder = super::simt::SimtGemmBuilder::new(
+                self.sm_version,
+                problem.input_type,
+                problem.output_type,
+                problem.trans_a,
+                problem.trans_b,
+                mask,
+            );
+            let ptx = builder.generate()?;
+            let kernel_name = builder.kernel_name();
+            let module = Arc::new(
+                Module::from_ptx(&ptx)
+                    .map_err(|e| BlasError::LaunchFailed(format!("module load failed: {e}")))?,
+            );
+            let kernel = Kernel::from_module(Arc::clone(&module), &kernel_name)
+                .map_err(|e| BlasError::LaunchFailed(format!("kernel lookup failed: {e}")))?;
+            (module, kernel, 0u32, GemmLaunchKind::Simt)
+        } else {
+            let template = GemmTemplate {
+                tile_m: tile_config.tile_m,
+                tile_n: tile_config.tile_n,
+                tile_k: tile_config.tile_k,
+                warp_m: tile_config.warp_m,
+                warp_n: tile_config.warp_n,
+                precision: problem.input_type,
+                accumulator: problem.output_type,
+                use_tensor_core: tile_config.use_tensor_core,
+                stages: tile_config.stages,
+                target: self.sm_version,
+                epilogue: EpilogueKind::LinearCombination,
+            };
+
+            let ptx = template.generate().map_err(|e| {
+                BlasError::PtxGeneration(format!("GEMM PTX generation failed: {e}"))
+            })?;
+
+            let kernel_name = template.kernel_name();
+            let module = Arc::new(
+                Module::from_ptx(&ptx)
+                    .map_err(|e| BlasError::LaunchFailed(format!("module load failed: {e}")))?,
+            );
+            let kernel = Kernel::from_module(Arc::clone(&module), &kernel_name)
+                .map_err(|e| BlasError::LaunchFailed(format!("kernel lookup failed: {e}")))?;
+
+            // Estimate shared memory: tile_m * tile_k + tile_k * tile_n, times
+            // element size, times pipeline stages.
+            let elem_bytes = problem.input_type.size_bytes() as u32;
+            let smem_a = tile_config.tile_m * tile_config.tile_k * elem_bytes;
+            let smem_b = tile_config.tile_k * tile_config.tile_n * elem_bytes;
+            let shared_mem_bytes = (smem_a + smem_b) * tile_config.stages;
+
+            (module, kernel, shared_mem_bytes, GemmLaunchKind::Template)
         };
-
-        let ptx = template
-            .generate()
-            .map_err(|e| BlasError::PtxGeneration(format!("GEMM PTX generation failed: {e}")))?;
-
-        let kernel_name = template.kernel_name();
-        let module = Arc::new(
-            Module::from_ptx(&ptx)
-                .map_err(|e| BlasError::LaunchFailed(format!("module load failed: {e}")))?,
-        );
-        let kernel = Kernel::from_module(Arc::clone(&module), &kernel_name)
-            .map_err(|e| BlasError::LaunchFailed(format!("kernel lookup failed: {e}")))?;
-
-        // Estimate shared memory: tile_m * tile_k + tile_k * tile_n, times
-        // element size, times pipeline stages.
-        let elem_bytes = problem.input_type.size_bytes() as u32;
-        let smem_a = tile_config.tile_m * tile_config.tile_k * elem_bytes;
-        let smem_b = tile_config.tile_k * tile_config.tile_n * elem_bytes;
-        let shared_mem_bytes = (smem_a + smem_b) * tile_config.stages;
 
         let entry = Arc::new(CompiledGemm {
             _module: module,
             kernel,
             tile_config: tile_config.clone(),
             shared_mem_bytes,
+            launch_kind,
         });
 
         // Insert into cache.

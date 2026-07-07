@@ -71,12 +71,16 @@ impl KvBlock {
     /// Append one token's key and value into the next free slot.
     ///
     /// `k` and `v` must each have exactly `n_kv_heads * head_dim` elements.
-    /// Returns `false` if the block is already full.
+    /// Returns `false` if the block is already full or if `k`/`v` have the
+    /// wrong length for this block's stride.
     pub fn append(&mut self, k: &[f32], v: &[f32]) -> bool {
         if self.filled >= self.capacity {
             return false;
         }
         let stride = self.keys.len() / self.capacity;
+        if k.len() != stride || v.len() != stride {
+            return false;
+        }
         let base = self.filled * stride;
         self.keys[base..base + stride].copy_from_slice(k);
         self.values[base..base + stride].copy_from_slice(v);
@@ -217,17 +221,36 @@ impl PagedKvCache {
     }
 
     /// Increment the reference count for a block (prefix sharing).
+    ///
+    /// Silently a no-op if `id` is out of range or already free — calling
+    /// `inc_ref` on a block that isn't currently allocated is a caller bug;
+    /// an already-free block must first be reallocated via
+    /// [`Self::alloc_block`]. This never panics (library code must not).
     pub fn inc_ref(&mut self, id: BlockId) {
-        self.ref_counts[id.0 as usize] += 1;
+        let Some(rc) = self.ref_counts.get_mut(id.0 as usize) else {
+            return;
+        };
+        if *rc == 0 {
+            return;
+        }
+        *rc += 1;
     }
 
     /// Decrement the reference count; return the block to the free list when
     /// it reaches zero.
+    ///
+    /// Silently a no-op if `id` is out of range or already free — this
+    /// guards against pushing the same block onto the free list twice, which
+    /// would let two live sequences silently alias one physical block. This
+    /// never panics (library code must not).
     pub fn dec_ref(&mut self, id: BlockId) {
-        let rc = &mut self.ref_counts[id.0 as usize];
-        if *rc > 0 {
-            *rc -= 1;
+        let Some(rc) = self.ref_counts.get_mut(id.0 as usize) else {
+            return;
+        };
+        if *rc == 0 {
+            return;
         }
+        *rc -= 1;
         if *rc == 0 {
             // Reset block data and return to free list.
             for layer in &mut self.blocks {
@@ -253,7 +276,24 @@ impl PagedKvCache {
                 got: layer + 1,
             });
         }
-        let block = &mut self.blocks[layer][id.0 as usize];
+        let expected = self.n_kv_heads * self.head_dim;
+        if k.len() != expected {
+            return Err(InferError::DimensionMismatch {
+                expected,
+                got: k.len(),
+            });
+        }
+        if v.len() != expected {
+            return Err(InferError::DimensionMismatch {
+                expected,
+                got: v.len(),
+            });
+        }
+        let block = self
+            .blocks
+            .get_mut(layer)
+            .and_then(|l| l.get_mut(id.0 as usize))
+            .ok_or_else(|| InferError::Other(format!("append_token: invalid block id {}", id.0)))?;
         if !block.append(k, v) {
             return Err(InferError::BlockAllocFailed {
                 needed: 1,
@@ -400,5 +440,77 @@ mod tests {
             .expect("reallocated block and layer 0 are valid");
         assert_eq!(blk.filled, 0);
         assert!(blk.keys.iter().all(|&x| x == 0.0));
+    }
+
+    /// Regression for F027: dec_ref on an already-free block must NOT push a
+    /// duplicate entry onto the free list (which would let two live
+    /// allocations alias the same physical block).
+    #[test]
+    fn dec_ref_on_already_free_block_is_a_no_op() {
+        let mut cache = tiny_cache();
+        let id = cache.alloc_block().expect("cache has free blocks");
+        cache.dec_ref(id); // rc: 1 -> 0, block returned to free list
+        assert_eq!(cache.n_free_blocks(), 8);
+        cache.dec_ref(id); // already free: must be a no-op, not a double-push
+        assert_eq!(
+            cache.n_free_blocks(),
+            8,
+            "double dec_ref must not duplicate the free-list entry"
+        );
+        // Allocating all 8 blocks must yield 8 *distinct* ids, not fewer due
+        // to a duplicated free-list entry.
+        let ids = cache.alloc_blocks(8).expect("8 distinct free blocks");
+        let unique: std::collections::HashSet<BlockId> = ids.iter().copied().collect();
+        assert_eq!(unique.len(), 8, "free list must not contain duplicate ids");
+    }
+
+    /// Regression for F027: inc_ref on an already-free block must not corrupt
+    /// its reference count (which would desynchronize it from the free list).
+    #[test]
+    fn inc_ref_on_free_block_is_a_no_op() {
+        let mut cache = tiny_cache();
+        let id = cache.alloc_block().expect("cache has free blocks");
+        cache.dec_ref(id); // rc -> 0, back on free list
+        cache.inc_ref(id); // must be a no-op on a free block
+        assert_eq!(cache.n_free_blocks(), 8);
+    }
+
+    /// Regression for F066: append_token must reject k/v slices with the
+    /// wrong element length instead of panicking inside copy_from_slice.
+    #[test]
+    fn append_token_wrong_length_returns_error_not_panic() {
+        let mut cache = tiny_cache(); // n_kv_heads=2, head_dim=4 -> expected len 8
+        let id = cache.alloc_block().expect("cache has free blocks");
+        let short_k = vec![1.0_f32; 4];
+        let ok_v = vec![1.0_f32; 8];
+        let res = cache.append_token(id, 0, &short_k, &ok_v);
+        assert!(matches!(
+            res,
+            Err(InferError::DimensionMismatch {
+                expected: 8,
+                got: 4
+            })
+        ));
+
+        let ok_k = vec![1.0_f32; 8];
+        let long_v = vec![1.0_f32; 16];
+        let res2 = cache.append_token(id, 0, &ok_k, &long_v);
+        assert!(matches!(
+            res2,
+            Err(InferError::DimensionMismatch {
+                expected: 8,
+                got: 16
+            })
+        ));
+    }
+
+    /// Regression for F066: append_token must return an error (not panic) for
+    /// an out-of-range block id.
+    #[test]
+    fn append_token_invalid_block_id_returns_error_not_panic() {
+        let mut cache = tiny_cache();
+        let bogus = BlockId(999);
+        let kv = vec![1.0_f32; 8];
+        assert!(cache.append_token(bogus, 0, &kv, &kv).is_err());
     }
 }

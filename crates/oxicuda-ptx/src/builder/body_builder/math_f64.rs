@@ -162,6 +162,14 @@ impl BodyBuilder<'_> {
         // place it in the exponent field. Valid for the normal exponent range.
         let ki = self.alloc_reg(PtxType::S32);
         self.raw_ptx(&format!("cvt.rzi.s32.f64 {ki}, {kf_rounded};"));
+        // Clamp k into a range where the `(k + 1023) << 52` exponent assembly is
+        // well-defined. For arguments far outside the representable range (e.g.
+        // x ≈ 710 or x ≈ -745), the unclamped k is enormous and the bit-twiddled
+        // exponent silently produces a wrong *finite* value (~1e150) instead of
+        // the mathematically correct inf/0. The saturation below then maps the
+        // out-of-range cases to the correct inf/0.
+        self.raw_ptx(&format!("max.s32 {ki}, {ki}, -1075;"));
+        self.raw_ptx(&format!("min.s32 {ki}, {ki}, 1024;"));
         let ki64 = self.alloc_reg(PtxType::S64);
         self.raw_ptx(&format!("cvt.s64.s32 {ki64}, {ki};"));
         let biased = self.alloc_reg(PtxType::S64);
@@ -170,10 +178,22 @@ impl BodyBuilder<'_> {
         self.raw_ptx(&format!("shl.b64 {expbits}, {biased}, 52;"));
         let two_k = self.alloc_reg(PtxType::F64);
         self.raw_ptx(&format!("mov.b64 {two_k}, {expbits};"));
-        // TODO(precision): subnormal/overflow saturation for extreme k is not handled.
 
-        // exp(x) = exp(r) * 2^k.
-        self.mul_rn_f64(&p, &two_k)
+        // exp(x) = exp(r) * 2^k (before saturation).
+        let raw = self.mul_rn_f64(&p, &two_k);
+
+        // Saturate the extremes: k > 1023 overflows to +inf; k < -1022
+        // underflows to 0 (flush-to-zero across the subnormal range). Without
+        // this, an out-of-range but clamped exponent yields a wrong finite value.
+        let pos_inf = self.alloc_reg(PtxType::F64);
+        self.raw_ptx(&format!("mov.b64 {pos_inf}, 0x7FF0000000000000;"));
+        let zero = self.mov_imm_f64(0.0);
+        let p_over = self.alloc_reg(PtxType::Pred);
+        self.raw_ptx(&format!("setp.gt.s32 {p_over}, {ki}, 1023;"));
+        let sat_over = self.selp(PtxType::F64, pos_inf, raw, p_over);
+        let p_under = self.alloc_reg(PtxType::Pred);
+        self.raw_ptx(&format!("setp.lt.s32 {p_under}, {ki}, -1022;"));
+        self.selp(PtxType::F64, zero, sat_over, p_under)
     }
 
     /// Computes the natural logarithm `log(x)` for `f64` without any
@@ -330,16 +350,25 @@ impl BodyBuilder<'_> {
     /// # Precision
     ///
     /// Inherits the precision of [`exp_f64`](Self::exp_f64) (~1–2 ulp) for
-    /// moderate `|x|`. For large `|x|` the intermediate `e^{2x}` overflows;
-    /// saturation/clamping is not handled.
+    /// moderate `|x|`. The input is clamped to `[-20, 20]` first, where
+    /// `tanh(±20) == ±1.0` exactly in `f64`, which removes both the
+    /// large-magnitude overflow (`inf/inf → NaN`) and the sign-flip that an
+    /// unbounded `e^{2x}` would otherwise cause.
     pub fn tanh_f64(&mut self, x: &Register) -> Register {
+        // Clamp x to [-20, 20] before doubling: tanh saturates to ±1 well within
+        // this range, so exp(2x) never overflows.
+        let hi = self.mov_imm_f64(20.0);
+        let lo = self.mov_imm_f64(-20.0);
+        let xc = self.alloc_reg(PtxType::F64);
+        self.raw_ptx(&format!("min.f64 {xc}, {x}, {hi};"));
+        self.raw_ptx(&format!("max.f64 {xc}, {xc}, {lo};"));
+
         // e = exp(2x).
-        let two_x = self.add_f64(x.clone(), x.clone());
+        let two_x = self.add_f64(xc.clone(), xc);
         let e = self.exp_f64(&two_x);
         let one = self.mov_imm_f64(1.0);
         let num = self.sub_f64(e.clone(), one.clone());
         let den = self.add_f64(e, one);
-        // TODO: clamp |x| for large-magnitude stability.
         self.div_rn_f64(&num, &den)
     }
 }
@@ -537,5 +566,121 @@ mod tests {
             !tanh_ptx.contains(".approx.f64"),
             "tanh_f64 must not emit .approx.f64:\n{tanh_ptx}"
         );
+    }
+
+    #[test]
+    fn exp_f64_emits_overflow_saturation() {
+        // The 2^k assembly must now clamp k and saturate to inf/0 for out-of-range
+        // arguments (F012); assert the clamps and saturation predicates are present.
+        let ptx = build_with_body(|b| {
+            let x = b.mov_imm_f64(0.5);
+            let _r = b.exp_f64(&x);
+            b.ret();
+        });
+        assert!(
+            ptx.contains("max.s32"),
+            "exp_f64 must clamp k with max.s32:\n{ptx}"
+        );
+        assert!(
+            ptx.contains("min.s32"),
+            "exp_f64 must clamp k with min.s32:\n{ptx}"
+        );
+        assert!(
+            ptx.contains("setp.gt.s32") && ptx.contains("setp.lt.s32"),
+            "exp_f64 must saturate via over/under predicates:\n{ptx}"
+        );
+        assert!(
+            ptx.contains("selp.f64"),
+            "exp_f64 must select the saturated value with selp.f64:\n{ptx}"
+        );
+    }
+
+    #[test]
+    fn tanh_f64_clamps_input() {
+        let ptx = build_with_body(|b| {
+            let x = b.mov_imm_f64(0.5);
+            let _r = b.tanh_f64(&x);
+            b.ret();
+        });
+        assert!(
+            ptx.contains("min.f64") && ptx.contains("max.f64"),
+            "tanh_f64 must clamp its input to [-20, 20]:\n{ptx}"
+        );
+    }
+
+    /// Locate `ptxas` so device-toolchain machines assemble the emitted PTX.
+    fn find_ptxas() -> Option<std::path::PathBuf> {
+        if let Ok(path) = std::env::var("PATH") {
+            for dir in std::env::split_paths(&path) {
+                let candidate = dir.join("ptxas");
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        let fallback = std::path::PathBuf::from("/usr/local/cuda/bin/ptxas");
+        fallback.is_file().then_some(fallback)
+    }
+
+    /// The clamped/saturated `f64` transcendentals must still assemble cleanly
+    /// under `ptxas`. Skips when `ptxas` is unavailable.
+    #[test]
+    fn math_f64_kernels_assemble_for_sm86() {
+        let Some(ptxas) = find_ptxas() else {
+            println!("skipping: ptxas not found on PATH");
+            return;
+        };
+
+        let kernels = [
+            (
+                "exp",
+                build_with_body(|b| {
+                    let x = b.mov_imm_f64(0.5);
+                    let _r = b.exp_f64(&x);
+                    b.ret();
+                }),
+            ),
+            (
+                "erf",
+                build_with_body(|b| {
+                    let x = b.mov_imm_f64(0.5);
+                    let _r = b.erf_f64(&x);
+                    b.ret();
+                }),
+            ),
+            (
+                "tanh",
+                build_with_body(|b| {
+                    let x = b.mov_imm_f64(0.5);
+                    let _r = b.tanh_f64(&x);
+                    b.ret();
+                }),
+            ),
+        ];
+
+        for (name, ptx) in kernels {
+            let mut ptx_path = std::env::temp_dir();
+            ptx_path.push(format!(
+                "oxicuda_math_f64_{name}_{}.ptx",
+                std::process::id()
+            ));
+            std::fs::write(&ptx_path, &ptx).expect("write PTX to temp file");
+
+            let output = std::process::Command::new(&ptxas)
+                .arg("-arch=sm_86")
+                .arg(&ptx_path)
+                .arg("-o")
+                .arg("/dev/null")
+                .output()
+                .expect("invoke ptxas");
+
+            let _ = std::fs::remove_file(&ptx_path);
+
+            assert!(
+                output.status.success(),
+                "ptxas rejected {name}_f64 kernel:\n{}\n--- PTX ---\n{ptx}",
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
     }
 }

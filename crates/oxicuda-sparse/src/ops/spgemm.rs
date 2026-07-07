@@ -91,6 +91,13 @@ pub fn spgemm_symbolic<T: GpuFloat>(
         ),
     )?;
 
+    // The kernel runs on `handle.stream()`, which is created `CU_STREAM_NON_BLOCKING`
+    // and therefore does NOT serialise against the legacy default stream used by
+    // the synchronous device-to-host copy below. Without an explicit sync the
+    // copy can race ahead of the kernel and read the still-zeroed counts, so we
+    // must wait for the launch to complete before downloading the results.
+    handle.stream().synchronize()?;
+
     // Download counts and build row_ptr via exclusive prefix sum
     let mut h_row_nnz = vec![0i32; m as usize];
     d_row_nnz.copy_to_host(&mut h_row_nnz)?;
@@ -498,5 +505,203 @@ mod tests {
         // Cannot construct CsrMatrix without GPU, but we can test the error type
         let err = SparseError::DimensionMismatch("A.cols (3) != B.rows (4)".to_string());
         assert!(err.to_string().contains("A.cols"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::gpu_handle;
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+    use oxicuda_memory::DeviceBuffer;
+
+    /// CPU oracle reproducing the *exact* expansion the production kernels emit:
+    /// the symbolic phase counts every (A nnz x B-row nnz) product (no merging),
+    /// and the numeric phase writes them in CSR-iteration order. Returns the
+    /// expanded `(row_ptr, col_idx, values)` of `C = A * B`.
+    fn cpu_spgemm_expanded(
+        a_rows: usize,
+        a_row_ptr: &[i32],
+        a_col_idx: &[i32],
+        a_values: &[f64],
+        b_row_ptr: &[i32],
+        b_col_idx: &[i32],
+        b_values: &[f64],
+    ) -> (Vec<i32>, Vec<i32>, Vec<f64>) {
+        let mut row_ptr = vec![0i32];
+        let mut col_idx = Vec::new();
+        let mut values = Vec::new();
+        for row in 0..a_rows {
+            for ak in a_row_ptr[row] as usize..a_row_ptr[row + 1] as usize {
+                let a_col = a_col_idx[ak] as usize;
+                let a_val = a_values[ak];
+                for bj in b_row_ptr[a_col] as usize..b_row_ptr[a_col + 1] as usize {
+                    col_idx.push(b_col_idx[bj]);
+                    values.push(a_val * b_values[bj]);
+                }
+            }
+            row_ptr.push(col_idx.len() as i32);
+        }
+        (row_ptr, col_idx, values)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_spgemm<T: GpuFloat>(
+        a_rows: u32,
+        a_cols: u32,
+        a_row_ptr: &[i32],
+        a_col_idx: &[i32],
+        a_values: &[f64],
+        b_rows: u32,
+        b_cols: u32,
+        b_row_ptr: &[i32],
+        b_col_idx: &[i32],
+        b_values: &[f64],
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let a_dev: Vec<T> = a_values.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let b_dev: Vec<T> = b_values.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let a = CsrMatrix::<T>::from_host(a_rows, a_cols, a_row_ptr, a_col_idx, &a_dev)
+            .expect("test: build A");
+        let b = CsrMatrix::<T>::from_host(b_rows, b_cols, b_row_ptr, b_col_idx, &b_dev)
+            .expect("test: build B");
+
+        // Symbolic phase: produces the (expanded) C row_ptr.
+        let c_row_ptr = spgemm_symbolic::<T>(&handle, &a, &b).expect("test: symbolic");
+
+        let (want_rp, want_ci, want_vals) = cpu_spgemm_expanded(
+            a_rows as usize,
+            a_row_ptr,
+            a_col_idx,
+            a_values,
+            b_row_ptr,
+            b_col_idx,
+            b_values,
+        );
+        assert_eq!(c_row_ptr, want_rp, "{tag}: symbolic row_ptr mismatch");
+
+        let nnz_c = *c_row_ptr.last().expect("test: row_ptr non-empty") as usize;
+        let c_row_ptr_buf = DeviceBuffer::from_host(&c_row_ptr).expect("test: upload C row_ptr");
+        let c_col_idx_buf =
+            DeviceBuffer::from_host(&vec![0i32; nnz_c]).expect("test: alloc C col_idx");
+        let c_values_buf =
+            DeviceBuffer::from_host(&vec![T::gpu_zero(); nnz_c]).expect("test: alloc C values");
+
+        spgemm_numeric::<T>(
+            &handle,
+            &a,
+            &b,
+            c_row_ptr_buf.as_device_ptr(),
+            c_col_idx_buf.as_device_ptr(),
+            c_values_buf.as_device_ptr(),
+        )
+        .expect("test: numeric");
+        handle.stream().synchronize().expect("test: sync");
+
+        let mut got_ci = vec![0i32; nnz_c];
+        c_col_idx_buf
+            .copy_to_host(&mut got_ci)
+            .expect("test: download col_idx");
+        let mut got_vals_t = vec![T::gpu_zero(); nnz_c];
+        c_values_buf
+            .copy_to_host(&mut got_vals_t)
+            .expect("test: download values");
+        let got_vals: Vec<f64> = got_vals_t.iter().map(|&v| gpu_to_f64(v)).collect();
+
+        assert_eq!(got_ci, want_ci, "{tag}: numeric col_idx mismatch");
+        assert_eq!(got_vals.len(), want_vals.len(), "{tag}: values length");
+        for (i, (g, w)) in got_vals.iter().zip(want_vals.iter()).enumerate() {
+            let diff = (g - w).abs();
+            let scale = w.abs().max(1.0);
+            assert!(
+                diff <= tol * scale,
+                "{tag}: value {i}: got {g}, want {w} (|diff| {diff})"
+            );
+        }
+    }
+
+    #[test]
+    fn spgemm_2x3_times_3x2_f64() {
+        // A (2x3):           B (3x2):
+        // [1 0 2]            [10 20]
+        // [0 3 0]            [30  0]
+        //                    [ 0 40]
+        let a_rp = vec![0, 2, 3];
+        let a_ci = vec![0, 2, 1];
+        let a_v = vec![1.0, 2.0, 3.0];
+        let b_rp = vec![0, 2, 3, 4];
+        let b_ci = vec![0, 1, 0, 1];
+        let b_v = vec![10.0, 20.0, 30.0, 40.0];
+        run_spgemm::<f64>(
+            2,
+            3,
+            &a_rp,
+            &a_ci,
+            &a_v,
+            3,
+            2,
+            &b_rp,
+            &b_ci,
+            &b_v,
+            1e-10,
+            "spgemm_f64",
+        );
+    }
+
+    #[test]
+    fn spgemm_2x3_times_3x2_f32() {
+        let a_rp = vec![0, 2, 3];
+        let a_ci = vec![0, 2, 1];
+        let a_v = vec![1.5, -2.0, 3.25];
+        let b_rp = vec![0, 2, 3, 4];
+        let b_ci = vec![0, 1, 0, 1];
+        let b_v = vec![10.0, -20.0, 30.0, 40.0];
+        run_spgemm::<f32>(
+            2,
+            3,
+            &a_rp,
+            &a_ci,
+            &a_v,
+            3,
+            2,
+            &b_rp,
+            &b_ci,
+            &b_v,
+            1e-4,
+            "spgemm_f32",
+        );
+    }
+
+    #[test]
+    fn spgemm_identity_left_f64() {
+        // I (3x3) * B (3x3) = B, expanded form equals B exactly.
+        let i_rp = vec![0, 1, 2, 3];
+        let i_ci = vec![0, 1, 2];
+        let i_v = vec![1.0, 1.0, 1.0];
+        let b_rp = vec![0, 2, 3, 5];
+        let b_ci = vec![0, 2, 1, 0, 2];
+        let b_v = vec![7.0, 8.0, 9.0, 11.0, 13.0];
+        run_spgemm::<f64>(
+            3,
+            3,
+            &i_rp,
+            &i_ci,
+            &i_v,
+            3,
+            3,
+            &b_rp,
+            &b_ci,
+            &b_v,
+            1e-10,
+            "spgemm_identity",
+        );
     }
 }

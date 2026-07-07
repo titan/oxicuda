@@ -322,6 +322,27 @@ pub fn gru_sequence_forward<T: GpuFloat>(
 // PTX generation
 // ---------------------------------------------------------------------------
 
+/// Accumulates `acc += a * bv` **in place** on a loop-carried register.
+///
+/// The dot-product loops are emitted as a single runtime loop body, so the
+/// accumulator must be a stable register that is read-modified-written each
+/// iteration. The builder's `fma_float` allocates a fresh destination (seeded
+/// from the loop-invariant addend), which would silently drop every term but
+/// the last — this raw in-place form keeps the running sum.
+fn fma_acc_inplace<T: GpuFloat>(
+    b: &mut oxicuda_ptx::builder::BodyBuilder<'_>,
+    acc: &oxicuda_ptx::ir::Register,
+    a: &oxicuda_ptx::ir::Register,
+    bv: &oxicuda_ptx::ir::Register,
+) {
+    let op = if T::PTX_TYPE == PtxType::F32 {
+        "fma.rn.f32"
+    } else {
+        "fma.rn.f64"
+    };
+    b.raw_ptx(&format!("{op} {acc}, {a}, {bv}, {acc};"));
+}
+
 /// Generates a fused GRU gate-computation PTX kernel.
 ///
 /// Each thread handles one `(batch, hidden_unit)` pair and computes:
@@ -329,7 +350,7 @@ pub fn gru_sequence_forward<T: GpuFloat>(
 /// 2. r = sigmoid(W_xr * x + W_hr * h + b_r)  (reset gate)
 /// 3. h_cand = tanh(W_xh * x + r * (W_hh * h) + b_h)  (candidate)
 /// 4. h_t = (1 - z) * h_prev + z * h_cand
-fn generate_gru_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
+pub(crate) fn generate_gru_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
     let kernel_name = format!("dnn_gru_fused_{}", T::NAME);
 
     let ptx = KernelBuilder::new(&kernel_name)
@@ -411,9 +432,7 @@ fn generate_gru_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                     ));
                     let w_addr = b.byte_offset_addr(w_x_ptr.clone(), w_offset, T::size_u32());
                     let w_val = load_global_float::<T>(b, w_addr);
-                    let new_acc =
-                        fma_float::<T>(b, w_val, x_val.clone(), gate_accum[gate as usize].clone());
-                    gate_accum[gate as usize] = new_acc;
+                    fma_acc_inplace::<T>(b, &gate_accum[gate as usize], &w_val, &x_val);
                 }
 
                 b.raw_ptx(&format!("add.u32 {k_reg}, {k_reg}, 1;"));
@@ -422,8 +441,8 @@ fn generate_gru_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
 
                 // Accumulate W_h * h_prev for z and r gates (gates 0, 1)
                 // For candidate (gate 2), we need r * (W_hh * h), so accumulate separately
-                let mut wh_h_accum_zr = [load_float_imm::<T>(b, 0.0), load_float_imm::<T>(b, 0.0)];
-                let mut wh_h_accum_cand = load_float_imm::<T>(b, 0.0);
+                let wh_h_accum_zr = [load_float_imm::<T>(b, 0.0), load_float_imm::<T>(b, 0.0)];
+                let wh_h_accum_cand = load_float_imm::<T>(b, 0.0);
 
                 let kh_reg = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("mov.u32 {kh_reg}, 0;"));
@@ -442,8 +461,8 @@ fn generate_gru_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                 let h_addr = b.byte_offset_addr(h_prev_ptr.clone(), h_offset, T::size_u32());
                 let h_val = load_global_float::<T>(b, h_addr);
 
-                // z gate (0) and r gate (1)
-                for (gi, acc) in wh_h_accum_zr.iter_mut().enumerate() {
+                // z gate (0) and r gate (1) — accumulate W_h*h in place.
+                for (gi, acc) in wh_h_accum_zr.iter().enumerate() {
                     let gate = gi as u32;
                     let w_row = b.alloc_reg(PtxType::U32);
                     b.raw_ptx(&format!(
@@ -455,11 +474,10 @@ fn generate_gru_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                     ));
                     let w_addr = b.byte_offset_addr(w_h_ptr.clone(), w_offset, T::size_u32());
                     let w_val = load_global_float::<T>(b, w_addr);
-                    let new_acc = fma_float::<T>(b, w_val, h_val.clone(), acc.clone());
-                    *acc = new_acc;
+                    fma_acc_inplace::<T>(b, acc, &w_val, &h_val);
                 }
 
-                // candidate gate (2): accumulate W_hh * h separately
+                // candidate gate (2): accumulate W_hh * h separately, in place.
                 {
                     let gate = 2u32;
                     let w_row = b.alloc_reg(PtxType::U32);
@@ -472,7 +490,7 @@ fn generate_gru_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                     ));
                     let w_addr = b.byte_offset_addr(w_h_ptr.clone(), w_offset, T::size_u32());
                     let w_val = load_global_float::<T>(b, w_addr);
-                    wh_h_accum_cand = fma_float::<T>(b, w_val, h_val, wh_h_accum_cand);
+                    fma_acc_inplace::<T>(b, &wh_h_accum_cand, &w_val, &h_val);
                 }
 
                 b.raw_ptx(&format!("add.u32 {kh_reg}, {kh_reg}, 1;"));
@@ -544,7 +562,7 @@ fn generate_gru_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
 }
 
 /// Generates a simple D2D copy kernel used for final state extraction.
-fn generate_copy_kernel_ptx_gru<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
+pub(crate) fn generate_copy_kernel_ptx_gru<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
     let kernel_name = format!("dnn_gru_copy_{}", T::NAME);
 
     let ptx = KernelBuilder::new(&kernel_name)

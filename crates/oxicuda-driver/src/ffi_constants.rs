@@ -104,8 +104,14 @@ pub const CU_POINTER_ATTRIBUTE_DEVICE_POINTER: u32 = 3;
 /// Query the host pointer corresponding to a device pointer.
 pub const CU_POINTER_ATTRIBUTE_HOST_POINTER: u32 = 4;
 
+/// Buffer ID uniquely identifying the allocation a pointer belongs to.
+pub const CU_POINTER_ATTRIBUTE_BUFFER_ID: u32 = 7;
+
 /// Query whether the memory is managed (unified).
-pub const CU_POINTER_ATTRIBUTE_IS_MANAGED: u32 = 7;
+pub const CU_POINTER_ATTRIBUTE_IS_MANAGED: u32 = 8;
+
+/// Device ordinal of the device on which the pointer's memory resides.
+pub const CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL: u32 = 9;
 
 // =========================================================================
 // CU_MEMORYTYPE values (returned by pointer attribute queries)

@@ -645,3 +645,441 @@ fn mapper_cluster_single_pair_mark() {
         );
     }
 }
+
+// ===========================================================================
+// 8. batched_column_reduce  —  EXACT HOST RE-DERIVATION (integer pivot lookup)
+// ===========================================================================
+//
+// One thread per column j (kernel in `homology::gpu_reduction`):
+//   add_src[j] = owner[low[j]]   iff  low[j] >= 0  AND  0 <= owner[low[j]] < j
+//   add_src[j] = -1              otherwise.
+//
+// Each thread writes only its own `add_src[j]`, so the result is fully
+// deterministic (no races) and asserted bit-exact. On sm_80+ the kernel also
+// commits/awaits a (decorative, empty) `cp.async` group; this test exercises
+// that path on the live sm_86 device. Inputs are crafted to hit every branch:
+// zero-column skip, owner == -1 skip, owner >= j skip, and a real column-add.
+
+#[test]
+fn batched_column_reduce_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+
+    // low[j] = pivot row of column j (-1 ⇒ zero column).
+    let low: Vec<i32> = vec![-1, 0, 3, 1, 2, -1, 5, 4];
+    // owner[r] = leftmost column currently claiming pivot row r (-1 ⇒ none).
+    let owner: Vec<i32> = vec![-1, 3, 1, 0, 7, 2, 0, 0];
+    let n_cols = low.len();
+    assert_eq!(owner.len(), n_cols, "test setup: low/owner length mismatch");
+
+    // Exact host re-derivation mirroring the kernel branch-for-branch.
+    let expected: Vec<i32> = low
+        .iter()
+        .enumerate()
+        .map(|(j, &lj)| {
+            if lj < 0 {
+                return -1;
+            }
+            let owner_of_low = owner[lj as usize];
+            if owner_of_low >= 0 && owner_of_low < j as i32 {
+                owner_of_low
+            } else {
+                -1
+            }
+        })
+        .collect();
+    // Pin the crafted expectation so the test self-documents every branch:
+    //   j=0 zero col ⇒ -1; j=1 owner==-1 ⇒ -1; j=2 owner 0 < 2 ⇒ 0;
+    //   j=3 owner 3 >= 3 ⇒ -1; j=4 owner 1 < 4 ⇒ 1; j=5 zero col ⇒ -1;
+    //   j=6 owner 2 < 6 ⇒ 2; j=7 owner 7 >= 7 ⇒ -1.
+    assert_eq!(
+        expected,
+        vec![-1, -1, 0, -1, 1, -1, 2, -1],
+        "test setup: crafted oracle drifted"
+    );
+
+    let ptx = crate::homology::gpu_reduction::batched_column_reduce_ptx(fx.sm);
+    let kernel = load_kernel(&ptx, "batched_column_reduce_kernel");
+    let stream = Stream::new(&fx.ctx).expect("stream");
+
+    let d_low = DeviceBuffer::<i32>::from_host(&low).expect("d_low");
+    let d_owner = DeviceBuffer::<i32>::from_host(&owner).expect("d_owner");
+    // Pre-fill add_src with a sentinel the kernel must overwrite for every column.
+    let d_add_src = DeviceBuffer::<i32>::from_host(&vec![99_i32; n_cols]).expect("d_add_src");
+
+    let block = 256_u32;
+    let params = LaunchParams::new(grid_1d(n_cols as u32, block), block);
+    kernel
+        .launch(
+            &params,
+            &stream,
+            &(
+                d_low.as_device_ptr(),
+                d_owner.as_device_ptr(),
+                d_add_src.as_device_ptr(),
+                n_cols as u32,
+            ),
+        )
+        .expect("launch batched_column_reduce_kernel");
+    stream.synchronize().expect("sync");
+
+    let mut add_src_gpu = vec![0_i32; n_cols];
+    d_add_src
+        .copy_to_host(&mut add_src_gpu)
+        .expect("copy add_src");
+
+    for j in 0..n_cols {
+        assert_eq!(
+            add_src_gpu[j], expected[j],
+            "batched_column_reduce: add_src[{j}] = {} (expected {} — owner[low[j]] pivot lookup)",
+            add_src_gpu[j], expected[j]
+        );
+    }
+}
+
+// ===========================================================================
+// 9. vietoris_rips_edges  —  INDEPENDENT HOST RE-DERIVATION (Euclidean + flag)
+// ===========================================================================
+//
+// Thread (i, j); i = ctaid.y·ntid.y + tid.y, j = ctaid.x·ntid.x + tid.x. For
+// the STRICT upper triangle i < j only:
+//   edge_len[i·n + j]  = sqrt( Σ_d (points[i,d] − points[j,d])^2 )
+//   edge_flag[i·n + j] = 1 if edge_len <= threshold else 0.
+// Cells with i >= j (lower triangle + diagonal) and out-of-range threads are
+// never written, so they must retain their pre-fill sentinel — asserted here to
+// catch any spurious out-of-triangle store.
+
+#[test]
+fn vietoris_rips_edges_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+
+    let n_pts = 6_usize;
+    let dim = 3_usize;
+
+    let mut rng = LcgRng::new(0x71E5_0042);
+    let points: Vec<f32> = (0..n_pts * dim)
+        .map(|_| unit_f32(&mut rng) * 2.0 - 1.0)
+        .collect();
+    let threshold = 1.5_f32;
+
+    // Independent host oracle, upper triangle only.
+    let len_sentinel = -7.0_f32;
+    let flag_sentinel = 9_u32;
+    let mut host_len = vec![len_sentinel; n_pts * n_pts];
+    let mut host_flag = vec![flag_sentinel; n_pts * n_pts];
+    let mut n_pass = 0_usize;
+    let mut n_fail = 0_usize;
+    for i in 0..n_pts {
+        for j in (i + 1)..n_pts {
+            let mut s = 0.0_f32;
+            for d in 0..dim {
+                let diff = points[i * dim + d] - points[j * dim + d];
+                s += diff * diff;
+            }
+            let len = s.sqrt();
+            host_len[i * n_pts + j] = len;
+            if len <= threshold {
+                host_flag[i * n_pts + j] = 1;
+                n_pass += 1;
+            } else {
+                host_flag[i * n_pts + j] = 0;
+                n_fail += 1;
+            }
+        }
+    }
+    // Make sure the chosen threshold exercises BOTH the accept and reject paths.
+    assert!(
+        n_pass > 0 && n_fail > 0,
+        "test setup: threshold must split edges (pass={n_pass}, fail={n_fail})"
+    );
+
+    let ptx = crate::homology::gpu_reduction::vietoris_rips_edges_ptx(fx.sm);
+    let kernel = load_kernel(&ptx, "vietoris_rips_edges_kernel");
+    let stream = Stream::new(&fx.ctx).expect("stream");
+
+    let d_points = DeviceBuffer::<f32>::from_host(&points).expect("d_points");
+    let d_flag =
+        DeviceBuffer::<u32>::from_host(&vec![flag_sentinel; n_pts * n_pts]).expect("d_flag");
+    let d_len = DeviceBuffer::<f32>::from_host(&vec![len_sentinel; n_pts * n_pts]).expect("d_len");
+
+    // Grid = (x = cols, y = rows) = (ceil(n/16), ceil(n/16)); block = (16, 16).
+    let g = grid_1d(n_pts as u32, 16);
+    let params = LaunchParams::new((g, g), (16u32, 16u32));
+    kernel
+        .launch(
+            &params,
+            &stream,
+            &(
+                d_points.as_device_ptr(),
+                d_flag.as_device_ptr(),
+                d_len.as_device_ptr(),
+                n_pts as u32,
+                dim as u32,
+                threshold,
+            ),
+        )
+        .expect("launch vietoris_rips_edges_kernel");
+    stream.synchronize().expect("sync");
+
+    let mut len_gpu = vec![0.0_f32; n_pts * n_pts];
+    let mut flag_gpu = vec![0_u32; n_pts * n_pts];
+    d_len.copy_to_host(&mut len_gpu).expect("copy edge_len");
+    d_flag.copy_to_host(&mut flag_gpu).expect("copy edge_flag");
+
+    for i in 0..n_pts {
+        for j in 0..n_pts {
+            let e = i * n_pts + j;
+            if i < j {
+                // fma accumulation + correctly-rounded sqrt vs host mul/add+sqrt.
+                assert!(
+                    close(len_gpu[e], host_len[e], 1e-4, 1e-4),
+                    "vietoris edge_len[{i},{j}] mismatch: gpu={} host={}",
+                    len_gpu[e],
+                    host_len[e]
+                );
+                assert_eq!(
+                    flag_gpu[e], host_flag[e],
+                    "vietoris edge_flag[{i},{j}] = {} (expected {}; len={}, thr={threshold})",
+                    flag_gpu[e], host_flag[e], len_gpu[e]
+                );
+            } else {
+                // Lower triangle + diagonal must be untouched (sentinels intact).
+                assert_eq!(
+                    len_gpu[e].to_bits(),
+                    len_sentinel.to_bits(),
+                    "vietoris edge_len[{i},{j}] = {} but should be untouched",
+                    len_gpu[e]
+                );
+                assert_eq!(
+                    flag_gpu[e], flag_sentinel,
+                    "vietoris edge_flag[{i},{j}] = {} but should be untouched",
+                    flag_gpu[e]
+                );
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// 10. wasserstein_auction  —  INDEPENDENT HOST RE-DERIVATION (Bertsekas bid)
+// ===========================================================================
+//
+// One thread per UNASSIGNED person i. Scanning j = 0..n_b with net value
+// v(j) = −cost[i,j] − price[j], it tracks the best and second-best net values
+// (strict ">") and emits:
+//   bid_obj[i] = argmax_j v(j)
+//   bid_val[i] = (best − second) + epsilon.
+// Degenerate cases: n_b == 0 ⇒ bid_obj = −1, bid_val = 0; n_b == 1 ⇒ second is
+// −inf ⇒ bid_val = +inf (the "must take it" bid). The non-zero epsilon and a
+// genuine second-best make this catch a dropped-epsilon or wrong-second bug.
+
+#[test]
+fn wasserstein_auction_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+
+    let n_a = 4_usize;
+    let n_b = 5_usize;
+    let epsilon = 0.05_f32;
+
+    let mut rng = LcgRng::new(0x4A3C_77E1);
+    let cost: Vec<f32> = (0..n_a * n_b).map(|_| unit_f32(&mut rng)).collect();
+    let price: Vec<f32> = (0..n_b).map(|_| unit_f32(&mut rng)).collect();
+
+    // Independent host oracle, branch-for-branch identical to the kernel.
+    let mut host_obj = vec![0_i32; n_a];
+    let mut host_val = vec![0.0_f32; n_a];
+    let mut any_nonzero_obj = false;
+    for i in 0..n_a {
+        let mut best = f32::NEG_INFINITY;
+        let mut second = f32::NEG_INFINITY;
+        let mut best_j = 0_i32;
+        // Net values within a row must be distinct so argmax / second are
+        // unambiguous (matches the kernel's strict-greater comparisons).
+        let mut nets = Vec::with_capacity(n_b);
+        for j in 0..n_b {
+            let v = -cost[i * n_b + j] - price[j];
+            nets.push(v);
+            if v > best {
+                second = best;
+                best = v;
+                best_j = j as i32;
+            } else if v > second {
+                second = v;
+            }
+        }
+        for a in 0..n_b {
+            for b in (a + 1)..n_b {
+                assert!(
+                    (nets[a] - nets[b]).abs() > 0.0,
+                    "test setup: tied net values in row {i} (j={a}, j={b})"
+                );
+            }
+        }
+        host_obj[i] = best_j;
+        host_val[i] = (best - second) + epsilon;
+        if best_j != 0 {
+            any_nonzero_obj = true;
+        }
+    }
+    // Ensure at least one row's winner is not object 0 (exercises real argmax).
+    assert!(
+        any_nonzero_obj,
+        "test setup: every winner is object 0 — argmax path under-exercised"
+    );
+
+    let ptx = crate::homology::gpu_reduction::wasserstein_auction_ptx(fx.sm);
+    let kernel = load_kernel(&ptx, "wasserstein_auction_kernel");
+    let stream = Stream::new(&fx.ctx).expect("stream");
+
+    let d_cost = DeviceBuffer::<f32>::from_host(&cost).expect("d_cost");
+    let d_price = DeviceBuffer::<f32>::from_host(&price).expect("d_price");
+    let d_obj = DeviceBuffer::<i32>::from_host(&vec![77_i32; n_a]).expect("d_obj");
+    let d_val = DeviceBuffer::<f32>::from_host(&vec![-7.0_f32; n_a]).expect("d_val");
+
+    let block = 256_u32;
+    let params = LaunchParams::new(grid_1d(n_a as u32, block), block);
+    kernel
+        .launch(
+            &params,
+            &stream,
+            &(
+                d_cost.as_device_ptr(),
+                d_price.as_device_ptr(),
+                d_obj.as_device_ptr(),
+                d_val.as_device_ptr(),
+                n_a as u32,
+                n_b as u32,
+                epsilon,
+            ),
+        )
+        .expect("launch wasserstein_auction_kernel");
+    stream.synchronize().expect("sync");
+
+    let mut obj_gpu = vec![0_i32; n_a];
+    let mut val_gpu = vec![0.0_f32; n_a];
+    d_obj.copy_to_host(&mut obj_gpu).expect("copy bid_obj");
+    d_val.copy_to_host(&mut val_gpu).expect("copy bid_val");
+
+    for i in 0..n_a {
+        assert_eq!(
+            obj_gpu[i], host_obj[i],
+            "wasserstein bid_obj[{i}] = {} (expected {} — argmax net value)",
+            obj_gpu[i], host_obj[i]
+        );
+        assert!(
+            close(val_gpu[i], host_val[i], 1e-4, 1e-4),
+            "wasserstein bid_val[{i}] mismatch: gpu={} host={} (best−second+ε)",
+            val_gpu[i],
+            host_val[i]
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 11. wasserstein_auction degenerate object counts (n_b == 0 and n_b == 1)
+// ---------------------------------------------------------------------------
+//
+// n_b == 0 ⇒ no object: bid_obj = −1, bid_val = 0.
+// n_b == 1 ⇒ only object 0; second stays −inf ⇒ bid_val = +inf, bid_obj = 0.
+
+#[test]
+fn wasserstein_auction_degenerate_object_counts() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+
+    let ptx = crate::homology::gpu_reduction::wasserstein_auction_ptx(fx.sm);
+    let kernel = load_kernel(&ptx, "wasserstein_auction_kernel");
+    let stream = Stream::new(&fx.ctx).expect("stream");
+
+    let n_a = 3_usize;
+    let epsilon = 0.1_f32;
+    let block = 256_u32;
+    let params = LaunchParams::new(grid_1d(n_a as u32, block), block);
+
+    // --- n_b == 0: empty object set ---------------------------------------
+    {
+        // `n_b == 0` ⇒ the kernel reads no cost/price element; `from_host` still
+        // needs a non-null pointer, so we pass length-1 dummy buffers.
+        let d_cost = DeviceBuffer::<f32>::from_host(&[0.0_f32; 1]).expect("d_cost0");
+        let d_price = DeviceBuffer::<f32>::from_host(&[0.0_f32; 1]).expect("d_price0");
+        let d_obj = DeviceBuffer::<i32>::from_host(&vec![77_i32; n_a]).expect("d_obj0");
+        let d_val = DeviceBuffer::<f32>::from_host(&vec![-7.0_f32; n_a]).expect("d_val0");
+
+        kernel
+            .launch(
+                &params,
+                &stream,
+                &(
+                    d_cost.as_device_ptr(),
+                    d_price.as_device_ptr(),
+                    d_obj.as_device_ptr(),
+                    d_val.as_device_ptr(),
+                    n_a as u32,
+                    0u32,
+                    epsilon,
+                ),
+            )
+            .expect("launch wasserstein_auction_kernel (n_b=0)");
+        stream.synchronize().expect("sync n_b=0");
+
+        let mut obj_gpu = vec![0_i32; n_a];
+        let mut val_gpu = vec![0.0_f32; n_a];
+        d_obj.copy_to_host(&mut obj_gpu).expect("copy obj0");
+        d_val.copy_to_host(&mut val_gpu).expect("copy val0");
+        for i in 0..n_a {
+            assert_eq!(obj_gpu[i], -1, "n_b=0: bid_obj[{i}] should be -1");
+            assert_eq!(
+                val_gpu[i].to_bits(),
+                0.0_f32.to_bits(),
+                "n_b=0: bid_val[{i}] should be 0.0"
+            );
+        }
+    }
+
+    // --- n_b == 1: single object ⇒ +inf "must take it" bid -----------------
+    {
+        let n_b = 1_usize;
+        let cost: Vec<f32> = vec![0.3, 0.7, 0.1]; // one cost per person to object 0
+        let price: Vec<f32> = vec![0.2];
+        let d_cost = DeviceBuffer::<f32>::from_host(&cost).expect("d_cost1");
+        let d_price = DeviceBuffer::<f32>::from_host(&price).expect("d_price1");
+        let d_obj = DeviceBuffer::<i32>::from_host(&vec![77_i32; n_a]).expect("d_obj1");
+        let d_val = DeviceBuffer::<f32>::from_host(&vec![-7.0_f32; n_a]).expect("d_val1");
+
+        kernel
+            .launch(
+                &params,
+                &stream,
+                &(
+                    d_cost.as_device_ptr(),
+                    d_price.as_device_ptr(),
+                    d_obj.as_device_ptr(),
+                    d_val.as_device_ptr(),
+                    n_a as u32,
+                    n_b as u32,
+                    epsilon,
+                ),
+            )
+            .expect("launch wasserstein_auction_kernel (n_b=1)");
+        stream.synchronize().expect("sync n_b=1");
+
+        let mut obj_gpu = vec![0_i32; n_a];
+        let mut val_gpu = vec![0.0_f32; n_a];
+        d_obj.copy_to_host(&mut obj_gpu).expect("copy obj1");
+        d_val.copy_to_host(&mut val_gpu).expect("copy val1");
+        for i in 0..n_a {
+            assert_eq!(obj_gpu[i], 0, "n_b=1: bid_obj[{i}] should be object 0");
+            assert!(
+                val_gpu[i].is_infinite() && val_gpu[i] > 0.0,
+                "n_b=1: bid_val[{i}] = {} should be +inf (best − (−inf) + ε)",
+                val_gpu[i]
+            );
+        }
+    }
+}

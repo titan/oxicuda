@@ -200,10 +200,11 @@ impl AttentionTemplate {
         writeln!(ptx, "    .param .u32 %param_seq_len,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param {ty} %param_scale").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+        // `.maxntid` must precede the body brace with no trailing semicolon.
+        writeln!(ptx, "    .maxntid {block_seq}, 1, 1").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
-        // Directives and register declarations
-        writeln!(ptx, "    .maxntid {block_seq}, 1, 1;").map_err(PtxGenError::FormatError)?;
+        // Register declarations
         writeln!(ptx, "    .reg .b32 %r<32>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b64 %rd<24>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .f32 %f<32>;").map_err(PtxGenError::FormatError)?;

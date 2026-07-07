@@ -192,10 +192,17 @@ impl Config {
     /// clearly infeasible configurations.
     #[must_use]
     pub fn estimated_registers_per_thread(&self) -> u32 {
-        let base_regs: u32 = 32;
-        let fragment_regs = (self.warp_m * self.warp_n) / self.block_size;
-        let tc_overhead = if self.use_tensor_core { 16 } else { 0 };
-        base_regs + fragment_regs + tc_overhead
+        // A zero-thread block is infeasible; returning `u32::MAX` makes every
+        // downstream feasibility check (prune, memory estimators) correctly
+        // reject the config instead of panicking on the division below.
+        if self.block_size == 0 {
+            return u32::MAX;
+        }
+        let base_regs: u64 = 32;
+        let fragment_regs =
+            (u64::from(self.warp_m) * u64::from(self.warp_n)) / u64::from(self.block_size);
+        let tc_overhead: u64 = if self.use_tensor_core { 16 } else { 0 };
+        (base_regs + fragment_regs + tc_overhead).min(u64::from(u32::MAX)) as u32
     }
 }
 
@@ -269,6 +276,17 @@ mod tests {
     fn warps_per_block() {
         let cfg = Config::new().with_block_size(256);
         assert_eq!(cfg.warps_per_block(), 8);
+    }
+
+    #[test]
+    fn estimated_registers_per_thread_zero_block_size_does_not_panic() {
+        let cfg = Config::new()
+            .with_block_size(0)
+            .with_warp_m(64)
+            .with_warp_n(64);
+        // Must not divide-by-zero / panic; the infeasible config should be
+        // flagged with a maximal register estimate so callers prune it.
+        assert_eq!(cfg.estimated_registers_per_thread(), u32::MAX);
     }
 
     #[test]

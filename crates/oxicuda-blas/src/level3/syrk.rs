@@ -7,17 +7,9 @@
 //! delegates to GEMM for the matrix product and applies the symmetry
 //! constraint during the output phase.
 
-use std::sync::Arc;
-
-use oxicuda_driver::Module;
-use oxicuda_launch::{Dim3, Kernel, LaunchParams};
-use oxicuda_ptx::ir::PtxType;
-
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
 use crate::types::{FillMode, GpuFloat, MatrixDesc, MatrixDescMut, Transpose};
-
-use super::syrk_tc;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -90,80 +82,32 @@ pub fn syrk<T: GpuFloat>(
         return Ok(()); // Nothing to do.
     }
 
-    // Tensor Core fast path: triangle-masked GEMM kernel.
+    let _ = a_k; // Inner dimension is validated above; GEMM re-derives it.
+
+    // SYRK is computed as a single triangle-masked GEMM:
+    //   NoTrans: C = alpha * A * A^T + beta * C   (gemm NoTrans, Trans)
+    //   Trans:   C = alpha * A^T * A + beta * C   (gemm Trans, NoTrans)
     //
-    // Applicable when:
-    //   - SM >= 80 (Ampere+) and n >= 32
-    //   - fill_mode is Upper or Lower (not Full)
-    //   - The element type is f32 (the generated PTX uses f32 alpha/beta).
+    // The former `syrk_tc` tensor-core fast path was an incomplete placeholder
+    // (it accumulated only the k = 0 term and was f32-only), so it is not used.
+    // The GEMM computes the full dot product over K; the triangle mask writes
+    // only `fill_mode`, leaving the opposite triangle of C untouched (matching
+    // reference-BLAS SYRK semantics, which reference only one triangle).
     //
-    // NOTE: Kernel caching is not yet integrated — the module is compiled
-    // fresh on each call. A future enhancement would store compiled modules
-    // in an interior-mutable cache on `BlasHandle` (keyed by SyrkTcConfig).
-    {
-        let sm = handle.sm_version();
-        let tc_eligible = syrk_tc::is_tc_applicable(sm, n)
-            && fill_mode != FillMode::Full
-            && T::PTX_TYPE == PtxType::F32;
-
-        if tc_eligible {
-            let tile = syrk_tc::syrk_tc_tile_config(sm, n);
-            let config =
-                syrk_tc::SyrkTcConfig::new(tile.tile_m, tile.tile_n, tile.tile_k, sm, fill_mode);
-
-            // PTX generation failed — fall through to GEMM fallback.
-            if let Ok((ptx, kernel_name)) = syrk_tc::generate_syrk_tc_ptx(&config) {
-                // Load the module (JIT-compiles PTX via the CUDA driver at
-                // runtime; returns CudaError::NotInitialized on macOS where
-                // no CUDA driver is present — falls through to GEMM below).
-                if let Ok(module) = Module::from_ptx(&ptx) {
-                    let module = Arc::new(module);
-                    let kernel =
-                        Kernel::from_module(Arc::clone(&module), &kernel_name).map_err(|e| {
-                            BlasError::LaunchFailed(format!("SYRK TC: kernel lookup failed: {e}"))
-                        })?;
-
-                    // Grid: one tile per output NxN tile (col-tiles x row-tiles).
-                    let grid_x = n.div_ceil(tile.tile_n);
-                    let grid_y = n.div_ceil(tile.tile_m);
-                    let threads_per_block = (tile.tile_m * tile.tile_n).min(256);
-
-                    let params = LaunchParams::new(
-                        Dim3::new(grid_x, grid_y, 1),
-                        Dim3::new(threads_per_block, 1, 1),
-                    );
-
-                    // Kernel args: ptr_a, ptr_c, alpha(f32), beta(f32),
-                    //              n, k, lda, ldc
-                    let alpha_f32 = f32::from_bits(alpha.to_bits_u64() as u32);
-                    let beta_f32 = f32::from_bits(beta.to_bits_u64() as u32);
-                    let args = (a.ptr, c.ptr, alpha_f32, beta_f32, n, a_k, a.ld, c.ld);
-
-                    kernel
-                        .launch(&params, handle.stream(), &args)
-                        .map_err(|e| {
-                            BlasError::LaunchFailed(format!("SYRK TC: launch failed: {e}"))
-                        })?;
-
-                    return Ok(());
-                }
-                // No CUDA driver available (e.g. macOS) — fall through to GEMM.
-            }
-        }
-    }
-
-    // Fallback: SYRK = GEMM(A, A^T) or GEMM(A^T, A) with symmetry.
-    // We compute the full GEMM and let the caller interpret only the
-    // requested triangle.
-
-    let (trans_left, trans_right) = match trans {
-        Transpose::NoTrans => (Transpose::NoTrans, Transpose::Trans),
-        Transpose::Trans => (Transpose::Trans, Transpose::NoTrans),
-        Transpose::ConjTrans => unreachable!(), // Caught above.
+    // ConjTrans was rejected above, so `trans` is NoTrans or Trans here.
+    let (trans_left, trans_right) = if trans == Transpose::NoTrans {
+        (Transpose::NoTrans, Transpose::Trans)
+    } else {
+        (Transpose::Trans, Transpose::NoTrans)
     };
 
-    // Both operands are A, so we pass `a` twice.
-    super::gemm_api::gemm(handle, trans_left, trans_right, alpha, a, a, beta, c)
+    let mask = match fill_mode {
+        FillMode::Upper | FillMode::Lower => Some(fill_mode),
+        FillMode::Full => None,
+    };
+
+    // Both operands are A, so we pass `a` twice (A and B may alias in GEMM).
+    super::gemm_api::gemm_tri(handle, trans_left, trans_right, alpha, a, a, beta, c, mask)
 }
 
 // ---------------------------------------------------------------------------

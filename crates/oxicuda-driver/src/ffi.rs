@@ -41,8 +41,15 @@ macro_rules! define_handle {
         #[derive(Clone, Copy, PartialEq, Eq, Hash)]
         pub struct $name(pub *mut c_void);
 
-        // SAFETY: CUDA handles are thread-safe when used with proper
-        // synchronisation via the driver API.
+        // SAFETY: an opaque CUDA handle is a plain value (a driver-side
+        // identifier), not something this crate ever dereferences. Every
+        // operation on it is performed by the driver through an
+        // `unsafe extern "C"` entry point, and the CUDA Driver API is
+        // documented as thread-safe (a context may even be current on several
+        // threads at once, CUDA >= 4.0). It is therefore sound to send and
+        // share these handles across threads. This is a deliberate part of the
+        // crate's threading model — `DevicePool` shares `Arc<Context>` across
+        // threads and so requires `Context: Sync`.
         unsafe impl Send for $name {}
         unsafe impl Sync for $name {}
 
@@ -63,6 +70,40 @@ macro_rules! define_handle {
             #[inline]
             pub fn is_null(self) -> bool {
                 self.0.is_null()
+            }
+        }
+    };
+}
+
+/// Like [`define_handle!`] but for CUDA handles that the header types as a
+/// plain `unsigned long long` value rather than an opaque pointer (e.g.
+/// `CUtexObject`, `CUsurfObject`). Using a `u64` payload keeps the ABI correct
+/// on 32-bit targets (where a pointer is only 4 bytes) and renders the numeric
+/// value in `Debug`.
+macro_rules! define_value_handle {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[repr(transparent)]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+        pub struct $name(pub u64);
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}(0x{:x})", stringify!($name), self.0)
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(0)
+            }
+        }
+
+        impl $name {
+            /// Returns `true` if the handle is null (uninitialised, i.e. `0`).
+            #[inline]
+            pub fn is_null(self) -> bool {
+                self.0 == 0
             }
         }
     };
@@ -112,13 +153,19 @@ define_handle! {
     CUsurfref
 }
 
-define_handle! {
-    /// Opaque handle to a CUDA texture object (modern bindless API).
+define_value_handle! {
+    /// Handle to a CUDA texture object (modern bindless API).
+    ///
+    /// `cuda.h` types this as `unsigned long long`, so it is modelled as a
+    /// `u64` value rather than an opaque pointer.
     CUtexObject
 }
 
-define_handle! {
-    /// Opaque handle to a CUDA surface object (modern bindless API).
+define_value_handle! {
+    /// Handle to a CUDA surface object (modern bindless API).
+    ///
+    /// `cuda.h` types this as `unsigned long long`, so it is modelled as a
+    /// `u64` value rather than an opaque pointer.
     CUsurfObject
 }
 
@@ -204,9 +251,9 @@ pub enum CUpointer_attribute {
     /// Query the host pointer corresponding to a device pointer.
     HostPointer = 4,
     /// Query whether the memory is managed (unified).
-    IsManaged = 9,
+    IsManaged = 8,
     /// Query the device ordinal for the pointer.
-    DeviceOrdinal = 10,
+    DeviceOrdinal = 9,
 }
 
 // =========================================================================
@@ -657,10 +704,12 @@ pub enum CUdevice_attribute {
     MaxTexture1DLayeredWidth = 42,
     /// Maximum layers in a 1D layered texture.
     MaxTexture1DLayeredLayers = 43,
-    /// Maximum 2D texture width if CUDA 2D memory allocation is bound.
-    MaxTexture2DGatherWidth = 44,
-    /// Maximum 2D texture height if CUDA 2D memory allocation is bound.
-    MaxTexture2DGatherHeight = 45,
+    /// Device can gather 2D textures (`CAN_TEX2D_GATHER`, deprecated).
+    CanTex2dGather = 44,
+    /// Maximum 2D texture gather width.
+    MaxTexture2DGatherWidth = 45,
+    /// Maximum 2D texture gather height.
+    MaxTexture2DGatherHeight = 46,
     /// Alternate maximum 3D texture width.
     MaxTexture3DWidthAlt = 47,
     /// Alternate maximum 3D texture height.
@@ -671,62 +720,64 @@ pub enum CUdevice_attribute {
     PciDomainId = 50,
     /// Texture pitch alignment.
     TexturePitchAlignment = 51,
-    /// Maximum 1D mipmapped texture width.
-    MaxTexture1DMipmappedWidth2 = 52,
     /// Maximum width for a cubemap texture.
-    MaxTextureCubemapWidth = 54,
+    MaxTextureCubemapWidth = 52,
     /// Maximum width for a cubemap layered texture.
-    MaxTextureCubemapLayeredWidth = 55,
+    MaxTextureCubemapLayeredWidth = 53,
     /// Maximum layers in a cubemap layered texture.
-    MaxTextureCubemapLayeredLayers = 56,
+    MaxTextureCubemapLayeredLayers = 54,
     /// Maximum 1D surface width.
-    MaxSurface1DWidth = 57,
+    MaxSurface1DWidth = 55,
     /// Maximum 2D surface width.
-    MaxSurface2DWidth = 58,
+    MaxSurface2DWidth = 56,
     /// Maximum 2D surface height.
-    MaxSurface2DHeight = 59,
+    MaxSurface2DHeight = 57,
     /// Maximum 3D surface width.
-    MaxSurface3DWidth = 60,
+    MaxSurface3DWidth = 58,
     /// Maximum 3D surface height.
-    MaxSurface3DHeight = 61,
+    MaxSurface3DHeight = 59,
     /// Maximum 3D surface depth.
-    MaxSurface3DDepth = 62,
-    /// Maximum cubemap surface width.
-    MaxSurfaceCubemapWidth = 63,
+    MaxSurface3DDepth = 60,
     /// Maximum 1D layered surface width.
-    MaxSurface1DLayeredWidth = 64,
+    MaxSurface1DLayeredWidth = 61,
     /// Maximum layers in a 1D layered surface.
-    MaxSurface1DLayeredLayers = 65,
+    MaxSurface1DLayeredLayers = 62,
     /// Maximum 2D layered surface width.
-    MaxSurface2DLayeredWidth = 66,
+    MaxSurface2DLayeredWidth = 63,
     /// Maximum 2D layered surface height.
-    MaxSurface2DLayeredHeight = 67,
+    MaxSurface2DLayeredHeight = 64,
     /// Maximum layers in a 2D layered surface.
-    MaxSurface2DLayeredLayers = 68,
+    MaxSurface2DLayeredLayers = 65,
+    /// Maximum cubemap surface width.
+    MaxSurfaceCubemapWidth = 66,
     /// Maximum cubemap layered surface width.
-    MaxSurfaceCubemapLayeredWidth = 69,
+    MaxSurfaceCubemapLayeredWidth = 67,
     /// Maximum layers in a cubemap layered surface.
-    MaxSurfaceCubemapLayeredLayers = 70,
+    MaxSurfaceCubemapLayeredLayers = 68,
     /// Maximum 1D linear texture width (deprecated).
-    MaxTexture1DLinearWidth = 71,
+    MaxTexture1DLinearWidth = 69,
     /// Maximum 2D linear texture width.
-    MaxTexture2DLinearWidth = 72,
+    MaxTexture2DLinearWidth = 70,
     /// Maximum 2D linear texture height.
-    MaxTexture2DLinearHeight = 73,
+    MaxTexture2DLinearHeight = 71,
     /// Maximum 2D linear texture pitch (bytes).
-    MaxTexture2DLinearPitch = 74,
+    MaxTexture2DLinearPitch = 72,
+    /// Maximum mipmapped 2D texture width.
+    MaxTexture2DMipmappedWidth = 73,
+    /// Maximum mipmapped 2D texture height.
+    MaxTexture2DMipmappedHeight = 74,
     /// Major compute capability version number.
     ComputeCapabilityMajor = 75,
     /// Minor compute capability version number.
     ComputeCapabilityMinor = 76,
-    /// Maximum mipmapped 2D texture width.
-    MaxTexture2DMipmappedWidth = 77,
-    /// Maximum mipmapped 2D texture height.
-    MaxTexture2DMipmappedHeight = 78,
     /// Maximum mipmapped 1D texture width.
-    MaxTexture1DMipmappedWidth = 79,
+    MaxTexture1DMipmappedWidth = 77,
     /// Device supports stream priorities.
-    StreamPrioritiesSupported = 80,
+    StreamPrioritiesSupported = 78,
+    /// Device supports caching globals in L1 cache.
+    GlobalL1CacheSupported = 79,
+    /// Device supports caching locals in L1 cache.
+    LocalL1CacheSupported = 80,
     /// Maximum shared memory per multiprocessor (bytes).
     MaxSharedMemoryPerMultiprocessor = 81,
     /// Maximum registers per multiprocessor.
@@ -749,12 +800,12 @@ pub enum CUdevice_attribute {
     ComputePreemptionSupported = 90,
     /// Device can access host memory via pageable accesses.
     CanUseHostPointerForRegisteredMem = 91,
-    /// Reserved attribute (CUDA internal, value 92).
-    Reserved92 = 92,
-    /// Reserved attribute (CUDA internal, value 93).
-    Reserved93 = 93,
-    /// Reserved attribute (CUDA internal, value 94).
-    Reserved94 = 94,
+    /// Deprecated: use of stream memory operations v1 (CUDA internal).
+    CanUseStreamMemOpsV1 = 92,
+    /// Deprecated: use of 64-bit stream memory operations v1 (CUDA internal).
+    CanUse64BitStreamMemOpsV1 = 93,
+    /// Deprecated: use of stream wait-value NOR v1 (CUDA internal).
+    CanUseStreamWaitValueNorV1 = 94,
     /// Device supports cooperative kernel launches.
     CooperativeLaunch = 95,
     /// Device supports cooperative kernel launches across multiple GPUs.
@@ -787,12 +838,14 @@ pub enum CUdevice_attribute {
     MaxAccessPolicyWindowSize = 109,
     /// Device supports RDMA APIs via `cuMemRangeGetAttribute`.
     GpuDirectRdmaWithCudaVmmSupported = 110,
-    /// Free memory / total memory on the device accessible via `cuMemGetInfo`.
-    AccessPolicyMaxWindowSize = 111,
     /// Reserved range of shared memory per SM (bytes).
-    ReservedSharedMemoryPerBlock = 112,
+    ReservedSharedMemoryPerBlock = 111,
+    /// Device supports sparse CUDA arrays.
+    SparseCudaArraySupported = 112,
+    /// Device supports read-only registration of host memory.
+    ReadOnlyHostRegisterSupported = 113,
     /// Device supports timeline semaphore interop.
-    TimelineSemaphoreInteropSupported = 113,
+    TimelineSemaphoreInteropSupported = 114,
     /// Device supports memory pools (`cudaMallocAsync`).
     MemoryPoolsSupported = 115,
     /// GPU direct RDMA is supported.
@@ -807,26 +860,27 @@ pub enum CUdevice_attribute {
     ClusterLaunch = 120,
     /// Deferred mapping CUDA array supported.
     DeferredMappingCudaArraySupported = 121,
+    /// Device supports 64-bit stream memory operations.
+    CanUse64BitStreamMemOps = 122,
+    /// Device supports stream wait-value NOR.
+    CanUseStreamWaitValueNor = 123,
+    /// Device supports importing memory from a Linux `dma_buf`.
+    DmaBufSupported = 124,
     /// Device supports IPC event handles.
-    IpcEventSupported = 122,
+    IpcEventSupported = 125,
     /// Device supports mem-sync domain count.
-    MemSyncDomainCount = 123,
+    MemSyncDomainCount = 126,
     /// Device supports tensor-map access to data.
-    TensorMapAccessSupported = 124,
+    TensorMapAccessSupported = 127,
+    /// Device supports exporting memory as a fabric handle
+    /// (`HANDLE_TYPE_FABRIC_SUPPORTED`).
+    GpuDirectRdmaFabricSupported = 128,
     /// Unified function pointers supported.
-    UnifiedFunctionPointers = 125,
+    UnifiedFunctionPointers = 129,
     /// NUMA config.
-    NumaConfig = 127,
+    NumaConfig = 130,
     /// NUMA id.
-    NumaId = 128,
-    /// Multicast supported.
-    /// Device supports getting the minimum required per-block shared memory
-    /// for a cooperative launch via the extended attributes.
-    MaxTimelineSemaphoreInteropSupported = 129,
-    /// Device supports memory sync domain operations.
-    MemSyncDomainSupported = 130,
-    /// Device supports GPU-Direct Fabric.
-    GpuDirectRdmaFabricSupported = 131,
+    NumaId = 131,
     /// Device supports multicast.
     MulticastSupported = 132,
     /// Device supports MPS features.
@@ -1043,6 +1097,30 @@ pub struct CUmemLocation {
     pub loc_type: u32,
     /// Identifier whose meaning depends on `loc_type`.
     pub id: i32,
+}
+
+// =========================================================================
+// CUmemcpyAttributes — per-copy attributes for cuMemcpyBatchAsync (CUDA 12.8+)
+// =========================================================================
+
+/// Attributes describing one entry (or group of entries) in a
+/// `cuMemcpyBatchAsync` batch.
+///
+/// Mirrors `CUmemcpyAttributes` in `cuda.h` (CUDA 12.8+). `src_access_order`
+/// is stored as a raw `u32` (the `CUmemcpySrcAccessOrder` enum) so that a
+/// forward-compatible value emitted by a future driver can be round-tripped
+/// without UB.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(C)]
+pub struct CUmemcpyAttributes {
+    /// Source access order; see `CUmemcpySrcAccessOrder` in `cuda.h`.
+    pub src_access_order: u32,
+    /// Hint for the source memory location.
+    pub src_loc_hint: CUmemLocation,
+    /// Hint for the destination memory location.
+    pub dst_loc_hint: CUmemLocation,
+    /// Additional copy flags (reserved; `0` on current drivers).
+    pub flags: u32,
 }
 
 // =========================================================================
@@ -1325,16 +1403,19 @@ mod tests {
         );
         assert_eq!(CUdevice_attribute::ManagedMemory as i32, 83);
 
-        // New variants
-        assert_eq!(CUdevice_attribute::MaxTexture2DGatherWidth as i32, 44);
-        assert_eq!(CUdevice_attribute::MaxTexture2DGatherHeight as i32, 45);
+        // Corrected discriminants (cuda.h `CUdevice_attribute` values)
+        assert_eq!(CUdevice_attribute::CanTex2dGather as i32, 44);
+        assert_eq!(CUdevice_attribute::MaxTexture2DGatherWidth as i32, 45);
+        assert_eq!(CUdevice_attribute::MaxTexture2DGatherHeight as i32, 46);
         assert_eq!(CUdevice_attribute::MaxTexture3DWidthAlt as i32, 47);
         assert_eq!(CUdevice_attribute::MaxTexture3DHeightAlt as i32, 48);
         assert_eq!(CUdevice_attribute::MaxTexture3DDepthAlt as i32, 49);
-        assert_eq!(CUdevice_attribute::MaxTexture1DMipmappedWidth2 as i32, 52);
-        assert_eq!(CUdevice_attribute::Reserved92 as i32, 92);
-        assert_eq!(CUdevice_attribute::Reserved93 as i32, 93);
-        assert_eq!(CUdevice_attribute::Reserved94 as i32, 94);
+        assert_eq!(CUdevice_attribute::MaxTextureCubemapWidth as i32, 52);
+        assert_eq!(CUdevice_attribute::CanUseStreamMemOpsV1 as i32, 92);
+        assert_eq!(CUdevice_attribute::CanUse64BitStreamMemOpsV1 as i32, 93);
+        assert_eq!(CUdevice_attribute::CanUseStreamWaitValueNorV1 as i32, 94);
+        assert_eq!(CUdevice_attribute::GlobalL1CacheSupported as i32, 79);
+        assert_eq!(CUdevice_attribute::LocalL1CacheSupported as i32, 80);
         assert_eq!(
             CUdevice_attribute::VirtualMemoryManagementSupported as i32,
             102
@@ -1351,21 +1432,29 @@ mod tests {
             CUdevice_attribute::HandleTypeWin32KmtHandleSupported as i32,
             105
         );
-        assert_eq!(CUdevice_attribute::AccessPolicyMaxWindowSize as i32, 111);
-        assert_eq!(CUdevice_attribute::ReservedSharedMemoryPerBlock as i32, 112);
+        assert_eq!(CUdevice_attribute::MaxAccessPolicyWindowSize as i32, 109);
+        assert_eq!(CUdevice_attribute::ReservedSharedMemoryPerBlock as i32, 111);
+        assert_eq!(CUdevice_attribute::SparseCudaArraySupported as i32, 112);
         assert_eq!(
-            CUdevice_attribute::TimelineSemaphoreInteropSupported as i32,
+            CUdevice_attribute::ReadOnlyHostRegisterSupported as i32,
             113
         );
-        assert_eq!(CUdevice_attribute::MemoryPoolsSupported as i32, 115);
-        assert_eq!(CUdevice_attribute::ClusterLaunch as i32, 120);
-        assert_eq!(CUdevice_attribute::UnifiedFunctionPointers as i32, 125);
         assert_eq!(
-            CUdevice_attribute::MaxTimelineSemaphoreInteropSupported as i32,
-            129
+            CUdevice_attribute::TimelineSemaphoreInteropSupported as i32,
+            114
         );
-        assert_eq!(CUdevice_attribute::MemSyncDomainSupported as i32, 130);
-        assert_eq!(CUdevice_attribute::GpuDirectRdmaFabricSupported as i32, 131);
+        assert_eq!(CUdevice_attribute::MemoryPoolsSupported as i32, 115);
+        assert_eq!(CUdevice_attribute::DmaBufSupported as i32, 124);
+        assert_eq!(CUdevice_attribute::IpcEventSupported as i32, 125);
+        assert_eq!(CUdevice_attribute::MemSyncDomainCount as i32, 126);
+        assert_eq!(CUdevice_attribute::TensorMapAccessSupported as i32, 127);
+        assert_eq!(CUdevice_attribute::ClusterLaunch as i32, 120);
+        assert_eq!(CUdevice_attribute::UnifiedFunctionPointers as i32, 129);
+        assert_eq!(CUdevice_attribute::NumaConfig as i32, 130);
+        assert_eq!(CUdevice_attribute::NumaId as i32, 131);
+        assert_eq!(CUdevice_attribute::GpuDirectRdmaFabricSupported as i32, 128);
+        assert_eq!(CUdevice_attribute::MulticastSupported as i32, 132);
+        assert_eq!(CUdevice_attribute::HostNumaId as i32, 134);
     }
 
     #[test]
@@ -1427,13 +1516,15 @@ mod tests {
             std::mem::size_of::<CUsurfref>(),
             std::mem::size_of::<*mut c_void>()
         );
+        // Bindless texture / surface objects are `unsigned long long` values,
+        // not opaque pointers (correct on 32-bit targets too).
         assert_eq!(
             std::mem::size_of::<CUtexObject>(),
-            std::mem::size_of::<*mut c_void>()
+            std::mem::size_of::<u64>()
         );
         assert_eq!(
             std::mem::size_of::<CUsurfObject>(),
-            std::mem::size_of::<*mut c_void>()
+            std::mem::size_of::<u64>()
         );
     }
 
@@ -1459,8 +1550,8 @@ mod tests {
         assert_eq!(CUpointer_attribute::MemoryType as u32, 2);
         assert_eq!(CUpointer_attribute::DevicePointer as u32, 3);
         assert_eq!(CUpointer_attribute::HostPointer as u32, 4);
-        assert_eq!(CUpointer_attribute::IsManaged as u32, 9);
-        assert_eq!(CUpointer_attribute::DeviceOrdinal as u32, 10);
+        assert_eq!(CUpointer_attribute::IsManaged as u32, 8);
+        assert_eq!(CUpointer_attribute::DeviceOrdinal as u32, 9);
     }
 
     #[test]

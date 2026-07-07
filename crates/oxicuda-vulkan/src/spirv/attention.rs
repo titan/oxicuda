@@ -89,6 +89,19 @@ pub fn attention_spirv(
     m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, b.ty_fn_void);
     m.emit_label(lbl_entry);
 
+    // SPIR-V requires all Function-storage OpVariables to be declared in the
+    // first (entry) basic block, so allocate them here before any branch.
+    let var_max = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_float, var_max, STORAGE_CLASS_FUNCTION);
+    let var_sum = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_float, var_sum, STORAGE_CLASS_FUNCTION);
+    let var_dot = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_float, var_dot, STORAGE_CLASS_FUNCTION);
+    let var_sk = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_uint, var_sk, STORAGE_CLASS_FUNCTION);
+    let var_d = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_uint, var_d, STORAGE_CLASS_FUNCTION);
+
     let gid = load_gid_x(&mut m, &b);
     let cond = m.alloc_id();
     m.emit(OP_U_LESS_THAN, &[b.ty_bool, cond, gid, c_total]);
@@ -108,18 +121,6 @@ pub fn attention_spirv(
     // bh_skv = bh * seq_kv  (shared prefix for k/v base)
     let bh_skv = m.alloc_id();
     m.emit(OP_I_MUL, &[b.ty_uint, bh_skv, bh, c_skv]);
-
-    // Local variables
-    let var_max = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_float, var_max, STORAGE_CLASS_FUNCTION);
-    let var_sum = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_float, var_sum, STORAGE_CLASS_FUNCTION);
-    let var_dot = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_float, var_dot, STORAGE_CLASS_FUNCTION);
-    let var_sk = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_sk, STORAGE_CLASS_FUNCTION);
-    let var_d = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_d, STORAGE_CLASS_FUNCTION);
 
     // ── Pass 1: find max score ──
     m.emit_store(var_max, c_neg_inf);

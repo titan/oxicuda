@@ -263,10 +263,11 @@ impl BatchNormTemplate {
         writeln!(ptx, "    .param .u64 %param_beta,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u32 %param_batch_count").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+        // `.maxntid` must precede the body brace with no trailing semicolon.
+        writeln!(ptx, "    .maxntid {block_size}, 1, 1").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
         // Declarations
-        writeln!(ptx, "    .maxntid {block_size}, 1, 1;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b32 %r<24>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b64 %rd<20>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .f32 %f<24>;").map_err(PtxGenError::FormatError)?;
@@ -540,10 +541,11 @@ impl BatchNormTemplate {
         writeln!(ptx, "    .param .u64 %param_running_var,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u32 %param_batch_count").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+        // `.maxntid` must precede the body brace with no trailing semicolon.
+        writeln!(ptx, "    .maxntid {block_size}, 1, 1").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
         // Declarations
-        writeln!(ptx, "    .maxntid {block_size}, 1, 1;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b32 %r<20>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b64 %rd<20>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .f32 %f<16>;").map_err(PtxGenError::FormatError)?;

@@ -201,16 +201,29 @@ impl LevelZeroMemoryManager {
     pub fn copy_to_device(&self, handle: u64, src: &[u8]) -> LevelZeroResult<()> {
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
-            let device_ptr = {
-                let buffers = self
-                    .buffers
-                    .lock()
-                    .map_err(|_| LevelZeroError::CommandListError("mutex poisoned".into()))?;
+            // Hold the `buffers` lock for the whole transfer so a concurrent
+            // `free(handle)` on another thread cannot free `device_ptr` while
+            // the copy is still in flight (TOCTOU use-after-free).
+            let buffers = self
+                .buffers
+                .lock()
+                .map_err(|_| LevelZeroError::CommandListError("mutex poisoned".into()))?;
+            let (device_ptr, alloc_size) = {
                 let rec = buffers.get(&handle).ok_or_else(|| {
                     LevelZeroError::InvalidArgument(format!("unknown handle {handle}"))
                 })?;
-                rec.device_ptr
+                (rec.device_ptr, rec.size)
             };
+
+            // Bound the copy length against the recorded allocation size so a
+            // safe caller cannot overflow the device buffer (OOB device write).
+            if src.len() as u64 > alloc_size {
+                return Err(LevelZeroError::InvalidArgument(format!(
+                    "copy_to_device: src length {} exceeds device allocation size {} (handle {handle})",
+                    src.len(),
+                    alloc_size
+                )));
+            }
 
             let api = &self.device.api;
             let context = self.device.context;
@@ -362,16 +375,30 @@ impl LevelZeroMemoryManager {
     pub fn copy_from_device(&self, dst: &mut [u8], handle: u64) -> LevelZeroResult<()> {
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
-            let device_ptr = {
-                let buffers = self
-                    .buffers
-                    .lock()
-                    .map_err(|_| LevelZeroError::CommandListError("mutex poisoned".into()))?;
+            // Hold the `buffers` lock for the whole transfer so a concurrent
+            // `free(handle)` cannot free `device_ptr` mid-copy (TOCTOU
+            // use-after-free).
+            let buffers = self
+                .buffers
+                .lock()
+                .map_err(|_| LevelZeroError::CommandListError("mutex poisoned".into()))?;
+            let (device_ptr, alloc_size) = {
                 let rec = buffers.get(&handle).ok_or_else(|| {
                     LevelZeroError::InvalidArgument(format!("unknown handle {handle}"))
                 })?;
-                rec.device_ptr
+                (rec.device_ptr, rec.size)
             };
+
+            // Bound the read length against the recorded allocation size so a
+            // safe caller cannot read past the device buffer (OOB device read /
+            // adjacent-buffer info leak).
+            if dst.len() as u64 > alloc_size {
+                return Err(LevelZeroError::InvalidArgument(format!(
+                    "copy_from_device: dst length {} exceeds device allocation size {} (handle {handle})",
+                    dst.len(),
+                    alloc_size
+                )));
+            }
 
             let api = &self.device.api;
             let context = self.device.context;

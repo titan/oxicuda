@@ -47,5 +47,19 @@ pub(crate) fn required_elements(n: u32, inc: i32) -> usize {
     1 + (n as usize - 1) * inc.unsigned_abs() as usize
 }
 
-/// Default block size for Level 1 element-wise kernels.
+/// Default thread-block size for Level-1 element-wise kernels.
+///
+/// This is a deliberate tuning constant, not an arbitrary default. 256 is a
+/// power of two and an exact multiple of the 32-lane warp, yielding 8 warps
+/// per block — enough to hide global-memory latency on every supported SM
+/// (sm_70…sm_90) while keeping register pressure and the tail (partial final
+/// block) small for the bandwidth-bound Level-1 workloads, which is also the
+/// block size cuBLAS uses for these kernels.
+///
+/// The Level-1 kernels bake this value into their generated PTX (via
+/// `.maxntid` and the grid computation), so it is fixed per build rather than
+/// chosen per launch from the driver occupancy API. An occupancy-driven,
+/// per-`(kernel, sm)` block-size sweep would require regenerating and caching a
+/// PTX variant per block size; that is deferred until an on-device benchmark
+/// demonstrates a win over this constant.
 pub(crate) const L1_BLOCK_SIZE: u32 = 256;

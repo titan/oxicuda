@@ -83,6 +83,17 @@ impl<T: GpuFloat> EllMatrix<T> {
             )));
         }
 
+        // Validate column indices are within [0, cols), or the padding
+        // sentinel `ELL_SENTINEL` (-1); any other out-of-range value
+        // would cause SpMV kernels to read device memory out of bounds.
+        for (k, &c) in col_idx.iter().enumerate() {
+            if c != ELL_SENTINEL && (c < 0 || c as u32 >= cols) {
+                return Err(SparseError::InvalidFormat(format!(
+                    "col_idx[{k}] = {c} out of range [0, {cols}) and not the sentinel ({ELL_SENTINEL})"
+                )));
+            }
+        }
+
         let d_col_idx = DeviceBuffer::from_host(col_idx)?;
         let d_values = DeviceBuffer::from_host(values)?;
 
@@ -205,5 +216,36 @@ mod tests {
     #[test]
     fn ell_sentinel_value() {
         assert_eq!(ELL_SENTINEL, -1);
+    }
+
+    #[test]
+    fn ell_validation_col_idx_out_of_range() {
+        // cols = 3, so col index 3 is out of range (and is not the sentinel)
+        let result = EllMatrix::<f32>::from_host(1, 3, 2, &[3, ELL_SENTINEL], &[1.0, 0.0]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// On-device validation that the padding sentinel is still accepted
+// (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::gpu_handle;
+
+    #[test]
+    fn ell_validation_sentinel_accepted() {
+        // Keep the handle (and the CUDA context it holds current) alive for
+        // the whole test; dropping it immediately would tear down the
+        // context before `EllMatrix::from_host` uploads to the device.
+        let Some(_handle) = gpu_handle() else {
+            return;
+        };
+        // The padding sentinel (-1) must remain valid regardless of `cols`.
+        let result = EllMatrix::<f32>::from_host(1, 3, 2, &[0, ELL_SENTINEL], &[1.0, 0.0]);
+        assert!(result.is_ok());
     }
 }

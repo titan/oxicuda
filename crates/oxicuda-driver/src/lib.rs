@@ -110,12 +110,12 @@ pub use ffi::{
     CUdevice_attribute, CUdeviceptr, CUevent, CUfilter_mode, CUfunction, CUfunction_attribute,
     CUjit_option, CUjitInputType, CUkernel, CUlibrary, CUlimit, CUlinkState, CUmemAccessDesc,
     CUmemAccessFlags, CUmemAllocationHandleType, CUmemAllocationProp, CUmemAllocationType,
-    CUmemGenericAllocationHandle, CUmemLocation, CUmemLocationType, CUmemPoolProps, CUmemoryPool,
-    CUmemorytype, CUmipmappedArray, CUmodule, CUmulticastObject, CUpointer_attribute,
-    CUresourceViewFormat, CUresourcetype, CUstream, CUsurfObject, CUsurfref, CUtexObject, CUtexref,
-    CuLaunchAttribute, CuLaunchAttributeClusterDim, CuLaunchAttributeId, CuLaunchAttributeValue,
-    CuLaunchConfig, CudaResourceDescArray, CudaResourceDescLinear, CudaResourceDescMipmap,
-    CudaResourceDescPitch2d, CudaResourceDescRes,
+    CUmemGenericAllocationHandle, CUmemLocation, CUmemLocationType, CUmemPoolProps,
+    CUmemcpyAttributes, CUmemoryPool, CUmemorytype, CUmipmappedArray, CUmodule, CUmulticastObject,
+    CUpointer_attribute, CUresourceViewFormat, CUresourcetype, CUstream, CUsurfObject, CUsurfref,
+    CUtexObject, CUtexref, CuLaunchAttribute, CuLaunchAttributeClusterDim, CuLaunchAttributeId,
+    CuLaunchAttributeValue, CuLaunchConfig, CudaResourceDescArray, CudaResourceDescLinear,
+    CudaResourceDescMipmap, CudaResourceDescPitch2d, CudaResourceDescRes,
 };
 
 // ---------------------------------------------------------------------------

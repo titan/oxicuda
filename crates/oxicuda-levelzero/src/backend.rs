@@ -99,45 +99,50 @@ impl ComputeBackend for LevelZeroBackend {
 
     fn gemm(
         &self,
-        _trans_a: BackendTranspose,
-        _trans_b: BackendTranspose,
+        trans_a: BackendTranspose,
+        trans_b: BackendTranspose,
         m: usize,
         n: usize,
         k: usize,
         alpha: f64,
         a_ptr: u64,
-        _lda: usize,
+        lda: usize,
         b_ptr: u64,
-        _ldb: usize,
+        ldb: usize,
         beta: f64,
         c_ptr: u64,
-        _ldc: usize,
+        ldc: usize,
     ) -> BackendResult<()> {
         self.check_init()?;
         if m == 0 || n == 0 || k == 0 {
             return Ok(());
         }
+        // The GEMM SPIR-V kernel hard-codes a packed, non-transposed layout
+        // (A: m×k lda=k, B: k×n ldb=n, C: m×n ldc=n). Reject any transpose mode
+        // or non-packed leading dimension with a loud error rather than
+        // silently computing the wrong product.
+        Self::check_gemm_layout(trans_a, trans_b, n, k, lda, ldb, ldc)?;
         self.dispatch_gemm(m, n, k, alpha as f32, a_ptr, b_ptr, beta as f32, c_ptr)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn batched_gemm(
         &self,
-        _trans_a: BackendTranspose,
-        _trans_b: BackendTranspose,
+        trans_a: BackendTranspose,
+        trans_b: BackendTranspose,
         m: usize,
         n: usize,
         k: usize,
         alpha: f64,
         a_ptr: u64,
-        _lda: usize,
+        lda: usize,
         stride_a: usize,
         b_ptr: u64,
-        _ldb: usize,
+        ldb: usize,
         stride_b: usize,
         beta: f64,
         c_ptr: u64,
-        _ldc: usize,
+        ldc: usize,
         stride_c: usize,
         batch_count: usize,
     ) -> BackendResult<()> {
@@ -145,6 +150,9 @@ impl ComputeBackend for LevelZeroBackend {
         if batch_count == 0 || m == 0 || n == 0 || k == 0 {
             return Ok(());
         }
+        // Same packed-layout constraint as `gemm`; the batched kernel reuses the
+        // identical per-matrix indexing.
+        Self::check_gemm_layout(trans_a, trans_b, n, k, lda, ldb, ldc)?;
         self.dispatch_batched_gemm(
             m,
             n,
@@ -325,15 +333,18 @@ impl ComputeBackend for LevelZeroBackend {
 
         // Numerically-stable scaled dot-product attention
         let mut output = vec![0.0f32; q_len];
+        // Per-key scores computed in pass 1 and reused in pass 2, avoiding a
+        // redundant recomputation of the Q·K dot product for every (query,key).
+        let mut scores = vec![0.0f32; seq_kv];
 
         for bh in 0..batch_heads {
             for sq in 0..seq_q {
                 let q_off = (bh * seq_q + sq) * head_dim;
                 let o_off = q_off;
 
-                // Pass 1: find max score
+                // Pass 1: compute + cache each score, tracking the max.
                 let mut max_score = f32::NEG_INFINITY;
-                for sk in 0..seq_kv {
+                for (sk, score_slot) in scores.iter_mut().enumerate() {
                     if causal && sk > sq {
                         continue;
                     }
@@ -343,6 +354,7 @@ impl ComputeBackend for LevelZeroBackend {
                         dot += q[q_off + d] * k[k_off + d];
                     }
                     let score = dot * scale_f32;
+                    *score_slot = score;
                     if score > max_score {
                         max_score = score;
                     }
@@ -352,19 +364,16 @@ impl ComputeBackend for LevelZeroBackend {
                     max_score = 0.0;
                 }
 
-                // Pass 2: accumulate exp-weighted V
+                // Pass 2: accumulate exp-weighted V, reusing the cached scores.
+                // The causal skip predicate is identical to pass 1, so only
+                // scores written above are ever read here.
                 let mut sum_exp = 0.0f32;
-                for sk in 0..seq_kv {
+                for (sk, &score) in scores.iter().enumerate() {
                     if causal && sk > sq {
                         continue;
                     }
-                    let k_off = (bh * seq_kv + sk) * head_dim;
                     let v_off = (bh * seq_kv + sk) * head_dim;
-                    let mut dot = 0.0f32;
-                    for d in 0..head_dim {
-                        dot += q[q_off + d] * k[k_off + d];
-                    }
-                    let w = (dot * scale_f32 - max_score).exp();
+                    let w = (score - max_score).exp();
                     sum_exp += w;
                     for d in 0..head_dim {
                         output[o_off + d] += w * v[v_off + d];
@@ -760,12 +769,13 @@ impl LevelZeroBackend {
         n: usize,
     ) -> BackendResult<()> {
         let spv = crate::spirv::unary_compute_shader(op);
+        let n32 = Self::checked_u32(n, "element count")?;
         let args = [
             KernelArg::Buffer(input_ptr),
             KernelArg::Buffer(output_ptr),
-            KernelArg::U32(n as u32),
+            KernelArg::U32(n32),
         ];
-        self.run_kernel(&spv, &args, (n as u32).div_ceil(WORKGROUP_SIZE))
+        self.run_kernel(&spv, &args, n32.div_ceil(WORKGROUP_SIZE))
     }
 
     fn dispatch_binary(
@@ -777,13 +787,14 @@ impl LevelZeroBackend {
         n: usize,
     ) -> BackendResult<()> {
         let spv = crate::spirv::binary_compute_shader(op);
+        let n32 = Self::checked_u32(n, "element count")?;
         let args = [
             KernelArg::Buffer(a_ptr),
             KernelArg::Buffer(b_ptr),
             KernelArg::Buffer(output_ptr),
-            KernelArg::U32(n as u32),
+            KernelArg::U32(n32),
         ];
-        self.run_kernel(&spv, &args, (n as u32).div_ceil(WORKGROUP_SIZE))
+        self.run_kernel(&spv, &args, n32.div_ceil(WORKGROUP_SIZE))
     }
 
     fn dispatch_reduce(
@@ -799,13 +810,20 @@ impl LevelZeroBackend {
         let inner_size: usize = shape[axis + 1..].iter().product::<usize>().max(1);
 
         let spv = crate::spirv::reduce_compute_shader(op);
-        let total_output = (outer_size * inner_size) as u32;
+        let outer32 = Self::checked_u32(outer_size, "outer_size")?;
+        let reduce32 = Self::checked_u32(reduce_size, "reduce_size")?;
+        let inner32 = Self::checked_u32(inner_size, "inner_size")?;
+        let total_output = outer32.checked_mul(inner32).ok_or_else(|| {
+            BackendError::InvalidArgument(
+                "outer_size*inner_size exceeds u32::MAX (32-bit kernel indexing)".into(),
+            )
+        })?;
         let args = [
             KernelArg::Buffer(input_ptr),
             KernelArg::Buffer(output_ptr),
-            KernelArg::U32(outer_size as u32),
-            KernelArg::U32(reduce_size as u32),
-            KernelArg::U32(inner_size as u32),
+            KernelArg::U32(outer32),
+            KernelArg::U32(reduce32),
+            KernelArg::U32(inner32),
         ];
         self.run_kernel(&spv, &args, total_output.div_ceil(WORKGROUP_SIZE))
     }
@@ -1067,23 +1085,32 @@ impl LevelZeroBackend {
         stride_c: usize,
     ) -> BackendResult<()> {
         let spv = crate::spirv::batched_gemm_compute_shader();
-        let total_per_batch = (m * n) as u32;
+        let m32 = Self::checked_u32(m, "m")?;
+        let n32 = Self::checked_u32(n, "n")?;
+        let k32 = Self::checked_u32(k, "k")?;
+        let batch32 = Self::checked_u32(batch_count, "batch_count")?;
+        let stride_a32 = Self::checked_u32(stride_a, "stride_a")?;
+        let stride_b32 = Self::checked_u32(stride_b, "stride_b")?;
+        let stride_c32 = Self::checked_u32(stride_c, "stride_c")?;
+        let total_per_batch = m32.checked_mul(n32).ok_or_else(|| {
+            BackendError::InvalidArgument("m*n exceeds u32::MAX (32-bit kernel indexing)".into())
+        })?;
         let workgroups_x = total_per_batch.div_ceil(WORKGROUP_SIZE);
         let args = [
             KernelArg::Buffer(a_ptr),
             KernelArg::Buffer(b_ptr),
             KernelArg::Buffer(c_ptr),
-            KernelArg::U32(m as u32),
-            KernelArg::U32(n as u32),
-            KernelArg::U32(k as u32),
+            KernelArg::U32(m32),
+            KernelArg::U32(n32),
+            KernelArg::U32(k32),
             KernelArg::F32(alpha),
             KernelArg::F32(beta),
-            KernelArg::U32(batch_count as u32),
-            KernelArg::U32(stride_a as u32),
-            KernelArg::U32(stride_b as u32),
-            KernelArg::U32(stride_c as u32),
+            KernelArg::U32(batch32),
+            KernelArg::U32(stride_a32),
+            KernelArg::U32(stride_b32),
+            KernelArg::U32(stride_c32),
         ];
-        self.run_kernel_3d(&spv, &args, workgroups_x, 1, batch_count as u32)
+        self.run_kernel_3d(&spv, &args, workgroups_x, 1, batch32)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1099,18 +1126,61 @@ impl LevelZeroBackend {
         c_ptr: u64,
     ) -> BackendResult<()> {
         let spv = crate::spirv::gemm_compute_shader();
-        let total = (m * n) as u32;
+        let m32 = Self::checked_u32(m, "m")?;
+        let n32 = Self::checked_u32(n, "n")?;
+        let k32 = Self::checked_u32(k, "k")?;
+        let total = m32.checked_mul(n32).ok_or_else(|| {
+            BackendError::InvalidArgument("m*n exceeds u32::MAX (32-bit kernel indexing)".into())
+        })?;
         let args = [
             KernelArg::Buffer(a_ptr),
             KernelArg::Buffer(b_ptr),
             KernelArg::Buffer(c_ptr),
-            KernelArg::U32(m as u32),
-            KernelArg::U32(n as u32),
-            KernelArg::U32(k as u32),
+            KernelArg::U32(m32),
+            KernelArg::U32(n32),
+            KernelArg::U32(k32),
             KernelArg::F32(alpha),
             KernelArg::F32(beta),
         ];
         self.run_kernel(&spv, &args, total.div_ceil(WORKGROUP_SIZE))
+    }
+
+    /// Narrow a `usize` dimension/count/stride to the `u32` the SPIR-V compute
+    /// kernels use for indexing and workgroup counts, returning a loud
+    /// [`BackendError::InvalidArgument`] rather than silently truncating (which
+    /// would leave part of the buffer unprocessed).
+    fn checked_u32(value: usize, what: &str) -> BackendResult<u32> {
+        u32::try_from(value).map_err(|_| {
+            BackendError::InvalidArgument(format!(
+                "{what} ({value}) exceeds u32::MAX; Level Zero compute kernels use 32-bit indexing"
+            ))
+        })
+    }
+
+    /// Validate that the GEMM kernel's packed, non-transposed layout assumption
+    /// holds; the kernel indexes `A[row*k+i]`, `B[i*n+col]`, `C[row*n+col]`.
+    fn check_gemm_layout(
+        trans_a: BackendTranspose,
+        trans_b: BackendTranspose,
+        n: usize,
+        k: usize,
+        lda: usize,
+        ldb: usize,
+        ldc: usize,
+    ) -> BackendResult<()> {
+        if trans_a != BackendTranspose::NoTrans || trans_b != BackendTranspose::NoTrans {
+            return Err(BackendError::InvalidArgument(
+                "Level Zero GEMM kernel supports only BackendTranspose::NoTrans for both operands"
+                    .into(),
+            ));
+        }
+        if lda != k || ldb != n || ldc != n {
+            return Err(BackendError::InvalidArgument(format!(
+                "Level Zero GEMM kernel requires packed leading dimensions \
+                 (lda=k={k}, ldb=n={n}, ldc=n={n}); got lda={lda}, ldb={ldb}, ldc={ldc}"
+            )));
+        }
+        Ok(())
     }
 }
 

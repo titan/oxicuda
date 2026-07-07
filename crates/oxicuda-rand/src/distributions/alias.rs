@@ -35,8 +35,10 @@ impl AliasTable {
     /// # Errors
     ///
     /// - [`RandError::InvalidParameter`] if `weights` is empty.
-    /// - [`RandError::InvalidParameter`] if any weight is negative.
-    /// - [`RandError::InvalidParameter`] if the total weight is zero.
+    /// - [`RandError::InvalidParameter`] if any weight is negative, `NaN`, or
+    ///   infinite.
+    /// - [`RandError::InvalidParameter`] if the total weight is zero or the
+    ///   sum overflows to infinity.
     pub fn new(weights: &[f64]) -> RandResult<Self> {
         if weights.is_empty() {
             return Err(RandError::InvalidParameter(
@@ -44,16 +46,16 @@ impl AliasTable {
             ));
         }
         for (i, &w) in weights.iter().enumerate() {
-            if w < 0.0 {
+            if !w.is_finite() || w < 0.0 {
                 return Err(RandError::InvalidParameter(format!(
-                    "weight[{i}] = {w} is negative; all weights must be >= 0"
+                    "weight[{i}] = {w} must be a finite non-negative number"
                 )));
             }
         }
 
         let n = weights.len();
         let sum: f64 = weights.iter().sum();
-        if sum == 0.0 {
+        if !sum.is_finite() || sum == 0.0 {
             return Err(RandError::InvalidParameter(
                 "total weight is zero; at least one weight must be positive".to_string(),
             ));
@@ -224,6 +226,28 @@ mod tests {
         assert!(result.is_err(), "negative weight must return Err");
         if let Err(RandError::InvalidParameter(msg)) = result {
             assert!(msg.contains("negative"), "error message: {msg}");
+        } else {
+            panic!("expected InvalidParameter error");
+        }
+    }
+
+    #[test]
+    fn nan_weight_error() {
+        let result = AliasTable::new(&[1.0, f64::NAN, 2.0]);
+        assert!(result.is_err(), "NaN weight must return Err");
+        if let Err(RandError::InvalidParameter(msg)) = result {
+            assert!(msg.contains("finite"), "error message: {msg}");
+        } else {
+            panic!("expected InvalidParameter error");
+        }
+    }
+
+    #[test]
+    fn infinite_weight_error() {
+        let result = AliasTable::new(&[1.0, f64::INFINITY, 2.0]);
+        assert!(result.is_err(), "infinite weight must return Err");
+        if let Err(RandError::InvalidParameter(msg)) = result {
+            assert!(msg.contains("finite"), "error message: {msg}");
         } else {
             panic!("expected InvalidParameter error");
         }

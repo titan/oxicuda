@@ -6,15 +6,15 @@
 //! `C = alpha * op(A) * op(B) + beta * C`
 //!
 //! The function validates dimensions, constructs a [`GemmProblem`], and
-//! delegates to the [`GemmDispatcher`] for kernel selection and launch.
+//! delegates to the [`GemmDispatcher`](super::gemm::dispatch::GemmDispatcher) for kernel selection and launch.
 
 use oxicuda_ptx::ir::PtxType;
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
-use crate::types::{GpuFloat, MatrixDesc, MatrixDescMut, Transpose};
+use crate::types::{FillMode, GpuFloat, Layout, MatrixDesc, MatrixDescMut, Transpose};
 
-use super::gemm::dispatch::{GemmDispatcher, GemmProblem};
+use super::gemm::dispatch::GemmProblem;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -54,6 +54,15 @@ use super::gemm::dispatch::{GemmDispatcher, GemmProblem};
 /// `op(A)` and `op(B)` do not agree, or if C does not have the right shape.
 /// Returns other [`BlasError`] variants on PTX generation or launch failure.
 ///
+/// # Aliasing
+///
+/// `C` must not overlap either input `A` or `B` in device memory: the kernel
+/// reads `A`/`B` while concurrently writing `C`, so an overlap yields a
+/// read/write race and undefined results. Passing a `C` whose storage
+/// interval intersects `A`'s or `B`'s returns
+/// [`BlasError::InvalidArgument`]. `A` and `B` may safely alias each other
+/// (they are read-only), which SYRK-style callers rely on.
+///
 /// # Example
 ///
 /// ```rust,no_run
@@ -79,6 +88,51 @@ pub fn gemm<T: GpuFloat>(
     b: &MatrixDesc<T>,
     beta: T,
     c: &mut MatrixDescMut<T>,
+) -> BlasResult<()> {
+    gemm_impl(handle, trans_a, trans_b, alpha, a, b, beta, c, None)
+}
+
+/// Triangle-masked GEMM: identical to [`gemm`] but writes only the requested
+/// triangle of `C`, leaving the opposite triangle byte-for-byte unchanged.
+///
+/// This is the correctness primitive behind SYRK / SYR2K: the symmetric
+/// product is computed with a full dot product over `K`, but the store is
+/// skipped for elements outside `fill_mode`, so the untouched off-triangle is
+/// preserved exactly (matching reference BLAS semantics).
+///
+/// `fill_mode` of `None` or `Some(FillMode::Full)` behaves exactly like
+/// [`gemm`] (a full write).
+///
+/// # Errors
+///
+/// Same as [`gemm`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gemm_tri<T: GpuFloat>(
+    handle: &BlasHandle,
+    trans_a: Transpose,
+    trans_b: Transpose,
+    alpha: T,
+    a: &MatrixDesc<T>,
+    b: &MatrixDesc<T>,
+    beta: T,
+    c: &mut MatrixDescMut<T>,
+    fill_mode: Option<FillMode>,
+) -> BlasResult<()> {
+    gemm_impl(handle, trans_a, trans_b, alpha, a, b, beta, c, fill_mode)
+}
+
+/// Shared implementation for [`gemm`] and [`gemm_tri`].
+#[allow(clippy::too_many_arguments)]
+fn gemm_impl<T: GpuFloat>(
+    handle: &BlasHandle,
+    trans_a: Transpose,
+    trans_b: Transpose,
+    alpha: T,
+    a: &MatrixDesc<T>,
+    b: &MatrixDesc<T>,
+    beta: T,
+    c: &mut MatrixDescMut<T>,
+    fill_mode: Option<FillMode>,
 ) -> BlasResult<()> {
     // Extract effective dimensions after transpose.
     let (m, k_a) = a.effective_dims(trans_a);
@@ -107,6 +161,39 @@ pub fn gemm<T: GpuFloat>(
         )));
     }
 
+    // The dispatcher derives leading dimensions from m/n/k and generates tight
+    // row-major kernels — it ignores each descriptor's `layout`/`ld`. A
+    // column-major or ld-padded operand would therefore be silently
+    // mis-addressed, so reject anything that is not tightly packed row-major.
+    for (layout, ld, cols, name) in [
+        (a.layout, a.ld, a.cols, "A"),
+        (b.layout, b.ld, b.cols, "B"),
+        (c.layout, c.ld, c.cols, "C"),
+    ] {
+        if layout != Layout::RowMajor {
+            return Err(BlasError::InvalidArgument(format!(
+                "GEMM requires RowMajor operands; {name} is ColMajor"
+            )));
+        }
+        if ld != cols {
+            return Err(BlasError::InvalidArgument(format!(
+                "GEMM requires tightly packed operands; {name}.ld ({ld}) != {name}.cols ({cols})"
+            )));
+        }
+    }
+
+    // Reject C overlapping either input. The kernel reads A/B while writing C,
+    // so an overlap is a device-side data race. A-vs-B overlap is *not*
+    // checked: both are read-only and SYRK/SYR2K legitimately pass the same
+    // descriptor as A and B.
+    if buffers_overlap(c.ptr, c.storage_bytes(), a.ptr, a.storage_bytes())
+        || buffers_overlap(c.ptr, c.storage_bytes(), b.ptr, b.storage_bytes())
+    {
+        return Err(BlasError::InvalidArgument(
+            "C must not overlap A/B in GEMM".into(),
+        ));
+    }
+
     // Build the problem description.
     let problem = GemmProblem {
         m,
@@ -119,8 +206,9 @@ pub fn gemm<T: GpuFloat>(
         math_mode: handle.math_mode(),
     };
 
-    // Create (or reuse) the dispatcher.
-    let dispatcher = GemmDispatcher::new(handle.sm_version());
+    // Reuse the handle-owned dispatcher so its compiled-kernel cache persists
+    // across calls (a fresh dispatcher would re-JIT every GEMM).
+    let dispatcher = handle.gemm_dispatcher();
 
     // Convert scalar arguments to bit representation for the kernel.
     let alpha_bits = alpha.to_bits_u64();
@@ -133,6 +221,7 @@ pub fn gemm<T: GpuFloat>(
         c.ptr,
         alpha_bits,
         beta_bits,
+        fill_mode,
         handle.stream(),
     )
 }
@@ -143,6 +232,17 @@ pub fn gemm<T: GpuFloat>(
 /// for F64 it's F64.
 fn accumulator_ptx_type<T: GpuFloat>() -> PtxType {
     <T::Accumulator as GpuFloat>::PTX_TYPE
+}
+
+/// Returns `true` if the two device byte-intervals `[p, p + p_len)` and
+/// `[q, q + q_len)` intersect. A zero-length interval never overlaps.
+fn buffers_overlap(p: u64, p_len: usize, q: u64, q_len: usize) -> bool {
+    if p_len == 0 || q_len == 0 {
+        return false;
+    }
+    let p_end = p.saturating_add(p_len as u64);
+    let q_end = q.saturating_add(q_len as u64);
+    p < q_end && q < p_end
 }
 
 // ---------------------------------------------------------------------------
@@ -212,5 +312,20 @@ mod tests {
     #[test]
     fn accumulator_ptx_type_f64() {
         assert_eq!(accumulator_ptx_type::<f64>(), PtxType::F64);
+    }
+
+    #[test]
+    fn overlap_detects_intersection() {
+        // [1000, 1400) vs [1200, 1600) overlap.
+        assert!(buffers_overlap(1000, 400, 1200, 400));
+        // Adjacent, non-overlapping: [1000, 1400) vs [1400, 1800).
+        assert!(!buffers_overlap(1000, 400, 1400, 400));
+        // Disjoint.
+        assert!(!buffers_overlap(1000, 100, 5000, 100));
+        // Identical intervals overlap (A-vs-B read/read is allowed elsewhere,
+        // but C-vs-A with the same pointer must be rejected).
+        assert!(buffers_overlap(2048, 256, 2048, 256));
+        // Zero-length never overlaps.
+        assert!(!buffers_overlap(2048, 0, 2048, 256));
     }
 }

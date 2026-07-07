@@ -43,6 +43,8 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
@@ -214,6 +216,99 @@ impl std::fmt::Display for LaunchTiming {
 }
 
 // ---------------------------------------------------------------------------
+// PollerShared — background re-waking thread shared by both completion futures
+// ---------------------------------------------------------------------------
+
+/// State shared between a completion future and its background poller
+/// thread.
+///
+/// A single thread (spawned lazily on the first [`Poll::Pending`]) loops
+/// according to the future's [`PollStrategy`], repeatedly re-waking the
+/// most recently stored [`Waker`] until `done` is set — either because the
+/// future resolved, or because it was dropped before resolving.
+///
+/// This replaces a one-shot wake: waking the executor exactly once is not
+/// sufficient for [`PollStrategy::Yield`] or [`PollStrategy::BackoffMicros`]
+/// to ever make further progress, since nothing else would schedule a
+/// second poll and the future would hang forever whenever the GPU work
+/// outlives that single wake.
+struct PollerShared {
+    /// Set once the future has resolved or been dropped, telling the
+    /// background thread to stop looping.
+    done: AtomicBool,
+    /// The waker to re-invoke on each interval; refreshed by the future
+    /// whenever the executor hands it a different one.
+    waker: Mutex<Waker>,
+}
+
+impl PollerShared {
+    /// Creates the shared state, seeded with the waker from the first
+    /// [`Poll::Pending`].
+    fn new(waker: Waker) -> Self {
+        Self {
+            done: AtomicBool::new(false),
+            waker: Mutex::new(waker),
+        }
+    }
+
+    /// Marks the poller as done, so its background thread exits on its
+    /// next loop iteration instead of continuing to re-wake forever.
+    fn mark_done(&self) {
+        self.done.store(true, Ordering::Release);
+    }
+
+    /// Replaces the stored waker if the executor has handed us a
+    /// different one since the last poll (e.g. the task moved to another
+    /// executor thread).
+    fn refresh_waker(&self, cx: &Context<'_>) {
+        let mut stored = self
+            .waker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !stored.will_wake(cx.waker()) {
+            *stored = cx.waker().clone();
+        }
+    }
+}
+
+/// Marks `poller` as done, if a background poller thread was ever spawned
+/// for this future (i.e. it was polled at least once while still pending).
+fn mark_poller_done(poller: &Option<Arc<PollerShared>>) {
+    if let Some(shared) = poller {
+        shared.mark_done();
+    }
+}
+
+/// Spawns the single background thread backing `shared`, looping
+/// according to `strategy` and re-waking `shared`'s stored waker on every
+/// interval until `shared.done` is set.
+///
+/// * [`PollStrategy::Spin`] — no pause between wakes (one busy-looping
+///   thread rather than the previous thread-per-poll spin).
+/// * [`PollStrategy::Yield`] — [`std::thread::yield_now`] between wakes.
+/// * [`PollStrategy::BackoffMicros`] — sleeps the given interval between
+///   wakes.
+fn spawn_poller_thread(shared: Arc<PollerShared>, strategy: PollStrategy) {
+    std::thread::spawn(move || {
+        loop {
+            match strategy {
+                PollStrategy::Spin => {}
+                PollStrategy::Yield => std::thread::yield_now(),
+                PollStrategy::BackoffMicros(us) => std::thread::sleep(Duration::from_micros(us)),
+            }
+            if shared.done.load(Ordering::Acquire) {
+                break;
+            }
+            let waker = shared
+                .waker
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            waker.wake_by_ref();
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // LaunchCompletion
 // ---------------------------------------------------------------------------
 
@@ -230,10 +325,9 @@ pub struct LaunchCompletion {
     timeout: Option<Duration>,
     /// When the future was first polled (lazily initialised).
     start_time: Option<Instant>,
-    /// Stored waker for background polling thread.
-    waker: Option<Waker>,
-    /// Whether a background poller thread has been spawned.
-    poller_spawned: bool,
+    /// Background poller thread's shared state, created on the first
+    /// [`Poll::Pending`].
+    poller: Option<Arc<PollerShared>>,
 }
 
 impl LaunchCompletion {
@@ -244,8 +338,7 @@ impl LaunchCompletion {
             strategy: config.poll_strategy,
             timeout: config.timeout,
             start_time: None,
-            waker: None,
-            poller_spawned: false,
+            poller: None,
         }
     }
 
@@ -266,23 +359,18 @@ impl LaunchCompletion {
         }
     }
 
-    /// Spawns a background thread that polls the event and wakes the
-    /// waker when the event completes or on each poll interval.
-    fn spawn_poller(strategy: PollStrategy, waker: Waker) {
-        std::thread::spawn(move || {
-            match strategy {
-                PollStrategy::Spin => {
-                    // Wake immediately — the executor will re-poll.
-                }
-                PollStrategy::Yield => {
-                    std::thread::yield_now();
-                }
-                PollStrategy::BackoffMicros(us) => {
-                    std::thread::sleep(Duration::from_micros(us));
-                }
+    /// Ensures a background poller thread is running for this future,
+    /// spawning it on the first [`Poll::Pending`] and refreshing the
+    /// stored waker on every subsequent one.
+    fn ensure_poller(&mut self, cx: &Context<'_>) {
+        match &self.poller {
+            None => {
+                let shared = Arc::new(PollerShared::new(cx.waker().clone()));
+                spawn_poller_thread(Arc::clone(&shared), self.strategy);
+                self.poller = Some(shared);
             }
-            waker.wake();
-        });
+            Some(shared) => shared.refresh_waker(cx),
+        }
     }
 }
 
@@ -297,26 +385,34 @@ impl Future for LaunchCompletion {
 
         // Check timeout.
         if self.check_timeout() {
+            mark_poller_done(&self.poller);
             return Poll::Ready(Err(CudaError::Timeout));
         }
 
         // Query the event.
         match self.event.query() {
-            Ok(true) => Poll::Ready(Ok(())),
+            Ok(true) => {
+                mark_poller_done(&self.poller);
+                Poll::Ready(Ok(()))
+            }
             Ok(false) => {
-                // Store the waker and schedule a re-poll.
-                let waker = cx.waker().clone();
-                self.waker = Some(waker.clone());
-
-                if !self.poller_spawned || self.strategy == PollStrategy::Spin {
-                    self.poller_spawned = true;
-                    Self::spawn_poller(self.strategy, waker);
-                }
-
+                self.ensure_poller(cx);
                 Poll::Pending
             }
-            Err(e) => Poll::Ready(Err(e)),
+            Err(e) => {
+                mark_poller_done(&self.poller);
+                Poll::Ready(Err(e))
+            }
         }
+    }
+}
+
+impl Drop for LaunchCompletion {
+    /// Signals the background poller thread (if any) to stop, so it does
+    /// not keep looping forever after the future is dropped without
+    /// resolving.
+    fn drop(&mut self) {
+        mark_poller_done(&self.poller);
     }
 }
 
@@ -337,8 +433,9 @@ pub struct TimedLaunchCompletion {
     timeout: Option<Duration>,
     /// When the future was first polled.
     start_time: Option<Instant>,
-    /// Whether a background poller thread has been spawned.
-    poller_spawned: bool,
+    /// Background poller thread's shared state, created on the first
+    /// [`Poll::Pending`].
+    poller: Option<Arc<PollerShared>>,
 }
 
 impl TimedLaunchCompletion {
@@ -350,7 +447,7 @@ impl TimedLaunchCompletion {
             strategy: config.poll_strategy,
             timeout: config.timeout,
             start_time: None,
-            poller_spawned: false,
+            poller: None,
         }
     }
 
@@ -370,6 +467,20 @@ impl TimedLaunchCompletion {
             _ => false,
         }
     }
+
+    /// Ensures a background poller thread is running for this future,
+    /// spawning it on the first [`Poll::Pending`] and refreshing the
+    /// stored waker on every subsequent one.
+    fn ensure_poller(&mut self, cx: &Context<'_>) {
+        match &self.poller {
+            None => {
+                let shared = Arc::new(PollerShared::new(cx.waker().clone()));
+                spawn_poller_thread(Arc::clone(&shared), self.strategy);
+                self.poller = Some(shared);
+            }
+            Some(shared) => shared.refresh_waker(cx),
+        }
+    }
 }
 
 impl Future for TimedLaunchCompletion {
@@ -381,11 +492,13 @@ impl Future for TimedLaunchCompletion {
         }
 
         if self.check_timeout() {
+            mark_poller_done(&self.poller);
             return Poll::Ready(Err(CudaError::Timeout));
         }
 
         match self.end_event.query() {
             Ok(true) => {
+                mark_poller_done(&self.poller);
                 // Kernel complete — compute elapsed time.
                 match Event::elapsed_time(&self.start_event, &self.end_event) {
                     Ok(ms) => {
@@ -396,17 +509,23 @@ impl Future for TimedLaunchCompletion {
                 }
             }
             Ok(false) => {
-                let waker = cx.waker().clone();
-
-                if !self.poller_spawned || self.strategy == PollStrategy::Spin {
-                    self.poller_spawned = true;
-                    LaunchCompletion::spawn_poller(self.strategy, waker);
-                }
-
+                self.ensure_poller(cx);
                 Poll::Pending
             }
-            Err(e) => Poll::Ready(Err(e)),
+            Err(e) => {
+                mark_poller_done(&self.poller);
+                Poll::Ready(Err(e))
+            }
         }
+    }
+}
+
+impl Drop for TimedLaunchCompletion {
+    /// Signals the background poller thread (if any) to stop, so it does
+    /// not keep looping forever after the future is dropped without
+    /// resolving.
+    fn drop(&mut self) {
+        mark_poller_done(&self.poller);
     }
 }
 
@@ -839,5 +958,310 @@ mod tests {
             .with_timeout(Duration::from_millis(250));
         assert_eq!(config2.poll_strategy, PollStrategy::BackoffMicros(100));
         assert_eq!(config2.timeout, Some(Duration::from_millis(250)));
+    }
+
+    // ---------------------------------------------------------------------------
+    // On-device regression tests (F030): the one-shot poller must not hang the
+    // future forever under PollStrategy::Yield/BackoffMicros.
+    // ---------------------------------------------------------------------------
+
+    /// A device-side busy-spin kernel: a single thread repeatedly performs a
+    /// **volatile** global-memory read-modify-write on the same scratch
+    /// address, `iters` times. Used to keep a real CUDA event `Pending` for
+    /// a measurable, tunable amount of wall-clock time so the completion
+    /// futures actually observe multiple poll cycles before resolving.
+    ///
+    /// The loop body must have a genuine, non-eliminable side effect: an
+    /// earlier version that only incremented a register (with no memory
+    /// traffic) let the JIT compiler algebraically collapse the whole loop
+    /// into a single closed-form store, since it could prove no external
+    /// observer could see the intermediate values — making the kernel
+    /// finish instantly instead of taking real time. The `volatile`
+    /// qualifier on the load/store forbids that transformation and forces
+    /// one genuine dependent DRAM round trip per iteration.
+    #[cfg(feature = "gpu-tests")]
+    const BUSY_SPIN_PTX: &str = "\
+.version 7.0
+.target sm_70
+.address_size 64
+.visible .entry busy_spin(
+    .param .u64 scratch_ptr,
+    .param .u32 iters
+)
+{
+    .reg .b32 %r<4>;
+    .reg .b64 %rd<2>;
+    .reg .pred %p<2>;
+    ld.param.u64 %rd0, [scratch_ptr];
+    ld.param.u32 %r0, [iters];
+    mov.u32 %r1, 0;
+$LOOP:
+    setp.ge.u32 %p0, %r1, %r0;
+    @%p0 bra $DONE;
+    ld.volatile.global.u32 %r2, [%rd0];
+    add.u32 %r2, %r2, 1;
+    st.volatile.global.u32 [%rd0], %r2;
+    add.u32 %r1, %r1, 1;
+    bra $LOOP;
+$DONE:
+    ret;
+}
+";
+
+    /// A minimal wake counter: a [`std::task::Wake`] implementation that
+    /// just counts invocations, used to detect whether the background
+    /// poller thread wakes the executor repeatedly (fixed behaviour) or
+    /// only once (the regression this test guards against).
+    #[cfg(feature = "gpu-tests")]
+    struct CountingWaker(std::sync::atomic::AtomicUsize);
+
+    #[cfg(feature = "gpu-tests")]
+    impl std::task::Wake for CountingWaker {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Regression test for the bug where `LaunchCompletion`'s background
+    /// poller only woke the executor **once**: under
+    /// [`PollStrategy::Yield`], a real async executor that parks the task
+    /// until woken (rather than busy-polling) would then never be told to
+    /// poll again, and would hang forever whenever the GPU work outlives
+    /// that single wake. This drives the future with a manual executor
+    /// that self-polls on a short interval (so it does not itself rely on
+    /// the wake signal to make progress — that would risk a hang if the
+    /// fix regressed) while independently counting wake-ups; the fixed
+    /// implementation must wake the executor *more than once* over the
+    /// lifetime of a kernel slow enough to take multiple poll cycles.
+    /// Self-skips if there is no GPU/driver.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn launch_completion_yield_strategy_wakes_repeatedly_and_completes() {
+        let Ok(dev) = oxicuda_driver::device::Device::get(0) else {
+            return;
+        };
+        let ctx = match oxicuda_driver::context::Context::new(&dev) {
+            Ok(c) => Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let module = match oxicuda_driver::module::Module::from_ptx(BUSY_SPIN_PTX) {
+            Ok(m) => Arc::new(m),
+            Err(_) => return,
+        };
+        let kernel = match Kernel::from_module(module, "busy_spin") {
+            Ok(k) => k,
+            Err(_) => return,
+        };
+        let scratch = match oxicuda_memory::DeviceBuffer::<u32>::zeroed(1) {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+
+        let async_kernel =
+            AsyncKernel::with_config(kernel, AsyncLaunchConfig::new(PollStrategy::Yield));
+        // Enough dependent volatile-memory round trips to keep the kernel
+        // busy for a measurable stretch of wall-clock time, so multiple
+        // poll cycles happen before it completes.
+        let iters: u32 = 3_000_000;
+        let completion = match async_kernel.launch_async(
+            &LaunchParams::new(1u32, 1u32),
+            &stream,
+            &(scratch.as_device_ptr(), iters),
+        ) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let counter = Arc::new(CountingWaker(std::sync::atomic::AtomicUsize::new(0)));
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut cx = Context::from_waker(&waker);
+        let mut completion = Box::pin(completion);
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let result = loop {
+            match completion.as_mut().poll(&mut cx) {
+                Poll::Ready(r) => break r,
+                Poll::Pending => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "LaunchCompletion under PollStrategy::Yield did not complete \
+                         within the deadline (regression of the one-shot-waker hang)"
+                    );
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        };
+        result.expect("busy-spin kernel launch must succeed");
+
+        // The key regression signal: the background poller must wake the
+        // executor more than once. With the old one-shot poller, `counter`
+        // would never exceed 1 regardless of how long the kernel runs.
+        let wakes = counter.0.load(Ordering::SeqCst);
+        assert!(
+            wakes > 1,
+            "background poller must wake the executor more than once under \
+             PollStrategy::Yield, got {wakes} wake(s)"
+        );
+    }
+
+    /// Regression test for the `Drop` half of the fix: once a pending
+    /// completion future is dropped, its background poller thread must
+    /// stop looping (and thus stop waking) instead of spinning/yielding
+    /// forever in the background. Self-skips if there is no GPU/driver.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn launch_completion_drop_stops_background_poller() {
+        let Ok(dev) = oxicuda_driver::device::Device::get(0) else {
+            return;
+        };
+        let ctx = match oxicuda_driver::context::Context::new(&dev) {
+            Ok(c) => Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let module = match oxicuda_driver::module::Module::from_ptx(BUSY_SPIN_PTX) {
+            Ok(m) => Arc::new(m),
+            Err(_) => return,
+        };
+        let kernel = match Kernel::from_module(module, "busy_spin") {
+            Ok(k) => k,
+            Err(_) => return,
+        };
+        let scratch = match oxicuda_memory::DeviceBuffer::<u32>::zeroed(1) {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+
+        let async_kernel =
+            AsyncKernel::with_config(kernel, AsyncLaunchConfig::new(PollStrategy::Yield));
+        // A long-running kernel so it is essentially guaranteed to still be
+        // pending immediately after the first poll.
+        let iters: u32 = 20_000_000;
+        let completion = match async_kernel.launch_async(
+            &LaunchParams::new(1u32, 1u32),
+            &stream,
+            &(scratch.as_device_ptr(), iters),
+        ) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let counter = Arc::new(CountingWaker(std::sync::atomic::AtomicUsize::new(0)));
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut cx = Context::from_waker(&waker);
+        let mut completion = Box::pin(completion);
+
+        match completion.as_mut().poll(&mut cx) {
+            Poll::Pending => {}
+            // Finished implausibly fast on this device — nothing to
+            // observe, skip rather than risk a flaky failure.
+            Poll::Ready(_) => return,
+        }
+
+        std::thread::sleep(Duration::from_millis(50));
+        let before_drop = counter.0.load(Ordering::SeqCst);
+        assert!(
+            before_drop > 0,
+            "poller should have woken the executor at least once by now"
+        );
+
+        drop(completion);
+
+        // Give the background thread time to observe `done` and exit.
+        std::thread::sleep(Duration::from_millis(150));
+        let settled = counter.0.load(Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(150));
+        let after_settle = counter.0.load(Ordering::SeqCst);
+
+        // The completion future's Drop only stops our host-side polling
+        // machinery — the kernel itself (and its writes to `scratch`) keep
+        // running on the device. Let it actually finish before `stream`
+        // and `scratch` are dropped below, regardless of the assertion
+        // outcome, so we never free device memory (or destroy the stream)
+        // out from under an in-flight kernel.
+        stream
+            .synchronize()
+            .expect("stream sync after dropped completion");
+
+        assert_eq!(
+            settled, after_settle,
+            "background poller must stop waking once the future has been dropped"
+        );
+    }
+
+    /// Smoke test that `TimedLaunchCompletion` — which shares the same
+    /// `PollerShared`/`spawn_poller_thread` machinery — also resolves
+    /// under `PollStrategy::Yield` instead of hanging. Self-skips if there
+    /// is no GPU/driver.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn timed_launch_completion_yield_strategy_completes() {
+        let Ok(dev) = oxicuda_driver::device::Device::get(0) else {
+            return;
+        };
+        let ctx = match oxicuda_driver::context::Context::new(&dev) {
+            Ok(c) => Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let module = match oxicuda_driver::module::Module::from_ptx(BUSY_SPIN_PTX) {
+            Ok(m) => Arc::new(m),
+            Err(_) => return,
+        };
+        let kernel = match Kernel::from_module(module, "busy_spin") {
+            Ok(k) => k,
+            Err(_) => return,
+        };
+        let scratch = match oxicuda_memory::DeviceBuffer::<u32>::zeroed(1) {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+
+        let async_kernel =
+            AsyncKernel::with_config(kernel, AsyncLaunchConfig::new(PollStrategy::Yield));
+        let iters: u32 = 3_000_000;
+        let completion = match async_kernel.launch_and_time_async(
+            &LaunchParams::new(1u32, 1u32),
+            &stream,
+            &(scratch.as_device_ptr(), iters),
+        ) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let counter = Arc::new(CountingWaker(std::sync::atomic::AtomicUsize::new(0)));
+        let waker = Waker::from(counter);
+        let mut cx = Context::from_waker(&waker);
+        let mut completion = Box::pin(completion);
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let timing = loop {
+            match completion.as_mut().poll(&mut cx) {
+                Poll::Ready(r) => break r,
+                Poll::Pending => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "TimedLaunchCompletion under PollStrategy::Yield did not \
+                         complete within the deadline"
+                    );
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+        .expect("busy-spin kernel launch must succeed");
+        assert!(timing.elapsed_us >= 0.0);
     }
 }

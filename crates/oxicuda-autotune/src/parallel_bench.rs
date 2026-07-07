@@ -29,7 +29,7 @@
 //!
 //! let engine = ParallelBenchmarkEngine::new(config, BenchmarkConfig::default());
 //! let configs = vec![Config::new().with_tile_m(64), Config::new().with_tile_m(128)];
-//! let result = engine.benchmark_parallel(&configs, Some(2.0e9));
+//! let result = engine.benchmark_parallel(&configs, Some(2.0e9), |_cfg, _partition_idx| Ok(()));
 //! assert!(result.is_ok());
 //! ```
 //!
@@ -373,17 +373,29 @@ impl ParallelBenchmarkEngine {
     ///
     /// * `configs` — Slice of configurations to benchmark.
     /// * `flops` — Optional FLOP count for GFLOPS computation.
+    /// * `run_fn` — Executes the workload being timed for a given
+    ///   `Config`. The second argument is the index of the partition
+    ///   (simulated stream/device, per [`ParallelStrategy`]) the config
+    ///   was assigned to, so callers can dispatch to the matching
+    ///   stream or device. Called once per (warmup + measurement)
+    ///   iteration inside [`BenchmarkEngine::benchmark_wallclock`]; if it
+    ///   launches GPU work asynchronously it must synchronize before
+    ///   returning, otherwise only launch overhead is measured.
     ///
     /// # Errors
     ///
     /// Returns [`AutotuneError::BenchmarkFailed`] if all configs fail.
     /// Individual config failures are silently skipped (or retried if
     /// `retry_on_failure` is enabled).
-    pub fn benchmark_parallel(
+    pub fn benchmark_parallel<F>(
         &self,
         configs: &[Config],
         flops: Option<f64>,
-    ) -> Result<ParallelBenchResult, AutotuneError> {
+        run_fn: F,
+    ) -> Result<ParallelBenchResult, AutotuneError>
+    where
+        F: Fn(&Config, usize) -> Result<(), AutotuneError>,
+    {
         let start = Instant::now();
 
         if configs.is_empty() {
@@ -406,10 +418,11 @@ impl ParallelBenchmarkEngine {
         // organizational structure)
         let mut all_results: Vec<BenchmarkResult> = Vec::with_capacity(configs.len());
 
-        for partition in &partitions {
+        for (partition_idx, partition) in partitions.iter().enumerate() {
             for &config_idx in partition {
                 let config = &configs[config_idx];
-                let result = self.benchmark_single_config(config, flops, &progress);
+                let result =
+                    self.benchmark_single_config(config, flops, partition_idx, &run_fn, &progress);
 
                 match result {
                     Ok(bench_result) => {
@@ -453,12 +466,22 @@ impl ParallelBenchmarkEngine {
     }
 
     /// Benchmarks a single config with optional timeout and retry.
-    fn benchmark_single_config(
+    ///
+    /// `run_fn` is invoked once per warmup/measurement iteration with the
+    /// config and the partition index it was assigned to; it performs the
+    /// actual timed workload (see [`Self::benchmark_parallel`] for the
+    /// blocking/synchronization contract it must uphold).
+    fn benchmark_single_config<F>(
         &self,
         config: &Config,
         flops: Option<f64>,
+        partition_idx: usize,
+        run_fn: &F,
         _progress: &BenchProgress,
-    ) -> Result<BenchmarkResult, AutotuneError> {
+    ) -> Result<BenchmarkResult, AutotuneError>
+    where
+        F: Fn(&Config, usize) -> Result<(), AutotuneError>,
+    {
         let attempt = |cfg: &Config| -> Result<BenchmarkResult, AutotuneError> {
             let timeout_ms = self.config.timeout_per_config_ms;
             let start = Instant::now();
@@ -473,9 +496,7 @@ impl ParallelBenchmarkEngine {
                         )));
                     }
                 }
-                // Simulate a tiny workload — in real usage this would
-                // launch a GPU kernel.
-                Ok(())
+                run_fn(cfg, partition_idx)
             })?;
 
             // Post-benchmark timeout check (covers total time including
@@ -621,7 +642,7 @@ mod tests {
             Config::new().with_tile_m(128),
         ];
 
-        let result = engine.benchmark_parallel(&configs, Some(1e9));
+        let result = engine.benchmark_parallel(&configs, Some(1e9), |_, _| Ok(()));
         assert!(result.is_ok());
         let result = result.expect("benchmark should succeed");
         assert_eq!(result.results.len(), 2);
@@ -664,13 +685,68 @@ mod tests {
             .map(|i| Config::new().with_tile_m(32 * (i as u32 + 1)))
             .collect();
 
-        let result = engine.benchmark_parallel(&configs, None);
+        let result = engine.benchmark_parallel(&configs, None, |_, _| Ok(()));
         assert!(result.is_ok());
         let result = result.expect("benchmark should succeed");
         assert_eq!(result.results.len(), 6);
         assert_eq!(
             result.strategy_used,
             ParallelStrategy::MultiStream { num_streams: 3 }
+        );
+    }
+
+    #[test]
+    fn run_fn_is_invoked_with_correct_partition_index() {
+        use std::collections::HashSet;
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+        use std::sync::{Arc, Mutex};
+
+        let config = ParallelBenchConfig {
+            strategy: ParallelStrategy::MultiStream { num_streams: 2 },
+            max_concurrent: 2,
+            timeout_per_config_ms: 5000,
+            retry_on_failure: false,
+        };
+        let engine = ParallelBenchmarkEngine::new(
+            config,
+            BenchmarkConfig {
+                warmup: WarmupStrategy::Fixed(1),
+                benchmark_runs: 2,
+            },
+        );
+
+        let configs: Vec<Config> = (0..4)
+            .map(|i| Config::new().with_tile_m(32 * (i as u32 + 1)))
+            .collect();
+
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let seen_partitions: Arc<Mutex<HashSet<usize>>> = Arc::new(Mutex::new(HashSet::new()));
+
+        let call_count_clone = Arc::clone(&call_count);
+        let seen_partitions_clone = Arc::clone(&seen_partitions);
+
+        let result = engine.benchmark_parallel(&configs, None, move |_cfg, partition_idx| {
+            call_count_clone.fetch_add(1, AtomicOrdering::Relaxed);
+            if let Ok(mut seen) = seen_partitions_clone.lock() {
+                seen.insert(partition_idx);
+            }
+            Ok(())
+        });
+
+        assert!(result.is_ok());
+
+        // Regression (F014): `run_fn` must actually be invoked for every
+        // warmup + measurement iteration of every config — previously
+        // `benchmark_parallel` timed a fabricated no-op closure and never
+        // called the caller-supplied workload at all.
+        assert!(
+            call_count.load(AtomicOrdering::Relaxed) > 0,
+            "run_fn was never invoked"
+        );
+        let seen = seen_partitions.lock().expect("lock poisoned");
+        assert!(
+            seen.iter().all(|&p| p < 2),
+            "partition index out of range for 2 streams: {seen:?}"
         );
     }
 
@@ -710,7 +786,7 @@ mod tests {
         .with_callback(Box::new(callback));
 
         let configs = vec![Config::new(), Config::new(), Config::new()];
-        let result = engine.benchmark_parallel(&configs, None);
+        let result = engine.benchmark_parallel(&configs, None, |_, _| Ok(()));
         assert!(result.is_ok());
 
         let updates = updates.lock().expect("lock poisoned");
@@ -769,7 +845,7 @@ mod tests {
     #[test]
     fn empty_config_list() {
         let engine = ParallelBenchmarkEngine::with_defaults();
-        let result = engine.benchmark_parallel(&[], None);
+        let result = engine.benchmark_parallel(&[], None, |_, _| Ok(()));
         assert!(result.is_ok());
         let result = result.expect("empty benchmark should succeed");
         assert!(result.results.is_empty());
@@ -794,7 +870,7 @@ mod tests {
         );
 
         let configs = vec![Config::new().with_tile_m(64)];
-        let result = engine.benchmark_parallel(&configs, Some(2e9));
+        let result = engine.benchmark_parallel(&configs, Some(2e9), |_, _| Ok(()));
         assert!(result.is_ok());
         let result = result.expect("single config should succeed");
         assert_eq!(result.results.len(), 1);
@@ -829,7 +905,7 @@ mod tests {
             },
         );
         let configs = vec![Config::new()];
-        let result = engine.benchmark_parallel(&configs, None);
+        let result = engine.benchmark_parallel(&configs, None, |_, _| Ok(()));
         assert!(result.is_ok());
     }
 

@@ -12,6 +12,7 @@ mod max;
 mod mean;
 mod min;
 mod ops;
+mod ptx_fixup;
 mod softmax;
 mod sum;
 mod variance;

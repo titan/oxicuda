@@ -130,7 +130,7 @@ fn emit_pointwise_conv_body(
 
     let loop_label = b.fresh_label("pw_loop");
     let loop_end = b.fresh_label("pw_loop_end");
-    b.label(&loop_label);
+    b.raw_ptx(&format!("{loop_label}:"));
 
     let pred_loop = b.alloc_reg(PtxType::Pred);
     b.raw_ptx(&format!("setp.lo.u32 {pred_loop}, {ic}, {in_channels};"));
@@ -180,7 +180,7 @@ fn emit_pointwise_conv_body(
 
     b.raw_ptx(&format!("add.u32 {ic}, {ic}, 1;"));
     b.raw_ptx(&format!("bra {loop_label};"));
-    b.label(&loop_end);
+    b.raw_ptx(&format!("{loop_end}:"));
 
     // Optional BN
     if p.has_bn {
@@ -206,6 +206,6 @@ fn emit_pointwise_conv_body(
         b.raw_ptx(&format!("st.global.f64 [{out_addr}], {activated};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }

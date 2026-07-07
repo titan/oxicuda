@@ -263,19 +263,42 @@ impl GemmTemplate {
         writeln!(ptx, "    mul.lo.u32 %r13, %r5, %r6;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.lo.u32 %r13, %r13, %r7;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.lo.u32 %r13, %r13, %r4;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    // total_elems = M*N").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mul.lo.u32 %r14, %r8, %r9;").map_err(PtxGenError::FormatError)?;
+        writeln!(
+            ptx,
+            "    // total_elems = M*N (64-bit: 32×32→64 widening avoids overflow when M*N >= 2^32)"
+        )
+        .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mul.wide.u32 %rd9, %r8, %r9;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
         // Grid-stride loop over output elements: idx = global_id, += total_threads.
-        writeln!(ptx, "    mov.u32 %r15, %r12;  // idx = global_id")
+        // The linear index and its bound are held in 64-bit registers so GEMMs
+        // with >= 2^32 output elements iterate over every element instead of
+        // silently truncating the loop bound and computing only a fraction.
+        writeln!(ptx, "    cvt.u64.u32 %rd10, %r12;  // idx = global_id")
             .map_err(PtxGenError::FormatError)?;
+        writeln!(
+            ptx,
+            "    cvt.u64.u32 %rd11, %r13;  // total_threads (grid stride)"
+        )
+        .map_err(PtxGenError::FormatError)?;
+        writeln!(
+            ptx,
+            "    cvt.u64.u32 %rd12, %r9;   // N (for 64-bit div/rem)"
+        )
+        .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "$TILE_LOOP:").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    setp.ge.u32 %p0, %r15, %r14;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    setp.ge.u64 %p0, %rd10, %rd9;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    @%p0 bra $GEMM_DONE;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    // row = idx / N ; col = idx % N").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    div.u32 %r16, %r15, %r9;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    rem.u32 %r17, %r15, %r9;").map_err(PtxGenError::FormatError)?;
+        writeln!(
+            ptx,
+            "    // row = idx / N ; col = idx % N (64-bit; both fit back into u32)"
+        )
+        .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    div.u64 %rd13, %rd10, %rd12;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    rem.u64 %rd14, %rd10, %rd12;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    cvt.u32.u64 %r16, %rd13;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    cvt.u32.u64 %r17, %rd14;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
         // Accumulator init
@@ -291,10 +314,14 @@ impl GemmTemplate {
         writeln!(ptx, "    @%p1 bra $K_DONE;").map_err(PtxGenError::FormatError)?;
 
         // Load A[row, k] = A[row * K + k]
-        writeln!(ptx, "    // A[row, k] = A[row*K + k]").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mad.lo.u32 %r19, %r16, %r10, %r18;")
+        writeln!(
+            ptx,
+            "    // A[row, k] = A[row*K + k] (64-bit element index)"
+        )
+        .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    cvt.u64.u32 %rd3, %r18;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mad.wide.u32 %rd3, %r16, %r10, %rd3;")
             .map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    cvt.u64.u32 %rd3, %r19;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.lo.u64 %rd3, %rd3, {byte_size};")
             .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    add.u64 %rd4, %rd0, %rd3;").map_err(PtxGenError::FormatError)?;
@@ -307,9 +334,14 @@ impl GemmTemplate {
         }
 
         // Load B[k, col] = B[k * N + col]
-        writeln!(ptx, "    // B[k, col] = B[k*N + col]").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mad.lo.u32 %r20, %r18, %r9, %r17;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    cvt.u64.u32 %rd5, %r20;").map_err(PtxGenError::FormatError)?;
+        writeln!(
+            ptx,
+            "    // B[k, col] = B[k*N + col] (64-bit element index)"
+        )
+        .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    cvt.u64.u32 %rd5, %r17;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mad.wide.u32 %rd5, %r18, %r9, %rd5;")
+            .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.lo.u64 %rd5, %rd5, {byte_size};")
             .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    add.u64 %rd6, %rd1, %rd5;").map_err(PtxGenError::FormatError)?;
@@ -334,8 +366,9 @@ impl GemmTemplate {
         // Epilogue: C[row, col] = alpha * acc + beta * C_old
         writeln!(ptx, "    // Epilogue: C = alpha * acc + beta * C_old")
             .map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    mad.lo.u32 %r21, %r16, %r9, %r17;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    cvt.u64.u32 %rd7, %r21;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    cvt.u64.u32 %rd7, %r17;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    mad.wide.u32 %rd7, %r16, %r9, %rd7;")
+            .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.lo.u64 %rd7, %rd7, {byte_size};")
             .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    add.u64 %rd8, %rd2, %rd7;").map_err(PtxGenError::FormatError)?;
@@ -360,8 +393,8 @@ impl GemmTemplate {
         }
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
-        // Advance to the next element handled by this thread.
-        writeln!(ptx, "    add.u32 %r15, %r15, %r13;").map_err(PtxGenError::FormatError)?;
+        // Advance to the next element handled by this thread (64-bit stride).
+        writeln!(ptx, "    add.u64 %rd10, %rd10, %rd11;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    bra $TILE_LOOP;").map_err(PtxGenError::FormatError)?;
 
         writeln!(ptx, "$GEMM_DONE:").map_err(PtxGenError::FormatError)?;
@@ -1272,6 +1305,37 @@ mod tests {
         assert!(
             ptx.contains("st.global.b16 [%rd8], %fin0;"),
             "store as b16:\n{ptx}"
+        );
+    }
+
+    /// The default GEMM must compute its output-element count, loop bound, loop
+    /// index, and A/B/C offset math in 64-bit so shapes with >= 2^32 output
+    /// elements do not silently truncate.
+    #[test]
+    fn gemm_uses_64bit_loop_and_offsets() {
+        let ptx = gemm_template(PtxType::F32, PtxType::F32)
+            .generate()
+            .expect("GEMM PTX generation should succeed");
+        assert!(
+            ptx.contains("mul.wide.u32 %rd9"),
+            "total_elems = M*N must be computed 64-bit (mul.wide.u32):\n{ptx}"
+        );
+        assert!(
+            ptx.contains("setp.ge.u64"),
+            "grid-stride loop bound must be a 64-bit compare:\n{ptx}"
+        );
+        assert!(
+            ptx.contains("mad.wide.u32"),
+            "A/B/C element offsets must use 32×32→64 mad.wide.u32:\n{ptx}"
+        );
+        // The old 32-bit truncating forms must be gone.
+        assert!(
+            !ptx.contains("mul.lo.u32 %r14"),
+            "M*N must not be computed with a truncating 32-bit multiply:\n{ptx}"
+        );
+        assert!(
+            !ptx.contains("mad.lo.u32 %r19"),
+            "row*K+k offset must not be a truncating 32-bit mad:\n{ptx}"
         );
     }
 

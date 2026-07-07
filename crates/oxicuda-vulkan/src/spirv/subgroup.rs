@@ -43,7 +43,6 @@ use super::consts::{
     OP_GROUP_NON_UNIFORM_F_ADD,
     OP_GROUP_NON_UNIFORM_F_MAX,
     OP_GROUP_NON_UNIFORM_F_MIN,
-    OP_GROUP_NON_UNIFORM_I_ADD,
     OP_GROUP_NON_UNIFORM_SHUFFLE,
     // Opcodes
     OP_I_ADD,
@@ -66,11 +65,10 @@ use super::consts::{
 
 /// Generate a SPIR-V compute shader for subgroup-optimized reduction.
 ///
-/// Uses `OpGroupNonUniformFAdd` / `OpGroupNonUniformIAdd` for a fast
-/// intra-subgroup reduce, followed by a shared-memory merge across
-/// subgroups within the workgroup.
+/// Uses `OpGroupNonUniformFAdd` for a fast intra-subgroup reduce, followed by a
+/// shared-memory merge across subgroups within the workgroup.
 ///
-/// Supported `op` values: `"fadd"`, `"iadd"`, `"fmin"`, `"fmax"`.
+/// Supported `op` values: `"fadd"`, `"fmin"`, `"fmax"` (buffers are `float`).
 ///
 /// Bindings: 0 = input `float[]`, 1 = output `float[]`,
 /// 2 = params `uint[]` where `params[0] = count`.
@@ -242,10 +240,11 @@ pub fn reduction_subgroup_spirv(op: &str) -> Vec<u32> {
     m.emit_type_pointer(params_sp, STORAGE_CLASS_STORAGE_BUFFER, params_s);
     m.emit_variable(params_sp, params_var, STORAGE_CLASS_STORAGE_BUFFER);
 
-    // Determine opcode for subgroup reduction
+    // Determine opcode for subgroup reduction. All buffers are float, so only
+    // the floating-point group ops are valid here; any unrecognised op (or a
+    // legacy `"iadd"`) falls back to floating-point add.
     let subgroup_op = match op {
         "fadd" => OP_GROUP_NON_UNIFORM_F_ADD,
-        "iadd" => OP_GROUP_NON_UNIFORM_I_ADD,
         "fmin" => OP_GROUP_NON_UNIFORM_F_MIN,
         "fmax" => OP_GROUP_NON_UNIFORM_F_MAX,
         _ => OP_GROUP_NON_UNIFORM_F_ADD, // default
@@ -447,7 +446,7 @@ pub fn reduction_subgroup_spirv(op: &str) -> Vec<u32> {
 /// Uses `OpGroupNonUniformFAdd` with `InclusiveScan` for a fast intra-subgroup
 /// scan, then `OpGroupNonUniformShuffle` to propagate subgroup totals.
 ///
-/// Supported `op` values: `"fadd"`, `"iadd"`, `"fmin"`, `"fmax"`.
+/// Supported `op` values: `"fadd"`, `"fmin"`, `"fmax"` (buffers are `float`).
 ///
 /// Bindings: 0 = input `float[]`, 1 = output `float[]`,
 /// 2 = params `uint[]` where `params[0] = count`.
@@ -628,10 +627,11 @@ pub fn scan_subgroup_spirv(op: &str) -> Vec<u32> {
     m.emit_type_pointer(params_sp, STORAGE_CLASS_STORAGE_BUFFER, params_s);
     m.emit_variable(params_sp, params_var, STORAGE_CLASS_STORAGE_BUFFER);
 
-    // Select the GroupNonUniform opcode
+    // Select the GroupNonUniform opcode. All buffers are float, so only the
+    // floating-point group ops are valid here; any unrecognised op (or a legacy
+    // `"iadd"`) falls back to floating-point add.
     let subgroup_op_code = match op {
         "fadd" => OP_GROUP_NON_UNIFORM_F_ADD,
-        "iadd" => OP_GROUP_NON_UNIFORM_I_ADD,
         "fmin" => OP_GROUP_NON_UNIFORM_F_MIN,
         "fmax" => OP_GROUP_NON_UNIFORM_F_MAX,
         _ => OP_GROUP_NON_UNIFORM_F_ADD,
@@ -859,6 +859,8 @@ mod tests {
         OP_GROUP_NON_UNIFORM_F_MAX, OP_GROUP_NON_UNIFORM_F_MIN, OP_GROUP_NON_UNIFORM_I_ADD,
         OP_GROUP_NON_UNIFORM_SHUFFLE, SPIRV_MAGIC, SPIRV_VERSION_1_3,
     };
+    // NOTE: `OP_GROUP_NON_UNIFORM_I_ADD` is intentionally still imported so the
+    // regression test below can assert it is *absent* from the float kernels.
     use super::*;
 
     fn check_valid_spirv(words: &[u32]) {
@@ -912,12 +914,20 @@ mod tests {
     }
 
     #[test]
-    fn reduction_subgroup_iadd_valid() {
+    fn reduction_subgroup_iadd_falls_back_to_valid_fadd() {
+        // The buffers are `float`, so an integer group op (`OpGroupNonUniformIAdd`)
+        // on a Float32 result type would be invalid SPIR-V. A legacy `"iadd"`
+        // request must therefore produce a valid module that uses the
+        // floating-point add op instead of the integer one.
         let words = reduction_subgroup_spirv("iadd");
         check_valid_spirv(&words);
         assert!(
-            contains_opcode(&words, OP_GROUP_NON_UNIFORM_I_ADD),
-            "missing OpGroupNonUniformIAdd"
+            !contains_opcode(&words, OP_GROUP_NON_UNIFORM_I_ADD),
+            "integer group op must not appear on a float result type"
+        );
+        assert!(
+            contains_opcode(&words, OP_GROUP_NON_UNIFORM_F_ADD),
+            "expected the floating-point add fallback"
         );
     }
 

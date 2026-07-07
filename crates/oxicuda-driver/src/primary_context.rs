@@ -54,9 +54,9 @@ pub struct PrimaryContext {
     raw: CUcontext,
 }
 
-// SAFETY: The primary context handle is managed by the CUDA driver and
-// can be used from any thread when properly synchronised.
-unsafe impl Send for PrimaryContext {}
+// `PrimaryContext` is `Send + Sync` by auto-derivation: its fields are a
+// `Device` (two integers) and a `CUcontext` handle. The CUDA Driver API is
+// thread-safe, so no manual `unsafe impl` is required.
 
 impl PrimaryContext {
     /// Retains the primary context on the given device.

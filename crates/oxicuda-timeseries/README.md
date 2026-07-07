@@ -71,7 +71,7 @@ assert_eq!(forecast.len(), horizon * c);
 
 | Item | Value |
 |------|-------|
-| Version | 0.4.0 |
+| Version | 0.4.1 |
 | Release date | 2026-06-25 |
 | Default features | Pure Rust (`thiserror` only) |
 | `unwrap()` | 0 in production code |

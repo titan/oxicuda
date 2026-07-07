@@ -6,7 +6,20 @@
 //! types defined there.
 
 use super::{Instruction, MmaShape, Operand, Register, WmmaLayout, WmmaOp, WmmaShape};
-use crate::ir::types::PtxType;
+use crate::ir::types::{MemorySpace, PtxType};
+
+/// Returns the legal `fence.proxy.async` space qualifier for a memory space.
+///
+/// The async proxy fence only accepts `.global`, `.shared::cta`, or
+/// `.shared::cluster` (or no space at all). Non-applicable spaces map to the
+/// bare, space-less form.
+const fn fence_proxy_space(space: MemorySpace) -> &'static str {
+    match space {
+        MemorySpace::Global => ".global",
+        MemorySpace::Shared => ".shared::cta",
+        MemorySpace::Local | MemorySpace::Constant | MemorySpace::Param => "",
+    }
+}
 
 impl Instruction {
     /// Emits this instruction as a PTX assembly text string.
@@ -392,8 +405,19 @@ impl Instruction {
                 trans_b,
             } => {
                 let d_list = reg_list(d_regs);
+                // FP8 (E4M3/E5M2) WGMMA does NOT take the imm-trans-a/imm-trans-b
+                // operands — transpose applies only to 16-bit (F16/BF16) inputs.
+                // Emitting the trailing `, {trans_a}, {trans_b}` for FP8 makes
+                // ptxas reject the instruction with an argument-count mismatch.
+                let is_fp8 = matches!(a_ty, PtxType::E4M3 | PtxType::E5M2)
+                    || matches!(b_ty, PtxType::E4M3 | PtxType::E5M2);
+                let trans = if is_fp8 {
+                    String::new()
+                } else {
+                    format!(", {trans_a}, {trans_b}")
+                };
                 format!(
-                    "wgmma.mma_async.sync.aligned{}{}{}{} {{{d_list}}}, {desc_a}, {desc_b}, {scale_d}, {imm_scale_a}, {imm_scale_b}, {trans_a}, {trans_b};",
+                    "wgmma.mma_async.sync.aligned{}{}{}{} {{{d_list}}}, {desc_a}, {desc_b}, {scale_d}, {imm_scale_a}, {imm_scale_b}{trans};",
                     shape.as_ptx_str(),
                     d_ty.as_ptx_str(),
                     a_ty.as_ptx_str(),
@@ -468,7 +492,15 @@ impl Instruction {
 
             // -- Special registers ------------------------------------------
             Self::MovSpecial { dst, special } => {
-                format!("mov.u32 {dst}, {};", special.as_ptx_str())
+                // Most special registers are 32-bit, but `%clock64` is a 64-bit
+                // counter and must be read with `mov.u64` to avoid a
+                // width-mismatched instruction that ptxas rejects.
+                let op = if matches!(special, crate::ir::types::SpecialReg::Clock64) {
+                    "mov.u64"
+                } else {
+                    "mov.u32"
+                };
+                format!("{op} {dst}, {};", special.as_ptx_str())
             }
 
             // -- Parameter loading ------------------------------------------
@@ -533,8 +565,10 @@ impl Instruction {
                 trans,
             } => {
                 let trans_str = if *trans { ".trans" } else { "" };
+                // `stmatrix.xN` requires an N-register source vector.
+                let src_list = reg_list(src);
                 format!(
-                    "stmatrix.sync.aligned{}{trans_str}.shared.b16 [{dst_addr}], {{{src}}};",
+                    "stmatrix.sync.aligned{}{trans_str}.shared.b16 [{dst_addr}], {{{src_list}}};",
                     shape.as_ptx_str()
                 )
             }
@@ -542,7 +576,12 @@ impl Instruction {
                 dst,
                 membership_mask,
             } => {
-                format!("elect.sync {dst}, 0x{membership_mask:08x};")
+                // `elect.sync` produces a leader-lane value AND an is-leader
+                // predicate: `elect.sync d|p, membermask`. The builder allocates
+                // `dst` as the predicate (`.pred`), so sink the register value to
+                // `_` and place the predicate in `dst`. Omitting the `d|p` pair
+                // makes ptxas reject with "Predicate output expected".
+                format!("elect.sync _|{dst}, 0x{membership_mask:08x};")
             }
             Self::Setmaxnreg { reg_count, action } => {
                 format!("setmaxnreg{} {reg_count};", action.as_ptx_str())
@@ -550,21 +589,29 @@ impl Instruction {
             Self::Griddepcontrol { action } => {
                 format!("griddepcontrol{};", action.as_ptx_str())
             }
-            Self::FenceProxy { scope, space } => {
-                format!(
-                    "fence.proxy.async{}{};",
-                    scope.as_ptx_str(),
-                    space.as_ptx_str()
-                )
+            Self::FenceProxy { space, .. } => {
+                // `fence.proxy.async` accepts only an optional *space* qualifier
+                // (`.global`, `.shared::cta`, `.shared::cluster`) — the thread
+                // scope (`.gpu`/`.cta`/`.sys`) is NOT a legal modifier here and
+                // ptxas rejects it. Map the memory space to its legal form and
+                // drop the scope entirely.
+                format!("fence.proxy.async{};", fence_proxy_space(*space))
             }
             Self::MbarrierInit { addr, count } => {
                 format!("mbarrier.init.shared.b64 [{addr}], {count};")
             }
             Self::MbarrierArrive { addr } => {
-                format!("mbarrier.arrive.shared.b64 [{addr}];")
+                // `mbarrier.arrive.shared.b64` requires a destination for the
+                // returned arrival-count state token. When the token is unused,
+                // sink it to `_`; omitting the destination makes ptxas reject
+                // the instruction with an argument-count mismatch.
+                format!("mbarrier.arrive.shared.b64 _, [{addr}];")
             }
-            Self::MbarrierWait { addr, phase } => {
-                format!("mbarrier.try_wait.parity.shared.b64 [{addr}], {phase};")
+            Self::MbarrierWait { dst, addr, phase } => {
+                // `mbarrier.try_wait.parity` writes a predicate result that the
+                // ISA forbids discarding, so a real destination register is
+                // required before the address/phase operands.
+                format!("mbarrier.try_wait.parity.shared.b64 {dst}, [{addr}], {phase};")
             }
 
             // -- SM 100+ (Blackwell) tcgen05 MMA ----------------------------
@@ -581,9 +628,14 @@ impl Instruction {
                 dst_smem,
                 src_gmem,
                 desc,
+                barrier,
             } => {
+                // The bulk tensor copy completes via an mbarrier
+                // (`mbarrier::complete_tx::bytes`), which requires the barrier
+                // operand; the `.bulk_group` completion form used previously is
+                // not a valid argument set for `cp.async.bulk.tensor`.
                 format!(
-                    "cp.async.bulk.tensor.1d.shared::cluster.global.tile.bulk_group [{dst_smem}], [{src_gmem}, {{{desc}}}];"
+                    "cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [{dst_smem}], [{src_gmem}, {{{desc}}}], [{barrier}];"
                 )
             }
 
@@ -594,8 +646,9 @@ impl Instruction {
                 tex_ref,
                 coord,
             } => {
+                let d = reg_list(dst);
                 format!(
-                    "tex.1d.v4{}.s32 {dst}, [{tex_ref}, {{{coord}}}];",
+                    "tex.1d.v4{}.s32 {{{d}}}, [{tex_ref}, {{{coord}}}];",
                     ty.as_ptx_str()
                 )
             }
@@ -606,8 +659,9 @@ impl Instruction {
                 coord_x,
                 coord_y,
             } => {
+                let d = reg_list(dst);
                 format!(
-                    "tex.2d.v4{}.s32 {dst}, [{tex_ref}, {{{coord_x}, {coord_y}}}];",
+                    "tex.2d.v4{}.s32 {{{d}}}, [{tex_ref}, {{{coord_x}, {coord_y}}}];",
                     ty.as_ptx_str()
                 )
             }
@@ -619,8 +673,9 @@ impl Instruction {
                 coord_y,
                 coord_z,
             } => {
+                let d = reg_list(dst);
                 format!(
-                    "tex.3d.v4{}.s32 {dst}, [{tex_ref}, {{{coord_x}, {coord_y}, {coord_z}}}];",
+                    "tex.3d.v4{}.s32 {{{d}}}, [{tex_ref}, {{{coord_x}, {coord_y}, {coord_z}}}];",
                     ty.as_ptx_str()
                 )
             }
@@ -655,7 +710,13 @@ impl Instruction {
                 src_addr,
             } => {
                 let trans_str = if *trans { ".trans" } else { "" };
-                let x_str = match num_fragments {
+                // Derive the fragment-count suffix from the actual number of
+                // destination registers so the `.xN` modifier and the operand
+                // list are always self-consistent, even if `num_fragments` was
+                // set inconsistently (the validator additionally rejects such
+                // cases up front). `num_fragments` is retained for validation.
+                let _ = num_fragments;
+                let x_str = match dst_regs.len() {
                     2 => ".x2",
                     4 => ".x4",
                     _ => ".x1",
@@ -717,12 +778,38 @@ fn emit_wmma(
             )
         }
         WmmaOp::Mma => {
-            format!(
-                "wmma.mma.sync.aligned{}{}{} {{{frag_list}}};",
-                shape.as_ptx_str(),
-                layout.as_ptx_str(),
-                ty.as_ptx_str()
-            )
+            // The PTX ISA form is
+            //   wmma.mma.sync.aligned.alayout.blayout.shape.dtype.ctype d, a, b, c;
+            // i.e. FOUR operand groups (d, a, b, c), two layouts and two types.
+            // The builder packs the single `fragments` list as [d, a, b, c],
+            // where d/c each hold `cd` accumulator registers (4 for f16
+            // accumulation, 8 for f32) and a/b each hold `ab = 8` fragments.
+            let cd = if matches!(ty, PtxType::F16) { 4 } else { 8 };
+            let ab = 8usize;
+            let expected = 2 * cd + 2 * ab;
+            if fragments.len() == expected {
+                let d = reg_list(&fragments[0..cd]);
+                let a = reg_list(&fragments[cd..cd + ab]);
+                let b = reg_list(&fragments[cd + ab..cd + 2 * ab]);
+                let c = reg_list(&fragments[cd + 2 * ab..]);
+                let layout_str = layout.as_ptx_str();
+                format!(
+                    "wmma.mma.sync.aligned{layout_str}{layout_str}{}{}{} {{{d}}}, {{{a}}}, {{{b}}}, {{{c}}};",
+                    shape.as_ptx_str(),
+                    ty.as_ptx_str(),
+                    ty.as_ptx_str(),
+                )
+            } else {
+                // Defensive fallback for a malformed fragment list (never
+                // produced by the builder). Emit the packed list unchanged so
+                // this never panics; the validator flags the shape mismatch.
+                format!(
+                    "wmma.mma.sync.aligned{}{}{} {{{frag_list}}};",
+                    layout.as_ptx_str(),
+                    shape.as_ptx_str(),
+                    ty.as_ptx_str()
+                )
+            }
         }
     }
 }

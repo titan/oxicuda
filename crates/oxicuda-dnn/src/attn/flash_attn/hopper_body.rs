@@ -157,7 +157,10 @@ fn alloc_f32_accum(b: &mut BodyBuilder<'_>, n: usize) -> Vec<Register> {
 /// Compute smem base address (u32) for a named shared memory variable.
 fn smem_base_u32(b: &mut BodyBuilder<'_>, name: &str) -> Register {
     let r = b.alloc_reg(PtxType::U32);
-    b.raw_ptx(&format!("mov.u32 {r}, %{name};"));
+    // The address of a `.shared` symbol is taken with a bare symbol name; a
+    // leading `%` would make ptxas read it as a (nonexistent) special register
+    // and reject the `mov` with "Arguments mismatch for instruction 'mov'".
+    b.raw_ptx(&format!("mov.u32 {r}, {name};"));
     r
 }
 
@@ -294,7 +297,9 @@ pub(super) fn emit_fa3_forward_body(
     // Loop guard
     let loop_pred = b.alloc_reg(PtxType::Pred);
     b.raw_ptx(&format!("setp.ge.u32 {loop_pred}, {kv_idx}, {nkv_tiles};"));
-    b.raw_ptx(&format!("@{loop_pred} bra {loop_end_lbl};"));
+    // `b.label()`/`b.branch()` emit `$`-prefixed symbols; a raw branch target
+    // must carry the same `$` or ptxas reports "Unknown symbol".
+    b.raw_ptx(&format!("@{loop_pred} bra ${loop_end_lbl};"));
 
     // stage = kv_idx % pingpong_stages
     let stage_mod = b.mov_imm_u32(pingpong_stages);
@@ -690,7 +695,8 @@ pub(super) fn emit_fa3_backward_body(
     b.raw_ptx(&format!(
         "setp.ge.u32 {q_loop_pred}, {q_tile_idx}, {nq_tiles};"
     ));
-    b.raw_ptx(&format!("@{q_loop_pred} bra {q_end_lbl};"));
+    // Raw branch target needs the `$` prefix used by `b.label()`/`b.branch()`.
+    b.raw_ptx(&format!("@{q_loop_pred} bra ${q_end_lbl};"));
 
     let stage_mod = b.mov_imm_u32(pingpong_stages);
     let stage = b.alloc_reg(PtxType::U32);

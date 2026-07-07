@@ -113,7 +113,7 @@ impl ResultDb {
     /// Returns an I/O error if the file exists but cannot be read,
     /// or if the JSON is malformed.
     pub fn open_at(path: PathBuf) -> Result<Self, std::io::Error> {
-        let data = if path.exists() {
+        let mut data = if path.exists() {
             let contents = std::fs::read_to_string(&path)?;
             if contents.trim().is_empty() {
                 ResultDbData::default()
@@ -124,6 +124,22 @@ impl ResultDb {
         } else {
             ResultDbData::default()
         };
+
+        // Defense in depth: a hand-edited or corrupted `results.json` could
+        // otherwise hand a physically-impossible `BenchmarkResult` (e.g. a
+        // zero `block_size`, which would divide-by-zero in
+        // `Config::estimated_registers_per_thread`, or a negative timing)
+        // straight to callers such as `Dispatcher`. Drop insane entries
+        // instead of erroring, so a partially corrupt file degrades to
+        // re-tuning rather than bricking the whole database.
+        let dropped = sanitize_entries(&mut data);
+        if dropped > 0 {
+            tracing::warn!(
+                dropped,
+                path = %path.display(),
+                "dropped insane benchmark result entries while loading result DB",
+            );
+        }
 
         Ok(Self { path, data })
     }
@@ -215,6 +231,44 @@ impl ResultDb {
         Ok(())
     }
 
+    /// Unconditionally saves a benchmark result, replacing whatever is
+    /// currently stored for the given (GPU, kernel, problem) triple
+    /// regardless of `median_us`.
+    ///
+    /// Unlike [`save`](Self::save), which only replaces an existing entry
+    /// when the new result is faster, this method always writes `result`
+    /// verbatim. It exists so callers that need to force-overwrite a
+    /// result (e.g. an "always replace" import policy) do not have to
+    /// fabricate a sentinel value such as `median_us = 0.0` to defeat the
+    /// "only replace if faster" guard in `save`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the file cannot be written.
+    pub fn save_unconditional(
+        &mut self,
+        gpu_name: &str,
+        kernel_name: &str,
+        problem_key: &str,
+        result: BenchmarkResult,
+    ) -> Result<(), std::io::Error> {
+        self.data
+            .entries
+            .entry(gpu_name.to_string())
+            .or_default()
+            .entry(kernel_name.to_string())
+            .or_default()
+            .insert(problem_key.to_string(), result);
+        // Flush with this key marked as "forced": the read-merge-write
+        // cycle in `flush_impl` normally keeps whichever of the in-memory
+        // or on-disk value has the lower `median_us` (correct for
+        // `save`'s "only replace if faster" contract), but that would
+        // silently undo an unconditional override if a slower value
+        // happens to already be on disk. Marking the key as forced makes
+        // this specific entry win the merge unconditionally.
+        self.flush_impl(true, Some((gpu_name, kernel_name, problem_key)))
+    }
+
     /// Lists all entries stored for a specific GPU.
     ///
     /// Returns a vector of `(kernel_name, problem_key, result)` tuples.
@@ -250,12 +304,16 @@ impl ResultDb {
 
     /// Clears all stored results and flushes an empty database to disk.
     ///
+    /// This intentionally bypasses the read-merge-write cycle used by
+    /// `flush` — `clear` means "wipe everything", so it
+    /// must not resurrect entries a concurrent writer left on disk.
+    ///
     /// # Errors
     ///
     /// Returns an I/O error if the file cannot be written.
     pub fn clear(&mut self) -> Result<(), std::io::Error> {
         self.data = ResultDbData::default();
-        self.flush()
+        self.flush_impl(false, None)
     }
 
     /// Returns the path to the backing JSON file.
@@ -264,15 +322,220 @@ impl ResultDb {
         &self.path
     }
 
-    /// Writes the in-memory database to disk as pretty-printed JSON.
-    fn flush(&self) -> Result<(), std::io::Error> {
+    /// Writes the in-memory database to disk as pretty-printed JSON,
+    /// merging in any concurrent writer's results first.
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        self.flush_impl(true, None)
+    }
+
+    /// Writes the in-memory database to disk.
+    ///
+    /// Two correctness properties are provided:
+    ///
+    /// 1. **Atomic replace** — the JSON is written to a unique temporary
+    ///    file in the same directory and then renamed over the target
+    ///    path. A crash or concurrent read mid-write can therefore never
+    ///    observe a torn or truncated file.
+    /// 2. **Lost-update avoidance** — while holding an exclusive advisory
+    ///    lock (a sibling `.lock` file), the on-disk database is re-read
+    ///    and merged with the in-memory state (keeping the lower
+    ///    `median_us` per `(gpu, kernel, problem)` key) before writing
+    ///    back, so a concurrent writer's results are not silently
+    ///    clobbered by a last-writer-wins overwrite. When `merge_with_disk`
+    ///    is `false` (used by [`clear`](Self::clear)), this merge step is
+    ///    skipped so the wipe is not immediately undone.
+    ///
+    /// `force_key`, if given, identifies a `(gpu, kernel, problem)` triple
+    /// whose in-memory value must win the merge unconditionally — used by
+    /// [`save_unconditional`](Self::save_unconditional) so an intentional
+    /// override is never discarded just because the on-disk copy has a
+    /// lower `median_us`.
+    fn flush_impl(
+        &mut self,
+        merge_with_disk: bool,
+        force_key: Option<(&str, &str, &str)>,
+    ) -> Result<(), std::io::Error> {
         // Ensure parent directory exists.
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+
+        let _lock = FileLockGuard::acquire(self.lock_path())?;
+
+        if merge_with_disk && self.path.exists() {
+            let contents = std::fs::read_to_string(&self.path)?;
+            if !contents.trim().is_empty() {
+                let on_disk: ResultDbData = serde_json::from_str(&contents)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                merge_keep_best(&mut self.data, on_disk, force_key);
+            }
+        }
+
         let json = serde_json::to_string_pretty(&self.data).map_err(std::io::Error::other)?;
-        std::fs::write(&self.path, json)
+
+        let tmp_path = self.tmp_path();
+        std::fs::write(&tmp_path, &json)?;
+        std::fs::rename(&tmp_path, &self.path)?;
+
+        Ok(())
     }
+
+    /// Returns the path to the sibling advisory lock file, e.g.
+    /// `results.json.lock`.
+    fn lock_path(&self) -> PathBuf {
+        let file_name = self
+            .path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("results.json");
+        self.path.with_file_name(format!("{file_name}.lock"))
+    }
+
+    /// Returns a unique sibling path for the atomic-replace temp file,
+    /// e.g. `results.json.tmp.<pid>.<counter>`.
+    fn tmp_path(&self) -> PathBuf {
+        static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let file_name = self
+            .path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("results.json");
+        self.path
+            .with_file_name(format!("{file_name}.tmp.{}.{unique}", std::process::id()))
+    }
+}
+
+/// RAII guard for a sibling `.lock` file, used as a simple, portable
+/// advisory lock around the read-merge-write cycle in [`ResultDb::flush_impl`].
+///
+/// A dedicated lock file (rather than [`std::fs::File::lock`]) is used
+/// because this workspace's `rust-version` is 1.85, while `File::lock`
+/// was only stabilized in Rust 1.89.
+struct FileLockGuard {
+    lock_path: PathBuf,
+}
+
+impl FileLockGuard {
+    /// Maximum time to wait for the lock before giving up.
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    /// Delay between lock-acquisition retries.
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(10);
+
+    /// Acquires the lock, retrying until [`Self::TIMEOUT`] elapses.
+    fn acquire(lock_path: PathBuf) -> Result<Self, std::io::Error> {
+        let start = std::time::Instant::now();
+        loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(_file) => return Ok(Self { lock_path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if start.elapsed() > Self::TIMEOUT {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!(
+                                "timed out waiting for result-db lock file {}",
+                                lock_path.display()
+                            ),
+                        ));
+                    }
+                    std::thread::sleep(Self::RETRY_DELAY);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+}
+
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
+}
+
+/// Merges `other` into `data`, keeping the faster (lower `median_us`)
+/// result whenever both sides have an entry for the same
+/// `(gpu, kernel, problem)` key. Entries that exist only in `other` are
+/// added to `data`. This implements the read-merge-write cycle so that
+/// a concurrent writer's results are not lost to a last-writer-wins
+/// overwrite.
+///
+/// `force_key`, if given, names a `(gpu, kernel, problem)` triple that is
+/// exempt from the "keep the faster one" rule: `data`'s value for that
+/// key is left untouched regardless of what `other` contains. This is
+/// used by [`ResultDb::save_unconditional`] to guarantee an intentional
+/// override always wins the merge.
+fn merge_keep_best(
+    data: &mut ResultDbData,
+    other: ResultDbData,
+    force_key: Option<(&str, &str, &str)>,
+) {
+    for (gpu, other_kernel_map) in other.entries {
+        let dst_kernel_map = data.entries.entry(gpu.clone()).or_default();
+        for (kernel, other_problem_map) in other_kernel_map {
+            let dst_problem_map = dst_kernel_map.entry(kernel.clone()).or_default();
+            for (problem, other_result) in other_problem_map {
+                if let Some((force_gpu, force_kernel, force_problem)) = force_key {
+                    if force_gpu == gpu && force_kernel == kernel && force_problem == problem {
+                        // This key was just unconditionally set by this
+                        // instance; the in-memory value is authoritative.
+                        continue;
+                    }
+                }
+                let take_other = dst_problem_map
+                    .get(&problem)
+                    .is_none_or(|existing| other_result.median_us < existing.median_us);
+                if take_other {
+                    dst_problem_map.insert(problem, other_result);
+                }
+            }
+        }
+    }
+}
+
+/// Returns `true` if a loaded benchmark result contains only sane,
+/// physically plausible values.
+///
+/// Guards against a corrupted or hand-edited `results.json` poisoning
+/// the database with degenerate entries — e.g. a zero `block_size`
+/// would divide-by-zero in [`crate::config::Config::estimated_registers_per_thread`]
+/// if served verbatim to a caller such as `Dispatcher`.
+fn entry_is_sane(r: &BenchmarkResult) -> bool {
+    r.median_us.is_finite()
+        && r.min_us.is_finite()
+        && r.max_us.is_finite()
+        && r.stddev_us.is_finite()
+        && r.median_us >= 0.0
+        && r.min_us >= 0.0
+        && r.max_us >= 0.0
+        && r.stddev_us >= 0.0
+        && r.min_us <= r.max_us
+        && r.gflops.is_none_or(f64::is_finite)
+        && (1..=1024).contains(&r.config.block_size)
+        && r.config.tile_m > 0
+        && r.config.tile_n > 0
+        && r.config.tile_k > 0
+}
+
+/// Drops entries that fail [`entry_is_sane`] from `data`, in place, and
+/// prunes now-empty kernel/GPU maps so [`ResultDb::list_gpus`] and
+/// [`ResultDb::total_entries`] stay consistent. Returns the number of
+/// entries removed.
+fn sanitize_entries(data: &mut ResultDbData) -> usize {
+    let mut dropped = 0usize;
+    data.entries.retain(|_, kernel_map| {
+        kernel_map.retain(|_, problem_map| {
+            let before = problem_map.len();
+            problem_map.retain(|_, result| entry_is_sane(result));
+            dropped += before - problem_map.len();
+            !problem_map.is_empty()
+        });
+        !kernel_map.is_empty()
+    });
+    dropped
 }
 
 /// Returns `~/.cache` on Unix systems, or `None` if `$HOME` is not set.

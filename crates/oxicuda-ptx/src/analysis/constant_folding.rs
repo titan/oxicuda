@@ -504,10 +504,12 @@ const fn instruction_def(inst: &Instruction) -> Option<&Register> {
         | Instruction::LoadParam { dst, .. }
         | Instruction::Atom { dst, .. }
         | Instruction::AtomCas { dst, .. }
-        | Instruction::Tex1d { dst, .. }
-        | Instruction::Tex2d { dst, .. }
-        | Instruction::Tex3d { dst, .. }
         | Instruction::SurfLoad { dst, .. } => Some(dst),
+        // `tex.*.v4` defines four texel registers; report the first as the
+        // representative destination.
+        Instruction::Tex1d { dst, .. }
+        | Instruction::Tex2d { dst, .. }
+        | Instruction::Tex3d { dst, .. } => dst.first(),
         _ => None,
     }
 }

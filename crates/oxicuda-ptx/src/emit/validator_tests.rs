@@ -3,8 +3,12 @@
 
 use std::fmt::Write as _;
 
-use super::{ValidationError, validate_ptx, validate_ptx_for_target};
+use super::{
+    IrErrorKind, ValidationError, validate_branch_labels, validate_ir_instructions, validate_ptx,
+    validate_ptx_for_target,
+};
 use crate::arch::SmVersion;
+use crate::ir::{Instruction, Operand, PtxType, Register};
 
 // ---------------------------------------------------------------------------
 // SM compatibility tests
@@ -115,13 +119,47 @@ fn test_too_many_registers_error() {
     ptx_body.push_str("    ret;\n}\n");
 
     let result = validate_ptx_for_target(&ptx_body, SmVersion::Sm80);
+    // More than 255 DISTINCT VIRTUAL registers is valid PTX — ptxas spills the
+    // excess to local memory. It must be reported as a warning, never a hard
+    // error (255 is a post-allocation *physical* limit, not a source limit).
     assert!(
-        result
+        !result
             .errors
             .iter()
             .any(|e| matches!(e, ValidationError::RegisterPressureExceeded { .. })),
-        "expected RegisterPressureExceeded for 260 registers, errors: {:?}",
+        "excess virtual registers must not be a hard error, errors: {:?}",
         result.errors
+    );
+    assert!(
+        result.warnings.iter().any(|w| w.contains("260")),
+        "expected a register-pressure warning for 260 virtual registers, warnings: {:?}",
+        result.warnings
+    );
+}
+
+#[test]
+fn test_unknown_target_warns() {
+    // A `.target` we cannot recognize disables SM/shared-mem checks; that loss
+    // of coverage must surface as a warning rather than pass silently.
+    let ptx = ".version 9.9\n.target sm_999\n.address_size 64\n\
+               .visible .entry k() { ret; }\n";
+    let result = validate_ptx(ptx);
+    assert!(
+        result.warnings.iter().any(|w| w.contains("sm_999")),
+        "expected an unrecognized-target warning, warnings: {:?}",
+        result.warnings
+    );
+    // A recognized target must NOT produce that warning.
+    let good = ".version 8.5\n.target sm_80\n.address_size 64\n\
+                .visible .entry k() { ret; }\n";
+    let good_result = validate_ptx(good);
+    assert!(
+        !good_result
+            .warnings
+            .iter()
+            .any(|w| w.contains("unrecognized .target")),
+        "recognized target should not warn, warnings: {:?}",
+        good_result.warnings
     );
 }
 
@@ -243,5 +281,147 @@ fn test_mma_sync_requires_sm75() {
     assert!(
         compat_errors.is_empty(),
         "mma.sync should be valid on sm_75: {compat_errors:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Branch / label validation tests (F085)
+// ---------------------------------------------------------------------------
+
+fn reg(name: &str, ty: PtxType) -> Register {
+    Register {
+        name: name.to_string(),
+        ty,
+    }
+}
+
+#[test]
+fn test_branch_to_undefined_label_errors() {
+    let instructions = vec![
+        Instruction::Branch {
+            target: "nowhere".to_string(),
+            predicate: None,
+        },
+        Instruction::Label("elsewhere".to_string()),
+        Instruction::Return,
+    ];
+    let result = validate_ir_instructions(&instructions);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.kind == IrErrorKind::InvalidOperand && e.message.contains("nowhere")),
+        "expected an undefined-branch-target error, got: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_branch_to_defined_label_ok() {
+    let instructions = vec![
+        Instruction::Branch {
+            target: "done".to_string(),
+            predicate: None,
+        },
+        Instruction::Label("done".to_string()),
+        Instruction::Return,
+    ];
+    let result = validate_branch_labels(&instructions);
+    assert!(
+        result.errors.is_empty(),
+        "forward branch to a defined label must be valid, got: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_duplicate_label_errors() {
+    let instructions = vec![
+        Instruction::Label("loop".to_string()),
+        Instruction::Return,
+        Instruction::Label("loop".to_string()),
+    ];
+    let result = validate_branch_labels(&instructions);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.kind == IrErrorKind::InvalidOperand && e.message.contains("duplicate")),
+        "expected a duplicate-label error, got: {:?}",
+        result.errors
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ldmatrix operand consistency (F106)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_ldmatrix_fragment_count_mismatch_errors() {
+    // num_fragments = 4 but only 2 destination registers supplied.
+    let instructions = vec![Instruction::Ldmatrix {
+        num_fragments: 4,
+        trans: false,
+        dst_regs: vec![reg("%r0", PtxType::B32), reg("%r1", PtxType::B32)],
+        src_addr: Operand::Register(reg("%rd0", PtxType::U64)),
+    }];
+    let result = validate_ir_instructions(&instructions);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.kind == IrErrorKind::InvalidOperand && e.message.contains("ldmatrix")),
+        "expected an ldmatrix fragment-count mismatch error, got: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_ldmatrix_invalid_fragment_count_errors() {
+    // num_fragments = 3 is not a legal ldmatrix width.
+    let instructions = vec![Instruction::Ldmatrix {
+        num_fragments: 3,
+        trans: false,
+        dst_regs: vec![
+            reg("%r0", PtxType::B32),
+            reg("%r1", PtxType::B32),
+            reg("%r2", PtxType::B32),
+        ],
+        src_addr: Operand::Register(reg("%rd0", PtxType::U64)),
+    }];
+    let result = validate_ir_instructions(&instructions);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.kind == IrErrorKind::InvalidOperand && e.message.contains("1, 2, or 4")),
+        "expected an ldmatrix invalid-width error, got: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_ldmatrix_valid_x4_ok() {
+    let instructions = vec![Instruction::Ldmatrix {
+        num_fragments: 4,
+        trans: false,
+        dst_regs: vec![
+            reg("%r0", PtxType::B32),
+            reg("%r1", PtxType::B32),
+            reg("%r2", PtxType::B32),
+            reg("%r3", PtxType::B32),
+        ],
+        src_addr: Operand::Register(reg("%rd0", PtxType::U64)),
+    }];
+    // Only check tensor-core operand validation (no register-lifetime noise).
+    let mut has_ldmatrix_err = false;
+    for e in &validate_ir_instructions(&instructions).errors {
+        if e.message.contains("ldmatrix") {
+            has_ldmatrix_err = true;
+        }
+    }
+    assert!(
+        !has_ldmatrix_err,
+        "valid x4 ldmatrix must not produce an ldmatrix operand error"
     );
 }

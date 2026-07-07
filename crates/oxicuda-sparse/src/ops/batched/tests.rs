@@ -660,3 +660,185 @@ fn mixed_precision_accumulation_fp32() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Hand-written batched SpMV PTX: ptxas pre-screen (host-only)
+// ---------------------------------------------------------------------------
+
+/// The hand-written `batched_spmv_{type}` PTX must assemble cleanly for sm_86
+/// in both precisions (it is `.target sm_70`, which ptxas accepts under a
+/// higher `-arch`). This guards the hand-rolled string kernel against the same
+/// PTX-level defects the builder-based kernels are screened for.
+#[test]
+fn batched_spmv_ptx_assembles_sm86() {
+    use crate::ptx_helpers::test_support::assert_assembles_and_clean;
+    assert_assembles_and_clean("batched_spmv_f32", &generate_batched_spmv_ptx::<f32>());
+    assert_assembles_and_clean("batched_spmv_f64", &generate_batched_spmv_ptx::<f64>());
+}
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation of the hand-written batched SpMV kernel
+// (feature = "gpu-tests").
+//
+// NOTE: `generate_batched_spmv_ptx` has no production launch wrapper in this
+// crate -- the public `BatchedSpMV::execute` runs the CPU baseline instead --
+// so this test assembles the kernel arrays and launches the kernel directly,
+// then checks the device result against an independent CPU oracle.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "gpu-tests")]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::{assert_close, gpu_handle};
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+    use oxicuda_driver::Module;
+    use oxicuda_launch::{Kernel, LaunchParams};
+    use oxicuda_memory::DeviceBuffer;
+    use std::sync::Arc;
+
+    /// One matrix in the batch (host CSR, f64 values, u32 index arrays).
+    struct HostMat {
+        rows: usize,
+        row_ptr: Vec<u32>,
+        col_idx: Vec<u32>,
+        values: Vec<f64>,
+    }
+
+    fn cpu_spmv(m: &HostMat, x: &[f64], y0: &[f64], alpha: f64, beta: f64) -> Vec<f64> {
+        (0..m.rows)
+            .map(|r| {
+                let mut acc = 0.0_f64;
+                for k in m.row_ptr[r] as usize..m.row_ptr[r + 1] as usize {
+                    acc += m.values[k] * x[m.col_idx[k] as usize];
+                }
+                alpha * acc + beta * y0[r]
+            })
+            .collect()
+    }
+
+    /// Assemble the batch buffers, launch the hand-written kernel directly, and
+    /// compare each matrix's output to the CPU oracle.
+    fn run_batched<T: GpuFloat>(
+        mats: &[HostMat],
+        xs: &[Vec<f64>],
+        y0s: &[Vec<f64>],
+        alpha: f64,
+        beta: f64,
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let batch = mats.len();
+
+        let mut concat_rp: Vec<u32> = Vec::new();
+        let mut concat_ci: Vec<u32> = Vec::new();
+        let mut concat_vals: Vec<T> = Vec::new();
+        let mut off_rp: Vec<u32> = Vec::new();
+        let mut off_nnz: Vec<u32> = Vec::new();
+        let mut row_counts: Vec<u32> = Vec::new();
+        for m in mats {
+            off_rp.push(concat_rp.len() as u32);
+            off_nnz.push(concat_ci.len() as u32);
+            row_counts.push(m.rows as u32);
+            concat_rp.extend_from_slice(&m.row_ptr);
+            concat_ci.extend_from_slice(&m.col_idx);
+            concat_vals.extend(m.values.iter().map(|&v| f64_to_gpu::<T>(v)));
+        }
+
+        let d_concat_rp = DeviceBuffer::from_host(&concat_rp).expect("test: upload row_ptr");
+        let d_concat_ci = DeviceBuffer::from_host(&concat_ci).expect("test: upload col_idx");
+        let d_concat_vals = DeviceBuffer::from_host(&concat_vals).expect("test: upload values");
+        let d_off_rp = DeviceBuffer::from_host(&off_rp).expect("test: upload rp offsets");
+        let d_off_nnz = DeviceBuffer::from_host(&off_nnz).expect("test: upload nnz offsets");
+        let d_row_counts = DeviceBuffer::from_host(&row_counts).expect("test: upload row_counts");
+
+        let mut x_bufs: Vec<DeviceBuffer<T>> = Vec::new();
+        let mut y_bufs: Vec<DeviceBuffer<T>> = Vec::new();
+        for i in 0..batch {
+            let xt: Vec<T> = xs[i].iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+            let yt: Vec<T> = y0s[i].iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+            x_bufs.push(DeviceBuffer::from_host(&xt).expect("test: upload x"));
+            y_bufs.push(DeviceBuffer::from_host(&yt).expect("test: upload y"));
+        }
+        let x_ptrs: Vec<u64> = x_bufs.iter().map(|b| b.as_device_ptr()).collect();
+        let y_ptrs: Vec<u64> = y_bufs.iter().map(|b| b.as_device_ptr()).collect();
+        let d_x_ptrs = DeviceBuffer::from_host(&x_ptrs).expect("test: upload x ptrs");
+        let d_y_ptrs = DeviceBuffer::from_host(&y_ptrs).expect("test: upload y ptrs");
+
+        let ptx = generate_batched_spmv_ptx::<T>();
+        let module = Arc::new(Module::from_ptx(&ptx).expect("test: load batched module"));
+        let kname = format!("batched_spmv_{}", T::NAME);
+        let kernel = Kernel::from_module(module, &kname).expect("test: get batched kernel");
+
+        let max_rows = mats.iter().map(|m| m.rows).max().unwrap_or(1).max(1) as u32;
+        let params = LaunchParams::new(batch as u32, max_rows);
+
+        kernel
+            .launch(
+                &params,
+                handle.stream(),
+                &(
+                    d_concat_rp.as_device_ptr(),
+                    d_concat_ci.as_device_ptr(),
+                    d_concat_vals.as_device_ptr(),
+                    d_off_rp.as_device_ptr(),
+                    d_off_nnz.as_device_ptr(),
+                    d_row_counts.as_device_ptr(),
+                    d_x_ptrs.as_device_ptr(),
+                    d_y_ptrs.as_device_ptr(),
+                    f64_to_gpu::<T>(alpha),
+                    f64_to_gpu::<T>(beta),
+                    batch as u32,
+                ),
+            )
+            .expect("test: batched launch");
+        handle.stream().synchronize().expect("test: sync");
+
+        for i in 0..batch {
+            let mut out = vec![T::gpu_zero(); mats[i].rows];
+            y_bufs[i].copy_to_host(&mut out).expect("test: download y");
+            let got: Vec<f64> = out.iter().map(|&v| gpu_to_f64(v)).collect();
+            let want = cpu_spmv(&mats[i], &xs[i], &y0s[i], alpha, beta);
+            assert_close(&got, &want, tol, &format!("{tag}[mat{i}]"));
+        }
+    }
+
+    /// Two matrices of differing shape (3x3 and 2x2) with distinct values.
+    fn sample_batch() -> (Vec<HostMat>, Vec<Vec<f64>>, Vec<Vec<f64>>) {
+        let m0 = HostMat {
+            rows: 3,
+            row_ptr: vec![0, 2, 3, 5],
+            col_idx: vec![0, 1, 1, 0, 2],
+            values: vec![2.0, 1.0, 3.0, 1.0, 4.0],
+        };
+        let m1 = HostMat {
+            rows: 2,
+            row_ptr: vec![0, 2, 3],
+            col_idx: vec![0, 1, 1],
+            values: vec![5.0, 6.0, 7.0],
+        };
+        let xs = vec![vec![1.0, 2.0, 3.0], vec![10.0, 20.0]];
+        let y0s = vec![vec![100.0, 200.0, 300.0], vec![-1.0, -2.0]];
+        (vec![m0, m1], xs, y0s)
+    }
+
+    #[test]
+    fn batched_spmv_f64_alpha_beta() {
+        let (mats, xs, y0s) = sample_batch();
+        run_batched::<f64>(&mats, &xs, &y0s, 1.5, -0.5, 1e-10, "batched_f64");
+    }
+
+    #[test]
+    fn batched_spmv_f32_alpha_beta() {
+        let (mats, xs, y0s) = sample_batch();
+        run_batched::<f32>(&mats, &xs, &y0s, 2.0, 0.25, 1e-4, "batched_f32");
+    }
+
+    #[test]
+    fn batched_spmv_f64_beta_zero() {
+        let (mats, xs, y0s) = sample_batch();
+        run_batched::<f64>(&mats, &xs, &y0s, 1.0, 0.0, 1e-10, "batched_beta0");
+    }
+}

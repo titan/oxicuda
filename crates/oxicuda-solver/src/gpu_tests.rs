@@ -17,15 +17,16 @@
 //!
 //! * **Validated against a CPU oracle** — LU (`trsm_unit_lower`, `gemm_update`,
 //!   `panel_lu`, `pivot_swap`), Cholesky (`chol_panel_trsm`, `chol_syrk`,
-//!   `panel_cholesky`, both triangles), the row-swap helper, and all ten
+//!   `panel_cholesky`, both triangles), the row-swap helper, all ten
 //!   `matrix_functions` kernels (expm scale/pade/square, logm
-//!   shift/sqrt_step/pade/scale_back, sqrtm init/iter/conv).
-//! * **JIT-load + launch only (no oracle)** — the batched kernels
-//!   (`batched_lu/qr/cholesky/solve`) and QZ kernels
-//!   (`hessenberg_reduction/qz_sweep/eigenvalue_extract`) are deliberate
-//!   placeholder bodies (they compute offsets then `ret` without writing
-//!   results). They assemble and launch cleanly but have no numerical output,
-//!   so they are load-validated only.
+//!   shift/sqrt_step/pade/scale_back, sqrtm init/iter/conv), and the batched
+//!   `batched_lu`/`batched_cholesky` kernels (including their `info`
+//!   singular/non-SPD reporting).
+//! * **JIT-load + launch only (no oracle)** — `batched_qr`/`batched_solve` and
+//!   the QZ kernels (`hessenberg_reduction/qz_sweep/eigenvalue_extract`) are
+//!   deliberate placeholder bodies (they compute offsets then `ret` without
+//!   writing results). They assemble and launch cleanly but have no numerical
+//!   output, so they are load-validated only.
 //!
 //! Every test skips (returns early) when no CUDA device is present, so the
 //! suite stays green on CPU-only machines.
@@ -316,7 +317,8 @@ fn ptxas_prescreen_all_kernels() {
         let n = entry_name(&m);
         check(&m, &n);
     }
-    // Stub kernels (batched + QZ) must still assemble.
+    // Batched (LU/Cholesky are real, QR/solve remain stubs) + QZ kernels
+    // must still assemble.
     check(
         &crate::dense::batched::emit_batched_lu::<f32>(sm, 16).expect("blu"),
         "batched_lu",
@@ -1398,7 +1400,232 @@ fn sqrtm_kernels_match_host() {
 }
 
 // ===========================================================================
-// Placeholder kernels (batched + QZ): JIT-load + launch validation only
+// Batched LU / Cholesky: CPU-oracle validation + singular/non-SPD `info`
+// reporting (via the public `BatchedSolver` API, which exercises the real
+// launch geometry `compute_grid_size`/`compute_block_size` computes).
+// ===========================================================================
+
+#[test]
+fn batched_lu_matches_cpu_oracle_and_reports_singular() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+    let handle = crate::handle::SolverHandle::new(&fx.ctx).expect("handle");
+    let mut solver = crate::dense::batched::BatchedSolver::new(handle);
+
+    // n = 8 <= SMALL_MATRIX_THRESHOLD exercises the multi-matrix-per-block
+    // packing path (4 matrices per CTA, `batch_count` = 6 not a multiple of 4
+    // so the trailing block mixes valid and out-of-range batch indices,
+    // stressing the barrier-safety of the `inactive`-thread predication);
+    // n = 32 exercises the one-matrix-per-block path (a full warp per matrix,
+    // `group_size` == 32 == n exactly, the boundary of `compute_block_size`).
+    for n in [8usize, 32usize] {
+        let batch_count = 6usize;
+        let singular_idx = 3usize;
+        let mut rng = Lcg::new(0xB47C_4ED0 ^ (n as u64));
+
+        let mut host_mats = vec![0.0f32; batch_count * n * n];
+        for b in 0..batch_count {
+            for col in 0..n {
+                for row in 0..n {
+                    let mut v = rng.range_f32(-1.0, 1.0);
+                    if row == col {
+                        v += 8.0; // diagonally dominant -> well-conditioned
+                    }
+                    if b == singular_idx && col == 2 {
+                        v = 0.0; // force an exactly-zero column -> exact singularity
+                    }
+                    host_mats[b * n * n + row + col * n] = v;
+                }
+            }
+        }
+
+        // CPU oracle: column-major right-looking Doolittle LU with partial
+        // pivoting, one matrix at a time, mirroring `emit_batched_lu`'s four
+        // phases (including that the trailing update always runs, independent of
+        // whether the current column was flagged singular).
+        let mut expect = host_mats.clone();
+        let mut piv_expect = vec![0i32; batch_count * n];
+        let mut singular_expect = vec![false; batch_count];
+        for b in 0..batch_count {
+            let base = b * n * n;
+            for k in 0..n {
+                let mut maxabs = 0.0f32;
+                let mut prow = k;
+                for r in k..n {
+                    let av = expect[base + r + k * n].abs();
+                    if av > maxabs {
+                        maxabs = av;
+                        prow = r;
+                    }
+                }
+                piv_expect[b * n + k] = prow as i32;
+                if prow != k {
+                    for c in 0..n {
+                        expect.swap(base + k + c * n, base + prow + c * n);
+                    }
+                }
+                let pivot = expect[base + k + k * n];
+                if pivot.abs() <= 1e-30 {
+                    singular_expect[b] = true;
+                } else {
+                    for r in k + 1..n {
+                        expect[base + r + k * n] /= pivot;
+                    }
+                }
+                for t in k + 1..n {
+                    let akt = expect[base + k + t * n];
+                    for r in k + 1..n {
+                        let prod = expect[base + r + k * n] * akt;
+                        expect[base + r + t * n] -= prod;
+                    }
+                }
+            }
+        }
+
+        let mut d_mat = DeviceBuffer::<f32>::from_host(&host_mats).expect("d_mat");
+        let mut d_piv = DeviceBuffer::<i32>::zeroed(batch_count * n).expect("d_piv");
+        let result = solver
+            .batched_lu(&mut d_mat, &mut d_piv, n, batch_count)
+            .expect("batched_lu");
+
+        let mut got = vec![0.0f32; batch_count * n * n];
+        d_mat.copy_to_host(&mut got).expect("copy mat");
+        let mut piv_got = vec![0i32; batch_count * n];
+        d_piv.copy_to_host(&mut piv_got).expect("copy piv");
+
+        assert_eq!(
+            result.failed_count, 1,
+            "n={n}: exactly 1 of {batch_count} matrices is exactly singular"
+        );
+        for b in 0..batch_count {
+            if singular_expect[b] {
+                continue; // factorization past a singular column isn't meaningful
+            }
+            for k in 0..n {
+                assert_eq!(
+                    piv_got[b * n + k],
+                    piv_expect[b * n + k],
+                    "batch {b} pivot[{k}]"
+                );
+            }
+            let gpu_slice = &got[b * n * n..(b + 1) * n * n];
+            let cpu_slice = &expect[b * n * n..(b + 1) * n * n];
+            assert_close_slice(
+                gpu_slice,
+                cpu_slice,
+                1e-3,
+                1e-4,
+                &format!("batched_lu[{b}]"),
+            );
+        }
+    }
+}
+
+#[test]
+fn batched_cholesky_matches_cpu_oracle_and_reports_non_spd() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+    let handle = crate::handle::SolverHandle::new(&fx.ctx).expect("handle");
+    let mut solver = crate::dense::batched::BatchedSolver::new(handle);
+
+    // Same n values as the LU test, for the same multi-matrix-per-CTA
+    // (n=8) + one-matrix-per-block boundary (n=32) coverage.
+    for n in [8usize, 32usize] {
+        let batch_count = 6usize;
+        let non_spd_idx = 4usize;
+        let mut rng = Lcg::new(0x0FEE_D5EA ^ (n as u64));
+
+        let mut host_mats = vec![0.0f32; batch_count * n * n];
+        for b in 0..batch_count {
+            let m: Vec<f32> = (0..n * n).map(|_| rng.range_f32(-1.0, 1.0)).collect();
+            // SPD matrix: A = M^T * M + n*I (column-major).
+            for col in 0..n {
+                for row in 0..n {
+                    let mut acc = 0.0f32;
+                    for kk in 0..n {
+                        acc += m[kk + row * n] * m[kk + col * n];
+                    }
+                    if row == col {
+                        acc += n as f32;
+                    }
+                    host_mats[b * n * n + row + col * n] = acc;
+                }
+            }
+            if b == non_spd_idx {
+                // Force a non-positive diagonal entry: guaranteed not SPD.
+                host_mats[b * n * n + 3 + 3 * n] = -5.0;
+            }
+        }
+
+        // CPU oracle: column-major right-looking Cholesky (Lower), mirroring
+        // `emit_batched_cholesky`'s two phases.
+        let mut expect = host_mats.clone();
+        let mut non_spd_expect = vec![false; batch_count];
+        for (b, is_non_spd) in non_spd_expect.iter_mut().enumerate() {
+            let base = b * n * n;
+            for k in 0..n {
+                let akk = expect[base + k + k * n];
+                if akk <= 0.0 {
+                    *is_non_spd = true;
+                } else {
+                    let diag = akk.sqrt();
+                    expect[base + k + k * n] = diag;
+                    for r in k + 1..n {
+                        expect[base + r + k * n] /= diag;
+                    }
+                }
+                for c in k + 1..n {
+                    let lck = expect[base + c + k * n];
+                    for r in c..n {
+                        let lik = expect[base + r + k * n];
+                        expect[base + r + c * n] -= lik * lck;
+                    }
+                }
+            }
+        }
+
+        let mut d_mat = DeviceBuffer::<f32>::from_host(&host_mats).expect("d_mat");
+        let result = solver
+            .batched_cholesky(&mut d_mat, n, batch_count)
+            .expect("batched_cholesky");
+
+        let mut got = vec![0.0f32; batch_count * n * n];
+        d_mat.copy_to_host(&mut got).expect("copy mat");
+
+        assert_eq!(
+            result.failed_count, 1,
+            "exactly 1 of {batch_count} matrices is not SPD"
+        );
+        for b in 0..batch_count {
+            if non_spd_expect[b] {
+                continue;
+            }
+            let gpu_slice = &got[b * n * n..(b + 1) * n * n];
+            let cpu_slice = &expect[b * n * n..(b + 1) * n * n];
+            // Only the lower triangle (incl. diagonal) is a meaningful factor.
+            for col in 0..n {
+                for row in col..n {
+                    let idx = row + col * n;
+                    assert!(
+                        close(gpu_slice[idx], cpu_slice[idx], 1e-3, 1e-4),
+                        "batched_cholesky batch {b} L[{row},{col}] gpu={} cpu={}",
+                        gpu_slice[idx],
+                        cpu_slice[idx]
+                    );
+                }
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// Placeholder kernels (batched QR/solve + QZ): JIT-load + launch validation
+// only. `batched_lu`/`batched_cholesky` are validated against a CPU oracle
+// above (see `batched_lu_matches_cpu_oracle_and_reports_singular` /
+// `batched_cholesky_matches_cpu_oracle_and_reports_non_spd`) and are no
+// longer placeholders.
 // ===========================================================================
 
 #[test]
@@ -1409,30 +1636,6 @@ fn placeholder_kernels_load_and_launch() {
     let stream = Stream::new(&fx.ctx).expect("stream");
     let sm = fx.sm;
 
-    // batched_lu.
-    {
-        let n = 16usize;
-        let batch = 4u32;
-        let ptx = crate::dense::batched::emit_batched_lu::<f32>(sm, n).expect("ptx");
-        let kernel = load_kernel(&ptx, &format!("solver_batched_lu_f32_{n}"));
-        let d_mat =
-            DeviceBuffer::<f32>::from_host(&vec![0.0f32; n * n * batch as usize]).expect("d_mat");
-        let d_piv = DeviceBuffer::<u32>::from_host(&vec![0u32; n * batch as usize]).expect("d_piv");
-        let params = LaunchParams::new(batch, 32u32);
-        kernel
-            .launch(
-                &params,
-                &stream,
-                &(
-                    d_mat.as_device_ptr(),
-                    d_piv.as_device_ptr(),
-                    n as u32,
-                    batch,
-                ),
-            )
-            .expect("launch batched_lu");
-        stream.synchronize().expect("sync");
-    }
     // batched_qr.
     {
         let m = 16usize;
@@ -1458,20 +1661,6 @@ fn placeholder_kernels_load_and_launch() {
                 ),
             )
             .expect("launch batched_qr");
-        stream.synchronize().expect("sync");
-    }
-    // batched_cholesky.
-    {
-        let n = 16usize;
-        let batch = 3u32;
-        let ptx = crate::dense::batched::emit_batched_cholesky::<f32>(sm, n).expect("ptx");
-        let kernel = load_kernel(&ptx, &format!("solver_batched_cholesky_f32_{n}"));
-        let d_mat =
-            DeviceBuffer::<f32>::from_host(&vec![0.0f32; n * n * batch as usize]).expect("d_mat");
-        let params = LaunchParams::new(batch, 32u32);
-        kernel
-            .launch(&params, &stream, &(d_mat.as_device_ptr(), n as u32, batch))
-            .expect("launch batched_cholesky");
         stream.synchronize().expect("sync");
     }
     // batched_solve.

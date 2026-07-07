@@ -33,7 +33,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxicuda-levelzero = "0.4.0"
+oxicuda-levelzero = "0.4.1"
 ```
 
 ```rust

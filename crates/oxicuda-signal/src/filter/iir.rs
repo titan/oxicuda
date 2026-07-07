@@ -53,9 +53,33 @@ impl Biquad {
         })
     }
 
+    /// Validate the common `(fc, q)` design parameters shared by all biquad
+    /// designers.
+    ///
+    /// # Errors
+    /// Returns `SignalError::InvalidParameter` if `fc` is not finite or not
+    /// in `(0, 0.5)`, or if `q` is not finite or not positive.
+    fn validate_fc_q(fc: f64, q: f64) -> SignalResult<()> {
+        if !fc.is_finite() || fc <= 0.0 || fc >= 0.5 {
+            return Err(SignalError::InvalidParameter(format!(
+                "biquad fc must be finite and in (0, 0.5), got {fc}"
+            )));
+        }
+        if !q.is_finite() || q <= 0.0 {
+            return Err(SignalError::InvalidParameter(format!(
+                "biquad q must be finite and positive, got {q}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Design a lowpass biquad (Butterworth 2nd order) at normalised frequency `fc`.
-    #[must_use]
-    pub fn lowpass(fc: f64, q: f64) -> Self {
+    ///
+    /// # Errors
+    /// Returns `SignalError::InvalidParameter` if `fc` is not in `(0, 0.5)`
+    /// or `q` is not finite and positive.
+    pub fn lowpass(fc: f64, q: f64) -> SignalResult<Self> {
+        Self::validate_fc_q(fc, q)?;
         let omega = 2.0 * PI * fc;
         let cos_w = omega.cos();
         let sin_w = omega.sin();
@@ -66,12 +90,16 @@ impl Biquad {
         let a0 = 1.0 + alpha;
         let a1 = -2.0 * cos_w;
         let a2 = 1.0 - alpha;
-        Self::new([b0, b1, b2], [a0, a1, a2]).expect("valid biquad")
+        Self::new([b0, b1, b2], [a0, a1, a2])
     }
 
     /// Design a highpass biquad (Butterworth 2nd order).
-    #[must_use]
-    pub fn highpass(fc: f64, q: f64) -> Self {
+    ///
+    /// # Errors
+    /// Returns `SignalError::InvalidParameter` if `fc` is not in `(0, 0.5)`
+    /// or `q` is not finite and positive.
+    pub fn highpass(fc: f64, q: f64) -> SignalResult<Self> {
+        Self::validate_fc_q(fc, q)?;
         let omega = 2.0 * PI * fc;
         let cos_w = omega.cos();
         let sin_w = omega.sin();
@@ -82,12 +110,16 @@ impl Biquad {
         let a0 = 1.0 + alpha;
         let a1 = -2.0 * cos_w;
         let a2 = 1.0 - alpha;
-        Self::new([b0, b1, b2], [a0, a1, a2]).expect("valid biquad")
+        Self::new([b0, b1, b2], [a0, a1, a2])
     }
 
     /// Design a bandpass biquad (constant skirt gain).
-    #[must_use]
-    pub fn bandpass(fc: f64, q: f64) -> Self {
+    ///
+    /// # Errors
+    /// Returns `SignalError::InvalidParameter` if `fc` is not in `(0, 0.5)`
+    /// or `q` is not finite and positive.
+    pub fn bandpass(fc: f64, q: f64) -> SignalResult<Self> {
+        Self::validate_fc_q(fc, q)?;
         let omega = 2.0 * PI * fc;
         let sin_w = omega.sin();
         let cos_w = omega.cos();
@@ -98,14 +130,23 @@ impl Biquad {
         let a0 = 1.0 + alpha;
         let a1 = -2.0 * cos_w;
         let a2 = 1.0 - alpha;
-        Self::new([b0, b1, b2], [a0, a1, a2]).expect("valid biquad")
+        Self::new([b0, b1, b2], [a0, a1, a2])
     }
 
     /// Design a peaking EQ biquad (audio parametric equaliser).
     ///
     /// Gain `dB_gain > 0` → boost, `< 0` → cut.
-    #[must_use]
-    pub fn peaking_eq(fc: f64, q: f64, db_gain: f64) -> Self {
+    ///
+    /// # Errors
+    /// Returns `SignalError::InvalidParameter` if `fc` is not in `(0, 0.5)`,
+    /// `q` is not finite and positive, or `db_gain` is not finite.
+    pub fn peaking_eq(fc: f64, q: f64, db_gain: f64) -> SignalResult<Self> {
+        Self::validate_fc_q(fc, q)?;
+        if !db_gain.is_finite() {
+            return Err(SignalError::InvalidParameter(format!(
+                "biquad db_gain must be finite, got {db_gain}"
+            )));
+        }
         let omega = 2.0 * PI * fc;
         let cos_w = omega.cos();
         let sin_w = omega.sin();
@@ -117,7 +158,7 @@ impl Biquad {
         let a0 = 1.0 + alpha / a_lin;
         let a1 = -2.0 * cos_w;
         let a2 = 1.0 - alpha / a_lin;
-        Self::new([b0, b1, b2], [a0, a1, a2]).expect("valid biquad")
+        Self::new([b0, b1, b2], [a0, a1, a2])
     }
 
     /// Apply this biquad to a signal using Direct Form II Transposed.
@@ -214,7 +255,7 @@ mod tests {
     #[test]
     fn test_biquad_lowpass_dc_gain() {
         // Lowpass at fc=0.5 should pass DC (low frequencies) with gain ≈ 1.
-        let bq = Biquad::lowpass(0.1, 0.707);
+        let bq = Biquad::lowpass(0.1, 0.707).expect("valid biquad params");
         let dc_gain: f64 = bq.b.iter().sum::<f64>() / (1.0 + bq.a[1] + bq.a[2]);
         assert!((dc_gain - 1.0).abs() < 0.01, "DC gain = {dc_gain}");
     }
@@ -222,7 +263,7 @@ mod tests {
     #[test]
     fn test_biquad_highpass_nyquist_gain() {
         // Highpass at fc should pass Nyquist (high frequencies).
-        let bq = Biquad::highpass(0.1, 0.707);
+        let bq = Biquad::highpass(0.1, 0.707).expect("valid biquad params");
         // Nyquist gain: H(z=-1) = (b0 - b1 + b2) / (1 - a1 + a2)
         let num = bq.b[0] - bq.b[1] + bq.b[2];
         let den = 1.0 - bq.a[1] + bq.a[2];
@@ -235,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_biquad_apply_length() {
-        let bq = Biquad::lowpass(0.1, 0.707);
+        let bq = Biquad::lowpass(0.1, 0.707).expect("valid biquad params");
         let x = vec![1.0_f64; 100];
         let y = bq.apply(&x);
         assert_eq!(y.len(), 100);
@@ -244,7 +285,7 @@ mod tests {
     #[test]
     fn test_biquad_apply_impulse_dc() {
         // Lowpass filtered constant 1 → output settles to DC gain ≈ 1.
-        let bq = Biquad::lowpass(0.1, 0.707);
+        let bq = Biquad::lowpass(0.1, 0.707).expect("valid biquad params");
         let x = vec![1.0_f64; 1000];
         let y = bq.apply(&x);
         // Final sample should be close to DC gain.
@@ -254,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_biquad_freq_response_shape() {
-        let bq = Biquad::lowpass(0.2, 0.707);
+        let bq = Biquad::lowpass(0.2, 0.707).expect("valid biquad params");
         let (mag, _) = bq.freq_response(128);
         // DC should be close to 1 and Nyquist close to 0.
         assert!(mag[0] > 0.9, "DC mag = {}", mag[0]);
@@ -276,7 +317,7 @@ mod tests {
     #[test]
     fn test_peaking_eq_boost_dc() {
         // Peaking EQ with positive gain should boost the target frequency.
-        let bq = Biquad::peaking_eq(0.1, 2.0, 6.0); // +6 dB at fc=0.1
+        let bq = Biquad::peaking_eq(0.1, 2.0, 6.0).expect("valid biquad params"); // +6 dB at fc=0.1
         // We only verify the filter was constructed without panic.
         assert!(bq.b[0] > 0.0);
     }
@@ -296,10 +337,39 @@ mod tests {
     }
 
     #[test]
+    fn test_biquad_lowpass_invalid_q_returns_err() {
+        // q = 0 previously drove alpha → 0, producing a degenerate (still
+        // technically valid) section; a non-finite/zero q must now be
+        // rejected instead of panicking via `.expect("valid biquad")`.
+        assert!(Biquad::lowpass(0.1, 0.0).is_err());
+        assert!(Biquad::lowpass(0.1, -1.0).is_err());
+        assert!(Biquad::lowpass(0.1, f64::NAN).is_err());
+        assert!(Biquad::lowpass(0.1, f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_biquad_invalid_fc_returns_err() {
+        assert!(Biquad::lowpass(0.0, 0.707).is_err());
+        assert!(Biquad::lowpass(0.5, 0.707).is_err());
+        assert!(Biquad::lowpass(-0.1, 0.707).is_err());
+        assert!(Biquad::highpass(0.6, 0.707).is_err());
+        assert!(Biquad::bandpass(f64::NAN, 0.707).is_err());
+        assert!(Biquad::peaking_eq(0.1, 0.707, f64::NAN).is_err());
+    }
+
+    #[test]
+    fn test_biquad_valid_params_ok() {
+        assert!(Biquad::lowpass(0.1, 0.707).is_ok());
+        assert!(Biquad::highpass(0.1, 0.707).is_ok());
+        assert!(Biquad::bandpass(0.25, 5.0).is_ok());
+        assert!(Biquad::peaking_eq(0.1, 2.0, 6.0).is_ok());
+    }
+
+    #[test]
     fn test_biquad_bandpass_peak() {
         // Bandpass at fc=0.25 uses ω = 2π·fc = π/2 internally.
         // freq_response maps k → ω = π·k/(n-1), so peak at k = (n-1)·(fc·2) ≈ n/2.
-        let bq = Biquad::bandpass(0.25, 5.0);
+        let bq = Biquad::bandpass(0.25, 5.0).expect("valid biquad params");
         let (mag, _) = bq.freq_response(256);
         let peak_idx = mag
             .iter()

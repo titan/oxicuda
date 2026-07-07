@@ -56,12 +56,17 @@ pub enum SmVersion {
 
 impl SmVersion {
     /// Maximum number of warps that can reside on a single SM.
+    ///
+    /// Ampere GA10x (`Sm86`) and Blackwell consumer (`Sm120`) share Ada
+    /// Lovelace's (`Sm89`) lower 1536-threads/SM ceiling (48 warps),
+    /// unlike the datacenter parts (`Sm80`/`Sm90`/`Sm100`) which reach the
+    /// full 2048 threads/SM (64 warps).
     #[must_use]
     pub const fn max_warps_per_sm(self) -> u32 {
         match self {
             Self::Sm75 => 32,
-            Self::Sm89 => 48,
-            Self::Sm80 | Self::Sm86 | Self::Sm90 | Self::Sm100 | Self::Sm120 => 64,
+            Self::Sm86 | Self::Sm89 | Self::Sm120 => 48,
+            Self::Sm80 | Self::Sm90 | Self::Sm100 => 64,
         }
     }
 
@@ -69,8 +74,9 @@ impl SmVersion {
     #[must_use]
     pub const fn max_blocks_per_sm(self) -> u32 {
         match self {
-            Self::Sm75 | Self::Sm80 | Self::Sm86 | Self::Sm89 => 16,
-            Self::Sm90 | Self::Sm100 | Self::Sm120 => 32,
+            Self::Sm75 | Self::Sm86 => 16,
+            Self::Sm89 | Self::Sm120 => 24,
+            Self::Sm80 | Self::Sm90 | Self::Sm100 => 32,
         }
     }
 
@@ -87,12 +93,16 @@ impl SmVersion {
     }
 
     /// Maximum shared memory per SM in bytes.
+    ///
+    /// Note this is the per-*SM* pool, not the smaller per-*block* cap
+    /// (e.g. `Sm86`/`Sm89` allow up to 100 KiB per SM but only 99 KiB
+    /// (101,376 bytes) opt-in per block).
     #[must_use]
     pub const fn max_shared_mem_per_sm(self) -> u32 {
         match self {
             Self::Sm75 => 65_536,
-            Self::Sm80 | Self::Sm86 => 163_840,
-            Self::Sm89 => 101_376,
+            Self::Sm80 => 167_936,
+            Self::Sm86 | Self::Sm89 => 102_400,
             Self::Sm90 | Self::Sm100 | Self::Sm120 => 232_448,
         }
     }
@@ -827,7 +837,17 @@ pub fn estimate_occupancy(
     // Round up to allocation granularity
     let regs_alloc = regs_per_thread.div_ceil(reg_granularity) * reg_granularity;
     let regs_per_warp = regs_alloc * warp_size;
-    let warps_limited_by_regs = regs_per_sm.checked_div(regs_per_warp).unwrap_or(max_warps);
+    // Register-derived warp count can never exceed the SM's physical warp
+    // residency limit; capping here (rather than relying on the final
+    // `occupancy.clamp(0.0, 1.0)`) keeps `blocks_by_warps` from reporting
+    // more concurrently-resident blocks than the SM can actually hold,
+    // which would otherwise let a smaller, more-limiting factor (e.g.
+    // shared memory) be masked whenever the erroneously-large
+    // register-derived count still isn't the binding minimum.
+    let warps_limited_by_regs = regs_per_sm
+        .checked_div(regs_per_warp)
+        .unwrap_or(max_warps)
+        .min(max_warps);
 
     // --- Shared memory limit ---
     let smem_per_block = if shared_mem == 0 {
@@ -1121,6 +1141,72 @@ mod tests {
     fn sm_version_display() {
         assert_eq!(format!("{}", SmVersion::Sm80), "sm_80");
         assert_eq!(format!("{}", SmVersion::Sm90), "sm_90");
+    }
+
+    // ---------------------------------------------------------------------------
+    // F069 regression tests: hardware constants must match real GPU specs.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn sm_version_max_warps_matches_real_hardware() {
+        // Ampere GA10x (sm_86) and Ada Lovelace (sm_89) top out at 1536
+        // threads/SM (48 warps), not the 2048 threads/SM (64 warps) of the
+        // datacenter parts (sm_80/sm_90/sm_100). Blackwell consumer
+        // (sm_120) shares Ada's lower ceiling.
+        assert_eq!(SmVersion::Sm75.max_warps_per_sm(), 32);
+        assert_eq!(SmVersion::Sm80.max_warps_per_sm(), 64);
+        assert_eq!(SmVersion::Sm86.max_warps_per_sm(), 48);
+        assert_eq!(SmVersion::Sm89.max_warps_per_sm(), 48);
+        assert_eq!(SmVersion::Sm90.max_warps_per_sm(), 64);
+        assert_eq!(SmVersion::Sm100.max_warps_per_sm(), 64);
+        assert_eq!(SmVersion::Sm120.max_warps_per_sm(), 48);
+    }
+
+    #[test]
+    fn sm_version_max_blocks_matches_real_hardware() {
+        assert_eq!(SmVersion::Sm75.max_blocks_per_sm(), 16);
+        assert_eq!(SmVersion::Sm80.max_blocks_per_sm(), 32);
+        assert_eq!(SmVersion::Sm86.max_blocks_per_sm(), 16);
+        assert_eq!(SmVersion::Sm89.max_blocks_per_sm(), 24);
+        assert_eq!(SmVersion::Sm90.max_blocks_per_sm(), 32);
+        assert_eq!(SmVersion::Sm100.max_blocks_per_sm(), 32);
+        assert_eq!(SmVersion::Sm120.max_blocks_per_sm(), 24);
+    }
+
+    #[test]
+    fn sm_version_max_shared_mem_matches_real_hardware() {
+        // sm_86/sm_89 share the same 100 KiB (102,400 byte) per-SM pool;
+        // 101,376 is the smaller *per-block* opt-in cap, not the per-SM
+        // total, and must not be used here.
+        assert_eq!(SmVersion::Sm75.max_shared_mem_per_sm(), 65_536);
+        assert_eq!(SmVersion::Sm80.max_shared_mem_per_sm(), 167_936);
+        assert_eq!(SmVersion::Sm86.max_shared_mem_per_sm(), 102_400);
+        assert_eq!(SmVersion::Sm89.max_shared_mem_per_sm(), 102_400);
+        assert_eq!(SmVersion::Sm90.max_shared_mem_per_sm(), 232_448);
+    }
+
+    #[test]
+    fn estimate_occupancy_caps_register_derived_warps_at_hardware_max() {
+        // Regression test: `warps_limited_by_regs` was previously
+        // uncapped, so with very low register pressure (here 1
+        // register/thread, the architectural minimum) the register-derived
+        // block count could exceed the SM's true warp-residency limit and
+        // get masked only by the final `occupancy.clamp(0.0, 1.0)` —
+        // silently reporting 100% occupancy for a configuration that the
+        // SM cannot actually realize. With block_size=224 (7 warps/block)
+        // on Sm86 (48 max warps/SM, which 7 does not evenly divide), full
+        // occupancy is architecturally impossible: the true ceiling is
+        // 6 resident blocks * 7 warps = 42/48 = 0.875.
+        let occ = estimate_occupancy(224, 1, 0, SmVersion::Sm86);
+        assert!(
+            occ < 1.0,
+            "occupancy must reflect the true SM warp-residency ceiling \
+             instead of a register-derived overcount masked by clamping, got {occ}"
+        );
+        assert!(
+            (occ - 0.875).abs() < 1e-9,
+            "expected 42/48 = 0.875 (6 blocks * 7 warps / 48 max warps), got {occ}"
+        );
     }
 
     // -- KernelStats Display --

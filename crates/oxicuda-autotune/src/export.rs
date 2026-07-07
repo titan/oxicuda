@@ -392,16 +392,14 @@ pub fn import_bundle(
                 efficiency: None,
             };
 
-            // Use save which only replaces if faster — but for AlwaysReplace
-            // we need to force it. We work around this by directly saving
-            // with a very small median when AlwaysReplace is used.
+            // `ResultDb::save` only replaces an existing entry when the new
+            // result is faster, so `AlwaysReplace` must use the additive
+            // `save_unconditional` instead — it writes `bench_result`
+            // verbatim (including the real `median_us`) regardless of what
+            // is already stored.
             match policy {
                 ImportPolicy::AlwaysReplace => {
-                    // Clear existing first by saving with the new result.
-                    // ResultDb::save only replaces if faster, so for AlwaysReplace
-                    // we clear and re-insert.
-                    force_save(
-                        db,
+                    db.save_unconditional(
                         &entry.gpu_name,
                         &entry.kernel_name,
                         &entry.problem_key,
@@ -432,41 +430,6 @@ pub fn import_bundle(
     }
 
     Ok(result)
-}
-
-/// Force-saves a result into the database, bypassing the "only replace if faster" logic.
-///
-/// Since [`ResultDb::save`] only replaces when the new result is faster, we
-/// force replacement by temporarily saving with `median_us = 0.0` (which
-/// always wins), then the actual result data replaces the zero sentinel
-/// because we construct it as a single save with all fields intact but
-/// a guaranteed-winning median.
-fn force_save(
-    db: &mut ResultDb,
-    gpu_name: &str,
-    kernel_name: &str,
-    problem_key: &str,
-    result: BenchmarkResult,
-) -> Result<(), AutotuneError> {
-    // Save with median_us = 0.0 to guarantee replacement, preserving config.
-    // Then immediately re-save with real data — but that won't win vs 0.0.
-    // So we use a single save with all the real data except median is 0.0
-    // to ensure it replaces any existing entry, then the config is correct.
-    //
-    // Trade-off: the stored median_us is 0.0, but for AlwaysReplace the
-    // primary purpose is overriding the config. The real timing metadata
-    // is preserved in all other fields.
-    let forced = BenchmarkResult {
-        config: result.config,
-        median_us: 0.0,
-        min_us: result.min_us,
-        max_us: result.max_us,
-        stddev_us: result.stddev_us,
-        gflops: result.gflops,
-        efficiency: result.efficiency,
-    };
-    db.save(gpu_name, kernel_name, problem_key, forced)?;
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -796,6 +759,16 @@ mod tests {
 
         assert_eq!(res.imported, 1);
         assert_eq!(res.conflicts, 1);
+
+        // Regression (F013): AlwaysReplace must persist the REAL median_us
+        // from the imported entry, not a `0.0` sentinel used to defeat the
+        // "only replace if faster" guard in `ResultDb::save`.
+        assert_eq!(
+            db.lookup("GPU0", "sgemm", "1024").map(|r| r.median_us),
+            Some(100.0),
+            "AlwaysReplace must not poison median_us with a 0.0 sentinel"
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

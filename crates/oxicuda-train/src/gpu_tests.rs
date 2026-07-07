@@ -1,5 +1,5 @@
 //! On-device GPU validation for the hand-written PTX kernels in
-//! [`crate::ptx_kernels`].
+//! [`crate::ptx_kernels`] and [`crate::amp`].
 //!
 //! Each test JIT-compiles a kernel's PTX for the live device's SM version via
 //! `Module::from_ptx`, launches it on the real CUDA device through
@@ -72,6 +72,10 @@ use crate::handle::LcgRng;
 struct GpuFixture {
     ctx: Arc<Context>,
     sm: SmVersion,
+    /// Numeric SM value (`major * 10 + minor`, e.g. `86` for `sm_86`), used by
+    /// the `amp` PTX generators which take a plain `u32` SM rather than a
+    /// [`SmVersion`].
+    sm_num: u32,
 }
 
 /// Acquire a GPU fixture, or `None` when no driver / device is present.
@@ -85,10 +89,12 @@ fn gpu_fixture() -> Option<GpuFixture> {
     };
     let (major, minor) = dev.compute_capability().ok()?;
     let sm = SmVersion::from_compute_capability(major, minor)?;
+    let sm_num = (major * 10 + minor) as u32;
     let ctx = Context::new(&dev).ok()?;
     Some(GpuFixture {
         ctx: Arc::new(ctx),
         sm,
+        sm_num,
     })
 }
 
@@ -821,4 +827,161 @@ fn add_inplace_matches_host() {
             acc_host[k]
         );
     }
+}
+
+// ===========================================================================
+// 10. unscale_inplace  —  INDEPENDENT HOST RE-DERIVATION (data[i] *= inv_scale)
+//     AMP gradient unscale, from `crate::amp::unscale_ptx`.
+//
+//     This is the kernel the convergence audit flagged: its only prior test
+//     was a `ptx.contains("unscale_inplace")` string assertion that never
+//     invoked ptxas, hiding the fact that the PTX did not compile at all (the
+//     user registers `%tid`/`%ntid`/`%ctaid`/`%nctaid` collided with the PTX
+//     built-in special registers, so `mov.u32 %tid, %tid.x` was rejected by
+//     ptxas as an illegal video selector). Fixed in `amp.rs` by renaming the
+//     work registers to `%t`/`%nt`/`%bid`/`%nc`.
+//
+//     Launched deliberately under-provisioned (grid*block < n) so the
+//     grid-stride advance is exercised across multiple iterations per thread —
+//     a stuck grid-stride would leave the buffer tail unscaled and fail here.
+// ===========================================================================
+
+fn run_unscale_case(fx: &GpuFixture, inv_scale: f32, seed: u64) {
+    let n = 4096_usize;
+
+    let mut rng = LcgRng::new(seed);
+    let data: Vec<f32> = (0..n).map(|_| rng.next_f32() * 8.0 - 4.0).collect();
+
+    // Host oracle: every element multiplied by inv_scale (= 1 / scale_factor).
+    let host: Vec<f32> = data.iter().map(|&v| v * inv_scale).collect();
+
+    let ptx = crate::amp::unscale_ptx(fx.sm_num);
+    let kernel = load_kernel(&ptx, "unscale_inplace");
+    let stream = Stream::new(&fx.ctx).expect("stream");
+
+    let d_data = DeviceBuffer::<f32>::from_host(&data).expect("d_data");
+
+    // 4 blocks × 128 = 512 threads for 4096 elements ⇒ each thread strides 8
+    // times. n is passed as `.u32` (the amp kernel's length type, unlike the
+    // `.u64` lengths in `ptx_kernels`).
+    let block = 128_u32;
+    let grid = 4_u32;
+    let params = LaunchParams::new(grid, block);
+    kernel
+        .launch(
+            &params,
+            &stream,
+            &(d_data.as_device_ptr(), n as u32, inv_scale),
+        )
+        .expect("launch unscale_inplace");
+    stream.synchronize().expect("sync");
+
+    let mut gpu = vec![0.0_f32; n];
+    d_data.copy_to_host(&mut gpu).expect("copy data");
+
+    // A single exact `mul.rn.f32` ⇒ ~1 ulp.
+    let (rel, abs) = worst_diff(&gpu, &host);
+    for k in 0..n {
+        assert!(
+            close(gpu[k], host[k], 1e-6, 1e-7),
+            "unscale (inv_scale={inv_scale}) data[{k}] mismatch: gpu={} host={} \
+             (worst rel={rel:e} abs={abs:e})",
+            gpu[k],
+            host[k]
+        );
+    }
+}
+
+#[test]
+fn unscale_inplace_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+    // The canonical AMP inverse scale (1 / 2¹⁶) plus two arbitrary factors, so
+    // the test pins the actual multiply rather than any hard-coded constant.
+    run_unscale_case(&fx, 1.0 / 65536.0, 0x0125_0A01);
+    run_unscale_case(&fx, 0.375, 0x0125_0A02);
+    run_unscale_case(&fx, 3.5, 0x0125_0A03);
+}
+
+// ===========================================================================
+// 11. overflow_check  —  INDEPENDENT HOST RE-DERIVATION (any inf/NaN ⇒ flag 1)
+//     AMP overflow detection, from `crate::amp::overflow_check_ptx`.
+//
+//     Same un-validated-PTX gap as `unscale_inplace`. Compiling + launching it
+//     exposed three real bugs (all fixed in `amp.rs`): (1) the same special-
+//     register name collision, (2) `testp.nan.f32` — not a legal PTX qualifier,
+//     it must be `testp.notanumber.f32`, and (3) a tangled grid-stride epilogue
+//     that recomputed `idx` from the thread's base every iteration, so it never
+//     advanced past `base + stride` (an infinite loop / hang for any launch
+//     with grid*block < n). Fixed to a clean `idx += gridDim.x * blockDim.x`.
+//
+//     The poisoned element is placed PAST the first thread-wave (index > 512)
+//     so the grid-stride must genuinely advance to detect it.
+// ===========================================================================
+
+fn run_overflow_case(fx: &GpuFixture, seed: u64, poison: Option<(usize, f32)>) -> u32 {
+    let n = 4096_usize;
+
+    let mut rng = LcgRng::new(seed);
+    let mut data: Vec<f32> = (0..n).map(|_| rng.next_f32() * 8.0 - 4.0).collect();
+    if let Some((idx, val)) = poison {
+        data[idx] = val;
+    }
+
+    let ptx = crate::amp::overflow_check_ptx(fx.sm_num);
+    let kernel = load_kernel(&ptx, "overflow_check");
+    let stream = Stream::new(&fx.ctx).expect("stream");
+
+    let d_data = DeviceBuffer::<f32>::from_host(&data).expect("d_data");
+    // The host MUST zero-init the flag; the kernel only ever stores 1.
+    let d_flag = DeviceBuffer::<u32>::from_host(&[0_u32]).expect("d_flag");
+
+    let block = 128_u32;
+    let grid = 4_u32;
+    let params = LaunchParams::new(grid, block);
+    kernel
+        .launch(
+            &params,
+            &stream,
+            &(d_data.as_device_ptr(), d_flag.as_device_ptr(), n as u32),
+        )
+        .expect("launch overflow_check");
+    stream.synchronize().expect("sync");
+
+    let mut flag = [0_u32; 1];
+    d_flag.copy_to_host(&mut flag).expect("copy flag");
+    flag[0]
+}
+
+#[test]
+fn overflow_check_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+    // All-finite buffer ⇒ the flag stays 0.
+    assert_eq!(
+        run_overflow_case(&fx, 0x0FEB_0070, None),
+        0,
+        "overflow_check flagged an all-finite buffer"
+    );
+    // +inf far into the buffer (index 3000 ≫ 512 first-wave threads) ⇒ flag 1;
+    // this can only be reached if the grid-stride actually advances.
+    assert_eq!(
+        run_overflow_case(&fx, 0x0FEB_0071, Some((3000, f32::INFINITY))),
+        1,
+        "overflow_check missed a +inf at index 3000"
+    );
+    // -inf ⇒ flag 1 (testp.infinite covers both signs).
+    assert_eq!(
+        run_overflow_case(&fx, 0x0FEB_0072, Some((1234, f32::NEG_INFINITY))),
+        1,
+        "overflow_check missed a -inf at index 1234"
+    );
+    // NaN ⇒ flag 1 (exercises the testp.notanumber path specifically).
+    assert_eq!(
+        run_overflow_case(&fx, 0x0FEB_0073, Some((2077, f32::NAN))),
+        1,
+        "overflow_check missed a NaN at index 2077"
+    );
 }

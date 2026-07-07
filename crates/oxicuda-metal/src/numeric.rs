@@ -79,7 +79,15 @@ impl Int8Quantizer {
                 let range = max - min;
                 let scale = if range > 0.0 { range / 255.0 } else { 1.0 };
                 // Map min → -128: zero_point = -128 - round(min/scale).
-                let zero_point = clamp_i8_int(-128 - (min / scale).round() as i32);
+                //
+                // The affine zero point is an `i32` offset (stored as `i32` in
+                // [`QuantizedTensor`] and consumed as `int` by the kernel), NOT
+                // an int8 quantity, so it must **not** be clamped to [-128, 127]:
+                // for a tensor whose values sit far from zero the correct offset
+                // is many thousands in magnitude, and clamping it would collapse
+                // the representable band and silently corrupt the roundtrip. Only
+                // the per-element codes below are clamped into int8 range.
+                let zero_point = -128 - (min / scale).round() as i32;
                 let inv = 1.0 / scale;
                 let values = data
                     .iter()
@@ -130,11 +138,6 @@ fn clamp_i8(v: f32) -> i8 {
     } else {
         v as i8
     }
-}
-
-#[inline]
-fn clamp_i8_int(v: i32) -> i32 {
-    v.clamp(-128, 127)
 }
 
 // ─── Double-single (df64) emulated FP64 ────────────────────────────────────────
@@ -308,8 +311,38 @@ mod tests {
         assert_eq!(clamp_i8(200.0), 127);
         assert_eq!(clamp_i8(-200.0), -128);
         assert_eq!(clamp_i8(5.0), 5);
-        assert_eq!(clamp_i8_int(500), 127);
-        assert_eq!(clamp_i8_int(-500), -128);
+    }
+
+    #[test]
+    fn asymmetric_quantise_range_far_from_zero() {
+        // A tensor whose values are all far from zero must still round-trip
+        // accurately: the affine zero point is a large-magnitude i32 offset and
+        // must not be clamped into int8 range (regression for the clamp bug).
+        let data = [50.0f32, 100.0, 150.0];
+        let q = Int8Quantizer::Asymmetric.quantize(&data).expect("quantise");
+        // zero_point must be well outside int8 range here.
+        assert!(
+            q.zero_point < -128,
+            "zero_point {} should be < -128 (unclamped)",
+            q.zero_point
+        );
+        let err = q.max_abs_error(&data).expect("error");
+        assert!(err <= q.scale, "err {err} should be <= scale {}", q.scale);
+    }
+
+    #[test]
+    fn asymmetric_quantise_all_negative() {
+        // All-negative tensor: true zero_point is large positive and must not be
+        // clamped to 127.
+        let data = [-100.0f32, -99.5, -99.0];
+        let q = Int8Quantizer::Asymmetric.quantize(&data).expect("quantise");
+        assert!(
+            q.zero_point > 127,
+            "zero_point {} should be > 127 (unclamped)",
+            q.zero_point
+        );
+        let err = q.max_abs_error(&data).expect("error");
+        assert!(err <= q.scale, "err {err} should be <= scale {}", q.scale);
     }
 
     // ── Double-single ──

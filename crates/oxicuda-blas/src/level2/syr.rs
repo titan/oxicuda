@@ -148,7 +148,7 @@ fn generate_syr_ptx<T: GpuFloat>(sm: SmVersion, uplo: FillMode) -> BlasResult<St
                         b.raw_ptx(&format!("setp.hs.u32 {in_triangle}, {row}, {col};"));
                     }
                     let skip_label = b.fresh_label("syr_skip");
-                    b.raw_ptx(&format!("@!{in_triangle} bra {skip_label};"));
+                    b.raw_ptx(&format!("@!{in_triangle} bra ${skip_label};"));
 
                     let a_ptr = b.load_param_u64("a_ptr");
                     let x_ptr = b.load_param_u64("x_ptr");

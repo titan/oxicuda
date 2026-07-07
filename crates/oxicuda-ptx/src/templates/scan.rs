@@ -335,10 +335,11 @@ impl ScanTemplate {
         writeln!(ptx, "    .param .u64 %param_block_sums,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u32 %param_n").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+        // `.maxntid` must precede the body brace with no trailing semicolon.
+        writeln!(ptx, "    .maxntid {tpb}, 1, 1").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
         // Declarations
-        writeln!(ptx, "    .maxntid {tpb}, 1, 1;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .u32 %r<{reg_count}>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .u64 %rd<{rd_reg_count}>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg {reg_type_str} %val<{val_reg_count}>;")
@@ -495,9 +496,10 @@ impl ScanTemplate {
         writeln!(ptx, "    .param .u64 %param_block_sums,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u32 %param_n").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+        // `.maxntid` must precede the body brace with no trailing semicolon.
+        writeln!(ptx, "    .maxntid {tpb}, 1, 1").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
-        writeln!(ptx, "    .maxntid {tpb}, 1, 1;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .u32 %r<{r_reg_count}>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .u64 %rd<8>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg {reg_type_str} %val<{val_reg_count}>;")

@@ -128,16 +128,35 @@ impl MemoryPool {
         if let Some(i) = best {
             let handle = self.next_handle;
             self.next_handle += 1;
-            // Re-key the reused block under a fresh handle and mark live.
+            // Re-key the reused block under a fresh handle and mark live,
+            // shrinking it to exactly `need`.  Any surplus is returned to the
+            // free list as its own block so later requests can be served from
+            // it (mirroring how `hipMallocAsync` subdivides a pool block).
             let blk = self.blocks[i].1;
+            let remainder = blk.size - need;
             self.blocks[i] = (
                 handle,
                 Block {
                     offset: blk.offset,
-                    size: blk.size,
+                    size: need,
                     in_use: true,
                 },
             );
+            // `need` and `blk.size` are both multiples of `HIP_MALLOC_ALIGN`, so
+            // `remainder` is either 0 or a full aligned block (never a stray
+            // sub-alignment fragment).
+            if remainder > 0 {
+                let leftover_handle = self.next_handle;
+                self.next_handle += 1;
+                self.blocks.push((
+                    leftover_handle,
+                    Block {
+                        offset: blk.offset + need,
+                        size: remainder,
+                        in_use: false,
+                    },
+                ));
+            }
             return Ok(handle);
         }
 
@@ -307,6 +326,31 @@ mod tests {
         assert_eq!(pool.stats().high_water_mark, hw_before);
         assert_eq!(pool.stats().live_allocations, 1);
         assert_ne!(a, b); // fresh handle for the reused block
+    }
+
+    #[test]
+    fn reused_block_is_split_so_surplus_stays_available() {
+        // Regression: a reused best-fit block used to be re-keyed whole, locking
+        // its surplus away and forcing spurious OOM. It must now be split so the
+        // remainder serves later requests.
+        let mut pool = MemoryPool::new(3072);
+        let a = pool.alloc(3000).expect("a"); // padded to 3072 == capacity
+        assert_eq!(pool.stats().bytes_in_use, 3072);
+        pool.free(a);
+
+        let b = pool.alloc(256).expect("b reuses the freed block");
+        // Only 256 bytes are actually in use; the 2816-byte surplus is free.
+        assert_eq!(pool.stats().bytes_in_use, 256);
+        assert_eq!(pool.stats().reusable_bytes, 2816);
+
+        // A second small request must be satisfiable from the split remainder
+        // (previously this returned OutOfMemory).
+        let c = pool.alloc(256).expect("c reuses the split remainder");
+        assert_eq!(pool.stats().bytes_in_use, 512);
+        assert_eq!(pool.stats().live_allocations, 2);
+        // Blocks must not overlap: b at offset 0, c at offset 256.
+        assert_eq!(pool.offset_of(b).unwrap(), 0);
+        assert_eq!(pool.offset_of(c).unwrap(), 256);
     }
 
     #[test]

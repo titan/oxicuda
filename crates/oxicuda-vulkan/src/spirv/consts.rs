@@ -65,6 +65,11 @@ pub(super) const OP_RETURN: u32 = 253;
 pub(super) const OP_CONTROL_BARRIER: u32 = 224;
 
 // Subgroup / GroupNonUniform opcodes
+// NOTE: the integer group-add op is not emitted by any generator (the subgroup
+// kernels operate on `float` buffers, where an integer group op on a Float32
+// result type would be invalid SPIR-V); it is retained for completeness and is
+// referenced by the regression test that asserts it is absent.
+#[allow(dead_code)]
 pub(super) const OP_GROUP_NON_UNIFORM_I_ADD: u32 = 349;
 pub(super) const OP_GROUP_NON_UNIFORM_F_ADD: u32 = 350;
 pub(super) const OP_GROUP_NON_UNIFORM_F_MIN: u32 = 354;
@@ -134,7 +139,7 @@ pub(super) const GLSL_TANH: u32 = 21;
 pub(super) const GLSL_EXP: u32 = 27;
 pub(super) const GLSL_LOG: u32 = 28;
 pub(super) const GLSL_SQRT: u32 = 31;
-pub(super) const GLSL_F_MIN: u32 = 39;
+pub(super) const GLSL_F_MIN: u32 = 37;
 pub(super) const GLSL_F_MAX: u32 = 40;
 
 /// Workgroup size for 1-D compute shaders.

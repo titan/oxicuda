@@ -249,7 +249,7 @@ fn emit_fused_dw_pw_body(
 
     let ch_loop = b.fresh_label("fused_ch_loop");
     let ch_loop_end = b.fresh_label("fused_ch_loop_end");
-    b.label(&ch_loop);
+    b.raw_ptx(&format!("{ch_loop}:"));
 
     let pred_ch = b.alloc_reg(PtxType::Pred);
     b.raw_ptx(&format!("setp.lo.u32 {pred_ch}, {ch}, {dw_out_ch};"));
@@ -368,7 +368,7 @@ fn emit_fused_dw_pw_body(
                 ));
             }
 
-            b.label(&skip);
+            b.raw_ptx(&format!("{skip}:"));
         }
     }
 
@@ -399,7 +399,7 @@ fn emit_fused_dw_pw_body(
     // Increment channel counter
     b.raw_ptx(&format!("add.u32 {ch}, {ch}, 1;"));
     b.raw_ptx(&format!("bra {ch_loop};"));
-    b.label(&ch_loop_end);
+    b.raw_ptx(&format!("{ch_loop_end}:"));
 
     b.comment("Stage 3: Sync (barrier for shared-memory consistency)");
     b.raw_ptx("bar.sync 0;");
@@ -422,6 +422,6 @@ fn emit_fused_dw_pw_body(
         b.raw_ptx(&format!("st.global.f64 [{out_addr}], {pw_activated};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }

@@ -297,7 +297,7 @@ fn generate_max_pool2d_ptx<T: GpuFloat>(sm: SmVersion, has_indices: bool) -> Dnn
 
                 // Bounds check for h
                 let h_valid = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.ge.and.s32 {h_valid}, {ih}, 0, {{true}};"));
+                b.raw_ptx(&format!("setp.ge.s32 {h_valid}, {ih}, 0;"));
                 let h_valid2 = b.alloc_reg(PtxType::Pred);
                 b.raw_ptx(&format!(
                     "setp.lt.and.s32 {h_valid2}, {ih}, {in_h_s32}, {h_valid};"
@@ -318,7 +318,7 @@ fn generate_max_pool2d_ptx<T: GpuFloat>(sm: SmVersion, has_indices: bool) -> Dnn
                 b.branch_if(pw_cmp, &end_w);
 
                 let w_valid = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.ge.and.s32 {w_valid}, {iw}, 0, {{true}};"));
+                b.raw_ptx(&format!("setp.ge.s32 {w_valid}, {iw}, 0;"));
                 let w_valid2 = b.alloc_reg(PtxType::Pred);
                 b.raw_ptx(&format!(
                     "setp.lt.and.s32 {w_valid2}, {iw}, {in_w_s32}, {w_valid};"

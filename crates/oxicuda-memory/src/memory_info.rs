@@ -21,6 +21,7 @@
 
 use oxicuda_driver::device::Device;
 use oxicuda_driver::error::{CudaError, CudaResult};
+use oxicuda_driver::ffi::CUdevice;
 use oxicuda_driver::loader::try_driver;
 use oxicuda_driver::stream::Stream;
 
@@ -138,6 +139,33 @@ pub fn mem_advise(ptr: u64, count: usize, advice: MemAdvice, device: &Device) ->
     })
 }
 
+/// The CUDA driver's sentinel `CUdevice` value denoting host (CPU) memory
+/// (`CU_DEVICE_CPU` / `cudaCpuDeviceId`), for use with [`mem_advise_host`].
+const CU_DEVICE_CPU: CUdevice = -1;
+
+/// Provides a memory usage hint for a unified memory region, directing it
+/// at host (CPU) memory rather than a specific GPU device.
+///
+/// This is the counterpart to [`mem_advise`] for hints that target the CPU
+/// (e.g. [`MemAdvice::SetPreferredLocation`] when the caller wants data to
+/// remain resident in system memory) rather than any particular [`Device`].
+/// There is no [`Device`] value that represents the CPU, so this function
+/// passes the driver's special `CU_DEVICE_CPU` (`-1`) sentinel directly.
+///
+/// # Errors
+///
+/// Returns [`CudaError::InvalidValue`] if `count` is zero, or another
+/// [`CudaError`] if the driver call fails.
+pub fn mem_advise_host(ptr: u64, count: usize, advice: MemAdvice) -> CudaResult<()> {
+    if count == 0 {
+        return Err(CudaError::InvalidValue);
+    }
+    let driver = try_driver()?;
+    oxicuda_driver::check(unsafe {
+        (driver.cu_mem_advise)(ptr, count, advice as u32, CU_DEVICE_CPU)
+    })
+}
+
 /// Prefetches unified memory to the specified device.
 ///
 /// This is an asynchronous operation enqueued on `stream`. The data
@@ -235,6 +263,24 @@ mod tests {
         // We cannot construct a Stream without a GPU context, but we can
         // verify the function signature compiles.
         let _: fn(u64, usize, &Device, &Stream) -> CudaResult<()> = mem_prefetch;
+    }
+
+    #[test]
+    fn mem_advise_host_rejects_zero_count() {
+        let result = mem_advise_host(0x1000, 0, MemAdvice::SetPreferredLocation);
+        assert_eq!(result, Err(CudaError::InvalidValue));
+    }
+
+    #[test]
+    fn mem_advise_host_signature_compiles() {
+        let _: fn(u64, usize, MemAdvice) -> CudaResult<()> = mem_advise_host;
+    }
+
+    #[test]
+    fn cu_device_cpu_is_negative_one() {
+        // `CU_DEVICE_CPU` (`cudaCpuDeviceId`) is a well-known CUDA driver
+        // sentinel; `mem_advise_host` relies on this exact value.
+        assert_eq!(CU_DEVICE_CPU, -1);
     }
 
     #[test]

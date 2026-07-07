@@ -87,23 +87,25 @@ impl VulkanMemModel {
     }
 
     /// Memory-operand bitmask for an availability store (operand 4 of `OpStore`).
+    ///
+    /// The SPIR-V memory model requires `NonPrivatePointer` to be set whenever
+    /// `MakePointerAvailable` is used, so it is always included regardless of the
+    /// [`non_private`](Self::non_private) hint.
     #[must_use]
     pub fn store_operands(self) -> u32 {
-        let mut bits = MEMORY_OPERAND_MAKE_POINTER_AVAILABLE;
-        if self.non_private {
-            bits |= MEMORY_OPERAND_NON_PRIVATE_POINTER;
-        }
-        bits
+        let _ = self.non_private;
+        MEMORY_OPERAND_MAKE_POINTER_AVAILABLE | MEMORY_OPERAND_NON_PRIVATE_POINTER
     }
 
     /// Memory-operand bitmask for a visibility load (operand 3 of `OpLoad`).
+    ///
+    /// The SPIR-V memory model requires `NonPrivatePointer` to be set whenever
+    /// `MakePointerVisible` is used, so it is always included regardless of the
+    /// [`non_private`](Self::non_private) hint.
     #[must_use]
     pub fn load_operands(self) -> u32 {
-        let mut bits = MEMORY_OPERAND_MAKE_POINTER_VISIBLE;
-        if self.non_private {
-            bits |= MEMORY_OPERAND_NON_PRIVATE_POINTER;
-        }
-        bits
+        let _ = self.non_private;
+        MEMORY_OPERAND_MAKE_POINTER_VISIBLE | MEMORY_OPERAND_NON_PRIVATE_POINTER
     }
 }
 
@@ -154,7 +156,14 @@ pub fn vulkan_memory_model_copy_spirv(model: VulkanMemModel) -> Vec<u32> {
         super::consts::OP_MEMORY_MODEL,
         &[super::consts::ADDRESSING_MODEL_LOGICAL, 3],
     );
-    m.emit_entry_point(main_fn, "main", &[var_gid]);
+    // Since SPIR-V 1.4 the OpEntryPoint interface must enumerate every global
+    // OpVariable statically used by the entry point, including the StorageBuffer
+    // SSBOs — not just the Input built-in.
+    m.emit_entry_point(
+        main_fn,
+        "main",
+        &[var_gid, var_input, var_output, var_params],
+    );
     m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
 
     // ── Decorations ──
@@ -332,15 +341,21 @@ mod tests {
             MEMORY_OPERAND_MAKE_POINTER_VISIBLE | MEMORY_OPERAND_NON_PRIVATE_POINTER
         );
 
+        // Even with `non_private: false`, NonPrivatePointer must still be set:
+        // the SPIR-V memory model requires it alongside MakePointerAvailable/
+        // MakePointerVisible, otherwise the module is invalid.
         let private = VulkanMemModel {
             non_private: false,
             ..VulkanMemModel::default()
         };
         assert_eq!(
             private.store_operands(),
-            MEMORY_OPERAND_MAKE_POINTER_AVAILABLE
+            MEMORY_OPERAND_MAKE_POINTER_AVAILABLE | MEMORY_OPERAND_NON_PRIVATE_POINTER
         );
-        assert_eq!(private.load_operands(), MEMORY_OPERAND_MAKE_POINTER_VISIBLE);
+        assert_eq!(
+            private.load_operands(),
+            MEMORY_OPERAND_MAKE_POINTER_VISIBLE | MEMORY_OPERAND_NON_PRIVATE_POINTER
+        );
     }
 
     #[test]

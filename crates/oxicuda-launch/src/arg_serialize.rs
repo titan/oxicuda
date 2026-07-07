@@ -272,7 +272,7 @@ impl LaunchLog {
     /// Returns the total number of threads in this launch.
     #[inline]
     pub fn total_threads(&self) -> u64 {
-        self.grid.total() as u64 * self.block.total() as u64
+        self.grid.total_u64() * self.block.total() as u64
     }
 }
 

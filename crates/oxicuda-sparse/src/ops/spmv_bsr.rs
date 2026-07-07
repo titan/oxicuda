@@ -359,3 +359,215 @@ mod tests {
         assert!(ptx_text.contains("bsr_inner"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::{assert_close, gpu_handle};
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+
+    /// CPU oracle for blocked SpMV `y = alpha * A * x + beta * y0`, where the
+    /// dense blocks are stored row-major: `value[blk*bd^2 + r*bd + c]` is the
+    /// `(r, c)` entry of the `blk`-th non-zero block.
+    #[allow(clippy::too_many_arguments)]
+    fn cpu_bsr_spmv(
+        rows: usize,
+        block_dim: usize,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        x: &[f64],
+        y0: &[f64],
+        alpha: f64,
+        beta: f64,
+    ) -> Vec<f64> {
+        let block_rows = rows / block_dim;
+        let bd2 = block_dim * block_dim;
+        let mut acc = vec![0.0_f64; rows];
+        for block_row in 0..block_rows {
+            for blk in row_ptr[block_row] as usize..row_ptr[block_row + 1] as usize {
+                let blk_col = col_idx[blk] as usize;
+                for r in 0..block_dim {
+                    for c in 0..block_dim {
+                        let v = values[blk * bd2 + r * block_dim + c];
+                        acc[block_row * block_dim + r] += v * x[blk_col * block_dim + c];
+                    }
+                }
+            }
+        }
+        (0..rows).map(|g| alpha * acc[g] + beta * y0[g]).collect()
+    }
+
+    /// Drive the production `spmv_bsr` op and compare to the CPU oracle.
+    #[allow(clippy::too_many_arguments)]
+    fn run_bsr<T: GpuFloat>(
+        rows: u32,
+        cols: u32,
+        block_dim: u32,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        x: &[f64],
+        y0: &[f64],
+        alpha: f64,
+        beta: f64,
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let dev_values: Vec<T> = values.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let bsr = BsrMatrix::<T>::from_host(rows, cols, block_dim, row_ptr, col_idx, &dev_values)
+            .expect("test: build BSR");
+
+        let dev_x: Vec<T> = x.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let dev_y: Vec<T> = y0.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let x_buf = DeviceBuffer::from_host(&dev_x).expect("test: upload x");
+        let mut y_buf = DeviceBuffer::from_host(&dev_y).expect("test: upload y");
+
+        spmv_bsr::<T>(
+            &handle,
+            &bsr,
+            &x_buf,
+            &mut y_buf,
+            f64_to_gpu::<T>(alpha),
+            f64_to_gpu::<T>(beta),
+        )
+        .expect("test: spmv_bsr launch");
+        handle.stream().synchronize().expect("test: sync");
+
+        let mut out = vec![T::gpu_zero(); rows as usize];
+        y_buf.copy_to_host(&mut out).expect("test: download y");
+        let got: Vec<f64> = out.iter().map(|&v| gpu_to_f64(v)).collect();
+        let want = cpu_bsr_spmv(
+            rows as usize,
+            block_dim as usize,
+            row_ptr,
+            col_idx,
+            values,
+            x,
+            y0,
+            alpha,
+            beta,
+        );
+        assert_close(&got, &want, tol, tag);
+    }
+
+    /// 4x4 matrix, block_dim 2 (2x2 grid of 2x2 blocks), 3 non-zero blocks.
+    fn bsr_4x4_b2() -> (u32, u32, u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        // block_row 0: blocks at block_col 0 and 1
+        // block_row 1: block at block_col 1
+        let row_ptr = vec![0, 2, 3];
+        let col_idx = vec![0, 1, 1];
+        let values = vec![
+            1.0, 2.0, 3.0, 4.0, // block (0,0)
+            5.0, 6.0, 7.0, 8.0, // block (0,1)
+            9.0, 10.0, 11.0, 12.0, // block (1,1)
+        ];
+        (4, 4, 2, row_ptr, col_idx, values)
+    }
+
+    /// 6x6 matrix, block_dim 3 (2x2 grid of 3x3 blocks), 3 non-zero blocks.
+    fn bsr_6x6_b3() -> (u32, u32, u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        let row_ptr = vec![0, 2, 3];
+        let col_idx = vec![0, 1, 0];
+        let mut values = Vec::new();
+        for blk in 0..3 {
+            for r in 0..3 {
+                for c in 0..3 {
+                    values.push(1.0 + (blk * 9 + r * 3 + c) as f64 * 0.5);
+                }
+            }
+        }
+        (6, 6, 3, row_ptr, col_idx, values)
+    }
+
+    #[test]
+    fn bsr_b2_f64_alpha_beta() {
+        let (r, c, bd, rp, ci, v) = bsr_4x4_b2();
+        let x = vec![1.0, 2.0, 3.0, 4.0];
+        let y0 = vec![10.0, 20.0, 30.0, 40.0];
+        run_bsr::<f64>(
+            r,
+            c,
+            bd,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            1.5,
+            -0.25,
+            1e-10,
+            "bsr_b2_f64",
+        );
+    }
+
+    #[test]
+    fn bsr_b2_f32_alpha_beta() {
+        let (r, c, bd, rp, ci, v) = bsr_4x4_b2();
+        let x = vec![0.5, -1.0, 2.0, 1.5];
+        let y0 = vec![1.0, 2.0, 3.0, 4.0];
+        run_bsr::<f32>(
+            r,
+            c,
+            bd,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            2.0,
+            0.5,
+            1e-4,
+            "bsr_b2_f32",
+        );
+    }
+
+    #[test]
+    fn bsr_b3_f64_alpha_beta() {
+        let (r, c, bd, rp, ci, v) = bsr_6x6_b3();
+        let x: Vec<f64> = (0..r as usize).map(|i| 1.0 + i as f64).collect();
+        let y0: Vec<f64> = (0..r as usize).map(|i| 100.0 - 2.0 * i as f64).collect();
+        run_bsr::<f64>(
+            r,
+            c,
+            bd,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            1.25,
+            0.75,
+            1e-10,
+            "bsr_b3_f64",
+        );
+    }
+
+    #[test]
+    fn bsr_b2_f64_beta_zero() {
+        let (r, c, bd, rp, ci, v) = bsr_4x4_b2();
+        let x = vec![1.0, 1.0, 1.0, 1.0];
+        let y0 = vec![1e9, -1e9, 5e8, -5e8];
+        run_bsr::<f64>(
+            r,
+            c,
+            bd,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            1.0,
+            0.0,
+            1e-10,
+            "bsr_b2_beta0",
+        );
+    }
+}

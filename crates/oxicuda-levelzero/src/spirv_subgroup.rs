@@ -59,7 +59,6 @@ const GROUP_OPERATION_INCLUSIVE_SCAN: u32 = 1;
 
 // Magic opcode numbers used inline
 const OP_I_EQUAL: u32 = 170;
-const OP_SELECT: u32 = 169;
 
 /// Maximum sub-groups per workgroup (used for shared-memory scratch array size).
 const MAX_SUBGROUPS: u32 = 32;
@@ -101,6 +100,7 @@ pub fn reduction_subgroup_spirv() -> Vec<u32> {
     let ty_ptr_input_v3uint = m.alloc_id();
     let ty_ptr_cross_float = m.alloc_id();
     let ty_ptr_func_float = m.alloc_id();
+    let ty_ptr_func_uint = m.alloc_id();
     let ty_ptr_wg_float = m.alloc_id();
     let ty_ptr_input_uint = m.alloc_id();
     let ty_arr_float = m.alloc_id();
@@ -108,6 +108,7 @@ pub fn reduction_subgroup_spirv() -> Vec<u32> {
 
     // ── Constants ──
     let c_uint_0 = m.alloc_id();
+    let c_uint_1 = m.alloc_id();
     let c_uint_max_sg = m.alloc_id();
     let c_float_0 = m.alloc_id();
     let c_scope_sg = m.alloc_id();
@@ -120,6 +121,9 @@ pub fn reduction_subgroup_spirv() -> Vec<u32> {
     let var_sg_lid = m.alloc_id();
     let var_num_sg = m.alloc_id();
     let var_scratch = m.alloc_id();
+    // Function-storage loop counter + accumulator for the cross-subgroup sum.
+    let var_j = m.alloc_id();
+    let var_acc = m.alloc_id();
 
     // ── Function ──
     let fn_ty = m.alloc_id();
@@ -156,6 +160,7 @@ pub fn reduction_subgroup_spirv() -> Vec<u32> {
     m.emit_type_pointer(ty_ptr_input_v3uint, STORAGE_CLASS_INPUT, ty_v3uint);
     m.emit_type_pointer(ty_ptr_cross_float, STORAGE_CLASS_CROSS_WORKGROUP, ty_float);
     m.emit_type_pointer(ty_ptr_func_float, STORAGE_CLASS_FUNCTION, ty_float);
+    m.emit_type_pointer(ty_ptr_func_uint, STORAGE_CLASS_FUNCTION, ty_uint);
     m.emit_type_pointer(ty_ptr_wg_float, STORAGE_CLASS_WORKGROUP, ty_float);
     m.emit_type_pointer(ty_ptr_input_uint, STORAGE_CLASS_INPUT, ty_uint);
     m.emit_type_function(
@@ -166,6 +171,7 @@ pub fn reduction_subgroup_spirv() -> Vec<u32> {
 
     // ── Constants ──
     m.emit_constant_u32(ty_uint, c_uint_0, 0);
+    m.emit_constant_u32(ty_uint, c_uint_1, 1);
     m.emit_constant_u32(ty_uint, c_uint_max_sg, MAX_SUBGROUPS);
     m.emit_constant_f32(ty_float, c_float_0, 0.0);
     m.emit_constant_u32(ty_uint, c_scope_sg, SCOPE_SUBGROUP);
@@ -191,6 +197,10 @@ pub fn reduction_subgroup_spirv() -> Vec<u32> {
     let label_after_leader = m.alloc_id();
     let label_sg0 = m.alloc_id();
     let label_after_sg0 = m.alloc_id();
+    let label_sum_hdr = m.alloc_id();
+    let label_sum_body = m.alloc_id();
+    let label_sum_cont = m.alloc_id();
+    let label_sum_merge = m.alloc_id();
 
     // ── Function body ──
     m.emit_function(ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
@@ -198,6 +208,10 @@ pub fn reduction_subgroup_spirv() -> Vec<u32> {
     m.emit_function_parameter(ty_ptr_cross_float, p_output);
     m.emit_function_parameter(ty_uint, p_count);
     m.emit_label(label_entry);
+
+    // Function-storage OpVariables: first instructions of the first block.
+    m.emit_variable(ty_ptr_func_uint, var_j, STORAGE_CLASS_FUNCTION);
+    m.emit_variable(ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
 
     // Load global ID
     let gid_val = m.alloc_id();
@@ -268,60 +282,62 @@ pub fn reduction_subgroup_spirv() -> Vec<u32> {
     // Workgroup barrier
     m.emit(OP_CONTROL_BARRIER, &[c_scope_wg, c_scope_wg, c_mem_sem]);
 
-    // Phase 2: sub-group 0 reduces across sub-groups
+    // Phase 2: sub-group 0, lane 0 serially sums ALL `num_sg` per-sub-group
+    // partials. A single OpGroupNonUniformFAdd/Reduce would only cover the first
+    // `subgroupSize` scratch entries; when the driver compiles a sub-group size
+    // smaller than the sub-group count (e.g. SIMD8 with 32 sub-groups), the
+    // remaining partials scratch[subgroupSize..num_sg) would be silently
+    // dropped. An explicit 0..num_sg loop is correct for any sub-group size.
     let is_sg0 = m.alloc_id();
     m.emit(OP_I_EQUAL, &[ty_bool, is_sg0, sg_id, c_uint_0]);
-
-    // Also need sg_lid < num_sg for valid lanes
-    let lid_lt_nsg = m.alloc_id();
-    m.emit(OP_U_LESS_THAN, &[ty_bool, lid_lt_nsg, sg_lid, num_sg]);
+    let is_lane0 = m.alloc_id();
+    m.emit(OP_I_EQUAL, &[ty_bool, is_lane0, sg_lid, c_uint_0]);
+    let is_writer = m.alloc_id();
+    // OpLogicalAnd = 167
+    m.emit(167, &[ty_bool, is_writer, is_sg0, is_lane0]);
 
     m.emit_selection_merge(label_after_sg0);
-    m.emit_branch_conditional(is_sg0, label_sg0, label_after_sg0);
+    m.emit_branch_conditional(is_writer, label_sg0, label_after_sg0);
 
     m.emit_label(label_sg0);
 
-    // Load scratch[sg_lid] -- each lane in SG0 loads one partial sum
+    // acc = 0; for (j = 0; j < num_sg; j++) acc += scratch[j];
+    m.emit_store(var_j, c_uint_0);
+    m.emit_store(var_acc, c_float_0);
+
+    m.emit_branch(label_sum_hdr);
+    m.emit_label(label_sum_hdr);
+    let j_val = m.alloc_id();
+    m.emit_load(ty_uint, j_val, var_j);
+    let sum_cond = m.alloc_id();
+    m.emit(OP_U_LESS_THAN, &[ty_bool, sum_cond, j_val, num_sg]);
+    m.emit_loop_merge(label_sum_merge, label_sum_cont);
+    m.emit_branch_conditional(sum_cond, label_sum_body, label_sum_merge);
+
+    m.emit_label(label_sum_body);
     let s_ptr = m.alloc_id();
-    m.emit_in_bounds_ptr_access_chain(ty_ptr_wg_float, s_ptr, var_scratch, sg_lid);
+    m.emit_in_bounds_ptr_access_chain(ty_ptr_wg_float, s_ptr, var_scratch, j_val);
     let partial = m.alloc_id();
     m.emit_load(ty_float, partial, s_ptr);
+    let old_acc = m.alloc_id();
+    m.emit_load(ty_float, old_acc, var_acc);
+    let new_acc = m.alloc_id();
+    m.emit(OP_F_ADD, &[ty_float, new_acc, old_acc, partial]);
+    m.emit_store(var_acc, new_acc);
+    m.emit_branch(label_sum_cont);
 
-    // Mask partial to 0 if sg_lid >= num_sg (out of range sub-groups)
-    let safe_partial = m.alloc_id();
-    m.emit(
-        OP_SELECT,
-        &[ty_float, safe_partial, lid_lt_nsg, partial, c_float_0],
-    );
+    m.emit_label(label_sum_cont);
+    let j_inc = m.alloc_id();
+    m.emit(OP_I_ADD, &[ty_uint, j_inc, j_val, c_uint_1]);
+    m.emit_store(var_j, j_inc);
+    m.emit_branch(label_sum_hdr);
 
-    // Sub-group reduce on partial sums
+    m.emit_label(label_sum_merge);
     let final_sum = m.alloc_id();
-    m.emit(
-        OP_GROUP_NON_UNIFORM_FADD,
-        &[
-            ty_float,
-            final_sum,
-            c_scope_sg,
-            GROUP_OPERATION_REDUCE,
-            safe_partial,
-        ],
-    );
-
-    // Lane 0 of sub-group 0 writes final result
-    let is_lane0 = m.alloc_id();
-    m.emit(OP_I_EQUAL, &[ty_bool, is_lane0, sg_lid, c_uint_0]);
-    let label_write = m.alloc_id();
-    let label_after_write = m.alloc_id();
-    m.emit_selection_merge(label_after_write);
-    m.emit_branch_conditional(is_lane0, label_write, label_after_write);
-
-    m.emit_label(label_write);
+    m.emit_load(ty_float, final_sum, var_acc);
     let out_ptr = m.alloc_id();
     m.emit_in_bounds_ptr_access_chain(ty_ptr_cross_float, out_ptr, p_output, c_uint_0);
     m.emit_store(out_ptr, final_sum);
-    m.emit_branch(label_after_write);
-
-    m.emit_label(label_after_write);
     m.emit_branch(label_after_sg0);
 
     m.emit_label(label_after_sg0);

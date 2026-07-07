@@ -12,20 +12,28 @@
 /// transpose flags carried in `GemmParams`:
 ///
 /// * `trans_a == 0` — `a` is stored row-major as `m × k`; element `(r, i)` is
-///   at `a[r * k + i]`.
+///   at `a[r * lda + i]`.
 /// * `trans_a != 0` — `a` is stored row-major as `k × m` (the transpose of the
-///   logical operand); element `(r, i)` of `op(A)` is at `a[i * m + r]`.
+///   logical operand); element `(r, i)` of `op(A)` is at `a[i * lda + r]`.
 /// * `trans_b == 0` — `b` is stored row-major as `k × n`; element `(i, c)` is
-///   at `b[i * n + c]`.
+///   at `b[i * ldb + c]`.
 /// * `trans_b != 0` — `b` is stored row-major as `n × k`; element `(i, c)` of
-///   `op(B)` is at `b[c * k + i]`.
+///   `op(B)` is at `b[c * ldb + i]`.
+///
+/// `lda` / `ldb` / `ldc` are the physical row strides (leading dimensions) of
+/// the stored buffers, carried in `GemmParams`.  They default to the packed
+/// width but may be larger to address a padded buffer or sub-matrix view; `C`
+/// is written at `c[row * ldc + col]`.
 ///
 /// The transpose flags are runtime uniforms, so a single shader module serves
 /// all four NN / NT / TN / TT combinations.
 ///
 /// # Arguments
 ///
-/// * `tile_size` — workgroup tile dimension (e.g. 8, 16, 32).
+/// * `tile_size` — workgroup tile dimension.  Because the workgroup is
+///   `tile_size × tile_size`, `tile_size * tile_size` must not exceed WebGPU's
+///   baseline `maxComputeInvocationsPerWorkgroup` of 256, so 16 is the portable
+///   maximum (e.g. 8 or 16).
 pub fn gemm_wgsl(tile_size: u32) -> String {
     format!(
         r#"
@@ -37,7 +45,11 @@ struct GemmParams {{
     beta:    f32,
     trans_a: u32,
     trans_b: u32,
-    _pad:    u32,
+    lda:     u32,
+    ldb:     u32,
+    ldc:     u32,
+    _pad0:   u32,
+    _pad1:   u32,
 }}
 
 @group(0) @binding(0) var<storage, read>       a:      array<f32>;
@@ -48,22 +60,23 @@ struct GemmParams {{
 var<workgroup> tile_a: array<array<f32, {ts}>, {ts}>;
 var<workgroup> tile_b: array<array<f32, {ts}>, {ts}>;
 
-// op(A)[r, i] — logical m×k left operand.
+// op(A)[r, i] — logical m×k left operand.  `lda` is the physical row stride of
+// the stored buffer (>= the packed width), supporting padded / sub-matrix views.
 fn load_a(r: u32, i: u32) -> f32 {{
     if (r >= params.m || i >= params.k) {{ return 0.0; }}
     if (params.trans_a == 0u) {{
-        return a[r * params.k + i];
+        return a[r * params.lda + i];
     }}
-    return a[i * params.m + r];
+    return a[i * params.lda + r];
 }}
 
-// op(B)[i, col] — logical k×n right operand.
+// op(B)[i, col] — logical k×n right operand.  `ldb` is the physical row stride.
 fn load_b(i: u32, col: u32) -> f32 {{
     if (i >= params.k || col >= params.n) {{ return 0.0; }}
     if (params.trans_b == 0u) {{
-        return b[i * params.n + col];
+        return b[i * params.ldb + col];
     }}
-    return b[col * params.k + i];
+    return b[col * params.ldb + i];
 }}
 
 @compute @workgroup_size({ts}, {ts})
@@ -92,7 +105,7 @@ fn main(
     }}
 
     if (row >= params.m || col >= params.n) {{ return; }}
-    let idx = row * params.n + col;
+    let idx = row * params.ldc + col;
     c[idx] = params.alpha * acc + params.beta * c[idx];
 }}
 "#,
@@ -109,11 +122,14 @@ fn main(
 /// Uses `tile_size × tile_size` workgroup tiles with shared-memory staging and
 /// Z = batch_count.  Transpose handling matches [`gemm_wgsl`]: the `trans_a` /
 /// `trans_b` uniforms select a row-major (`m × k` / `k × n`) or column-major
-/// (`k × m` / `n × k`) physical layout for each per-batch operand.
+/// (`k × m` / `n × k`) physical layout for each per-batch operand, with the
+/// physical row strides carried as `lda` / `ldb` / `ldc`.
 ///
 /// # Arguments
 ///
-/// * `tile_size` — workgroup tile dimension (e.g. 8, 16, 32).
+/// * `tile_size` — workgroup tile dimension.  `tile_size * tile_size` must not
+///   exceed WebGPU's baseline `maxComputeInvocationsPerWorkgroup` of 256, so 16
+///   is the portable maximum (e.g. 8 or 16).
 pub fn batched_gemm_wgsl(tile_size: u32) -> String {
     format!(
         r#"
@@ -129,6 +145,11 @@ struct BatchedGemmParams {{
     stride_c: u32,
     trans_a:  u32,
     trans_b:  u32,
+    lda:      u32,
+    ldb:      u32,
+    ldc:      u32,
+    _pad0:    u32,
+    _pad1:    u32,
 }}
 
 @group(0) @binding(0) var<storage, read>       a:      array<f32>;
@@ -139,22 +160,24 @@ struct BatchedGemmParams {{
 var<workgroup> tile_a: array<array<f32, {ts}>, {ts}>;
 var<workgroup> tile_b: array<array<f32, {ts}>, {ts}>;
 
-// op(A_b)[r, i] — logical m×k left operand for batch `a_offset`.
+// op(A_b)[r, i] — logical m×k left operand for batch `a_offset`.  `lda` is the
+// physical per-batch row stride of the stored buffer (>= the packed width).
 fn load_a(a_offset: u32, r: u32, i: u32) -> f32 {{
     if (r >= params.m || i >= params.k) {{ return 0.0; }}
     if (params.trans_a == 0u) {{
-        return a[a_offset + r * params.k + i];
+        return a[a_offset + r * params.lda + i];
     }}
-    return a[a_offset + i * params.m + r];
+    return a[a_offset + i * params.lda + r];
 }}
 
-// op(B_b)[i, col] — logical k×n right operand for batch `b_offset`.
+// op(B_b)[i, col] — logical k×n right operand for batch `b_offset`.  `ldb` is
+// the physical per-batch row stride.
 fn load_b(b_offset: u32, i: u32, col: u32) -> f32 {{
     if (i >= params.k || col >= params.n) {{ return 0.0; }}
     if (params.trans_b == 0u) {{
-        return b[b_offset + i * params.n + col];
+        return b[b_offset + i * params.ldb + col];
     }}
-    return b[b_offset + col * params.k + i];
+    return b[b_offset + col * params.ldb + i];
 }}
 
 @compute @workgroup_size({ts}, {ts})
@@ -189,7 +212,7 @@ fn main(
     }}
 
     if (row >= params.m || col >= params.n) {{ return; }}
-    let idx = c_offset + row * params.n + col;
+    let idx = c_offset + row * params.ldc + col;
     c[idx] = params.alpha * acc + params.beta * c[idx];
 }}
 "#,
@@ -202,9 +225,14 @@ fn main(
 /// Uses `enable f16;` WGSL extension. Storage buffers use `array<f16>`,
 /// but accumulation is done in f32 for precision.
 ///
+/// Requires the device to have enabled the `SHADER_F16` feature; otherwise the
+/// module fails validation for the missing capability.
+///
 /// # Arguments
 ///
-/// * `tile_size` — workgroup tile dimension (e.g. 8, 16, 32).
+/// * `tile_size` — workgroup tile dimension.  `tile_size * tile_size` must not
+///   exceed WebGPU's baseline `maxComputeInvocationsPerWorkgroup` of 256, so 16
+///   is the portable maximum (e.g. 8 or 16).
 pub fn gemm_wgsl_f16(tile_size: u32) -> String {
     format!(
         r#"
@@ -717,8 +745,11 @@ fn main(
 /// Generate WGSL for the final scalar reduction of partial sums.
 ///
 /// Takes a `partial_sums` array of length `num_groups` and reduces it to a
-/// single value at `output[0]`.  Should be dispatched with a single workgroup
-/// of 256 threads.
+/// single value at `output[0]`.  Dispatched with a single workgroup of 256
+/// threads: each thread first folds every partial it owns via a grid-stride
+/// loop (`partial_sums[tid]`, `partial_sums[tid + 256]`, …) so that an
+/// arbitrary `num_groups` — not just the first 256 — is reduced, then the 256
+/// per-thread accumulators are combined with a shared-memory tree reduction.
 pub fn reduction_final_wgsl(op: &str) -> String {
     let (neutral, combine) = match op {
         "max" => ("f32(-1e38)", "max(acc, val)"),
@@ -744,11 +775,19 @@ fn main(
 ) {{
     let tid = lid.x;
 
-    if (tid < params.num_groups) {{
-        shared_data[tid] = partial_sums[tid];
-    }} else {{
-        shared_data[tid] = {neutral};
+    // Grid-stride fold: each of the 256 threads accumulates every partial at
+    // index tid, tid+256, tid+512, …  Without this, partials beyond index 255
+    // (num_groups > 256, i.e. > 65 536 input elements) would be silently
+    // dropped.
+    var acc: f32 = {neutral};
+    var i: u32 = tid;
+    loop {{
+        if (i >= params.num_groups) {{ break; }}
+        let val = partial_sums[i];
+        acc = {combine};
+        i = i + 256u;
     }}
+    shared_data[tid] = acc;
     workgroupBarrier();
 
     var stride: u32 = 128u;
@@ -800,11 +839,17 @@ mod tests {
         // Transpose flags live in the uniform struct.
         assert!(src.contains("trans_a: u32"));
         assert!(src.contains("trans_b: u32"));
-        // Both row-major and column-major index forms must be present.
-        assert!(src.contains("a[r * params.k + i]"));
-        assert!(src.contains("a[i * params.m + r]"));
-        assert!(src.contains("b[i * params.n + col]"));
-        assert!(src.contains("b[col * params.k + i]"));
+        // Leading-dimension uniforms drive the physical row strides.
+        assert!(src.contains("lda:     u32"));
+        assert!(src.contains("ldb:     u32"));
+        assert!(src.contains("ldc:     u32"));
+        // Both row-major and column-major index forms must be present, keyed on
+        // the leading dimensions rather than the packed extents.
+        assert!(src.contains("a[r * params.lda + i]"));
+        assert!(src.contains("a[i * params.lda + r]"));
+        assert!(src.contains("b[i * params.ldb + col]"));
+        assert!(src.contains("b[col * params.ldb + i]"));
+        assert!(src.contains("row * params.ldc + col"));
     }
 
     #[test]
@@ -868,6 +913,24 @@ mod tests {
         let src = reduction_final_wgsl("sum");
         assert!(src.contains("num_groups"));
         assert!(src.contains("output[0]"));
+    }
+
+    #[test]
+    fn wgsl_reduction_final_grid_strides_over_all_groups() {
+        // The final pass must fold *every* partial via a grid-stride loop, not
+        // just the first 256 (which would drop reductions over > 65 536
+        // elements).  Verify the strided loop is present for all ops.
+        for op in ["sum", "max", "min", "mean"] {
+            let src = reduction_final_wgsl(op);
+            assert!(
+                src.contains("i = i + 256u"),
+                "final reduction for {op} lacks the grid-stride loop"
+            );
+            assert!(
+                src.contains("if (i >= params.num_groups)"),
+                "final reduction for {op} lacks the num_groups loop bound"
+            );
+        }
     }
 
     // ── reduction_nd_wgsl tests ───────────────────────────────────────────
@@ -1069,11 +1132,16 @@ mod tests {
         let src = batched_gemm_wgsl(8);
         assert!(src.contains("trans_a:  u32"));
         assert!(src.contains("trans_b:  u32"));
-        // Per-batch offset is applied to every index form.
-        assert!(src.contains("a[a_offset + r * params.k + i]"));
-        assert!(src.contains("a[a_offset + i * params.m + r]"));
-        assert!(src.contains("b[b_offset + i * params.n + col]"));
-        assert!(src.contains("b[b_offset + col * params.k + i]"));
+        assert!(src.contains("lda:      u32"));
+        assert!(src.contains("ldb:      u32"));
+        assert!(src.contains("ldc:      u32"));
+        // Per-batch offset is applied to every index form, keyed on the
+        // per-batch leading dimensions.
+        assert!(src.contains("a[a_offset + r * params.lda + i]"));
+        assert!(src.contains("a[a_offset + i * params.lda + r]"));
+        assert!(src.contains("b[b_offset + i * params.ldb + col]"));
+        assert!(src.contains("b[b_offset + col * params.ldb + i]"));
+        assert!(src.contains("row * params.ldc + col"));
     }
 
     #[test]

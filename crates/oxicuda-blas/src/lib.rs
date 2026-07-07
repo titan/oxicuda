@@ -39,6 +39,12 @@ pub mod types;
 #[cfg(test)]
 mod test_matrices;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests;
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_tests_ops;
+
 pub use algorithm_selection::{
     AlgorithmConfig, AlgorithmHeuristic, AlgorithmId, AlgorithmSelector, EpiloguePreference,
     SwizzleMode,

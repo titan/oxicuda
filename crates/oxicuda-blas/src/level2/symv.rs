@@ -20,7 +20,7 @@ use oxicuda_ptx::prelude::*;
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
-use crate::types::{FillMode, GpuFloat, MatrixDesc};
+use crate::types::{FillMode, GpuFloat, Layout, MatrixDesc};
 
 /// Default block size for SYMV kernels.
 const SYMV_BLOCK_SIZE: u32 = 256;
@@ -63,6 +63,14 @@ pub fn symv<T: GpuFloat>(
 ) -> BlasResult<()> {
     if n == 0 {
         return Ok(());
+    }
+
+    // The kernel addresses A as row-major; reject column-major descriptors.
+    if a.layout == Layout::ColMajor {
+        return Err(BlasError::InvalidArgument(
+            "symv: ColMajor layout is not supported by this kernel; pass a RowMajor descriptor"
+                .to_string(),
+        ));
     }
 
     validate_symv_args(n, a, x, incx, y, incy)?;
@@ -189,7 +197,7 @@ fn generate_symv_ptx<T: GpuFloat>(sm: SmVersion, uplo: FillMode) -> BlasResult<S
                 b.label(&loop_label);
                 let pred = b.alloc_reg(PtxType::Pred);
                 b.raw_ptx(&format!("setp.lo.u32 {pred}, {j}, {n_reg};"));
-                b.raw_ptx(&format!("@!{pred} bra {done_label};"));
+                b.raw_ptx(&format!("@!{pred} bra ${done_label};"));
 
                 // Determine row,col for memory access based on fill mode
                 // For upper: if i <= j, read A[i][j]; else read A[j][i]

@@ -441,6 +441,17 @@ fn validate_3d_buffer_size<T: Copy>(buf: &DeviceBuffer<T>, byte_extent: usize) -
 
 /// Copies a 3D region between two device buffers (device-to-device).
 ///
+/// # Status
+///
+/// `cuMemcpy3D_v2` is not yet loaded by `oxicuda-driver` (unlike
+/// `cuMemcpy2D_v2`, which backs [`copy_2d_dtod`]/[`copy_2d_htod`]/
+/// [`copy_2d_dtoh`]). Wiring it requires adding a new loaded function
+/// pointer to `oxicuda-driver`'s `DriverApi`, which is outside this crate.
+/// Until that entry point exists, this function validates its arguments
+/// (so callers still get early, precise `InvalidValue` diagnostics for bad
+/// parameters) and then honestly reports [`CudaError::NotSupported`] rather
+/// than silently doing nothing.
+///
 /// # Errors
 ///
 /// * [`CudaError::InvalidValue`] if parameters are invalid or buffers
@@ -455,8 +466,12 @@ pub fn copy_3d_dtod<T: Copy>(
     validate_3d_buffer_size(src, params.src_byte_extent())?;
     validate_3d_buffer_size(dst, params.dst_byte_extent())?;
 
+    // `cuMemcpy3D_v2` is not yet loaded (see the `# Status` section above),
+    // so there is no driver call available to actually perform the copy.
+    // Report this honestly instead of returning a fabricated `Ok(())` that
+    // would silently skip the transfer.
     let _api = oxicuda_driver::loader::try_driver()?;
-    Ok(())
+    Err(CudaError::NotSupported)
 }
 
 // ---------------------------------------------------------------------------
@@ -642,5 +657,34 @@ mod tests {
         assert!(p.validate().is_ok());
         assert_eq!(p.src_byte_extent(), 49 * 100 + 100);
         assert_eq!(p.dst_byte_extent(), 49 * 100 + 100);
+    }
+
+    /// Regression test for F007: `copy_3d_dtod` previously validated its
+    /// arguments and then returned a fabricated `Ok(())` without copying
+    /// anything. With a real driver present (but `cuMemcpy3D_v2` not yet
+    /// loaded), a validated call must honestly report `NotSupported`
+    /// instead. Uses `DeviceBuffer::from_raw` (a non-owning view) since
+    /// `copy_3d_dtod` only inspects reported sizes and never dereferences
+    /// the pointer before returning `NotSupported`.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn copy_3d_dtod_reports_not_supported_instead_of_fabricating_success() {
+        if oxicuda_driver::loader::try_driver().is_err() {
+            eprintln!("skipping: no CUDA driver");
+            return;
+        }
+        let params = Memcpy3DParams::new(512, 512, 480, 256, 4, 256, 256);
+        assert!(params.validate().is_ok());
+        let byte_len = params.src_byte_extent().max(params.dst_byte_extent());
+
+        // SAFETY: `copy_3d_dtod` only checks reported sizes and, absent a
+        // `cuMemcpy3D_v2` entry point, never dereferences either pointer
+        // before returning `NotSupported`, so a non-owning view over an
+        // arbitrary pointer value is sufficient here.
+        let src = unsafe { DeviceBuffer::<u8>::from_raw(0x1000, byte_len) };
+        let mut dst = unsafe { DeviceBuffer::<u8>::from_raw(0x2000, byte_len) };
+
+        let result = copy_3d_dtod(&mut dst, &src, &params);
+        assert_eq!(result, Err(CudaError::NotSupported));
     }
 }

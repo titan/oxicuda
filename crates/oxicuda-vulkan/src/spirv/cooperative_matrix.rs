@@ -111,6 +111,7 @@ pub fn cooperative_matrix_gemm_spirv(input_ty: CoopMatType, tile: CoopMatTile) -
     let ty_coop_b = m.alloc_id();
     let ty_coop_c = m.alloc_id();
 
+    let c_uint_0 = m.alloc_id();
     let c_scope_subgroup = m.alloc_id();
     let c_m = m.alloc_id();
     let c_n = m.alloc_id();
@@ -131,7 +132,10 @@ pub fn cooperative_matrix_gemm_spirv(input_ty: CoopMatType, tile: CoopMatTile) -
     // (model 3 == Vulkan).
     m.emit(OP_MEMORY_MODEL, &[ADDRESSING_MODEL_LOGICAL, 3]);
 
-    m.emit_entry_point(main_fn, "main", &[var_wgid]);
+    // Since SPIR-V 1.4 the OpEntryPoint interface must enumerate every global
+    // OpVariable statically used by the entry point, including the StorageBuffer
+    // matrices A/B/C — not just the WorkgroupId built-in.
+    m.emit_entry_point(main_fn, "main", &[var_wgid, var_a, var_b, var_c]);
     // One subgroup per workgroup along x; a single MMA covers the whole tile.
     m.emit_execution_mode_local_size(main_fn, 32, 1, 1);
 
@@ -177,6 +181,7 @@ pub fn cooperative_matrix_gemm_spirv(input_ty: CoopMatType, tile: CoopMatTile) -
     m.emit_type_pointer(ty_ptr_sb_acc, STORAGE_CLASS_STORAGE_BUFFER, ty_acc);
 
     // Constants used as cooperative-matrix type operands.
+    m.emit_constant_u32(ty_uint, c_uint_0, 0);
     m.emit_constant_u32(ty_uint, c_scope_subgroup, SCOPE_SUBGROUP);
     m.emit_constant_u32(ty_uint, c_m, tile.m);
     m.emit_constant_u32(ty_uint, c_n, tile.n);
@@ -216,22 +221,33 @@ pub fn cooperative_matrix_gemm_spirv(input_ty: CoopMatType, tile: CoopMatTile) -
     m.emit_function(ty_void, main_fn, FUNCTION_CONTROL_NONE, ty_fn_void);
     m.emit_label(label);
 
+    // The cooperative-matrix load/store Pointer operand must be a pointer to a
+    // scalar/vector element, not to the wrapping SSBO struct. Emit an
+    // OpAccessChain into member 0 (the runtime array) at the origin element and
+    // pass that element pointer to the load/store.
+    let a_elem = m.alloc_id();
+    m.emit_access_chain(ty_ptr_sb_in, a_elem, var_a, &[c_uint_0, c_uint_0]);
+    let b_elem = m.alloc_id();
+    m.emit_access_chain(ty_ptr_sb_in, b_elem, var_b, &[c_uint_0, c_uint_0]);
+    let c_elem = m.alloc_id();
+    m.emit_access_chain(ty_ptr_sb_acc, c_elem, var_c, &[c_uint_0, c_uint_0]);
+
     // Stride (in elements) of one MMA step over K.
     let mat_a = m.alloc_id();
     // OpCooperativeMatrixLoadKHR <ty> <id> <Pointer> <MemoryLayout> [Stride]
     m.emit(
         OP_COOPERATIVE_MATRIX_LOAD_KHR,
-        &[ty_coop_a, mat_a, var_a, c_layout_row, c_k],
+        &[ty_coop_a, mat_a, a_elem, c_layout_row, c_k],
     );
     let mat_b = m.alloc_id();
     m.emit(
         OP_COOPERATIVE_MATRIX_LOAD_KHR,
-        &[ty_coop_b, mat_b, var_b, c_layout_row, c_n],
+        &[ty_coop_b, mat_b, b_elem, c_layout_row, c_n],
     );
     let mat_c0 = m.alloc_id();
     m.emit(
         OP_COOPERATIVE_MATRIX_LOAD_KHR,
-        &[ty_coop_c, mat_c0, var_c, c_layout_row, c_n],
+        &[ty_coop_c, mat_c0, c_elem, c_layout_row, c_n],
     );
 
     // C = A * B + C  (the fused MMA — this is the Tensor-Core instruction).
@@ -241,10 +257,10 @@ pub fn cooperative_matrix_gemm_spirv(input_ty: CoopMatType, tile: CoopMatTile) -
         &[ty_coop_c, mat_c1, mat_a, mat_b, mat_c0],
     );
 
-    // Store the accumulated tile back.
+    // Store the accumulated tile back through the element pointer.
     m.emit(
         OP_COOPERATIVE_MATRIX_STORE_KHR,
-        &[var_c, mat_c1, c_layout_row, c_n],
+        &[c_elem, mat_c1, c_layout_row, c_n],
     );
 
     // Touch OP_I_MUL to compute a tile base (keeps the op present for the

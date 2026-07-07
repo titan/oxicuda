@@ -98,6 +98,14 @@ fn build_causal_softmax_kernel(
 /// also accepted: when `r >= cols` every column is unmasked (the whole row is
 /// "live"), which is the natural generalization.
 ///
+/// `rows` may also flatten several independent causal matrices back to back
+/// (e.g. a `[batch*heads, seq_len, seq_len]` attention-score tensor stored as
+/// one `[batch*heads*seq_len, seq_len]` buffer): pass the per-matrix row
+/// count as `seq_len` and the causal boundary for row `r` is derived from
+/// `r % seq_len` instead of `r` directly, so the mask resets at the start of
+/// every matrix instead of saturating to "fully unmasked" once `r` exceeds
+/// `cols`. For a single, non-batched matrix pass `seq_len == rows`.
+///
 /// No score scaling is applied; scale the input beforehand if required.
 ///
 /// # Parallelization
@@ -108,8 +116,11 @@ fn build_causal_softmax_kernel(
 /// # Arguments
 ///
 /// * `handle` -- BLAS handle bound to a CUDA context and stream.
-/// * `rows` -- number of rows (query positions).
+/// * `rows` -- number of rows (query positions), possibly `batch*heads*seq_len`.
 /// * `cols` -- number of columns (key positions).
+/// * `seq_len` -- row count of one causal matrix; the within-matrix row used
+///   for masking is `row % seq_len`. Pass `seq_len == rows` for a single
+///   matrix.
 /// * `input` -- device buffer containing the input matrix in row-major
 ///   layout, at least `rows * cols` elements.
 /// * `output` -- device buffer for the result matrix, same layout, at least
@@ -124,7 +135,7 @@ fn build_causal_softmax_kernel(
 /// # Errors
 ///
 /// Returns [`BlasError::BufferTooSmall`] if buffers are too small,
-/// [`BlasError::InvalidDimension`] if `rows` or `cols` is zero,
+/// [`BlasError::InvalidDimension`] if `rows`, `cols`, or `seq_len` is zero,
 /// [`BlasError::UnsupportedOperation`] if `T` is not `f32`/`f64`, or
 /// [`BlasError::LaunchFailed`] / [`BlasError::PtxGeneration`] if kernel
 /// construction or launch fails.
@@ -132,12 +143,13 @@ pub fn causal_softmax<T: GpuFloat>(
     handle: &BlasHandle,
     rows: u32,
     cols: u32,
+    seq_len: u32,
     input: &DeviceBuffer<T>,
     output: &mut DeviceBuffer<T>,
 ) -> BlasResult<()> {
-    if rows == 0 || cols == 0 {
+    if rows == 0 || cols == 0 || seq_len == 0 {
         return Err(BlasError::InvalidDimension(
-            "causal_softmax requires rows > 0 and cols > 0".to_string(),
+            "causal_softmax requires rows > 0, cols > 0, and seq_len > 0".to_string(),
         ));
     }
 
@@ -172,8 +184,14 @@ pub fn causal_softmax<T: GpuFloat>(
     let grid = grid_size_for(rows, CAUSAL_SOFTMAX_BLOCK);
     let params = LaunchParams::new(grid, CAUSAL_SOFTMAX_BLOCK);
 
-    // Kernel signature: (input_ptr, output_ptr, rows, cols).
-    let args = (input.as_device_ptr(), output.as_device_ptr(), rows, cols);
+    // Kernel signature: (input_ptr, output_ptr, rows, cols, seq_len).
+    let args = (
+        input.as_device_ptr(),
+        output.as_device_ptr(),
+        rows,
+        cols,
+        seq_len,
+    );
 
     kernel
         .launch(&params, handle.stream(), &args)
@@ -215,14 +233,23 @@ mod tests {
     // ---- CPU reference for the intended math ----------------------------
 
     /// Naive triple-loop causal softmax over a row-major `rows x cols`
-    /// matrix. This is the ground truth the device kernel must reproduce; it
-    /// encodes the exact masking + stability rule the GPU kernel implements.
-    fn causal_softmax_reference(input: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    /// matrix, optionally flattening several `seq_len`-row matrices back to
+    /// back (pass `seq_len == rows` for a single matrix). This is the ground
+    /// truth the device kernel must reproduce; it encodes the exact masking +
+    /// stability rule the GPU kernel implements.
+    fn causal_softmax_reference(
+        input: &[f32],
+        rows: usize,
+        cols: usize,
+        seq_len: usize,
+    ) -> Vec<f32> {
         let mut out = vec![0.0f32; rows * cols];
         for r in 0..rows {
             let base = r * cols;
-            // Unmasked columns: j <= r and j < cols.
-            let live = (r + 1).min(cols);
+            // Unmasked columns: j <= (r % seq_len) and j < cols. The modulo
+            // resets the causal boundary at every seq_len-row matrix.
+            let row_in_seq = r % seq_len;
+            let live = (row_in_seq + 1).min(cols);
 
             // Pass 1: masked max.
             let mut max_val = f32::NEG_INFINITY;
@@ -270,7 +297,7 @@ mod tests {
         let rows = 4;
         let cols = 4;
         let input: Vec<f32> = (0..16).map(|i| (i as f32) * 0.1).collect();
-        let out = causal_softmax_reference(&input, rows, cols);
+        let out = causal_softmax_reference(&input, rows, cols, rows);
 
         for r in 0..rows {
             for j in 0..cols {
@@ -296,7 +323,7 @@ mod tests {
             -5.0, -4.0, -3.0, -2.0, -1.0, //
             100.0, 99.0, 98.0, 97.0, 96.0, // large values: stability matters
         ];
-        let out = causal_softmax_reference(&input, rows, cols);
+        let out = causal_softmax_reference(&input, rows, cols, rows);
         for r in 0..rows {
             let row_sum: f32 = (0..cols).map(|j| out[r * cols + j]).sum();
             assert!(
@@ -312,7 +339,7 @@ mod tests {
         let rows = 3;
         let cols = 3;
         let input = vec![7.0, 1.0, 2.0, 0.0, 3.0, 4.0, -1.0, -2.0, 5.0];
-        let out = causal_softmax_reference(&input, rows, cols);
+        let out = causal_softmax_reference(&input, rows, cols, rows);
         assert!((out[0] - 1.0).abs() < 1e-6);
         assert_eq!(out[1], 0.0);
         assert_eq!(out[2], 0.0);
@@ -327,7 +354,7 @@ mod tests {
         let a = 1.5f32;
         let b = 0.5f32;
         let input = vec![0.0, 0.0, 0.0, a, b, 99.0, 0.0, 0.0, 0.0];
-        let out = causal_softmax_reference(&input, rows, cols);
+        let out = causal_softmax_reference(&input, rows, cols, rows);
 
         let m = a.max(b);
         let ea = (a - m).exp();
@@ -383,12 +410,12 @@ mod tests {
         let rows = seq_len as usize;
         let cols = seq_len as usize;
         let host_in: Vec<f32> = (0..(rows * cols)).map(|i| ((i % 7) as f32) - 3.0).collect();
-        let expected = causal_softmax_reference(&host_in, rows, cols);
+        let expected = causal_softmax_reference(&host_in, rows, cols, seq_len as usize);
 
         let input = DeviceBuffer::<f32>::from_host(&host_in).expect("upload input");
         let mut output = DeviceBuffer::<f32>::zeroed(rows * cols).expect("alloc output");
 
-        causal_softmax(&handle, seq_len, seq_len, &input, &mut output)
+        causal_softmax(&handle, seq_len, seq_len, seq_len, &input, &mut output)
             .expect("causal_softmax launch");
         handle.stream().synchronize().expect("sync");
 
@@ -399,6 +426,88 @@ mod tests {
                 (g - e).abs() < 1e-4,
                 "mismatch at {i}: device={g} reference={e}"
             );
+        }
+    }
+
+    /// Regression test for the batch-saturation bug: with `rows =
+    /// batch*seq_len` and `cols = seq_len`, the causal boundary must reset at
+    /// every `seq_len`-row matrix instead of saturating to "fully unmasked"
+    /// once the flat row index exceeds `cols` (which is what the kernel did
+    /// before `seq_len` was threaded through separately from `rows`).
+    #[test]
+    fn device_matches_reference_for_batched_matrices() {
+        use oxicuda_driver::{Context, Device};
+
+        let device = match Device::get(0) {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("device_matches_reference_for_batched_matrices: no GPU, skipping");
+                return;
+            }
+        };
+        let ctx = match Context::new(&device) {
+            Ok(c) => Arc::new(c),
+            Err(_) => {
+                eprintln!("device_matches_reference_for_batched_matrices: no context, skipping");
+                return;
+            }
+        };
+        let handle = match BlasHandle::new(&ctx) {
+            Ok(h) => h,
+            Err(_) => {
+                eprintln!(
+                    "device_matches_reference_for_batched_matrices: no BLAS handle, skipping"
+                );
+                return;
+            }
+        };
+
+        // 3 stacked batch/head causal matrices of seq_len=5, flattened into
+        // one [15, 5] buffer -- exactly the `[batch*heads*seq_len, seq_len]`
+        // shape the bug report describes.
+        let seq_len: usize = 5;
+        let batch: usize = 3;
+        let rows = batch * seq_len;
+        let cols = seq_len;
+        let host_in: Vec<f32> = (0..(rows * cols))
+            .map(|i| ((i % 11) as f32) - 5.0)
+            .collect();
+        let expected = causal_softmax_reference(&host_in, rows, cols, seq_len);
+
+        let input = DeviceBuffer::<f32>::from_host(&host_in).expect("upload input");
+        let mut output = DeviceBuffer::<f32>::zeroed(rows * cols).expect("alloc output");
+
+        causal_softmax(
+            &handle,
+            rows as u32,
+            cols as u32,
+            seq_len as u32,
+            &input,
+            &mut output,
+        )
+        .expect("causal_softmax launch");
+        handle.stream().synchronize().expect("sync");
+
+        let mut got = vec![0.0f32; rows * cols];
+        output.copy_to_host(&mut got).expect("download output");
+
+        // Every batch block must independently reproduce the single-matrix
+        // reference for its own within-matrix row -- in particular, the last
+        // block's row 0 (flat row = 2*seq_len = 10) must be masked down to a
+        // one-hot row, not "fully unmasked" as the pre-fix kernel produced.
+        for (i, (g, e)) in got.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (g - e).abs() < 1e-4,
+                "mismatch at {i}: device={g} reference={e}"
+            );
+        }
+        let last_block_row0 = &got[2 * seq_len * cols..2 * seq_len * cols + cols];
+        assert!(
+            (last_block_row0[0] - 1.0).abs() < 1e-4,
+            "last block's row 0 must be one-hot (only column 0 live), got {last_block_row0:?}"
+        );
+        for &v in &last_block_row0[1..] {
+            assert_eq!(v, 0.0, "last block's row 0 must mask all future columns");
         }
     }
 }

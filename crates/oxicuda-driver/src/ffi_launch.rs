@@ -16,26 +16,34 @@ use super::CUstream;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum CuLaunchAttributeId {
-    /// Controls whether shared memory reuse is ignored.
-    IgnoreSharedMemoryReuse = 1,
+    /// No attribute (`CU_LAUNCH_ATTRIBUTE_IGNORE`).
+    Ignore = 0,
+    /// Access-policy window for persisting L2 cache
+    /// (`CU_LAUNCH_ATTRIBUTE_ACCESS_POLICY_WINDOW`).
+    AccessPolicyWindow = 1,
+    /// Cooperative kernel launch (`CU_LAUNCH_ATTRIBUTE_COOPERATIVE`).
+    Cooperative = 2,
+    /// Stream synchronization policy
+    /// (`CU_LAUNCH_ATTRIBUTE_SYNCHRONIZATION_POLICY`).
+    SynchronizationPolicy = 3,
     /// Specifies thread block cluster dimensions (sm_90+).
-    ClusterDimension = 2,
+    ClusterDimension = 4,
     /// Controls cluster scheduling policy preference.
-    ClusterSchedulingPolicyPreference = 3,
+    ClusterSchedulingPolicyPreference = 5,
     /// Enables programmatic stream serialization.
-    ProgrammaticStreamSerialization = 4,
+    ProgrammaticStreamSerialization = 6,
     /// Specifies a programmatic completion event.
-    ProgrammaticEvent = 5,
+    ProgrammaticEvent = 7,
     /// Specifies kernel launch priority.
-    Priority = 6,
+    Priority = 8,
     /// Maps memory synchronization domains.
-    MemSyncDomainMap = 7,
+    MemSyncDomainMap = 9,
     /// Sets memory synchronization domain.
-    MemSyncDomain = 8,
+    MemSyncDomain = 10,
     /// Specifies a launch completion event.
-    LaunchCompletionEvent = 9,
+    LaunchCompletionEvent = 12,
     /// Configures device-updatable kernel node.
-    DeviceUpdatableKernelNode = 10,
+    DeviceUpdatableKernelNode = 13,
 }
 
 // =========================================================================
@@ -177,3 +185,33 @@ pub struct CuLaunchConfig {
 // the struct itself is Send + Sync because no interior mutation occurs.
 unsafe impl Send for CuLaunchConfig {}
 unsafe impl Sync for CuLaunchConfig {}
+
+#[cfg(test)]
+mod tests {
+    use super::CuLaunchAttributeId;
+
+    /// Discriminants must match `CUlaunchAttributeID_enum` from `cuda.h`
+    /// exactly, otherwise `cuLaunchKernelEx` silently misconfigures kernels.
+    #[test]
+    fn launch_attribute_id_matches_header() {
+        assert_eq!(CuLaunchAttributeId::Ignore as u32, 0);
+        assert_eq!(CuLaunchAttributeId::AccessPolicyWindow as u32, 1);
+        assert_eq!(CuLaunchAttributeId::Cooperative as u32, 2);
+        assert_eq!(CuLaunchAttributeId::SynchronizationPolicy as u32, 3);
+        assert_eq!(CuLaunchAttributeId::ClusterDimension as u32, 4);
+        assert_eq!(
+            CuLaunchAttributeId::ClusterSchedulingPolicyPreference as u32,
+            5
+        );
+        assert_eq!(
+            CuLaunchAttributeId::ProgrammaticStreamSerialization as u32,
+            6
+        );
+        assert_eq!(CuLaunchAttributeId::ProgrammaticEvent as u32, 7);
+        assert_eq!(CuLaunchAttributeId::Priority as u32, 8);
+        assert_eq!(CuLaunchAttributeId::MemSyncDomainMap as u32, 9);
+        assert_eq!(CuLaunchAttributeId::MemSyncDomain as u32, 10);
+        assert_eq!(CuLaunchAttributeId::LaunchCompletionEvent as u32, 12);
+        assert_eq!(CuLaunchAttributeId::DeviceUpdatableKernelNode as u32, 13);
+    }
+}

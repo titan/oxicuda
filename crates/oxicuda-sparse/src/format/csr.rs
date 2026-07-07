@@ -109,6 +109,17 @@ impl<T: GpuFloat> CsrMatrix<T> {
             }
         }
 
+        // Validate column indices are within [0, cols); an out-of-range
+        // col_idx would otherwise cause SpMV/SpMM kernels to read device
+        // memory out of bounds.
+        for (k, &c) in col_idx.iter().enumerate() {
+            if c < 0 || c as u32 >= cols {
+                return Err(SparseError::InvalidFormat(format!(
+                    "col_idx[{k}] = {c} out of range [0, {cols})"
+                )));
+            }
+        }
+
         // Upload to GPU
         let d_row_ptr = DeviceBuffer::from_host(row_ptr)?;
         let d_col_idx = DeviceBuffer::from_host(col_idx)?;
@@ -126,7 +137,14 @@ impl<T: GpuFloat> CsrMatrix<T> {
 
     /// Creates a CSR matrix from pre-allocated device buffers.
     ///
-    /// No validation of contents is performed; only lengths are checked.
+    /// This is the unchecked escape hatch: no validation of contents is
+    /// performed; only lengths are checked. In particular, `col_idx`
+    /// values are **not** range-checked against `cols`, and `row_ptr` is
+    /// not checked for monotonicity. Out-of-range column indices will
+    /// cause SpMV/SpMM kernels to read device memory out of bounds.
+    /// Callers are responsible for ensuring the contents are valid;
+    /// prefer [`from_host`](Self::from_host) when the data originates on
+    /// the host, as it validates both structure and index ranges.
     ///
     /// # Errors
     ///
@@ -352,6 +370,19 @@ mod tests {
     fn csr_validation_mismatched_col_idx() {
         let result = CsrMatrix::<f32>::from_host(2, 2, &[0, 1, 2], &[0], &[1.0, 2.0]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn csr_validation_col_idx_out_of_range() {
+        // cols = 2, so col index 2 is out of range
+        let result = CsrMatrix::<f32>::from_host(2, 2, &[0, 1, 2], &[0, 2], &[1.0, 2.0]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
+    }
+
+    #[test]
+    fn csr_validation_negative_col_idx() {
+        let result = CsrMatrix::<f32>::from_host(2, 2, &[0, 1, 2], &[0, -1], &[1.0, 2.0]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
     }
 
     #[test]

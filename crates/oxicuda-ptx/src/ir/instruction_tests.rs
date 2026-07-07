@@ -1050,25 +1050,38 @@ fn emit_pragma_nounroll() {
 fn emit_tex_1d() {
     let inst = Instruction::Tex1d {
         ty: PtxType::F32,
-        dst: make_reg("%f0", PtxType::F32),
+        dst: [
+            make_reg("%f0", PtxType::F32),
+            make_reg("%f1", PtxType::F32),
+            make_reg("%f2", PtxType::F32),
+            make_reg("%f3", PtxType::F32),
+        ],
         tex_ref: "my_tex".to_string(),
         coord: make_reg_op("%r0", PtxType::S32),
     };
-    assert_eq!(inst.emit(), "tex.1d.v4.f32.s32 %f0, [my_tex, {%r0}];");
+    assert_eq!(
+        inst.emit(),
+        "tex.1d.v4.f32.s32 {%f0, %f1, %f2, %f3}, [my_tex, {%r0}];"
+    );
 }
 
 #[test]
 fn emit_tex_2d() {
     let inst = Instruction::Tex2d {
         ty: PtxType::F32,
-        dst: make_reg("%f0", PtxType::F32),
+        dst: [
+            make_reg("%f0", PtxType::F32),
+            make_reg("%f1", PtxType::F32),
+            make_reg("%f2", PtxType::F32),
+            make_reg("%f3", PtxType::F32),
+        ],
         tex_ref: "my_tex2d".to_string(),
         coord_x: make_reg_op("%r0", PtxType::S32),
         coord_y: make_reg_op("%r1", PtxType::S32),
     };
     assert_eq!(
         inst.emit(),
-        "tex.2d.v4.f32.s32 %f0, [my_tex2d, {%r0, %r1}];"
+        "tex.2d.v4.f32.s32 {%f0, %f1, %f2, %f3}, [my_tex2d, {%r0, %r1}];"
     );
 }
 
@@ -1076,7 +1089,12 @@ fn emit_tex_2d() {
 fn emit_tex_3d() {
     let inst = Instruction::Tex3d {
         ty: PtxType::F32,
-        dst: make_reg("%f0", PtxType::F32),
+        dst: [
+            make_reg("%f0", PtxType::F32),
+            make_reg("%f1", PtxType::F32),
+            make_reg("%f2", PtxType::F32),
+            make_reg("%f3", PtxType::F32),
+        ],
         tex_ref: "my_tex3d".to_string(),
         coord_x: make_reg_op("%r0", PtxType::S32),
         coord_y: make_reg_op("%r1", PtxType::S32),
@@ -1084,7 +1102,7 @@ fn emit_tex_3d() {
     };
     assert_eq!(
         inst.emit(),
-        "tex.3d.v4.f32.s32 %f0, [my_tex3d, {%r0, %r1, %r2}];"
+        "tex.3d.v4.f32.s32 {%f0, %f1, %f2, %f3}, [my_tex3d, {%r0, %r1, %r2}];"
     );
 }
 
@@ -1114,23 +1132,39 @@ fn emit_surf_store() {
 fn emit_tex_1d_f16() {
     let inst = Instruction::Tex1d {
         ty: PtxType::F16,
-        dst: make_reg("%h0", PtxType::F16),
+        dst: [
+            make_reg("%h0", PtxType::F16),
+            make_reg("%h1", PtxType::F16),
+            make_reg("%h2", PtxType::F16),
+            make_reg("%h3", PtxType::F16),
+        ],
         tex_ref: "tex_f16".to_string(),
         coord: make_reg_op("%r0", PtxType::S32),
     };
-    assert_eq!(inst.emit(), "tex.1d.v4.f16.s32 %h0, [tex_f16, {%r0}];");
+    assert_eq!(
+        inst.emit(),
+        "tex.1d.v4.f16.s32 {%h0, %h1, %h2, %h3}, [tex_f16, {%r0}];"
+    );
 }
 
 #[test]
 fn emit_tex_2d_b32() {
     let inst = Instruction::Tex2d {
         ty: PtxType::B32,
-        dst: make_reg("%r0", PtxType::B32),
+        dst: [
+            make_reg("%r0", PtxType::B32),
+            make_reg("%r3", PtxType::B32),
+            make_reg("%r4", PtxType::B32),
+            make_reg("%r5", PtxType::B32),
+        ],
         tex_ref: "tex_b32".to_string(),
         coord_x: make_reg_op("%r1", PtxType::S32),
         coord_y: make_reg_op("%r2", PtxType::S32),
     };
-    assert_eq!(inst.emit(), "tex.2d.v4.b32.s32 %r0, [tex_b32, {%r1, %r2}];");
+    assert_eq!(
+        inst.emit(),
+        "tex.2d.v4.b32.s32 {%r0, %r3, %r4, %r5}, [tex_b32, {%r1, %r2}];"
+    );
 }
 
 #[test]
@@ -1167,7 +1201,7 @@ fn builder_tex_1d() {
         crate::BodyBuilder::new(&mut regs, &mut instructions, &params, SmVersion::Sm80);
     let coord = Operand::Immediate(ImmValue::U32(42));
     let dst = builder.tex_1d(PtxType::F32, "my_tex", coord);
-    assert_eq!(dst.ty, PtxType::F32);
+    assert_eq!(dst[0].ty, PtxType::F32);
     assert_eq!(instructions.len(), 1);
     assert!(instructions[0].emit().starts_with("tex.1d.v4.f32.s32"));
 }
@@ -1185,7 +1219,7 @@ fn builder_tex_2d() {
     let cx = Operand::Immediate(ImmValue::U32(10));
     let cy = Operand::Immediate(ImmValue::U32(20));
     let dst = builder.tex_2d(PtxType::F32, "tex2d", cx, cy);
-    assert_eq!(dst.ty, PtxType::F32);
+    assert_eq!(dst[0].ty, PtxType::F32);
     assert_eq!(instructions.len(), 1);
     assert!(instructions[0].emit().starts_with("tex.2d.v4.f32.s32"));
 }
@@ -1204,7 +1238,7 @@ fn builder_tex_3d() {
     let cy = Operand::Immediate(ImmValue::U32(2));
     let cz = Operand::Immediate(ImmValue::U32(3));
     let dst = builder.tex_3d(PtxType::F32, "tex3d", cx, cy, cz);
-    assert_eq!(dst.ty, PtxType::F32);
+    assert_eq!(dst[0].ty, PtxType::F32);
     assert_eq!(instructions.len(), 1);
     assert!(instructions[0].emit().starts_with("tex.3d.v4.f32.s32"));
 }
@@ -1250,7 +1284,12 @@ fn tex_instructions_in_scheduling() {
     let instructions = vec![
         Instruction::Tex1d {
             ty: PtxType::F32,
-            dst: make_reg("%f0", PtxType::F32),
+            dst: [
+                make_reg("%f0", PtxType::F32),
+                make_reg("%f5", PtxType::F32),
+                make_reg("%f6", PtxType::F32),
+                make_reg("%f7", PtxType::F32),
+            ],
             tex_ref: "tex".to_string(),
             coord: make_reg_op("%r0", PtxType::S32),
         },
@@ -1304,13 +1343,18 @@ fn emit_redux_max() {
 fn emit_stmatrix_m8n8x4() {
     let inst = Instruction::Stmatrix {
         dst_addr: make_reg_op("%r0", PtxType::U32),
-        src: make_reg("%r1", PtxType::B32),
+        src: vec![
+            make_reg("%r1", PtxType::B32),
+            make_reg("%r2", PtxType::B32),
+            make_reg("%r3", PtxType::B32),
+            make_reg("%r4", PtxType::B32),
+        ],
         shape: super::StmatrixShape::M8n8x4,
         trans: false,
     };
     assert_eq!(
         inst.emit(),
-        "stmatrix.sync.aligned.m8n8.x4.shared.b16 [%r0], {%r1};"
+        "stmatrix.sync.aligned.m8n8.x4.shared.b16 [%r0], {%r1, %r2, %r3, %r4};"
     );
 }
 
@@ -1318,13 +1362,13 @@ fn emit_stmatrix_m8n8x4() {
 fn emit_stmatrix_transposed() {
     let inst = Instruction::Stmatrix {
         dst_addr: make_reg_op("%r0", PtxType::U32),
-        src: make_reg("%r1", PtxType::B32),
+        src: vec![make_reg("%r1", PtxType::B32), make_reg("%r2", PtxType::B32)],
         shape: super::StmatrixShape::M8n8x2,
         trans: true,
     };
     assert_eq!(
         inst.emit(),
-        "stmatrix.sync.aligned.m8n8.x2.trans.shared.b16 [%r0], {%r1};"
+        "stmatrix.sync.aligned.m8n8.x2.trans.shared.b16 [%r0], {%r1, %r2};"
     );
 }
 
@@ -1334,7 +1378,7 @@ fn emit_elect_sync() {
         dst: make_reg("%p0", PtxType::Pred),
         membership_mask: 0xFFFF_FFFF,
     };
-    assert_eq!(inst.emit(), "elect.sync %p0, 0xffffffff;");
+    assert_eq!(inst.emit(), "elect.sync _|%p0, 0xffffffff;");
 }
 
 #[test]
@@ -1377,7 +1421,9 @@ fn emit_fence_proxy() {
         scope: FenceScope::Gpu,
         space: MemorySpace::Shared,
     };
-    assert_eq!(inst.emit(), "fence.proxy.async.gpu.shared;");
+    // The thread scope (`.gpu`) is not a legal fence.proxy modifier; only the
+    // legal space qualifier is emitted.
+    assert_eq!(inst.emit(), "fence.proxy.async.shared::cta;");
 }
 
 #[test]
@@ -1394,18 +1440,19 @@ fn emit_mbarrier_arrive() {
     let inst = Instruction::MbarrierArrive {
         addr: make_reg_op("%r0", PtxType::U64),
     };
-    assert_eq!(inst.emit(), "mbarrier.arrive.shared.b64 [%r0];");
+    assert_eq!(inst.emit(), "mbarrier.arrive.shared.b64 _, [%r0];");
 }
 
 #[test]
 fn emit_mbarrier_wait() {
     let inst = Instruction::MbarrierWait {
+        dst: make_reg("%p0", PtxType::Pred),
         addr: make_reg_op("%r0", PtxType::U64),
         phase: make_reg_op("%r1", PtxType::U32),
     };
     assert_eq!(
         inst.emit(),
-        "mbarrier.try_wait.parity.shared.b64 [%r0], %r1;"
+        "mbarrier.try_wait.parity.shared.b64 %p0, [%r0], %r1;"
     );
 }
 

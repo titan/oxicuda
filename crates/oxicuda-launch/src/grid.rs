@@ -20,7 +20,7 @@
 
 use std::fmt;
 
-use oxicuda_driver::error::CudaResult;
+use oxicuda_driver::error::{CudaError, CudaResult};
 use oxicuda_driver::module::Function;
 
 /// 3-dimensional size specification for grids and blocks.
@@ -91,13 +91,30 @@ impl Dim3 {
         Self::new(x, y, 1)
     }
 
-    /// Total number of elements (`x * y * z`).
+    /// Total number of elements (`x * y * z`), saturating at [`u32::MAX`]
+    /// rather than panicking (debug builds) or silently wrapping (release
+    /// builds) when the true product would overflow a `u32`.
     ///
-    /// For a grid dimension, this is the total number of thread blocks.
-    /// For a block dimension, this is the total number of threads per block.
+    /// Use [`total_u64`](Self::total_u64) instead when the exact product
+    /// matters, e.g. for `u64`-typed accounting or comparisons.
     #[inline]
     pub fn total(&self) -> u32 {
-        self.x * self.y * self.z
+        u32::try_from(self.total_u64()).unwrap_or(u32::MAX)
+    }
+
+    /// Total number of elements (`x * y * z`) widened to `u64`, saturating
+    /// at [`u64::MAX`] on overflow.
+    ///
+    /// Note that the product of three arbitrary `u32` values does *not*
+    /// always fit in a `u64` (e.g. `u32::MAX` cubed is far larger than
+    /// `u64::MAX`), so the multiplication is carried out in `u128` — which
+    /// is always wide enough for three `u32` factors — before narrowing
+    /// back down, exactly mirroring how [`total`](Self::total) narrows
+    /// this value to `u32`.
+    #[inline]
+    pub fn total_u64(&self) -> u64 {
+        let product: u128 = u128::from(self.x) * u128::from(self.y) * u128::from(self.z);
+        u64::try_from(product).unwrap_or(u64::MAX)
     }
 }
 
@@ -151,7 +168,7 @@ impl fmt::Display for Dim3 {
 ///
 /// # Errors
 ///
-/// Returns a [`CudaError`](oxicuda_driver::CudaError) if the occupancy
+/// Returns a [`CudaError`] if the occupancy
 /// query fails (e.g., invalid function handle, driver not loaded).
 ///
 /// # Examples
@@ -168,11 +185,7 @@ impl fmt::Display for Dim3 {
 pub fn auto_grid_for(func: &Function, n: usize) -> CudaResult<(Dim3, Dim3)> {
     let (_min_grid, optimal_block) = func.optimal_block_size(0)?;
     let block_size = optimal_block as u32;
-    let grid_x = if n == 0 {
-        0
-    } else {
-        (n as u32).div_ceil(block_size)
-    };
+    let grid_x = checked_ceil_div_u32(n, block_size)?;
     Ok((Dim3::x(grid_x), Dim3::x(block_size)))
 }
 
@@ -187,7 +200,7 @@ pub fn auto_grid_for(func: &Function, n: usize) -> CudaResult<(Dim3, Dim3)> {
 ///
 /// # Errors
 ///
-/// Returns a [`CudaError`](oxicuda_driver::CudaError) if the occupancy
+/// Returns a [`CudaError`] if the occupancy
 /// query fails.
 ///
 /// # Examples
@@ -211,18 +224,31 @@ pub fn auto_grid_2d(func: &Function, width: usize, height: usize) -> CudaResult<
     let block_x = nearest_power_of_two_le(sqrt_approx).max(1);
     let block_y = (total / block_x).max(1);
 
-    let grid_x = if width == 0 {
-        0
-    } else {
-        (width as u32).div_ceil(block_x)
-    };
-    let grid_y = if height == 0 {
-        0
-    } else {
-        (height as u32).div_ceil(block_y)
-    };
+    let grid_x = checked_ceil_div_u32(width, block_x)?;
+    let grid_y = checked_ceil_div_u32(height, block_y)?;
 
     Ok((Dim3::xy(grid_x, grid_y), Dim3::xy(block_x, block_y)))
+}
+
+/// Computes `ceil(n / divisor)` widened to `u64` before narrowing back to
+/// `u32`, rejecting the result instead of silently truncating when `n` is
+/// large enough (`n >= 2^32`) that the true grid size would not fit in a
+/// `u32`.
+///
+/// Extracted from [`auto_grid_for`]/[`auto_grid_2d`] so the overflow
+/// behaviour is unit-testable without a live GPU/kernel.
+///
+/// # Errors
+///
+/// Returns [`CudaError::InvalidValue`] if the ceiling-divided result does
+/// not fit in a `u32`.
+fn checked_ceil_div_u32(n: usize, divisor: u32) -> CudaResult<u32> {
+    let wide: u64 = if n == 0 {
+        0
+    } else {
+        (n as u64).div_ceil(u64::from(divisor))
+    };
+    u32::try_from(wide).map_err(|_| CudaError::InvalidValue)
 }
 
 /// Returns the largest power of two that is less than or equal to `n`.
@@ -381,6 +407,81 @@ mod tests {
         assert_eq!(super::nearest_power_of_two_le(17), 16);
         assert_eq!(super::nearest_power_of_two_le(255), 128);
         assert_eq!(super::nearest_power_of_two_le(256), 256);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Dim3::total_u64 / checked_ceil_div_u32 — overflow-safety regression tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn dim3_total_u64_matches_total_for_small_values() {
+        let d = Dim3::new(8, 8, 4);
+        assert_eq!(d.total_u64(), 256u64);
+        assert_eq!(d.total_u64(), u64::from(d.total()));
+    }
+
+    #[test]
+    fn dim3_total_saturates_at_u32_max_when_u64_product_is_exact() {
+        // x * y * z here vastly overflows u32::MAX (~4.29e9) but still fits
+        // exactly in a u64 (u32::MAX squared is ~1.84e19, just under
+        // u64::MAX): total() must saturate to u32::MAX rather than
+        // panicking (debug) or wrapping (release), while total_u64() must
+        // report the true, non-saturated product.
+        let d = Dim3::new(u32::MAX, u32::MAX, 1);
+        assert_eq!(d.total(), u32::MAX);
+        let expected_u64 = u64::from(u32::MAX) * u64::from(u32::MAX);
+        assert_eq!(d.total_u64(), expected_u64);
+        assert!(d.total_u64() > u64::from(u32::MAX));
+    }
+
+    #[test]
+    fn dim3_total_u64_saturates_instead_of_panicking_when_product_overflows_u64() {
+        // Three u32::MAX-scale factors can reach ~7.9e28 — far beyond even
+        // u64::MAX (~1.8e19) — so total_u64() itself must saturate at
+        // u64::MAX rather than panicking (debug) or wrapping (release).
+        // This is exactly the same class of overflow bug as total()'s
+        // u32 overflow, just one level up; total_u64() must not
+        // reintroduce it.
+        let d = Dim3::new(u32::MAX, u32::MAX, 2);
+        assert_eq!(d.total_u64(), u64::MAX);
+        assert_eq!(d.total(), u32::MAX);
+    }
+
+    #[test]
+    fn dim3_total_u64_one_is_one() {
+        assert_eq!(Dim3::new(1, 1, 1).total_u64(), 1u64);
+    }
+
+    #[test]
+    fn checked_ceil_div_u32_normal_values() {
+        assert_eq!(super::checked_ceil_div_u32(1000, 256).unwrap(), 4);
+        assert_eq!(super::checked_ceil_div_u32(256, 256).unwrap(), 1);
+        assert_eq!(super::checked_ceil_div_u32(0, 256).unwrap(), 0);
+        assert_eq!(super::checked_ceil_div_u32(257, 256).unwrap(), 2);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn checked_ceil_div_u32_rejects_overflow_instead_of_truncating() {
+        // n so large that n / block_size overflows u32::MAX — must be
+        // rejected with an error rather than silently truncated to a
+        // too-small (and therefore too-few-blocks) grid dimension.
+        let n: usize = (u32::MAX as usize) + 1;
+        let result = super::checked_ceil_div_u32(n, 1);
+        assert!(
+            result.is_err(),
+            "grid dimension overflowing u32 must be rejected, got {result:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn checked_ceil_div_u32_boundary_fits_exactly() {
+        // Exactly u32::MAX elements at block_size 1 must fit (grid_x ==
+        // u32::MAX), not be rejected.
+        let n: usize = u32::MAX as usize;
+        let result = super::checked_ceil_div_u32(n, 1);
+        assert_eq!(result.unwrap(), u32::MAX);
     }
 
     #[test]

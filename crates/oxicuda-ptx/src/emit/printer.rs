@@ -99,12 +99,16 @@ pub fn emit_function(func: &PtxFunction, regs: &RegisterAllocator) -> String {
     }
     let _ = writeln!(out);
     let _ = writeln!(out, ")");
-    let _ = writeln!(out, "{{");
 
-    // Max threads hint
+    // `.maxntid` is a kernel-header directive: per the PTX ISA it belongs
+    // between the parameter list and the opening brace and carries no
+    // trailing semicolon. Emitting it inside the body makes `ptxas` reject
+    // the module.
     if let Some(n) = func.max_threads {
-        let _ = writeln!(out, "    .maxntid {n}, 1, 1;");
+        let _ = writeln!(out, ".maxntid {n}, 1, 1");
     }
+
+    let _ = writeln!(out, "{{");
 
     // Register declarations
     for decl in regs.emit_declarations() {
@@ -150,12 +154,16 @@ pub fn emit_function_standalone(func: &PtxFunction) -> String {
     }
     let _ = writeln!(out);
     let _ = writeln!(out, ")");
-    let _ = writeln!(out, "{{");
 
-    // Max threads hint
+    // `.maxntid` is a kernel-header directive: per the PTX ISA it belongs
+    // between the parameter list and the opening brace and carries no
+    // trailing semicolon. Emitting it inside the body makes `ptxas` reject
+    // the module.
     if let Some(n) = func.max_threads {
-        let _ = writeln!(out, "    .maxntid {n}, 1, 1;");
+        let _ = writeln!(out, ".maxntid {n}, 1, 1");
     }
+
+    let _ = writeln!(out, "{{");
 
     // Shared memory
     for (sname, sty, count) in &func.shared_mem {
@@ -190,11 +198,14 @@ fn try_emit_function_standalone(func: &PtxFunction) -> Result<String, std::fmt::
     }
     writeln!(out)?;
     writeln!(out, ")")?;
-    writeln!(out, "{{")?;
 
+    // `.maxntid` is a kernel-header directive (before the brace, no trailing
+    // semicolon); emitting it inside the body makes `ptxas` reject the module.
     if let Some(n) = func.max_threads {
-        writeln!(out, "    .maxntid {n}, 1, 1;")?;
+        writeln!(out, ".maxntid {n}, 1, 1")?;
     }
+
+    writeln!(out, "{{")?;
 
     for (sname, sty, count) in &func.shared_mem {
         let align = sty.size_bytes().max(4);
@@ -338,6 +349,55 @@ mod tests {
 
         let ptx = emit_function_standalone(&func);
         assert!(ptx.contains(".shared .align 4 .b8 tile[1024];"));
+    }
+
+    #[test]
+    fn maxntid_emitted_as_header_directive() {
+        // `.maxntid` must appear before the opening brace and carry NO trailing
+        // semicolon — the placement ptxas rejects when emitted inside the body.
+        let mut func = PtxFunction::new("mnt_kernel");
+        func.add_param("n", PtxType::U32);
+        func.max_threads = Some(256);
+        func.push(Instruction::Return);
+
+        let mut regs = RegisterAllocator::new();
+        let _ = regs.alloc(PtxType::F32);
+
+        // emit_function (allocator path)
+        let with_regs = emit_function(&func, &regs);
+        assert!(with_regs.contains(".maxntid 256, 1, 1"));
+        assert!(!with_regs.contains(".maxntid 256, 1, 1;"));
+        assert!(
+            with_regs.find(".maxntid").expect("maxntid present")
+                < with_regs.find('{').expect("brace present"),
+            "emit_function: .maxntid must precede the body brace"
+        );
+
+        // emit_function_standalone
+        let standalone = emit_function_standalone(&func);
+        assert!(standalone.contains(".maxntid 256, 1, 1"));
+        assert!(!standalone.contains(".maxntid 256, 1, 1;"));
+        assert!(
+            standalone.find(".maxntid").expect("maxntid present")
+                < standalone.find('{').expect("brace present"),
+            "emit_function_standalone: .maxntid must precede the body brace"
+        );
+
+        // try_emit_module (uses try_emit_function_standalone)
+        let module = PtxModule {
+            version: "8.5".to_string(),
+            target: "sm_80".to_string(),
+            address_size: 64,
+            functions: vec![func],
+        };
+        let via_module = try_emit_module(&module).expect("module emit should succeed");
+        assert!(via_module.contains(".maxntid 256, 1, 1"));
+        assert!(!via_module.contains(".maxntid 256, 1, 1;"));
+        assert!(
+            via_module.find(".maxntid").expect("maxntid present")
+                < via_module.find('{').expect("brace present"),
+            "try_emit_module: .maxntid must precede the body brace"
+        );
     }
 
     #[test]

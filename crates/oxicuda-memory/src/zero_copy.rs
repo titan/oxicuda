@@ -101,6 +101,20 @@ impl<T: Copy> MappedBuffer<T> {
             return Err(e);
         }
 
+        // SAFETY: `raw_ptr` was just allocated by `cu_mem_alloc_host_v2` and
+        // is valid for `byte_size` bytes. Zero-initialising it here means
+        // `as_host_slice`/`as_host_slice_mut` below never expose
+        // driver-uninitialised memory as a safe `&[T]` (all-zero bytes are
+        // a valid `T` for every in-tree usage of `MappedBuffer`, e.g.
+        // `u8`/`f32`). Skipped for a zero-byte allocation (e.g. `n == 0` or
+        // a zero-sized `T`) to avoid writing through a possibly-unusual
+        // pointer for a no-op write.
+        if byte_size > 0 {
+            unsafe {
+                std::ptr::write_bytes(raw_ptr.cast::<u8>(), 0, byte_size);
+            }
+        }
+
         Ok(Self {
             host_ptr,
             device_ptr,
@@ -151,7 +165,8 @@ impl<T: Copy> MappedBuffer<T> {
     ///
     /// The caller must ensure no concurrent GPU writes are in flight.
     pub fn as_host_slice(&self) -> &[T] {
-        // SAFETY: host_ptr is valid for `len` elements allocated by cuMemAllocHost.
+        // SAFETY: host_ptr is valid for `len` elements allocated by
+        // cuMemAllocHost and zero-initialised at `alloc` time.
         unsafe { std::slice::from_raw_parts(self.host_ptr, self.len) }
     }
 
@@ -161,7 +176,8 @@ impl<T: Copy> MappedBuffer<T> {
     ///
     /// The caller must ensure no concurrent GPU reads or writes are in flight.
     pub fn as_host_slice_mut(&mut self) -> &mut [T] {
-        // SAFETY: host_ptr is valid for `len` elements allocated by cuMemAllocHost.
+        // SAFETY: host_ptr is valid for `len` elements allocated by
+        // cuMemAllocHost and zero-initialised at `alloc` time.
         unsafe { std::slice::from_raw_parts_mut(self.host_ptr, self.len) }
     }
 }
@@ -175,6 +191,72 @@ impl<T: Copy> Drop for MappedBuffer<T> {
             // SAFETY: host_ptr was allocated by cuMemAllocHost_v2 and has not
             // been freed yet (Drop is called at most once).
             unsafe { (api.cu_mem_free_host)(self.host_ptr.cast::<c_void>()) };
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alloc_signature_compiles() {
+        let _: fn(usize) -> CudaResult<MappedBuffer<f32>> = MappedBuffer::alloc;
+    }
+
+    #[cfg(feature = "gpu-tests")]
+    mod gpu_tests {
+        use super::*;
+
+        /// Establishes a real CUDA context on device 0. Returns `None` if no
+        /// driver/GPU is available so tests can skip gracefully.
+        fn real_context() -> Option<oxicuda_driver::context::Context> {
+            if oxicuda_driver::init().is_err()
+                || oxicuda_driver::device::Device::count().unwrap_or(0) == 0
+            {
+                return None;
+            }
+            let dev = oxicuda_driver::device::Device::get(0).ok()?;
+            oxicuda_driver::context::Context::new(&dev).ok()
+        }
+
+        /// Regression test for F070: a freshly allocated `MappedBuffer` must
+        /// never expose driver-uninitialised bytes through the safe
+        /// `as_host_slice` accessor — it must read back as all-zero.
+        #[test]
+        fn alloc_is_zero_initialized() {
+            let Some(_ctx) = real_context() else {
+                eprintln!("skipping: no CUDA driver/device");
+                return;
+            };
+            let Ok(buf) = MappedBuffer::<u8>::alloc(4096) else {
+                eprintln!("skipping: alloc failed");
+                return;
+            };
+            assert_eq!(buf.len(), 4096);
+            assert!(buf.as_host_slice().iter().all(|&b| b == 0));
+        }
+
+        #[test]
+        fn device_ptr_is_nonzero_and_host_writes_visible() {
+            let Some(_ctx) = real_context() else {
+                eprintln!("skipping: no CUDA driver/device");
+                return;
+            };
+            let Ok(mut buf) = MappedBuffer::<f32>::alloc(64) else {
+                eprintln!("skipping: alloc failed");
+                return;
+            };
+            assert_ne!(buf.as_device_ptr(), 0);
+            for (i, v) in buf.as_host_slice_mut().iter_mut().enumerate() {
+                *v = i as f32;
+            }
+            let expected: Vec<f32> = (0..64).map(|i| i as f32).collect();
+            assert_eq!(buf.as_host_slice(), expected.as_slice());
         }
     }
 }

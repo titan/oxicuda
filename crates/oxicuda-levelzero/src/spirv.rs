@@ -117,11 +117,13 @@ const OPENCL_FMIN: u32 = 28;
 const OPENCL_LOG: u32 = 37;
 const OPENCL_SQRT: u32 = 61;
 const OPENCL_TANH: u32 = 63;
-// Extended transcendental instruction numbers (OpenCL.std).
-const OPENCL_ATAN: u32 = 9;
-const OPENCL_ATAN2: u32 = 11;
-const OPENCL_CBRT: u32 = 14;
-const OPENCL_COS: u32 = 16;
+// Extended transcendental instruction numbers (OpenCL.std): atan=6, atan2=7,
+// cbrt=11, cos=14 per the OpenCL Extended Instruction Set spec (9=atanpi,
+// 16=cospi were wrong).
+const OPENCL_ATAN: u32 = 6;
+const OPENCL_ATAN2: u32 = 7;
+const OPENCL_CBRT: u32 = 11;
+const OPENCL_COS: u32 = 14;
 const OPENCL_ERFC: u32 = 17;
 const OPENCL_ERF: u32 = 18;
 const OPENCL_RSQRT: u32 = 56;
@@ -373,14 +375,21 @@ pub(crate) struct BaseIds {
     pub(crate) c_float_1: u32,
     pub(crate) var_gid: u32,
     pub(crate) opencl_ext: u32,
+    /// The kernel entry-point function id (allocated + entry-point emitted by
+    /// `emit_preamble` so `OpEntryPoint`/`OpExecutionMode` land in the correct
+    /// SPIR-V logical-layout position — before decorations/types/constants).
+    pub(crate) main_fn: u32,
 }
 
 /// Emit the preamble shared by all OpenCL-style compute kernels.
 ///
-/// This emits capabilities, memory model, types, constants, and the
-/// `GlobalInvocationId` Input variable.  The caller must separately emit
-/// `OpEntryPoint`, `OpExecutionMode`, and the function body.
-pub(crate) fn emit_preamble(m: &mut SpvModule) -> BaseIds {
+/// This emits — in the exact SPIR-V logical-layout order (spec §2.4) —
+/// capabilities, the OpenCL ext-inst import, memory model, the `OpEntryPoint`
+/// and `OpExecutionMode` for `entry_name`, then decorations, types, constants,
+/// and the `GlobalInvocationId` Input variable. The caller emits only the
+/// function type and body afterward; the entry-point function id is returned in
+/// [`BaseIds::main_fn`].
+pub(crate) fn emit_preamble(m: &mut SpvModule, entry_name: &str) -> BaseIds {
     let ty_void = m.alloc_id();
     let ty_bool = m.alloc_id();
     let ty_uint = m.alloc_id();
@@ -397,6 +406,7 @@ pub(crate) fn emit_preamble(m: &mut SpvModule) -> BaseIds {
     let c_float_1 = m.alloc_id();
     let var_gid = m.alloc_id();
     let opencl_ext = m.alloc_id();
+    let main_fn = m.alloc_id();
 
     // Capabilities
     m.emit_capability(CAPABILITY_KERNEL);
@@ -408,8 +418,10 @@ pub(crate) fn emit_preamble(m: &mut SpvModule) -> BaseIds {
     // Memory model: Physical64 + OpenCL
     m.emit_memory_model(ADDRESSING_MODEL_PHYSICAL64, MEMORY_MODEL_OPENCL);
 
-    // NOTE: OpEntryPoint and OpExecutionMode are emitted by the caller after
-    // allocating the main function ID, so we skip them here.
+    // Entry point (section 5) and execution mode (section 6) MUST precede
+    // annotations (section 8) and types/constants/globals (section 9).
+    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, entry_name, &[var_gid]);
+    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
 
     // Decoration: GlobalInvocationId on var_gid
     m.emit_decorate(var_gid, DECORATION_BUILTIN, &[BUILTIN_GLOBAL_INVOCATION_ID]);
@@ -452,6 +464,7 @@ pub(crate) fn emit_preamble(m: &mut SpvModule) -> BaseIds {
         c_float_1,
         var_gid,
         opencl_ext,
+        main_fn,
     }
 }
 
@@ -471,9 +484,8 @@ pub(crate) fn load_gid_x(m: &mut SpvModule, b: &BaseIds) -> u32 {
 /// Kernel parameters: `(CrossWorkgroup float* input, CrossWorkgroup float* output, uint count)`.
 pub fn unary_compute_shader(op: UnaryOp) -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "main");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_input = m.alloc_id();
     let p_output = m.alloc_id();
@@ -486,17 +498,13 @@ pub fn unary_compute_shader(op: UnaryOp) -> Vec<u32> {
         &[b.ty_ptr_cross_float, b.ty_ptr_cross_float, b.ty_uint],
     );
 
-    // Entry point and execution mode
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
-
     // Labels
     let label_entry = m.alloc_id();
     let label_body = m.alloc_id();
     let label_merge = m.alloc_id();
 
     // Function
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_input);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_output);
     m.emit_function_parameter(b.ty_uint, p_count);
@@ -586,9 +594,8 @@ fn emit_unary_op(m: &mut SpvModule, b: &BaseIds, op: UnaryOp, x: u32) -> u32 {
 ///                      CrossWorkgroup float* output, uint count)`.
 pub fn binary_compute_shader(op: BinaryOp) -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "main");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_a = m.alloc_id();
     let p_b = m.alloc_id();
@@ -607,14 +614,11 @@ pub fn binary_compute_shader(op: BinaryOp) -> Vec<u32> {
         ],
     );
 
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
-
     let label_entry = m.alloc_id();
     let label_body = m.alloc_id();
     let label_merge = m.alloc_id();
 
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_a);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_b);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_out);
@@ -682,9 +686,8 @@ fn emit_binary_op(m: &mut SpvModule, b: &BaseIds, op: BinaryOp, lhs: u32, rhs: u
 /// Each thread computes one output element by iterating over the reduce dimension.
 pub fn reduce_compute_shader(op: ReduceOp) -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "main");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_input = m.alloc_id();
     let p_output = m.alloc_id();
@@ -705,8 +708,27 @@ pub fn reduce_compute_shader(op: ReduceOp) -> Vec<u32> {
         ],
     );
 
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
+    // Accumulator initial value. For Max/Min this is a ±infinity constant that
+    // MUST live in the module-global constants section (before OpFunction), so
+    // allocate + emit it here rather than inside the function body.
+    let init_val = match op {
+        ReduceOp::Sum | ReduceOp::Mean => b.c_float_0,
+        ReduceOp::Max => {
+            let neg_inf = m.alloc_id();
+            m.emit_constant_f32(b.ty_float, neg_inf, f32::NEG_INFINITY);
+            neg_inf
+        }
+        ReduceOp::Min => {
+            let pos_inf = m.alloc_id();
+            m.emit_constant_f32(b.ty_float, pos_inf, f32::INFINITY);
+            pos_inf
+        }
+    };
+
+    // Function-storage variables must be the first instructions of the first
+    // block; allocate their ids now and emit the OpVariables in `label_entry`.
+    let var_i = m.alloc_id();
+    let var_acc = m.alloc_id();
 
     let label_entry = m.alloc_id();
     let label_bounds_body = m.alloc_id();
@@ -716,13 +738,17 @@ pub fn reduce_compute_shader(op: ReduceOp) -> Vec<u32> {
     let label_loop_continue = m.alloc_id();
     let label_loop_merge = m.alloc_id();
 
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_input);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_output);
     m.emit_function_parameter(b.ty_uint, p_outer);
     m.emit_function_parameter(b.ty_uint, p_reduce);
     m.emit_function_parameter(b.ty_uint, p_inner);
     m.emit_label(label_entry);
+
+    // Function-storage OpVariables: first instructions of the first block.
+    m.emit_variable(b.ty_ptr_func_uint, var_i, STORAGE_CLASS_FUNCTION);
+    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
 
     let gid = load_gid_x(&mut m, &b);
 
@@ -752,27 +778,9 @@ pub fn reduce_compute_shader(op: ReduceOp) -> Vec<u32> {
     let base_idx = m.alloc_id();
     m.emit(OP_I_ADD, &[b.ty_uint, base_idx, t2, inner_idx]);
 
-    // Loop counter
-    let var_i = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_i, STORAGE_CLASS_FUNCTION);
+    // Initialize the loop counter and accumulator (variables were declared in
+    // the entry block; only the stores live here).
     m.emit_store(var_i, b.c_uint_0);
-
-    // Accumulator
-    let var_acc = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
-    let init_val = match op {
-        ReduceOp::Sum | ReduceOp::Mean => b.c_float_0,
-        ReduceOp::Max => {
-            let neg_inf = m.alloc_id();
-            m.emit_constant_f32(b.ty_float, neg_inf, f32::NEG_INFINITY);
-            neg_inf
-        }
-        ReduceOp::Min => {
-            let pos_inf = m.alloc_id();
-            m.emit_constant_f32(b.ty_float, pos_inf, f32::INFINITY);
-            pos_inf
-        }
-    };
     m.emit_store(var_acc, init_val);
 
     m.emit_branch(label_loop_header);
@@ -878,9 +886,8 @@ pub fn reduce_compute_shader(op: ReduceOp) -> Vec<u32> {
 ///                      float alpha, float beta)`.
 pub fn gemm_compute_shader() -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "main");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_a = m.alloc_id();
     let p_b = m.alloc_id();
@@ -907,8 +914,10 @@ pub fn gemm_compute_shader() -> Vec<u32> {
         ],
     );
 
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
+    // Function-storage variables must be the first instructions of the first
+    // block; allocate ids now and emit the OpVariables in `label_entry`.
+    let var_i = m.alloc_id();
+    let var_acc = m.alloc_id();
 
     let label_entry = m.alloc_id();
     let label_bounds_body = m.alloc_id();
@@ -918,7 +927,7 @@ pub fn gemm_compute_shader() -> Vec<u32> {
     let label_loop_continue = m.alloc_id();
     let label_loop_merge = m.alloc_id();
 
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_a);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_b);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_c);
@@ -928,6 +937,10 @@ pub fn gemm_compute_shader() -> Vec<u32> {
     m.emit_function_parameter(b.ty_float, p_alpha);
     m.emit_function_parameter(b.ty_float, p_beta);
     m.emit_label(label_entry);
+
+    // Function-storage OpVariables: first instructions of the first block.
+    m.emit_variable(b.ty_ptr_func_uint, var_i, STORAGE_CLASS_FUNCTION);
+    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
 
     let gid = load_gid_x(&mut m, &b);
 
@@ -949,12 +962,8 @@ pub fn gemm_compute_shader() -> Vec<u32> {
     let col = m.alloc_id();
     m.emit(OP_U_MOD, &[b.ty_uint, col, gid, p_n]);
 
-    // Loop counter + accumulator
-    let var_i = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_i, STORAGE_CLASS_FUNCTION);
+    // Initialize loop counter + accumulator (declared in the entry block).
     m.emit_store(var_i, b.c_uint_0);
-    let var_acc = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
     m.emit_store(var_acc, b.c_float_0);
 
     m.emit_branch(label_loop_header);
@@ -1065,9 +1074,8 @@ fn load_gid_z(m: &mut SpvModule, b: &BaseIds) -> u32 {
 ///   uint batch_count, uint stride_a, uint stride_b, uint stride_c)`.
 pub fn batched_gemm_compute_shader() -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "main");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_a = m.alloc_id();
     let p_b = m.alloc_id();
@@ -1103,8 +1111,10 @@ pub fn batched_gemm_compute_shader() -> Vec<u32> {
         ],
     );
 
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
+    // Function-storage variables must be the first instructions of the first
+    // block; allocate ids now and emit the OpVariables in `label_entry`.
+    let var_i = m.alloc_id();
+    let var_acc = m.alloc_id();
 
     let label_entry = m.alloc_id();
     let label_bounds_body = m.alloc_id();
@@ -1114,7 +1124,7 @@ pub fn batched_gemm_compute_shader() -> Vec<u32> {
     let label_loop_continue = m.alloc_id();
     let label_loop_merge = m.alloc_id();
 
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_a);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_b);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_c);
@@ -1128,6 +1138,10 @@ pub fn batched_gemm_compute_shader() -> Vec<u32> {
     m.emit_function_parameter(b.ty_uint, p_stride_b);
     m.emit_function_parameter(b.ty_uint, p_stride_c);
     m.emit_label(label_entry);
+
+    // Function-storage OpVariables: first instructions of the first block.
+    m.emit_variable(b.ty_ptr_func_uint, var_i, STORAGE_CLASS_FUNCTION);
+    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
 
     // gid_x = element index within single GEMM output
     let gid = load_gid_x(&mut m, &b);
@@ -1177,12 +1191,8 @@ pub fn batched_gemm_compute_shader() -> Vec<u32> {
     let col = m.alloc_id();
     m.emit(OP_U_MOD, &[b.ty_uint, col, gid, p_n]);
 
-    // Loop counter + accumulator
-    let var_i = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_i, STORAGE_CLASS_FUNCTION);
+    // Initialize loop counter + accumulator (declared in the entry block).
     m.emit_store(var_i, b.c_uint_0);
-    let var_acc = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
     m.emit_store(var_acc, b.c_float_0);
 
     m.emit_branch(label_loop_header);
@@ -1375,9 +1385,8 @@ impl ExtMathFn {
 /// Entry-point name: `"main"`.
 pub fn ext_math_compute_shader(func: ExtMathFn) -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "main");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_input = m.alloc_id();
     let p_output = m.alloc_id();
@@ -1389,14 +1398,11 @@ pub fn ext_math_compute_shader(func: ExtMathFn) -> Vec<u32> {
         &[b.ty_ptr_cross_float, b.ty_ptr_cross_float, b.ty_uint],
     );
 
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "main", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
-
     let label_entry = m.alloc_id();
     let label_body = m.alloc_id();
     let label_merge = m.alloc_id();
 
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_input);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_output);
     m.emit_function_parameter(b.ty_uint, p_count);
@@ -1446,9 +1452,8 @@ pub fn ext_math_compute_shader(func: ExtMathFn) -> Vec<u32> {
 /// Entry-point name: `"atan2"`.
 pub fn atan2_compute_shader() -> Vec<u32> {
     let mut m = SpvModule::new();
-    let b = emit_preamble(&mut m);
+    let b = emit_preamble(&mut m, "atan2");
 
-    let main_fn = m.alloc_id();
     let fn_ty = m.alloc_id();
     let p_y = m.alloc_id();
     let p_x = m.alloc_id();
@@ -1466,14 +1471,11 @@ pub fn atan2_compute_shader() -> Vec<u32> {
         ],
     );
 
-    m.emit_entry_point(EXECUTION_MODEL_KERNEL, main_fn, "atan2", &[b.var_gid]);
-    m.emit_execution_mode_local_size(main_fn, WORKGROUP_SIZE, 1, 1);
-
     let label_entry = m.alloc_id();
     let label_body = m.alloc_id();
     let label_merge = m.alloc_id();
 
-    m.emit_function(b.ty_void, main_fn, FUNCTION_CONTROL_NONE, fn_ty);
+    m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, fn_ty);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_y);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_x);
     m.emit_function_parameter(b.ty_ptr_cross_float, p_out);
@@ -1716,7 +1718,9 @@ mod tests {
     fn ext_math_fn_metadata() {
         assert_eq!(ExtMathFn::Erf.opencl_inst(), 18);
         assert_eq!(ExtMathFn::Erfc.opencl_inst(), 17);
-        assert_eq!(ExtMathFn::Atan.opencl_inst(), 9);
+        assert_eq!(ExtMathFn::Atan.opencl_inst(), 6);
+        assert_eq!(ExtMathFn::Cos.opencl_inst(), 14);
+        assert_eq!(ExtMathFn::Cbrt.opencl_inst(), 11);
         assert_eq!(ExtMathFn::Erf.name(), "erf");
         assert_eq!(ExtMathFn::Rsqrt.name(), "rsqrt");
     }
@@ -1752,10 +1756,10 @@ mod tests {
         let words = atan2_compute_shader();
         check_valid_spirv(&words);
         let insts = decode_insts(&words);
-        // OpExtInst with inst number = atan2 (11) and two value args.
+        // OpExtInst with inst number = atan2 (7) and two value args.
         let atan2_inst = insts
             .iter()
-            .find(|(op, ops)| *op == OP_EXT_INST && ops.get(3) == Some(&11));
+            .find(|(op, ops)| *op == OP_EXT_INST && ops.get(3) == Some(&7));
         let (_, ops) = atan2_inst.expect("atan2 OpExtInst present");
         // result_ty, result, ext_set, inst, arg0, arg1 → 6 operands.
         assert_eq!(ops.len(), 6, "atan2 must pass two arguments");

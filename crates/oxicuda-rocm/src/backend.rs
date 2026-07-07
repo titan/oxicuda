@@ -3,9 +3,14 @@
 //! Implements the [`ComputeBackend`] trait from `oxicuda-backend` using
 //! the AMD ROCm/HIP runtime for GPU compute on Linux.
 //!
-//! Compute operations (gemm, unary, binary, reduce, attention, conv2d) use
-//! HIP C++ kernels compiled at runtime via `hiprtc` and launched via
-//! `hipModuleLoadData` + `hipModuleLaunchKernel`.
+//! Compute operations (gemm, unary, binary, reduce, attention, conv2d)
+//! currently execute on a **CPU fallback path**: the operands are staged
+//! device→host, the math is performed on the host, and the result is copied
+//! host→device. The HIP C++ kernel sources in [`crate::hip_kernels`] are the
+//! intended `hiprtc`/`hipModuleLaunchKernel` implementation and are validated
+//! by codegen tests, but they are not yet wired into these dispatch methods.
+//! The fallback honours the column-major [`ComputeBackend`] contract so its
+//! numerical results match the reference `CpuBackend`.
 
 use std::sync::Arc;
 
@@ -388,12 +393,15 @@ impl RocmBackend {
         _c_ptr: u64,
         _ldc: usize,
     ) -> BackendResult<()> {
+        if _m == 0 || _n == 0 {
+            return Ok(());
+        }
         #[cfg(target_os = "linux")]
         {
-            let _src = crate::hip_kernels::gemm_hip(16);
-            // Compile via hiprtc, load module, resolve function, launch kernel.
-            // The device pointers are resolved from the memory manager handles.
-            let dev = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
+            // CPU fallback path (see module docs): the HIP kernel launch is not
+            // yet wired, so ensure the device is live and run the column-major
+            // reference math on host-staged operands.
+            self.device.as_ref().ok_or(BackendError::NotInitialized)?;
             let mm = self.memory_manager()?;
 
             let m = _m;
@@ -402,10 +410,15 @@ impl RocmBackend {
             let alpha = _alpha as f32;
             let beta = _beta as f32;
 
-            // Read A, B, C from device
-            let a_bytes = m * k * 4;
-            let b_bytes = k * n * 4;
-            let c_bytes = m * n * 4;
+            // Leading-dimension-aware operand extents (column-major contract).
+            let (a_rows, a_cols, b_rows, b_cols) =
+                gemm_operand_extents(_trans_a, _trans_b, m, n, k);
+            check_gemm_leading_dims(a_rows, b_rows, m, _lda, _ldb, _ldc)?;
+
+            // Read A, B, C from device (sized by leading dimensions).
+            let a_bytes = _lda * a_cols * 4;
+            let b_bytes = _ldb * b_cols * 4;
+            let c_bytes = _ldc * n * 4;
 
             let mut a_host = vec![0u8; a_bytes];
             let mut b_host = vec![0u8; b_bytes];
@@ -418,46 +431,17 @@ impl RocmBackend {
             mm.copy_from_device(&mut c_host, _c_ptr)
                 .map_err(BackendError::from)?;
 
-            // Reinterpret as f32 slices
+            // Reinterpret as f32 slices and run the column-major reference GEMM.
             let a_f32 = bytemuck_cast_f32(&a_host);
             let b_f32 = bytemuck_cast_f32(&b_host);
             let c_f32 = bytemuck_cast_f32_mut(&mut c_host);
+            col_major_gemm_f32(
+                _trans_a, _trans_b, m, n, k, alpha, a_f32, _lda, b_f32, _ldb, beta, c_f32, _ldc,
+            );
 
-            // Handle transpose flags
-            for row in 0..m {
-                for col in 0..n {
-                    let mut acc = 0.0f32;
-                    for i in 0..k {
-                        let a_val = match _trans_a {
-                            BackendTranspose::NoTrans => a_f32[row * _lda + i],
-                            BackendTranspose::Trans | BackendTranspose::ConjTrans => {
-                                a_f32[i * _lda + row]
-                            }
-                        };
-                        let b_val = match _trans_b {
-                            BackendTranspose::NoTrans => b_f32[i * _ldb + col],
-                            BackendTranspose::Trans | BackendTranspose::ConjTrans => {
-                                b_f32[col * _ldb + i]
-                            }
-                        };
-                        acc += a_val * b_val;
-                    }
-                    let idx = row * _ldc + col;
-                    c_f32[idx] = alpha * acc + beta * c_f32[idx];
-                }
-            }
-
-            // Write C back to device
+            // Write C back to device (blocking hipMemcpy already synchronises).
             mm.copy_to_device(_c_ptr, &c_host)
                 .map_err(BackendError::from)?;
-
-            // Synchronize
-            let rc = unsafe { (dev.api.hip_device_synchronize)() };
-            if rc != crate::device::HIP_SUCCESS {
-                return Err(BackendError::DeviceError(format!(
-                    "hipDeviceSynchronize failed (rc={rc})"
-                )));
-            }
             Ok(())
         }
         #[cfg(not(target_os = "linux"))]
@@ -489,11 +473,12 @@ impl RocmBackend {
         _stride_c: usize,
         _batch_count: usize,
     ) -> BackendResult<()> {
+        if _m == 0 || _n == 0 {
+            return Ok(());
+        }
         #[cfg(target_os = "linux")]
         {
-            let _src = crate::hip_kernels::batched_gemm_hip(16);
-
-            let dev = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
+            self.device.as_ref().ok_or(BackendError::NotInitialized)?;
             let mm = self.memory_manager()?;
 
             let m = _m;
@@ -503,14 +488,14 @@ impl RocmBackend {
             let beta = _beta as f32;
             let batch_count = _batch_count;
 
-            // For each batch, read A_b, B_b, C_b, compute, write C_b back.
-            let a_elems = m * k;
-            let b_elems = k * n;
-            let c_elems = m * n;
+            // Per-batch operand extents honouring the leading dimensions.
+            let (a_rows, a_cols, b_rows, b_cols) =
+                gemm_operand_extents(_trans_a, _trans_b, m, n, k);
+            check_gemm_leading_dims(a_rows, b_rows, m, _lda, _ldb, _ldc)?;
 
-            let mut a_host = vec![0u8; a_elems * 4];
-            let mut b_host = vec![0u8; b_elems * 4];
-            let mut c_host = vec![0u8; c_elems * 4];
+            let mut a_host = vec![0u8; _lda * a_cols * 4];
+            let mut b_host = vec![0u8; _ldb * b_cols * 4];
+            let mut c_host = vec![0u8; _ldc * n * 4];
 
             for batch in 0..batch_count {
                 let a_offset = _a_ptr + (batch * _stride_a * 4) as u64;
@@ -527,40 +512,14 @@ impl RocmBackend {
                 let a_f32 = bytemuck_cast_f32(&a_host);
                 let b_f32 = bytemuck_cast_f32(&b_host);
                 let c_f32 = bytemuck_cast_f32_mut(&mut c_host);
-
-                for row in 0..m {
-                    for col in 0..n {
-                        let mut acc = 0.0f32;
-                        for i in 0..k {
-                            let a_val = match _trans_a {
-                                BackendTranspose::NoTrans => a_f32[row * _lda + i],
-                                BackendTranspose::Trans | BackendTranspose::ConjTrans => {
-                                    a_f32[i * _lda + row]
-                                }
-                            };
-                            let b_val = match _trans_b {
-                                BackendTranspose::NoTrans => b_f32[i * _ldb + col],
-                                BackendTranspose::Trans | BackendTranspose::ConjTrans => {
-                                    b_f32[col * _ldb + i]
-                                }
-                            };
-                            acc += a_val * b_val;
-                        }
-                        let idx = row * _ldc + col;
-                        c_f32[idx] = alpha * acc + beta * c_f32[idx];
-                    }
-                }
+                col_major_gemm_f32(
+                    _trans_a, _trans_b, m, n, k, alpha, a_f32, _lda, b_f32, _ldb, beta, c_f32, _ldc,
+                );
 
                 mm.copy_to_device(c_offset, &c_host)
                     .map_err(BackendError::from)?;
             }
 
-            let rc = unsafe { (dev.api.hip_device_synchronize)() };
-            if rc != crate::device::HIP_SUCCESS {
-                return Err(BackendError::DeviceError(format!(
-                    "hipDeviceSynchronize failed (rc={rc})"
-                )));
-            }
             Ok(())
         }
         #[cfg(not(target_os = "linux"))]
@@ -850,11 +809,7 @@ impl RocmBackend {
                 for sq in 0.._seq_q {
                     // Find max score for numerical stability
                     let mut max_score = f32::NEG_INFINITY;
-                    let kv_limit = if _causal {
-                        (sq + 1).min(_seq_kv)
-                    } else {
-                        _seq_kv
-                    };
+                    let kv_limit = causal_kv_limit(_seq_q, _seq_kv, sq, _causal);
                     for sk in 0..kv_limit {
                         let mut dot = 0.0f32;
                         for dd in 0.._head_dim {
@@ -1054,9 +1009,7 @@ impl RocmBackend {
         }
         #[cfg(target_os = "linux")]
         {
-            let _src = crate::hip_kernels::gemm_hip_f16(16);
-
-            let dev = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
+            self.device.as_ref().ok_or(BackendError::NotInitialized)?;
             let mm = self.memory_manager()?;
 
             let m = _m;
@@ -1065,13 +1018,13 @@ impl RocmBackend {
             let alpha = _alpha as f32;
             let beta = _beta as f32;
 
-            let a_bytes = m * k * 2;
-            let b_bytes = k * n * 2;
-            let c_bytes = m * n * 2;
+            let (a_rows, a_cols, b_rows, b_cols) =
+                gemm_operand_extents(_trans_a, _trans_b, m, n, k);
+            check_gemm_leading_dims(a_rows, b_rows, m, _lda, _ldb, _ldc)?;
 
-            let mut a_host = vec![0u8; a_bytes];
-            let mut b_host = vec![0u8; b_bytes];
-            let mut c_host = vec![0u8; c_bytes];
+            let mut a_host = vec![0u8; _lda * a_cols * 2];
+            let mut b_host = vec![0u8; _ldb * b_cols * 2];
+            let mut c_host = vec![0u8; _ldc * n * 2];
 
             mm.copy_from_device(&mut a_host, _a_ptr)
                 .map_err(BackendError::from)?;
@@ -1083,40 +1036,12 @@ impl RocmBackend {
             let a_f16 = bytemuck_cast_f16(&a_host);
             let b_f16 = bytemuck_cast_f16(&b_host);
             let c_f16 = bytemuck_cast_f16_mut(&mut c_host);
-
-            for row in 0..m {
-                for col in 0..n {
-                    let mut acc = 0.0f32;
-                    for i in 0..k {
-                        let a_val = match _trans_a {
-                            BackendTranspose::NoTrans => a_f16[row * _lda + i],
-                            BackendTranspose::Trans | BackendTranspose::ConjTrans => {
-                                a_f16[i * _lda + row]
-                            }
-                        };
-                        let b_val = match _trans_b {
-                            BackendTranspose::NoTrans => b_f16[i * _ldb + col],
-                            BackendTranspose::Trans | BackendTranspose::ConjTrans => {
-                                b_f16[col * _ldb + i]
-                            }
-                        };
-                        acc += a_val.to_f32() * b_val.to_f32();
-                    }
-                    let idx = row * _ldc + col;
-                    let c_val = c_f16[idx].to_f32();
-                    c_f16[idx] = half::f16::from_f32(alpha * acc + beta * c_val);
-                }
-            }
+            col_major_gemm_f16(
+                _trans_a, _trans_b, m, n, k, alpha, a_f16, _lda, b_f16, _ldb, beta, c_f16, _ldc,
+            );
 
             mm.copy_to_device(_c_ptr, &c_host)
                 .map_err(BackendError::from)?;
-
-            let rc = unsafe { (dev.api.hip_device_synchronize)() };
-            if rc != crate::device::HIP_SUCCESS {
-                return Err(BackendError::DeviceError(format!(
-                    "hipDeviceSynchronize failed (rc={rc})"
-                )));
-            }
             Ok(())
         }
         #[cfg(not(target_os = "linux"))]
@@ -1154,9 +1079,7 @@ impl RocmBackend {
         }
         #[cfg(target_os = "linux")]
         {
-            let _src = crate::hip_kernels::gemm_hip_bf16(16);
-
-            let dev = self.device.as_ref().ok_or(BackendError::NotInitialized)?;
+            self.device.as_ref().ok_or(BackendError::NotInitialized)?;
             let mm = self.memory_manager()?;
 
             let m = _m;
@@ -1165,13 +1088,13 @@ impl RocmBackend {
             let alpha = _alpha as f32;
             let beta = _beta as f32;
 
-            let a_bytes = m * k * 2;
-            let b_bytes = k * n * 2;
-            let c_bytes = m * n * 2;
+            let (a_rows, a_cols, b_rows, b_cols) =
+                gemm_operand_extents(_trans_a, _trans_b, m, n, k);
+            check_gemm_leading_dims(a_rows, b_rows, m, _lda, _ldb, _ldc)?;
 
-            let mut a_host = vec![0u8; a_bytes];
-            let mut b_host = vec![0u8; b_bytes];
-            let mut c_host = vec![0u8; c_bytes];
+            let mut a_host = vec![0u8; _lda * a_cols * 2];
+            let mut b_host = vec![0u8; _ldb * b_cols * 2];
+            let mut c_host = vec![0u8; _ldc * n * 2];
 
             mm.copy_from_device(&mut a_host, _a_ptr)
                 .map_err(BackendError::from)?;
@@ -1183,40 +1106,12 @@ impl RocmBackend {
             let a_bf16 = bytemuck_cast_bf16(&a_host);
             let b_bf16 = bytemuck_cast_bf16(&b_host);
             let c_bf16 = bytemuck_cast_bf16_mut(&mut c_host);
-
-            for row in 0..m {
-                for col in 0..n {
-                    let mut acc = 0.0f32;
-                    for i in 0..k {
-                        let a_val = match _trans_a {
-                            BackendTranspose::NoTrans => a_bf16[row * _lda + i],
-                            BackendTranspose::Trans | BackendTranspose::ConjTrans => {
-                                a_bf16[i * _lda + row]
-                            }
-                        };
-                        let b_val = match _trans_b {
-                            BackendTranspose::NoTrans => b_bf16[i * _ldb + col],
-                            BackendTranspose::Trans | BackendTranspose::ConjTrans => {
-                                b_bf16[col * _ldb + i]
-                            }
-                        };
-                        acc += a_val.to_f32() * b_val.to_f32();
-                    }
-                    let idx = row * _ldc + col;
-                    let c_val = c_bf16[idx].to_f32();
-                    c_bf16[idx] = half::bf16::from_f32(alpha * acc + beta * c_val);
-                }
-            }
+            col_major_gemm_bf16(
+                _trans_a, _trans_b, m, n, k, alpha, a_bf16, _lda, b_bf16, _ldb, beta, c_bf16, _ldc,
+            );
 
             mm.copy_to_device(_c_ptr, &c_host)
                 .map_err(BackendError::from)?;
-
-            let rc = unsafe { (dev.api.hip_device_synchronize)() };
-            if rc != crate::device::HIP_SUCCESS {
-                return Err(BackendError::DeviceError(format!(
-                    "hipDeviceSynchronize failed (rc={rc})"
-                )));
-            }
             Ok(())
         }
         #[cfg(not(target_os = "linux"))]
@@ -1230,66 +1125,220 @@ impl RocmBackend {
 
 // ─── Byte reinterpretation helpers ──────────────────────────────────────────
 
-/// Reinterpret a `&[u8]` slice (whose length is a multiple of 4) as `&[f32]`.
+/// Reinterpret a `&[u8]` slice as `&[f32]`.
+///
+/// Uses [`bytemuck::cast_slice`], which validates both length divisibility and
+/// pointer alignment (panicking loudly on a mismatch) rather than risking the
+/// undefined behaviour of an unchecked `from_raw_parts` on an under-aligned
+/// `Vec<u8>`. The staging buffers passed here come from a fresh `vec![0u8; _]`
+/// whose allocation is suitably aligned on the supported targets.
 ///
 /// # Panics
 ///
-/// Panics in debug mode if `bytes.len()` is not a multiple of 4.
+/// Panics if `bytes.len()` is not a multiple of 4 or the slice is not 4-aligned.
 #[cfg(target_os = "linux")]
 fn bytemuck_cast_f32(bytes: &[u8]) -> &[f32] {
-    debug_assert_eq!(bytes.len() % 4, 0);
-    // SAFETY: We verified the length is a multiple of 4.
-    // `f32` has alignment 4; `Vec<u8>` from `vec![0u8; n*4]` is 1-aligned,
-    // but `u8` slices can always be cast to `f32` slices when properly aligned.
-    // We use a safe ptr-based approach.
-    let len = bytes.len() / 4;
-    let ptr = bytes.as_ptr().cast::<f32>();
-    unsafe { std::slice::from_raw_parts(ptr, len) }
+    bytemuck::cast_slice(bytes)
 }
 
-/// Reinterpret a `&mut [u8]` slice (whose length is a multiple of 4) as `&mut [f32]`.
+/// Reinterpret a `&mut [u8]` slice as `&mut [f32]`. See [`bytemuck_cast_f32`].
 #[cfg(target_os = "linux")]
 fn bytemuck_cast_f32_mut(bytes: &mut [u8]) -> &mut [f32] {
-    debug_assert_eq!(bytes.len() % 4, 0);
-    let len = bytes.len() / 4;
-    let ptr = bytes.as_mut_ptr().cast::<f32>();
-    unsafe { std::slice::from_raw_parts_mut(ptr, len) }
+    bytemuck::cast_slice_mut(bytes)
 }
 
-/// Reinterpret a `&[u8]` slice (whose length is a multiple of 2) as `&[half::f16]`.
+/// Reinterpret a `&[u8]` slice as `&[half::f16]`. See [`bytemuck_cast_f32`].
 #[cfg(target_os = "linux")]
 fn bytemuck_cast_f16(bytes: &[u8]) -> &[half::f16] {
-    debug_assert_eq!(bytes.len() % 2, 0);
-    let len = bytes.len() / 2;
-    let ptr = bytes.as_ptr().cast::<half::f16>();
-    unsafe { std::slice::from_raw_parts(ptr, len) }
+    bytemuck::cast_slice(bytes)
 }
 
-/// Reinterpret a `&mut [u8]` slice (whose length is a multiple of 2) as `&mut [half::f16]`.
+/// Reinterpret a `&mut [u8]` slice as `&mut [half::f16]`. See [`bytemuck_cast_f32`].
 #[cfg(target_os = "linux")]
 fn bytemuck_cast_f16_mut(bytes: &mut [u8]) -> &mut [half::f16] {
-    debug_assert_eq!(bytes.len() % 2, 0);
-    let len = bytes.len() / 2;
-    let ptr = bytes.as_mut_ptr().cast::<half::f16>();
-    unsafe { std::slice::from_raw_parts_mut(ptr, len) }
+    bytemuck::cast_slice_mut(bytes)
 }
 
-/// Reinterpret a `&[u8]` slice (whose length is a multiple of 2) as `&[half::bf16]`.
+/// Reinterpret a `&[u8]` slice as `&[half::bf16]`. See [`bytemuck_cast_f32`].
 #[cfg(target_os = "linux")]
 fn bytemuck_cast_bf16(bytes: &[u8]) -> &[half::bf16] {
-    debug_assert_eq!(bytes.len() % 2, 0);
-    let len = bytes.len() / 2;
-    let ptr = bytes.as_ptr().cast::<half::bf16>();
-    unsafe { std::slice::from_raw_parts(ptr, len) }
+    bytemuck::cast_slice(bytes)
 }
 
-/// Reinterpret a `&mut [u8]` slice (whose length is a multiple of 2) as `&mut [half::bf16]`.
+/// Reinterpret a `&mut [u8]` slice as `&mut [half::bf16]`. See [`bytemuck_cast_f32`].
 #[cfg(target_os = "linux")]
 fn bytemuck_cast_bf16_mut(bytes: &mut [u8]) -> &mut [half::bf16] {
-    debug_assert_eq!(bytes.len() % 2, 0);
-    let len = bytes.len() / 2;
-    let ptr = bytes.as_mut_ptr().cast::<half::bf16>();
-    unsafe { std::slice::from_raw_parts_mut(ptr, len) }
+    bytemuck::cast_slice_mut(bytes)
+}
+
+// ─── Column-major GEMM reference helpers ────────────────────────────────────
+
+/// Row/column extents of the *stored* GEMM operands after honouring the
+/// transpose flags, in the column-major contract shared with the CPU backend.
+///
+/// Returns `(a_rows, a_cols, b_rows, b_cols)`: the stored A buffer spans
+/// `lda * a_cols` elements and the stored B buffer spans `ldb * b_cols`.
+#[cfg(target_os = "linux")]
+fn gemm_operand_extents(
+    trans_a: BackendTranspose,
+    trans_b: BackendTranspose,
+    m: usize,
+    n: usize,
+    k: usize,
+) -> (usize, usize, usize, usize) {
+    let (a_rows, a_cols) = if trans_a == BackendTranspose::NoTrans {
+        (m, k)
+    } else {
+        (k, m)
+    };
+    let (b_rows, b_cols) = if trans_b == BackendTranspose::NoTrans {
+        (k, n)
+    } else {
+        (n, k)
+    };
+    (a_rows, a_cols, b_rows, b_cols)
+}
+
+/// Reject leading dimensions smaller than the stored matrix extent, matching
+/// the CPU reference contract (`lda >= a_rows`, `ldb >= b_rows`, `ldc >= m`).
+#[cfg(target_os = "linux")]
+fn check_gemm_leading_dims(
+    a_rows: usize,
+    b_rows: usize,
+    m: usize,
+    lda: usize,
+    ldb: usize,
+    ldc: usize,
+) -> BackendResult<()> {
+    if lda < a_rows || ldb < b_rows || ldc < m {
+        return Err(BackendError::InvalidArgument(
+            "leading dimension smaller than matrix extent".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Column-major buffer index of `op(M)[r, c]` for a source matrix stored with
+/// leading dimension `ld`. Mirrors `cpu.rs::at`:
+/// `NoTrans → col_major(r, c, ld)`; `Trans/ConjTrans → col_major(c, r, ld)`.
+#[cfg(target_os = "linux")]
+#[inline]
+fn op_index(trans: BackendTranspose, r: usize, c: usize, ld: usize) -> usize {
+    match trans {
+        BackendTranspose::NoTrans => c * ld + r,
+        BackendTranspose::Trans | BackendTranspose::ConjTrans => r * ld + c,
+    }
+}
+
+/// Number of keys the query at local index `sq` may attend to under a causal
+/// mask.
+///
+/// With a KV cache the query at local index `sq` sits at absolute position
+/// `seq_kv - seq_q + sq`, so it attends to `(seq_kv - seq_q) + sq + 1` keys
+/// (clamped to `seq_kv`). This reduces to `sq + 1` only for full prefill
+/// (`seq_q == seq_kv`). Non-causal attention sees all `seq_kv` keys.
+#[cfg(target_os = "linux")]
+#[inline]
+fn causal_kv_limit(seq_q: usize, seq_kv: usize, sq: usize, causal: bool) -> usize {
+    if causal {
+        (seq_kv.saturating_sub(seq_q) + sq + 1).min(seq_kv)
+    } else {
+        seq_kv
+    }
+}
+
+/// Column-major reference GEMM `C = alpha*op(A)*op(B) + beta*C` on `f32`.
+#[cfg(target_os = "linux")]
+#[allow(clippy::too_many_arguments)]
+fn col_major_gemm_f32(
+    trans_a: BackendTranspose,
+    trans_b: BackendTranspose,
+    m: usize,
+    n: usize,
+    k: usize,
+    alpha: f32,
+    a: &[f32],
+    lda: usize,
+    b: &[f32],
+    ldb: usize,
+    beta: f32,
+    c: &mut [f32],
+    ldc: usize,
+) {
+    for col in 0..n {
+        for row in 0..m {
+            let mut acc = 0.0f32;
+            for i in 0..k {
+                acc += a[op_index(trans_a, row, i, lda)] * b[op_index(trans_b, i, col, ldb)];
+            }
+            let idx = col * ldc + row;
+            c[idx] = alpha * acc + beta * c[idx];
+        }
+    }
+}
+
+/// Column-major reference GEMM on `f16` operands with `f32` accumulation.
+#[cfg(target_os = "linux")]
+#[allow(clippy::too_many_arguments)]
+fn col_major_gemm_f16(
+    trans_a: BackendTranspose,
+    trans_b: BackendTranspose,
+    m: usize,
+    n: usize,
+    k: usize,
+    alpha: f32,
+    a: &[half::f16],
+    lda: usize,
+    b: &[half::f16],
+    ldb: usize,
+    beta: f32,
+    c: &mut [half::f16],
+    ldc: usize,
+) {
+    for col in 0..n {
+        for row in 0..m {
+            let mut acc = 0.0f32;
+            for i in 0..k {
+                acc += a[op_index(trans_a, row, i, lda)].to_f32()
+                    * b[op_index(trans_b, i, col, ldb)].to_f32();
+            }
+            let idx = col * ldc + row;
+            let cur = c[idx].to_f32();
+            c[idx] = half::f16::from_f32(alpha * acc + beta * cur);
+        }
+    }
+}
+
+/// Column-major reference GEMM on `bf16` operands with `f32` accumulation.
+#[cfg(target_os = "linux")]
+#[allow(clippy::too_many_arguments)]
+fn col_major_gemm_bf16(
+    trans_a: BackendTranspose,
+    trans_b: BackendTranspose,
+    m: usize,
+    n: usize,
+    k: usize,
+    alpha: f32,
+    a: &[half::bf16],
+    lda: usize,
+    b: &[half::bf16],
+    ldb: usize,
+    beta: f32,
+    c: &mut [half::bf16],
+    ldc: usize,
+) {
+    for col in 0..n {
+        for row in 0..m {
+            let mut acc = 0.0f32;
+            for i in 0..k {
+                acc += a[op_index(trans_a, row, i, lda)].to_f32()
+                    * b[op_index(trans_b, i, col, ldb)].to_f32();
+            }
+            let idx = col * ldc + row;
+            let cur = c[idx].to_f32();
+            c[idx] = half::bf16::from_f32(alpha * acc + beta * cur);
+        }
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -1862,5 +1911,132 @@ mod tests {
             ),
             Ok(())
         );
+    }
+
+    // ── Column-major GEMM contract (regression for the row-major bug) ──────────
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn gemm_operand_extents_are_transpose_aware() {
+        use BackendTranspose::{NoTrans, Trans};
+        // A: op(A) is m×k. NoTrans stored m×k, Trans stored k×m.
+        assert_eq!(
+            gemm_operand_extents(NoTrans, NoTrans, 8, 4, 2),
+            (8, 2, 2, 4)
+        );
+        assert_eq!(gemm_operand_extents(Trans, Trans, 8, 4, 2), (2, 8, 4, 2));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn check_gemm_leading_dims_rejects_short_ld() {
+        // a_rows=8, b_rows=2, m=8: lda>=8, ldb>=2, ldc>=8.
+        assert!(check_gemm_leading_dims(8, 2, 8, 8, 2, 8).is_ok());
+        assert!(matches!(
+            check_gemm_leading_dims(8, 2, 8, 7, 2, 8),
+            Err(BackendError::InvalidArgument(_))
+        ));
+        assert!(matches!(
+            check_gemm_leading_dims(8, 2, 8, 8, 2, 7),
+            Err(BackendError::InvalidArgument(_))
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn col_major_gemm_f32_matches_logical_product_all_transpose_combos() {
+        use BackendTranspose::{NoTrans, Trans};
+        // Non-symmetric logical operands A (m×k) and B (k×n).
+        let (m, n, k) = (2usize, 3usize, 4usize);
+        let a_logical = |r: usize, c: usize| (r * 10 + c + 1) as f32;
+        let b_logical = |r: usize, c: usize| (r * 7 + c * 2 + 3) as f32;
+
+        // Expected C = A·B laid out row-major (m×n) for comparison.
+        let mut expected = vec![0.0f32; m * n];
+        for (i, exp_row) in expected.chunks_exact_mut(n).enumerate() {
+            for (j, slot) in exp_row.iter_mut().enumerate() {
+                let mut acc = 0.0f32;
+                for p in 0..k {
+                    acc += a_logical(i, p) * b_logical(p, j);
+                }
+                *slot = acc;
+            }
+        }
+
+        for &ta in &[NoTrans, Trans] {
+            for &tb in &[NoTrans, Trans] {
+                // Column-major storage with padded leading dimensions.
+                let (a_rows, a_cols) = if ta == NoTrans { (m, k) } else { (k, m) };
+                let lda = a_rows + 2;
+                let mut a_buf = vec![0.0f32; lda * a_cols];
+                for c in 0..a_cols {
+                    for r in 0..a_rows {
+                        // Stored (r,c) is logical A(r,c) for NoTrans, A(c,r) for Trans.
+                        a_buf[c * lda + r] = if ta == NoTrans {
+                            a_logical(r, c)
+                        } else {
+                            a_logical(c, r)
+                        };
+                    }
+                }
+
+                let (b_rows, b_cols) = if tb == NoTrans { (k, n) } else { (n, k) };
+                let ldb = b_rows + 1;
+                let mut b_buf = vec![0.0f32; ldb * b_cols];
+                for c in 0..b_cols {
+                    for r in 0..b_rows {
+                        b_buf[c * ldb + r] = if tb == NoTrans {
+                            b_logical(r, c)
+                        } else {
+                            b_logical(c, r)
+                        };
+                    }
+                }
+
+                let ldc = m + 3;
+                let mut c_buf = vec![0.0f32; ldc * n];
+                col_major_gemm_f32(
+                    ta, tb, m, n, k, 1.0, &a_buf, lda, &b_buf, ldb, 0.0, &mut c_buf, ldc,
+                );
+
+                for i in 0..m {
+                    for j in 0..n {
+                        let got = c_buf[j * ldc + i];
+                        let want = expected[i * n + j];
+                        assert!(
+                            (got - want).abs() < 1e-3,
+                            "ta={ta:?} tb={tb:?} C[{i}][{j}] got {got} want {want}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn causal_kv_limit_offsets_by_cache_length() {
+        // Incremental decode: 1 new query, 10 cached keys → must see all 10.
+        assert_eq!(causal_kv_limit(1, 10, 0, true), 10);
+        // Full prefill (seq_q == seq_kv): query sq attends to sq+1 keys.
+        assert_eq!(causal_kv_limit(4, 4, 0, true), 1);
+        assert_eq!(causal_kv_limit(4, 4, 3, true), 4);
+        // Chunked decode: 2 new queries over a 10-key cache (offset 8).
+        assert_eq!(causal_kv_limit(2, 10, 0, true), 9);
+        assert_eq!(causal_kv_limit(2, 10, 1, true), 10);
+        // Non-causal always sees the whole KV length.
+        assert_eq!(causal_kv_limit(2, 10, 0, false), 10);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn col_major_gemm_f32_applies_alpha_beta() {
+        use BackendTranspose::NoTrans;
+        // 1×1: A=[2], B=[3], C0=[5], alpha=2, beta=4 → 2*(2*3)+4*5 = 32.
+        let a = [2.0f32];
+        let b = [3.0f32];
+        let mut c = [5.0f32];
+        col_major_gemm_f32(NoTrans, NoTrans, 1, 1, 1, 2.0, &a, 1, &b, 1, 4.0, &mut c, 1);
+        assert!((c[0] - 32.0).abs() < 1e-6);
     }
 }

@@ -4,9 +4,6 @@
 //! two-phase reduction where each block finds its local maximum and index,
 //! then a second kernel selects the global winner.
 
-use std::sync::Arc;
-
-use oxicuda_driver::Module;
 use oxicuda_launch::{Kernel, LaunchParams, grid_size_for};
 use oxicuda_memory::DeviceBuffer;
 use oxicuda_ptx::prelude::*;
@@ -16,9 +13,7 @@ use crate::handle::BlasHandle;
 use crate::types::GpuFloat;
 
 use super::axpy::{abs_float, load_global_float};
-use super::dot::{
-    load_shared_float, shared_mem_addr_for_tid, shared_mem_base_addr, store_shared_float,
-};
+use super::dot::{load_shared_float, store_shared_float};
 use super::{L1_BLOCK_SIZE, required_elements};
 
 /// Computes `result = argmax_i |x_i|` (IAMAX) on the GPU.
@@ -77,9 +72,10 @@ pub fn iamax<T: GpuFloat>(
     let partial_vals = DeviceBuffer::<T>::zeroed(num_blocks as usize)?;
     let partial_idxs = DeviceBuffer::<u32>::zeroed(num_blocks as usize)?;
 
-    let ptx_p1 = generate_iamax_phase1_ptx::<T>(sm)?;
-    let module_p1 = Arc::new(Module::from_ptx(&ptx_p1)?);
-    let kernel_p1 = Kernel::from_module(module_p1, &iamax_phase1_name::<T>())?;
+    let p1_name = iamax_phase1_name::<T>();
+    let module_p1 =
+        handle.get_or_compile_module(&p1_name, || generate_iamax_phase1_ptx::<T>(sm))?;
+    let kernel_p1 = Kernel::from_module(module_p1, &p1_name)?;
 
     let params_p1 = LaunchParams::new(num_blocks, L1_BLOCK_SIZE).with_shared_mem(
         L1_BLOCK_SIZE * (T::size_u32() + 4), // float + u32 per thread
@@ -95,9 +91,10 @@ pub fn iamax<T: GpuFloat>(
     kernel_p1.launch(&params_p1, handle.stream(), &args_p1)?;
 
     // Phase 2: reduce partial (val, idx) pairs to the global maximum.
-    let ptx_p2 = generate_iamax_phase2_ptx::<T>(sm)?;
-    let module_p2 = Arc::new(Module::from_ptx(&ptx_p2)?);
-    let kernel_p2 = Kernel::from_module(module_p2, &iamax_phase2_name::<T>())?;
+    let p2_name = iamax_phase2_name::<T>();
+    let module_p2 =
+        handle.get_or_compile_module(&p2_name, || generate_iamax_phase2_ptx::<T>(sm))?;
+    let kernel_p2 = Kernel::from_module(module_p2, &p2_name)?;
 
     let params_p2 =
         LaunchParams::new(1u32, L1_BLOCK_SIZE).with_shared_mem(L1_BLOCK_SIZE * (T::size_u32() + 4));
@@ -299,11 +296,26 @@ fn generate_iamax_phase2_ptx<T: GpuFloat>(sm: SmVersion) -> BlasResult<String> {
 // ---------------------------------------------------------------------------
 
 fn val_smem_addr<T: GpuFloat>(b: &mut BodyBuilder<'_>, tid: Register) -> Register {
-    shared_mem_addr_for_tid::<T>(b, tid)
+    // Address into the `smem_val` array: &smem_val[tid * elem_bytes].
+    //
+    // NOTE: this must reference `smem_val` (this kernel's float array), *not*
+    // the `smem` symbol used by the single-array reductions in `dot.rs`. The
+    // earlier delegation to `dot::shared_mem_*` emitted `mov.u64 %rd, smem;`,
+    // a symbol that does not exist here, so ptxas rejected the whole module
+    // ("Unknown symbol 'smem'") and `iamax` failed to load on every launch.
+    let base = val_smem_base(b);
+    let tid64 = b.cvt_u32_to_u64(tid);
+    let stride = b.alloc_reg(PtxType::U64);
+    b.raw_ptx(&format!("mov.u64 {stride}, {};", T::size_u32()));
+    let offset = b.alloc_reg(PtxType::U64);
+    b.raw_ptx(&format!("mul.lo.u64 {offset}, {tid64}, {stride};"));
+    b.add_u64(base, offset)
 }
 
 fn val_smem_base(b: &mut BodyBuilder<'_>) -> Register {
-    shared_mem_base_addr(b)
+    let base = b.alloc_reg(PtxType::U64);
+    b.raw_ptx(&format!("mov.u64 {base}, smem_val;"));
+    base
 }
 
 fn idx_smem_addr(b: &mut BodyBuilder<'_>, tid: Register, _val_smem_bytes: usize) -> Register {

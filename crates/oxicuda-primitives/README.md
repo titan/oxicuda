@@ -22,7 +22,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxicuda-primitives = "0.4.0"
+oxicuda-primitives = "0.4.1"
 ```
 
 ```rust

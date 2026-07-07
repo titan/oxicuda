@@ -8,7 +8,9 @@
 //! All limits are taken from the AMD ISA reference manuals and the LLVM
 //! AMDGPU back-end:
 //!
-//! - VGPR/SGPR file sizes per SIMD (CDNA: 256 VGPR/SIMD, RDNA: 256 VGPR/SIMD).
+//! - VGPR file sizes per SIMD (CDNA: 256 VGPR/lane, i.e. a 64 KiB file over 64
+//!   lanes; RDNA2/3: 1024 VGPR/lane, i.e. a 128 KiB file over the 32-lane
+//!   SIMD32).
 //! - LDS (Local Data Share) size per compute unit (CDNA1/2/3: 64 KiB,
 //!   RDNA2/3: 64 KiB).
 //! - Wavefront width (CDNA: 64 lanes, RDNA: 32 lanes natively, 64 in
@@ -158,10 +160,14 @@ impl GfxArch {
         if self.is_cdna() { 64 } else { 32 }
     }
 
-    /// Number of 32-bit vector general-purpose registers (VGPRs) per SIMD lane
-    /// group.  256 across all currently-supported architectures.
+    /// Number of 32-bit vector general-purpose registers (VGPRs) addressable
+    /// per lane by a single wavefront.
+    ///
+    /// CDNA/GCN: a 64 KiB VGPR file shared by 64 lanes → `64*1024 / 4 / 64 =
+    /// 256` VGPRs/lane.  RDNA2/3: a 128 KiB file over the 32-lane SIMD32 →
+    /// `128*1024 / 4 / 32 = 1024` VGPRs/lane.
     pub fn vgprs_per_simd(self) -> u32 {
-        256
+        if self.is_rdna() { 1024 } else { 256 }
     }
 
     /// Number of scalar general-purpose registers (SGPRs) addressable per
@@ -370,6 +376,8 @@ mod tests {
         assert_eq!(r.max_waves_per_simd(), 16);
         assert_eq!(r.vgpr_alloc_granularity(), 8);
         assert_eq!(r.sgprs_per_wave(), 106);
+        // RDNA SIMD32 exposes a 128 KiB VGPR file → 1024 VGPRs/lane, 4x CDNA.
+        assert_eq!(r.vgprs_per_simd(), 1024);
     }
 
     #[test]

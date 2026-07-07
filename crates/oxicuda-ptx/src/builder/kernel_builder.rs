@@ -160,6 +160,12 @@ impl KernelBuilder {
             body_fn(&mut bb);
         }
 
+        // Validate explicitly-declared named registers before emitting any
+        // declarations: reject names that collide with allocator-generated
+        // registers or PTX special registers, which would otherwise produce
+        // duplicate or illegal `.reg` declarations.
+        regs.validate_named()?;
+
         // Phase 2: Generate PTX text.
         let mut ptx = String::with_capacity(4096);
 

@@ -65,6 +65,9 @@ pub mod ops;
 pub mod preconditioner;
 pub(crate) mod ptx_helpers;
 
+#[cfg(all(test, feature = "gpu-tests"))]
+pub(crate) mod gpu_test_support;
+
 pub use error::{SparseError, SparseResult};
 pub use format::{
     BsrMatrix, CooMatrix, CscMatrix, Csr5Matrix, CsrMatrix, EllMatrix, HybMatrix, HybPartition,

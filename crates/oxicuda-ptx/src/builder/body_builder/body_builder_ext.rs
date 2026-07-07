@@ -215,9 +215,12 @@ impl BodyBuilder<'_> {
     /// Fetches a texel from the named texture reference at the given
     /// integer coordinate. Returns the destination register.
     ///
-    /// Emits: `tex.1d.v4.{ty}.s32 dst, [tex_ref, {coord}];`
-    pub fn tex_1d(&mut self, ty: PtxType, tex_ref: &str, coord: Operand) -> Register {
-        let dst = self.regs.alloc(ty);
+    /// Emits: `tex.1d.v4.{ty}.s32 {d0, d1, d2, d3}, [tex_ref, {coord}];`
+    ///
+    /// `tex.*.v4` returns four texel components, so four destination registers
+    /// are allocated and returned (RGBA order).
+    pub fn tex_1d(&mut self, ty: PtxType, tex_ref: &str, coord: Operand) -> [Register; 4] {
+        let dst = self.alloc_texel_regs(ty);
         self.instructions.push(Instruction::Tex1d {
             ty,
             dst: dst.clone(),
@@ -232,15 +235,17 @@ impl BodyBuilder<'_> {
     /// Fetches a texel from the named texture reference at the given
     /// (x, y) integer coordinates. Returns the destination register.
     ///
-    /// Emits: `tex.2d.v4.{ty}.s32 dst, [tex_ref, {coord_x, coord_y}];`
+    /// Emits: `tex.2d.v4.{ty}.s32 {d0, d1, d2, d3}, [tex_ref, {coord_x, coord_y}];`
+    ///
+    /// Returns the four texel-component destination registers (RGBA order).
     pub fn tex_2d(
         &mut self,
         ty: PtxType,
         tex_ref: &str,
         coord_x: Operand,
         coord_y: Operand,
-    ) -> Register {
-        let dst = self.regs.alloc(ty);
+    ) -> [Register; 4] {
+        let dst = self.alloc_texel_regs(ty);
         self.instructions.push(Instruction::Tex2d {
             ty,
             dst: dst.clone(),
@@ -256,7 +261,9 @@ impl BodyBuilder<'_> {
     /// Fetches a texel from the named texture reference at the given
     /// (x, y, z) integer coordinates. Returns the destination register.
     ///
-    /// Emits: `tex.3d.v4.{ty}.s32 dst, [tex_ref, {coord_x, coord_y, coord_z}];`
+    /// Emits: `tex.3d.v4.{ty}.s32 {d0, d1, d2, d3}, [tex_ref, {coord_x, coord_y, coord_z}];`
+    ///
+    /// Returns the four texel-component destination registers (RGBA order).
     pub fn tex_3d(
         &mut self,
         ty: PtxType,
@@ -264,8 +271,8 @@ impl BodyBuilder<'_> {
         coord_x: Operand,
         coord_y: Operand,
         coord_z: Operand,
-    ) -> Register {
-        let dst = self.regs.alloc(ty);
+    ) -> [Register; 4] {
+        let dst = self.alloc_texel_regs(ty);
         self.instructions.push(Instruction::Tex3d {
             ty,
             dst: dst.clone(),
@@ -275,6 +282,16 @@ impl BodyBuilder<'_> {
             coord_z,
         });
         dst
+    }
+
+    /// Allocates the four destination registers for a `tex.*.v4` fetch.
+    fn alloc_texel_regs(&mut self, ty: PtxType) -> [Register; 4] {
+        [
+            self.regs.alloc(ty),
+            self.regs.alloc(ty),
+            self.regs.alloc(ty),
+            self.regs.alloc(ty),
+        ]
     }
 
     /// Emits a 1D surface load instruction.
@@ -349,7 +366,9 @@ impl BodyBuilder<'_> {
     }
 
     /// Store matrix m8n8x4 to shared memory (SM >= 90).
-    pub fn stmatrix_m8n8x4(&mut self, addr: &str, src: &str) -> Result<(), PtxGenError> {
+    ///
+    /// `stmatrix.x4` requires four source registers, one per matrix fragment.
+    pub fn stmatrix_m8n8x4(&mut self, addr: &str, src: &[&str; 4]) -> Result<(), PtxGenError> {
         if !self.target.capabilities().has_stmatrix {
             return Err(PtxGenError::GenerationFailed(format!(
                 "stmatrix requires SM >= 90, target is {}",
@@ -361,10 +380,13 @@ impl BodyBuilder<'_> {
                 name: addr.to_string(),
                 ty: PtxType::U32,
             }),
-            src: Register {
-                name: src.to_string(),
-                ty: PtxType::B32,
-            },
+            src: src
+                .iter()
+                .map(|name| Register {
+                    name: (*name).to_string(),
+                    ty: PtxType::B32,
+                })
+                .collect(),
             shape: StmatrixShape::M8n8x4,
             trans: false,
         });
@@ -502,14 +524,20 @@ impl BodyBuilder<'_> {
     }
 
     /// Wait on an mbarrier phase (SM >= 90).
-    pub fn mbarrier_wait(&mut self, addr: &str, phase: &str) -> Result<(), PtxGenError> {
+    ///
+    /// Allocates and returns the predicate register that receives the wait
+    /// result (`true` once the phase completes); the ISA forbids discarding it.
+    pub fn mbarrier_wait(&mut self, addr: &str, phase: &str) -> Result<String, PtxGenError> {
         if !self.target.capabilities().has_cluster_barriers {
             return Err(PtxGenError::GenerationFailed(format!(
                 "mbarrier requires SM >= 90, target is {}",
                 self.target
             )));
         }
+        let dst = self.regs.alloc(PtxType::Pred);
+        let name = dst.name.clone();
         self.instructions.push(Instruction::MbarrierWait {
+            dst,
             addr: Operand::Register(Register {
                 name: addr.to_string(),
                 ty: PtxType::U64,
@@ -519,7 +547,7 @@ impl BodyBuilder<'_> {
                 ty: PtxType::U32,
             }),
         });
-        Ok(())
+        Ok(name)
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -647,6 +675,7 @@ impl BodyBuilder<'_> {
         dst_smem: Register,
         src_gmem: Register,
         desc: Register,
+        barrier: Register,
     ) -> Result<(), PtxGenError> {
         if !self.target.capabilities().has_bulk_copy {
             return Err(PtxGenError::GenerationFailed(format!(
@@ -658,6 +687,7 @@ impl BodyBuilder<'_> {
             dst_smem,
             src_gmem,
             desc,
+            barrier,
         });
         Ok(())
     }

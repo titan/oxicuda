@@ -814,12 +814,13 @@ fn defs(inst: &Instruction) -> Vec<&Register> {
         | Instruction::Selp { dst, .. }
         | Instruction::Dp4a { dst, .. }
         | Instruction::Dp2a { dst, .. }
-        | Instruction::Tex1d { dst, .. }
-        | Instruction::Tex2d { dst, .. }
-        | Instruction::Tex3d { dst, .. }
         | Instruction::SurfLoad { dst, .. }
         | Instruction::Redux { dst, .. }
         | Instruction::ElectSync { dst, .. } => vec![dst],
+        // `tex.*.v4` defines four texel destination registers.
+        Instruction::Tex1d { dst, .. }
+        | Instruction::Tex2d { dst, .. }
+        | Instruction::Tex3d { dst, .. } => dst.iter().collect(),
 
         Instruction::Ldmatrix { dst_regs, .. } => dst_regs.iter().collect(),
 
@@ -1107,7 +1108,7 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
         // PTX 8.x
         Instruction::Stmatrix { dst_addr, src, .. } => {
             let mut regs = operand_regs(dst_addr);
-            regs.push(src);
+            regs.extend(src.iter());
             regs
         }
         Instruction::MbarrierInit { addr, count, .. } => {
@@ -1127,7 +1128,8 @@ fn uses(inst: &Instruction) -> Vec<&Register> {
             dst_smem,
             src_gmem,
             desc,
-        } => vec![dst_smem, src_gmem, desc],
+            barrier,
+        } => vec![dst_smem, src_gmem, desc, barrier],
 
         Instruction::Ldmatrix { src_addr, .. } => operand_regs(src_addr),
     }

@@ -29,7 +29,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::arch::SmVersion;
 use crate::error::PtxGenError;
@@ -63,11 +63,16 @@ impl PtxCacheKey {
     ///
     /// Format: `{kernel_name}_{sm}_{combined_hash:016x}.ptx`
     ///
-    /// The combined hash includes both the `params_hash` and the full key hash
-    /// to minimize collision risk.
+    /// The combined hash includes the generator version (`CARGO_PKG_VERSION`),
+    /// the `params_hash`, and the full key hash. Mixing the generator version
+    /// means a codegen upgrade automatically invalidates stale entries: the
+    /// same logical key hashes to a different filename after a version bump,
+    /// so previously-cached PTX from an older generator is never served.
     #[must_use]
     pub fn to_filename(&self) -> String {
         let mut hasher = DefaultHasher::new();
+        // Generator version stamp: invalidates the cache across codegen upgrades.
+        env!("CARGO_PKG_VERSION").hash(&mut hasher);
         self.hash(&mut hasher);
         let full_hash = hasher.finish();
         format!(
@@ -89,7 +94,7 @@ impl PtxCache {
     ///
     /// Returns `std::io::Error` if the cache directory cannot be created.
     pub fn new() -> Result<Self, std::io::Error> {
-        let cache_dir = resolve_cache_dir();
+        let cache_dir = resolve_cache_dir()?;
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self { cache_dir })
     }
@@ -138,8 +143,10 @@ impl PtxCache {
         // Generate fresh PTX
         let ptx = generate()?;
 
-        // Write to cache (best-effort; cache write failure is non-fatal)
-        if let Err(e) = std::fs::write(&path, &ptx) {
+        // Write to cache atomically (best-effort; cache write failure is
+        // non-fatal). The tmp+fsync+rename pattern guarantees that concurrent
+        // writers never observe a torn or interleaved file.
+        if let Err(e) = atomic_write(&path, &ptx) {
             // Log the error but don't fail the generation
             eprintln!(
                 "oxicuda-ptx: cache write failed for {}: {e}",
@@ -169,7 +176,7 @@ impl PtxCache {
     /// Returns `std::io::Error` if the write fails.
     pub fn put(&self, key: &PtxCacheKey, ptx: &str) -> Result<(), std::io::Error> {
         let path = self.cache_dir.join(key.to_filename());
-        std::fs::write(&path, ptx)
+        atomic_write(&path, ptx)
     }
 
     /// Removes all cached PTX files from the cache directory.
@@ -216,15 +223,38 @@ impl PtxCache {
 }
 
 /// Resolves the cache directory path, with fallback.
-fn resolve_cache_dir() -> PathBuf {
-    // Try ~/.cache/oxicuda/ptx/
-    if let Some(home) = home_dir() {
-        let cache = home.join(".cache").join("oxicuda").join("ptx");
-        return cache;
+///
+/// Preference order:
+/// 1. `$XDG_CACHE_HOME/oxicuda/ptx` (when set to an absolute path)
+/// 2. `$HOME/.cache/oxicuda/ptx` (or `%USERPROFILE%\.cache\...` on Windows)
+/// 3. A hardened, per-user directory under the system temp dir
+///
+/// The temp fallback (3) is the security-sensitive path: a shared world
+/// directory such as `/tmp` with a predictable name is a kernel-poisoning
+/// vector, so [`temp_fallback_dir`] makes the directory per-user, creates it
+/// with `0o700`, and verifies ownership and permissions before returning it.
+///
+/// # Errors
+///
+/// Returns `std::io::Error` if the temp fallback directory cannot be created
+/// safely (e.g. it already exists but is not owned by the current user or is
+/// group/world-writable).
+fn resolve_cache_dir() -> std::io::Result<PathBuf> {
+    // Prefer XDG_CACHE_HOME (must be an absolute path per the XDG spec).
+    if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
+        let xdg = PathBuf::from(xdg);
+        if xdg.is_absolute() {
+            return Ok(xdg.join("oxicuda").join("ptx"));
+        }
     }
 
-    // Fallback to temp dir
-    std::env::temp_dir().join("oxicuda_ptx_cache")
+    // Then ~/.cache/oxicuda/ptx/
+    if let Some(home) = home_dir() {
+        return Ok(home.join(".cache").join("oxicuda").join("ptx"));
+    }
+
+    // Hardened per-user temp fallback.
+    temp_fallback_dir()
 }
 
 /// Attempts to determine the user's home directory.
@@ -234,6 +264,133 @@ fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
+}
+
+/// Returns the current effective user id by probing a freshly created file.
+///
+/// A newly created file is owned by the process's effective uid, so its owner
+/// metadata reveals our euid without any C dependency.
+#[cfg(unix)]
+fn current_euid() -> Option<u32> {
+    use std::os::unix::fs::MetadataExt;
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let probe =
+        std::env::temp_dir().join(format!("oxicuda_uid_probe_{}_{nanos}", std::process::id()));
+    let uid = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .ok()
+        .and_then(|_| std::fs::symlink_metadata(&probe).ok())
+        .map(|m| m.uid());
+    let _ = std::fs::remove_file(&probe);
+    uid
+}
+
+/// Creates and validates a hardened per-user cache directory under the system
+/// temp directory.
+///
+/// The directory is named `oxicuda_ptx_cache_{uid}`, created with mode `0o700`,
+/// and then verified to be a real directory owned by the current user with no
+/// group- or other-write permission bits. This closes the predictable
+/// world-writable `/tmp` kernel-poisoning vector.
+#[cfg(unix)]
+fn temp_fallback_dir() -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+
+    let uid = current_euid().unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("oxicuda_ptx_cache_{uid}"));
+
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)?;
+
+    // Use symlink_metadata so a symlink planted at the path is not followed.
+    let meta = std::fs::symlink_metadata(&dir)?;
+    if !meta.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "cache fallback path exists but is not a directory",
+        ));
+    }
+    if meta.uid() != uid {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "cache fallback directory is not owned by the current user",
+        ));
+    }
+    if meta.permissions().mode() & 0o022 != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "cache fallback directory is group- or world-writable",
+        ));
+    }
+    Ok(dir)
+}
+
+/// Non-Unix temp fallback: the system temp directory is per-user on Windows,
+/// so a fixed subdirectory name is sufficient.
+#[cfg(not(unix))]
+fn temp_fallback_dir() -> std::io::Result<PathBuf> {
+    Ok(std::env::temp_dir().join("oxicuda_ptx_cache"))
+}
+
+/// Atomically writes `contents` to `path` via a temp file, `fsync`, and rename.
+///
+/// The temp file lives in the same directory (so the final `rename(2)` is
+/// atomic on the same filesystem) and is opened with `create_new` (`O_EXCL`),
+/// which refuses to follow a pre-planted symlink at the temp name. The rename
+/// replaces any destination symlink instead of following it, so concurrent
+/// writers never observe a torn or interleaved file and a symlink at the final
+/// path cannot redirect the write. On any failure the temp file is removed.
+///
+/// # Errors
+///
+/// Returns `std::io::Error` if the temp file cannot be created/written/synced
+/// or the rename fails.
+fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let dir = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "cache path has no parent directory",
+        )
+    })?;
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("cache");
+
+    // Per-writer temp name (process + thread) with a `.tmp` extension so the
+    // `.ptx`-only `clear`/`len` scans never count it as a cache entry.
+    let tmp = dir.join(format!(
+        ".{file_name}.{}.{:?}.tmp",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Sanitizes a string for use as part of a filename.
@@ -518,6 +675,60 @@ mod tests {
         assert_eq!(
             ptx_first, ptx_second,
             "cache hit must return original content"
+        );
+
+        cleanup(&dir);
+    }
+
+    /// Concurrent writers of the same key must never leave a torn file: the
+    /// final content must be exactly one of the written payloads.
+    #[test]
+    fn test_atomic_write_no_torn_file() {
+        let dir = test_cache_dir_named("atomic_concurrent");
+        cleanup(&dir);
+        let cache = PtxCache::with_dir(dir.clone()).expect("cache creation should succeed");
+
+        let key = PtxCacheKey {
+            kernel_name: "atomic_kernel".to_string(),
+            params_hash: 0x5151_5151,
+            sm_version: SmVersion::Sm80,
+        };
+
+        // A large distinctive payload makes a torn/interleaved write obvious.
+        let payload_a = "// PAYLOAD_A ".repeat(4096);
+        let payload_b = "// PAYLOAD_B ".repeat(4096);
+
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let cache_ref = &cache;
+                let key_ref = &key;
+                let a = payload_a.as_str();
+                let b = payload_b.as_str();
+                scope.spawn(move || {
+                    for i in 0..20 {
+                        let payload = if i % 2 == 0 { a } else { b };
+                        let _ = cache_ref.put(key_ref, payload);
+                    }
+                });
+            }
+        });
+
+        // Whatever won the race, the file must equal exactly one payload — never
+        // a mix of the two.
+        let final_content = cache.get(&key).expect("a value must be present");
+        assert!(
+            final_content == payload_a || final_content == payload_b,
+            "cache file is torn: length {} is neither payload length ({} / {})",
+            final_content.len(),
+            payload_a.len(),
+            payload_b.len()
+        );
+
+        // Temp files must not be counted as cache entries.
+        assert_eq!(
+            cache.len().expect("len"),
+            1,
+            "only the .ptx file should count"
         );
 
         cleanup(&dir);

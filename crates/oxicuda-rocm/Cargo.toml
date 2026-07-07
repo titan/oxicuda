@@ -17,6 +17,7 @@ libloading.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 half.workspace = true
+bytemuck.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true

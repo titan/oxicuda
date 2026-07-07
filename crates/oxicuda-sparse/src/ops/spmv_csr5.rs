@@ -122,6 +122,7 @@ pub fn csr5_spmv<T: GpuFloat>(
         &(
             y.as_device_ptr(),
             csr5.calibrator().as_device_ptr(),
+            beta.to_bits_u64(),
             csr5.rows(),
         ),
     )?;
@@ -426,12 +427,12 @@ fn emit_csr5_tile_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
 /// `y` vector: `y[row] = calibrator[row] + beta * y[row]`.
 fn emit_csr5_calibrate_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
     let elem_bytes = T::size_u32();
-    let _is_f64 = T::SIZE == 8;
 
     KernelBuilder::new("csr5_calibrate")
         .target(sm)
         .param("y_ptr", PtxType::U64)
         .param("calibrator_ptr", PtxType::U64)
+        .param("beta_bits", PtxType::U64)
         .param("num_rows", PtxType::U32)
         .body(move |b| {
             let gid = b.global_thread_id_x();
@@ -442,8 +443,10 @@ fn emit_csr5_calibrate_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String
                 let row = gid_inner;
                 let y_ptr = b.load_param_u64("y_ptr");
                 let cal_ptr = b.load_param_u64("calibrator_ptr");
+                let beta_bits = b.load_param_u64("beta_bits");
+                let beta = reinterpret_bits_to_float::<T>(b, beta_bits);
 
-                // Load calibrator[row]
+                // Load calibrator[row] = alpha * (A*x)[row] (accumulated in phase 1).
                 let cal_addr = b.byte_offset_addr(cal_ptr, row.clone(), elem_bytes);
                 let cal_val = load_global_float::<T>(b, cal_addr);
 
@@ -451,8 +454,10 @@ fn emit_csr5_calibrate_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String
                 let y_addr = b.byte_offset_addr(y_ptr, row, elem_bytes);
                 let y_val = load_global_float::<T>(b, y_addr.clone());
 
-                // y[row] = y[row] + calibrator[row]
-                let result = add_float::<T>(b, y_val, cal_val);
+                // y[row] = calibrator[row] + beta * y[row]
+                //        = alpha * (A*x)[row] + beta * y_old[row]
+                let beta_y = mul_float::<T>(b, beta, y_val);
+                let result = add_float::<T>(b, cal_val, beta_y);
                 store_global_float::<T>(b, y_addr, result);
             });
 
@@ -547,5 +552,184 @@ mod tests {
     fn csr5_block_sizes_are_warp_aligned() {
         assert_eq!(CSR5_TILE_BLOCK % 32, 0);
         assert_eq!(CSR5_CALIBRATE_BLOCK % 32, 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::format::CsrMatrix;
+    use crate::gpu_test_support::{assert_close, gpu_handle};
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+    use oxicuda_memory::DeviceBuffer;
+
+    /// CPU oracle for `y = alpha * A * x + beta * y0` over a CSR matrix
+    /// (row count is derived from `row_ptr`).
+    fn cpu_csr_spmv(
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        x: &[f64],
+        y0: &[f64],
+        alpha: f64,
+        beta: f64,
+    ) -> Vec<f64> {
+        let rows = row_ptr.len() - 1;
+        let mut y = vec![0.0_f64; rows];
+        for (i, slot) in y.iter_mut().enumerate() {
+            let mut acc = 0.0_f64;
+            for k in row_ptr[i] as usize..row_ptr[i + 1] as usize {
+                acc += values[k] * x[col_idx[k] as usize];
+            }
+            *slot = alpha * acc + beta * y0[i];
+        }
+        y
+    }
+
+    /// Drive the production `csr5_spmv` op and compare to the CPU oracle.
+    #[allow(clippy::too_many_arguments)]
+    fn run_csr5<T: GpuFloat>(
+        rows: u32,
+        cols: u32,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        x: &[f64],
+        y0: &[f64],
+        alpha: f64,
+        beta: f64,
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let dev_values: Vec<T> = values.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        // Build via CSR -> CSR5 so the tile metadata is produced by the real
+        // conversion path.
+        let csr = CsrMatrix::<T>::from_host(rows, cols, row_ptr, col_idx, &dev_values)
+            .expect("test: build CSR");
+        let csr5 = Csr5Matrix::<T>::from_csr(&csr).expect("test: build CSR5");
+
+        let dev_x: Vec<T> = x.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let dev_y: Vec<T> = y0.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let x_buf = DeviceBuffer::from_host(&dev_x).expect("test: upload x");
+        let mut y_buf = DeviceBuffer::from_host(&dev_y).expect("test: upload y");
+
+        csr5_spmv::<T>(
+            &handle,
+            &csr5,
+            &x_buf,
+            &mut y_buf,
+            f64_to_gpu::<T>(alpha),
+            f64_to_gpu::<T>(beta),
+        )
+        .expect("test: csr5_spmv launch");
+        handle.stream().synchronize().expect("test: sync");
+
+        let mut out = vec![T::gpu_zero(); rows as usize];
+        y_buf.copy_to_host(&mut out).expect("test: download y");
+        let got: Vec<f64> = out.iter().map(|&v| gpu_to_f64(v)).collect();
+        let want = cpu_csr_spmv(row_ptr, col_idx, values, x, y0, alpha, beta);
+        assert_close(&got, &want, tol, tag);
+    }
+
+    /// Tridiagonal SPD-ish matrix of order `n` (3*n - 2 non-zeros). For `n = 20`
+    /// this is 58 non-zeros => 2 CSR5 tiles, so rows straddle the tile boundary
+    /// at element 32 and exercise the cross-tile calibrator merge.
+    fn tridiagonal(n: usize) -> (u32, u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        let mut row_ptr = vec![0i32];
+        let mut col_idx = Vec::new();
+        let mut values = Vec::new();
+        for i in 0..n {
+            if i > 0 {
+                col_idx.push((i - 1) as i32);
+                values.push(-1.0);
+            }
+            col_idx.push(i as i32);
+            values.push(4.0 + 0.01 * (i as f64));
+            if i + 1 < n {
+                col_idx.push((i + 1) as i32);
+                values.push(-1.0);
+            }
+            row_ptr.push(col_idx.len() as i32);
+        }
+        (n as u32, n as u32, row_ptr, col_idx, values)
+    }
+
+    #[test]
+    fn csr5_single_tile_f64_beta_one() {
+        // 10 rows => 28 nnz => single tile.
+        let (r, c, rp, ci, v) = tridiagonal(10);
+        let x: Vec<f64> = (0..r as usize).map(|i| 1.0 + i as f64).collect();
+        let y0 = vec![0.0_f64; r as usize];
+        run_csr5::<f64>(
+            r,
+            c,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            1.0,
+            1.0,
+            1e-10,
+            "csr5_f64_single",
+        );
+    }
+
+    #[test]
+    fn csr5_cross_tile_f64_beta_nonunit() {
+        // 20 rows => 58 nnz => 2 tiles. beta != 1 exercises the (previously
+        // dropped) beta scale in the calibration kernel.
+        let (r, c, rp, ci, v) = tridiagonal(20);
+        let x: Vec<f64> = (0..r as usize).map(|i| 0.5 + 0.25 * i as f64).collect();
+        let y0: Vec<f64> = (0..r as usize).map(|i| 100.0 - i as f64).collect();
+        run_csr5::<f64>(
+            r,
+            c,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            2.0,
+            -0.5,
+            1e-10,
+            "csr5_f64_cross",
+        );
+    }
+
+    #[test]
+    fn csr5_cross_tile_f32_alpha_beta() {
+        let (r, c, rp, ci, v) = tridiagonal(20);
+        let x: Vec<f64> = (0..r as usize).map(|i| 1.0 + 0.1 * i as f64).collect();
+        let y0: Vec<f64> = (0..r as usize).map(|i| 5.0 + i as f64).collect();
+        run_csr5::<f32>(
+            r,
+            c,
+            &rp,
+            &ci,
+            &v,
+            &x,
+            &y0,
+            1.5,
+            0.25,
+            1e-4,
+            "csr5_f32_cross",
+        );
+    }
+
+    #[test]
+    fn csr5_beta_zero_overwrites() {
+        // beta = 0 must fully overwrite the prior y.
+        let (r, c, rp, ci, v) = tridiagonal(12);
+        let x = vec![1.0_f64; r as usize];
+        let y0 = vec![1e9_f64; r as usize];
+        run_csr5::<f64>(r, c, &rp, &ci, &v, &x, &y0, 1.0, 0.0, 1e-10, "csr5_beta0");
     }
 }

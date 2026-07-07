@@ -55,6 +55,7 @@ fn build_sum_kernel(
     let ptx_source = template
         .generate()
         .map_err(|e| BlasError::PtxGeneration(format!("reduce_sum (for mean): {e}")))?;
+    let ptx_source = super::ptx_fixup::relocate_perf_directives(&ptx_source);
     let module = Arc::new(
         Module::from_ptx(&ptx_source)
             .map_err(|e| BlasError::LaunchFailed(format!("module load for mean/sum: {e}")))?,
@@ -74,6 +75,7 @@ fn build_scale_kernel(
     let ptx_source = template
         .generate()
         .map_err(|e| BlasError::PtxGeneration(format!("scale (for mean): {e}")))?;
+    let ptx_source = super::ptx_fixup::relocate_perf_directives(&ptx_source);
     let module = Arc::new(
         Module::from_ptx(&ptx_source)
             .map_err(|e| BlasError::LaunchFailed(format!("module load for mean/scale: {e}")))?,

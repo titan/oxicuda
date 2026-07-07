@@ -119,15 +119,22 @@ impl PrefixCache {
     ///
     /// If the cache is at capacity, evicts the least-recently-used entry.
     ///
-    /// Returns `false` if insertion was skipped (e.g., entry already present).
-    pub fn insert(&mut self, tokens: &[u32], block_ids: Vec<BlockId>) -> bool {
+    /// Returns `None` if insertion was skipped (e.g., entry already present).
+    /// Returns `Some(evicted)` on a successful insertion, where `evicted` is
+    /// the list of physical block IDs freed by LRU eviction (empty if no
+    /// eviction was needed). The caller **must** `dec_ref` these blocks in
+    /// the KV cache — dropping the returned `Vec` silently leaks them.
+    #[must_use = "evicted block ids must be dec_ref'd in the KV cache or they leak"]
+    pub fn insert(&mut self, tokens: &[u32], block_ids: Vec<BlockId>) -> Option<Vec<BlockId>> {
         let key = Self::hash_tokens(tokens);
         if self.entries.contains_key(&key) {
-            return false; // Already cached; don't overwrite.
+            return None; // Already cached; don't overwrite.
         }
-        if self.entries.len() >= self.max_entries {
-            self.evict_lru();
-        }
+        let evicted = if self.entries.len() >= self.max_entries {
+            self.evict_lru().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         self.clock += 1;
         self.entries.insert(
             key,
@@ -138,7 +145,7 @@ impl PrefixCache {
                 last_access: self.clock,
             },
         );
-        true
+        Some(evicted)
     }
 
     // ── Eviction ─────────────────────────────────────────────────────────────
@@ -147,16 +154,13 @@ impl PrefixCache {
     ///
     /// Returns the evicted entry's block IDs so the caller can decrement
     /// reference counts in the KV cache, or `None` if the cache is empty.
+    #[must_use = "evicted block ids must be dec_ref'd in the KV cache or they leak"]
     pub fn evict_lru(&mut self) -> Option<Vec<BlockId>> {
-        if self.entries.is_empty() {
-            return None;
-        }
         let lru_key = self
             .entries
             .iter()
             .min_by_key(|(_, v)| v.last_access)
-            .map(|(&k, _)| k)
-            .expect("entries non-empty");
+            .map(|(&k, _)| k)?;
         self.entries.remove(&lru_key).map(|e| e.block_ids)
     }
 
@@ -214,7 +218,8 @@ mod tests {
     fn insert_and_lookup() {
         let mut cache = PrefixCache::new(16);
         let tokens = vec![1_u32, 2, 3, 4];
-        cache.insert(&tokens, fake_blocks(2));
+        let evicted = cache.insert(&tokens, fake_blocks(2));
+        assert_eq!(evicted, Some(Vec::new()), "no eviction on first insert");
         let entry = cache.lookup(&tokens).expect("should hit");
         assert_eq!(entry.prefix_len, 4);
         assert_eq!(entry.block_ids.len(), 2);
@@ -230,7 +235,7 @@ mod tests {
     fn hit_rate_tracking() {
         let mut cache = PrefixCache::new(16);
         let t = vec![1_u32, 2, 3];
-        cache.insert(&t, fake_blocks(1));
+        let _ = cache.insert(&t, fake_blocks(1));
         cache.lookup(&t); // hit
         cache.lookup(&[99_u32]); // miss
         // 1 hit out of 2 queries
@@ -240,12 +245,23 @@ mod tests {
     #[test]
     fn lru_eviction_on_capacity() {
         let mut cache = PrefixCache::new(2);
-        cache.insert(&[1], fake_blocks(1));
+        let e0 = cache.insert(&[1], fake_blocks(1));
+        assert_eq!(e0, Some(Vec::new()));
         cache.lookup(&[1]); // access entry 1 → recent
-        cache.insert(&[2], fake_blocks(1));
+        let e1 = cache.insert(&[2], fake_blocks(1));
+        assert_eq!(e1, Some(Vec::new()));
         // Cache is now full; inserting a third entry should evict LRU.
-        cache.insert(&[3], fake_blocks(1));
+        // Regression for F028: the evicted block ids must be surfaced to the
+        // caller (previously silently discarded, leaking the KV blocks).
+        let evicted = cache
+            .insert(&[3], fake_blocks(1))
+            .expect("insert always succeeds for a new key");
         assert_eq!(cache.n_entries(), 2);
+        assert_eq!(
+            evicted.len(),
+            1,
+            "the LRU entry's block ids must be returned for dec_ref, not dropped"
+        );
     }
 
     #[test]
@@ -253,9 +269,9 @@ mod tests {
         let mut cache = PrefixCache::new(16);
         let t = vec![5_u32, 6];
         let inserted = cache.insert(&t, fake_blocks(1));
-        assert!(inserted);
+        assert!(inserted.is_some());
         let inserted2 = cache.insert(&t, fake_blocks(2)); // same key
-        assert!(!inserted2);
+        assert!(inserted2.is_none());
         assert_eq!(cache.n_entries(), 1);
     }
 
@@ -278,7 +294,7 @@ mod tests {
     fn remove_existing_entry() {
         let mut cache = PrefixCache::new(16);
         let t = vec![7_u32, 8];
-        cache.insert(&t, fake_blocks(2));
+        let _ = cache.insert(&t, fake_blocks(2));
         let blocks = cache
             .remove(&t)
             .expect("entry was inserted and not yet removed");
@@ -295,8 +311,8 @@ mod tests {
     #[test]
     fn clear_returns_all_blocks() {
         let mut cache = PrefixCache::new(16);
-        cache.insert(&[1], fake_blocks(2));
-        cache.insert(&[2], fake_blocks(3));
+        let _ = cache.insert(&[1], fake_blocks(2));
+        let _ = cache.insert(&[2], fake_blocks(3));
         let all_blocks = cache.clear();
         let total: usize = all_blocks.iter().map(Vec::len).sum();
         assert_eq!(total, 5);

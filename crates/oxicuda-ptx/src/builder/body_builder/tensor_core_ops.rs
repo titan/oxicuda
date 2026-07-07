@@ -222,7 +222,8 @@ impl BodyBuilder<'_> {
     /// Emit `mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32`.
     ///
     /// TF32 inputs with F32 accumulation.  Requires Ampere (`sm_80+`).
-    /// Operand register counts per thread: A=2, B=1, C/D=4.
+    /// Operand register counts per thread: A=4, B=2, C/D=4 (TF32 occupies a
+    /// full 32-bit lane, so A/B double the F16 counts).
     ///
     /// # Errors
     ///
@@ -310,7 +311,7 @@ impl BodyBuilder<'_> {
     /// Emit `mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32`.
     ///
     /// FP8 E4M3 inputs with F32 accumulation.  Requires Hopper (`sm_90+`).
-    /// Register counts per thread: A=8, B=4, C/D=4.
+    /// Register counts per thread: A=4, B=2, C/D=4.
     ///
     /// # Errors
     ///
@@ -386,42 +387,29 @@ impl BodyBuilder<'_> {
         ])
     }
 
-    /// Emit `mma.sync.aligned.m16n8k32.row.col.f32.f16.f16.f32` —
-    /// the K=32 FP16 variant for Hopper.
+    /// `mma.sync.aligned.m16n8k32.f16` does **not** exist in the PTX ISA —
+    /// 16-bit inputs cap at K=16. This method therefore always returns an
+    /// error; to reach K=32 with F16 inputs, tile two
+    /// [`mma_m16n8k16_bf16_f32`](BodyBuilder::mma_m16n8k16_bf16_f32)-style
+    /// K=16 MMAs (or use FP8 via
+    /// [`mma_m16n8k32_e4m3_f32`](BodyBuilder::mma_m16n8k32_e4m3_f32)).
     ///
     /// # Errors
     ///
-    /// Returns an error if the target SM is below Hopper.
+    /// Always returns [`PtxGenError::InvalidType`]: the instruction is not
+    /// defined in the PTX ISA.
+    #[deprecated(note = "mma.sync.m16n8k32.f16 does not exist; tile two m16n8k16 MMAs or use FP8")]
     pub fn mma_m16n8k32_f16_f32(
         &mut self,
-        a_regs: &[Register],
-        b_regs: &[Register],
-        c_regs: &[Register],
+        _a_regs: &[Register],
+        _b_regs: &[Register],
+        _c_regs: &[Register],
     ) -> Result<[Register; 4], PtxGenError> {
-        if self.target < crate::arch::SmVersion::Sm90 {
-            return Err(PtxGenError::UnsupportedFeature {
-                arch: self.target.as_ptx_str().to_string(),
-                feature: "mma.sync m16n8k32.f16 (Hopper+)".to_string(),
-            });
-        }
-        let dst = self.regs.alloc_group(PtxType::F32, 4);
-        self.emit(Instruction::Mma {
-            shape: MmaShape::M16N8K32,
-            a_ty: PtxType::F16,
-            b_ty: PtxType::F16,
-            c_ty: PtxType::F32,
-            d_ty: PtxType::F32,
-            d_regs: dst.clone(),
-            a_regs: a_regs.to_vec(),
-            b_regs: b_regs.to_vec(),
-            c_regs: c_regs.to_vec(),
-        });
-        Ok([
-            dst[0].clone(),
-            dst[1].clone(),
-            dst[2].clone(),
-            dst[3].clone(),
-        ])
+        Err(PtxGenError::InvalidType(
+            "m16n8k32.f16 does not exist in the PTX ISA (16-bit inputs cap at K=16); \
+             tile two m16n8k16 MMAs or use FP8 (e4m3/e5m2)"
+                .to_string(),
+        ))
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -584,6 +572,16 @@ impl BodyBuilder<'_> {
                 feature: "wgmma.mma_async (Hopper+ SM 90)".to_string(),
             });
         }
+        // FP8 (E4M3/E5M2) inputs only exist at K=32 in the WGMMA ISA; pairing
+        // them with a K=16 shape yields a nonexistent instruction.
+        let is_fp8 = matches!(a_ty, PtxType::E4M3 | PtxType::E5M2)
+            || matches!(b_ty, PtxType::E4M3 | PtxType::E5M2);
+        if is_fp8 && !shape.is_k32() {
+            return Err(PtxGenError::InvalidType(format!(
+                "WGMMA FP8 (E4M3/E5M2) requires a K=32 shape, got {}",
+                shape.as_ptx_str()
+            )));
+        }
         // Accumulator count: (M × N) / 128 F32 registers per thread.
         let n_acc = wgmma_acc_regs(shape);
         let d_regs = self.regs.alloc_group(PtxType::F32, n_acc);
@@ -716,13 +714,15 @@ impl BodyBuilder<'_> {
 ///
 /// Derived from PTX ISA: `(M × N) / 128` where 128 = threads per warpgroup.
 const fn wgmma_acc_regs(shape: WgmmaShape) -> u32 {
+    // Accumulator count depends only on M×N (K does not change the D fragment),
+    // so the K=32 shapes mirror their K=16 counterparts.
     match shape {
-        WgmmaShape::M64N8K16 => 4,     // 64 × 8  / 128 = 4
-        WgmmaShape::M64N16K16 => 8,    // 64 × 16 / 128 = 8
-        WgmmaShape::M64N32K16 => 16,   // 64 × 32 / 128 = 16
-        WgmmaShape::M64N64K16 => 32,   // 64 × 64 / 128 = 32
-        WgmmaShape::M64N128K16 => 64,  // 64 × 128/ 128 = 64
-        WgmmaShape::M64N256K16 => 128, // 64 × 256/ 128 = 128
+        WgmmaShape::M64N8K16 | WgmmaShape::M64N8K32 => 4, // 64 × 8  / 128 = 4
+        WgmmaShape::M64N16K16 | WgmmaShape::M64N16K32 => 8, // 64 × 16 / 128 = 8
+        WgmmaShape::M64N32K16 | WgmmaShape::M64N32K32 => 16, // 64 × 32 / 128 = 16
+        WgmmaShape::M64N64K16 | WgmmaShape::M64N64K32 => 32, // 64 × 64 / 128 = 32
+        WgmmaShape::M64N128K16 | WgmmaShape::M64N128K32 => 64, // 64 × 128/ 128 = 64
+        WgmmaShape::M64N256K16 | WgmmaShape::M64N256K32 => 128, // 64 × 256/ 128 = 128
     }
 }
 
@@ -782,6 +782,56 @@ mod tests {
         assert!(ptx.contains("wmma.load.b"), "wmma load B must appear");
         assert!(ptx.contains("wmma.mma.sync"), "wmma mma must appear");
         assert!(ptx.contains("wmma.store.d"), "wmma store D must appear");
+
+        // The mma must emit FOUR operand groups (d, a, b, c) with two layouts
+        // and two types — not the old single-brace-group broken form.
+        assert!(
+            ptx.contains("wmma.mma.sync.aligned.row.row.m16n16k16.f32.f32"),
+            "wmma.mma must carry two layouts and two types:\n{ptx}"
+        );
+        let mma_line = ptx
+            .lines()
+            .find(|l| l.contains("wmma.mma.sync"))
+            .expect("wmma.mma line present");
+        assert_eq!(
+            mma_line.matches('{').count(),
+            4,
+            "wmma.mma must have 4 operand groups (d,a,b,c): {mma_line}"
+        );
+
+        // The generated PTX must assemble under ptxas when it is available.
+        if let Some(ptxas) = find_ptxas() {
+            let mut ptx_path = std::env::temp_dir();
+            ptx_path.push(format!("oxicuda_wmma_{}.ptx", std::process::id()));
+            std::fs::write(&ptx_path, &ptx).expect("write PTX");
+            let out = std::process::Command::new(&ptxas)
+                .arg("-arch=sm_80")
+                .arg(&ptx_path)
+                .arg("-o")
+                .arg("/dev/null")
+                .output()
+                .expect("invoke ptxas");
+            let _ = std::fs::remove_file(&ptx_path);
+            assert!(
+                out.status.success(),
+                "ptxas rejected WMMA kernel:\n{}\n--- PTX ---\n{ptx}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    /// Locate `ptxas` for on-toolchain assembly checks (skips gracefully).
+    fn find_ptxas() -> Option<std::path::PathBuf> {
+        if let Ok(path) = std::env::var("PATH") {
+            for dir in std::env::split_paths(&path) {
+                let candidate = dir.join("ptxas");
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        let fallback = std::path::PathBuf::from("/usr/local/cuda/bin/ptxas");
+        fallback.is_file().then_some(fallback)
     }
 
     /// Verify TF32 MMA emits correct PTX suffix.
@@ -791,8 +841,9 @@ mod tests {
             .target(SmVersion::Sm80)
             .param("unused", PtxType::U32)
             .body(|b| {
-                let a = b.regs.alloc_group(PtxType::B32, 2);
-                let bv = b.regs.alloc_group(PtxType::B32, 1);
+                // TF32 m16n8k8 uses A=4, B=2 registers per thread.
+                let a = b.regs.alloc_group(PtxType::B32, 4);
+                let bv = b.regs.alloc_group(PtxType::B32, 2);
                 let c = b.regs.alloc_group(PtxType::F32, 4);
                 let _ = b.mma_m16n8k8_tf32_f32(&a, &bv, &c).expect("TF32 on Ampere");
             })
@@ -831,6 +882,80 @@ mod tests {
 
         assert!(ptx.contains("wgmma.mma_async"), "must contain wgmma");
         assert!(ptx.contains("m64n128k16"), "must contain shape");
+    }
+
+    /// FP8 WGMMA must use a K=32 shape and omit the trans operands; it must
+    /// also assemble under ptxas (`sm_90a`) when available.
+    #[test]
+    fn wgmma_fp8_k32_emits_and_assembles() {
+        let ptx = KernelBuilder::new("wgmma_fp8")
+            .target(SmVersion::Sm90a)
+            .param("unused", PtxType::U32)
+            .body(|b| {
+                let desc_a = b.regs.alloc(PtxType::U64);
+                let desc_b = b.regs.alloc(PtxType::U64);
+                let _ = b
+                    .wgmma_mma_async_e4m3(WgmmaShape::M64N8K32, desc_a, desc_b)
+                    .expect("FP8 wgmma on sm_90a");
+            })
+            .build()
+            .expect("build");
+
+        assert!(
+            ptx.contains("wgmma.mma_async.sync.aligned.m64n8k32.f32.e4m3.e4m3"),
+            "FP8 wgmma must target a K=32 shape:\n{ptx}"
+        );
+        // No trans operands for FP8: the instruction ends right after
+        // imm_scale_b (scale_d=1, imm_scale_a=1, imm_scale_b=1), and must NOT
+        // carry the trailing `, trans_a, trans_b` that F16/BF16 emit.
+        let line = ptx
+            .lines()
+            .find(|l| l.contains("wgmma.mma_async"))
+            .expect("wgmma line");
+        assert!(
+            line.trim_end().ends_with("1, 1, 1;"),
+            "FP8 wgmma must end after imm_scale_b with no trans operands: {line}"
+        );
+        assert!(
+            !line.contains("1, 1, 1, 0, 0"),
+            "FP8 wgmma must not emit the F16-style trans operands: {line}"
+        );
+
+        if let Some(ptxas) = find_ptxas() {
+            let mut ptx_path = std::env::temp_dir();
+            ptx_path.push(format!("oxicuda_wgmma_fp8_{}.ptx", std::process::id()));
+            std::fs::write(&ptx_path, &ptx).expect("write PTX");
+            let out = std::process::Command::new(&ptxas)
+                .arg("-arch=sm_90a")
+                .arg(&ptx_path)
+                .arg("-o")
+                .arg("/dev/null")
+                .output()
+                .expect("invoke ptxas");
+            let _ = std::fs::remove_file(&ptx_path);
+            assert!(
+                out.status.success(),
+                "ptxas rejected FP8 wgmma:\n{}\n--- PTX ---\n{ptx}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    /// FP8 WGMMA paired with a K=16 shape must be rejected (no such instruction).
+    #[test]
+    fn wgmma_fp8_with_k16_shape_errors() {
+        let result = KernelBuilder::new("wgmma_fp8_bad")
+            .target(SmVersion::Sm90a)
+            .param("unused", PtxType::U32)
+            .body(|b| {
+                let desc_a = b.regs.alloc(PtxType::U64);
+                let desc_b = b.regs.alloc(PtxType::U64);
+                let r = b.wgmma_mma_async_e5m2(WgmmaShape::M64N8K16, desc_a, desc_b);
+                assert!(r.is_err(), "FP8 with K=16 shape must error");
+                b.ret();
+            })
+            .build();
+        let _ = result;
     }
 
     /// Verify INT8 IMMA m8n8k16 emits correct type suffixes.

@@ -89,17 +89,12 @@ const OP_I_ADD: u32 = 128;
 // ─── CooperativeMatrix use/scope values ──────────────────────────────────────
 
 /// Scope `Subgroup` (the XMX execution granularity on Intel GPUs).
+///
+/// The cooperative-matrix `Scope`, `Rows`, `Columns`, `Use` operands and the
+/// load/store `MemoryLayout` operand are all IdRefs to constant integers, so
+/// the `MatrixUse` (A=0, B=1, Accumulator=2) and `RowMajor` (0) enumerants are
+/// emitted as the `c0`/`c1`/`c2` `OpConstant` ids rather than as bare literals.
 const SCOPE_SUBGROUP: u32 = 3;
-
-/// `MatrixUseA` — first input matrix to `MulAdd`.
-const MATRIX_USE_A: u32 = 0;
-/// `MatrixUseB` — second input matrix to `MulAdd`.
-const MATRIX_USE_B: u32 = 1;
-/// `MatrixUseAccumulator` — accumulator matrix to `MulAdd`.
-const MATRIX_USE_ACCUMULATOR: u32 = 2;
-
-/// `RowMajor` layout for `CooperativeMatrixLoad/Store`.
-const MATRIX_LAYOUT_ROW_MAJOR: u32 = 0;
 
 // ─── CooperativeMatrixOperands bitmask ───────────────────────────────────────
 
@@ -453,9 +448,13 @@ pub fn gemm_xmx_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32> {
     let ty_v3u32 = m.alloc_id();
     let ty_ptr_in_v3u32 = m.alloc_id();
 
-    // Constants
+    // Constants. `c2` (value 2) and `c_scope` (Subgroup) are declared up front —
+    // the cooperative-matrix type operands (Scope/Rows/Columns/Use) and the
+    // load/store MemoryLayout are IdRefs to constant integers, not literals.
     let c0 = m.alloc_id();
     let c1 = m.alloc_id();
+    let c2 = m.alloc_id();
+    let c_scope = m.alloc_id();
     let c_tile_m = m.alloc_id();
     let c_tile_n = m.alloc_id();
     let c_tile_k = m.alloc_id();
@@ -519,31 +518,20 @@ pub fn gemm_xmx_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32> {
     m.emit_type_ptr(ty_ptr_f32_sb, STORAGE_CLASS_STORAGE_BUFFER, ty_f32);
     m.emit_type_ptr(ty_ptr_u32_sb, STORAGE_CLASS_STORAGE_BUFFER, ty_u32);
 
-    // Cooperative matrix types
-    m.emit_type_cooperative_matrix(
-        ty_cmat_a,
-        ty_f32,
-        SCOPE_SUBGROUP,
-        tile.m,
-        tile.k,
-        MATRIX_USE_A,
-    );
-    m.emit_type_cooperative_matrix(
-        ty_cmat_b,
-        ty_f32,
-        SCOPE_SUBGROUP,
-        tile.k,
-        tile.n,
-        MATRIX_USE_B,
-    );
-    m.emit_type_cooperative_matrix(
-        ty_cmat_c,
-        ty_f32,
-        SCOPE_SUBGROUP,
-        tile.m,
-        tile.n,
-        MATRIX_USE_ACCUMULATOR,
-    );
+    // ── Constants (must precede the cooperative-matrix types that ref them) ───
+    m.emit_const_u32(ty_u32, c0, 0);
+    m.emit_const_u32(ty_u32, c1, 1);
+    m.emit_const_u32(ty_u32, c2, 2);
+    m.emit_const_u32(ty_u32, c_scope, SCOPE_SUBGROUP);
+    m.emit_const_u32(ty_u32, c_tile_m, tile.m);
+    m.emit_const_u32(ty_u32, c_tile_n, tile.n);
+    m.emit_const_u32(ty_u32, c_tile_k, tile.k);
+
+    // Cooperative matrix types. Scope/Rows/Columns/Use are constant <id>s.
+    // MatrixUse: A=0 (c0), B=1 (c1), Accumulator=2 (c2).
+    m.emit_type_cooperative_matrix(ty_cmat_a, ty_f32, c_scope, c_tile_m, c_tile_k, c0);
+    m.emit_type_cooperative_matrix(ty_cmat_b, ty_f32, c_scope, c_tile_k, c_tile_n, c1);
+    m.emit_type_cooperative_matrix(ty_cmat_c, ty_f32, c_scope, c_tile_m, c_tile_n, c2);
 
     // v3uint for WorkgroupId builtin
     let ty_v3u32_actual = ty_v3u32;
@@ -551,13 +539,6 @@ pub fn gemm_xmx_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32> {
     m.emit_type_ptr(ty_ptr_in_v3u32, STORAGE_CLASS_INPUT, ty_v3u32_actual);
 
     m.emit_type_fn(ty_fn_void, ty_void, &[]);
-
-    // ── Constants ─────────────────────────────────────────────────────────────
-    m.emit_const_u32(ty_u32, c0, 0);
-    m.emit_const_u32(ty_u32, c1, 1);
-    m.emit_const_u32(ty_u32, c_tile_m, tile.m);
-    m.emit_const_u32(ty_u32, c_tile_n, tile.n);
-    m.emit_const_u32(ty_u32, c_tile_k, tile.k);
 
     // ── Variables ─────────────────────────────────────────────────────────────
     m.emit_variable(ty_ptr_sb_f32, var_a, STORAGE_CLASS_STORAGE_BUFFER);
@@ -589,8 +570,6 @@ pub fn gemm_xmx_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32> {
     let dim_k = m.alloc_id();
     m.emit_access_chain(ty_ptr_u32_sb, ptr_m, var_dim, &[c0, c0]);
     m.emit_access_chain(ty_ptr_u32_sb, ptr_n, var_dim, &[c0, c1]);
-    let c2 = m.alloc_id();
-    m.emit_const_u32(ty_u32, c2, 2);
     m.emit_access_chain(ty_ptr_u32_sb, ptr_k, var_dim, &[c0, c2]);
     m.emit_load(ty_u32, dim_m, ptr_m);
     m.emit_load(ty_u32, dim_n, ptr_n);
@@ -613,13 +592,8 @@ pub fn gemm_xmx_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32> {
     m.emit_in_bounds_access_chain(ty_ptr_f32_sb, ptr_c_tile, var_c, &[c0, c_base_flat]);
 
     let mat_c_init = m.alloc_id();
-    m.emit_coop_matrix_load(
-        ty_cmat_c,
-        mat_c_init,
-        ptr_c_tile,
-        MATRIX_LAYOUT_ROW_MAJOR,
-        c_row_stride,
-    );
+    // MemoryLayout is an IdRef to a constant; RowMajor == 0 == c0.
+    m.emit_coop_matrix_load(ty_cmat_c, mat_c_init, ptr_c_tile, c0, c_row_stride);
 
     // ── Accumulator starts as loaded C (for beta=1 semantics) ────────────────
     // For simplicity this kernel computes C += A*B (i.e., alpha=1, beta=1).
@@ -640,13 +614,13 @@ pub fn gemm_xmx_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32> {
         let ptr_a_tile = m.alloc_id();
         m.emit_in_bounds_access_chain(ty_ptr_f32_sb, ptr_a_tile, var_a, &[c0, a_base_flat]);
         let mat_a = m.alloc_id();
-        m.emit_coop_matrix_load(ty_cmat_a, mat_a, ptr_a_tile, MATRIX_LAYOUT_ROW_MAJOR, dim_k);
+        m.emit_coop_matrix_load(ty_cmat_a, mat_a, ptr_a_tile, c0, dim_k);
 
         // Load B tile: B[0 * N + col_base] (RowMajor, stride = dim_n)
         let ptr_b_tile = m.alloc_id();
         m.emit_in_bounds_access_chain(ty_ptr_f32_sb, ptr_b_tile, var_b, &[c0, col_base]);
         let mat_b = m.alloc_id();
-        m.emit_coop_matrix_load(ty_cmat_b, mat_b, ptr_b_tile, MATRIX_LAYOUT_ROW_MAJOR, dim_n);
+        m.emit_coop_matrix_load(ty_cmat_b, mat_b, ptr_b_tile, c0, dim_n);
 
         // Multiply-accumulate: tmp = A * B + C_init
         let mat_tmp = m.alloc_id();
@@ -662,12 +636,7 @@ pub fn gemm_xmx_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32> {
     };
 
     // ── Store result tile back to C ───────────────────────────────────────────
-    m.emit_coop_matrix_store(
-        ptr_c_tile,
-        mat_acc_after,
-        MATRIX_LAYOUT_ROW_MAJOR,
-        c_row_stride,
-    );
+    m.emit_coop_matrix_store(ptr_c_tile, mat_acc_after, c0, c_row_stride);
 
     m.emit_return();
     m.emit_function_end();
@@ -782,48 +751,30 @@ pub fn gemm_xmx_f16_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32>
     m.emit_type_ptr(ty_ptr_f16_sb, STORAGE_CLASS_STORAGE_BUFFER, ty_f16);
     m.emit_type_ptr(ty_ptr_f32_sb, STORAGE_CLASS_STORAGE_BUFFER, ty_f32);
     m.emit_type_ptr(ty_ptr_u32_sb, STORAGE_CLASS_STORAGE_BUFFER, ty_u32);
-    // XMX: A and B use f16 components, C/D use f32
-    m.emit_type_cooperative_matrix(
-        ty_cmat_a,
-        ty_f16,
-        SCOPE_SUBGROUP,
-        tile.m,
-        tile.k,
-        MATRIX_USE_A,
-    );
-    m.emit_type_cooperative_matrix(
-        ty_cmat_b,
-        ty_f16,
-        SCOPE_SUBGROUP,
-        tile.k,
-        tile.n,
-        MATRIX_USE_B,
-    );
-    m.emit_type_cooperative_matrix(
-        ty_cmat_c,
-        ty_f32,
-        SCOPE_SUBGROUP,
-        tile.m,
-        tile.n,
-        MATRIX_USE_ACCUMULATOR,
-    );
+    // Constants (declared before the cooperative-matrix types that ref them;
+    // Scope/Rows/Columns/Use operands are IdRefs to constant integers).
+    let c0 = m.alloc_id();
+    let c1 = m.alloc_id();
+    let c2 = m.alloc_id();
+    let c_scope = m.alloc_id();
+    let c_tm = m.alloc_id();
+    let c_tn = m.alloc_id();
+    let c_tk = m.alloc_id();
+    m.emit_const_u32(ty_u32, c0, 0);
+    m.emit_const_u32(ty_u32, c1, 1);
+    m.emit_const_u32(ty_u32, c2, 2);
+    m.emit_const_u32(ty_u32, c_scope, SCOPE_SUBGROUP);
+    m.emit_const_u32(ty_u32, c_tm, tile.m);
+    m.emit_const_u32(ty_u32, c_tn, tile.n);
+    m.emit_const_u32(ty_u32, c_tk, tile.k);
+
+    // XMX: A and B use f16 components, C/D use f32. MatrixUse A=0/B=1/Accum=2.
+    m.emit_type_cooperative_matrix(ty_cmat_a, ty_f16, c_scope, c_tm, c_tk, c0);
+    m.emit_type_cooperative_matrix(ty_cmat_b, ty_f16, c_scope, c_tk, c_tn, c1);
+    m.emit_type_cooperative_matrix(ty_cmat_c, ty_f32, c_scope, c_tm, c_tn, c2);
     m.emit(30, &[ty_v3u32, ty_u32, 3]); // OpTypeVector v3u32
     m.emit_type_ptr(ty_ptr_in_v3u32, STORAGE_CLASS_INPUT, ty_v3u32);
     m.emit_type_fn(ty_fn_void, ty_void, &[]);
-
-    // Constants
-    let c0 = m.alloc_id();
-    m.emit_const_u32(ty_u32, c0, 0);
-    let c1 = m.alloc_id();
-    m.emit_const_u32(ty_u32, c1, 1);
-    let c2 = m.alloc_id();
-    m.emit_const_u32(ty_u32, c2, 2);
-    let c_tm = m.alloc_id();
-    m.emit_const_u32(ty_u32, c_tm, tile.m);
-    let c_tn = m.alloc_id();
-    m.emit_const_u32(ty_u32, c_tn, tile.n);
-    let c_tk = m.alloc_id();
-    m.emit_const_u32(ty_u32, c_tk, tile.k);
 
     // Variables
     m.emit_variable(ty_ptr_sb_f16, var_a, STORAGE_CLASS_STORAGE_BUFFER);
@@ -869,13 +820,8 @@ pub fn gemm_xmx_f16_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32>
     let ptr_c_tile = m.alloc_id();
     m.emit_in_bounds_access_chain(ty_ptr_f32_sb, ptr_c_tile, var_c, &[c0, c_base_flat]);
     let mat_c_init = m.alloc_id();
-    m.emit_coop_matrix_load(
-        ty_cmat_c,
-        mat_c_init,
-        ptr_c_tile,
-        MATRIX_LAYOUT_ROW_MAJOR,
-        dim_n,
-    );
+    // MemoryLayout is an IdRef to a constant; RowMajor == 0 == c0.
+    m.emit_coop_matrix_load(ty_cmat_c, mat_c_init, ptr_c_tile, c0, dim_n);
 
     // Load A tile (f16)
     let a_base = m.alloc_id();
@@ -883,13 +829,13 @@ pub fn gemm_xmx_f16_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32>
     let ptr_a = m.alloc_id();
     m.emit_in_bounds_access_chain(ty_ptr_f16_sb, ptr_a, var_a, &[c0, a_base]);
     let mat_a = m.alloc_id();
-    m.emit_coop_matrix_load(ty_cmat_a, mat_a, ptr_a, MATRIX_LAYOUT_ROW_MAJOR, dim_k);
+    m.emit_coop_matrix_load(ty_cmat_a, mat_a, ptr_a, c0, dim_k);
 
     // Load B tile (f16)
     let ptr_b = m.alloc_id();
     m.emit_in_bounds_access_chain(ty_ptr_f16_sb, ptr_b, var_b, &[c0, col_base]);
     let mat_b = m.alloc_id();
-    m.emit_coop_matrix_load(ty_cmat_b, mat_b, ptr_b, MATRIX_LAYOUT_ROW_MAJOR, dim_n);
+    m.emit_coop_matrix_load(ty_cmat_b, mat_b, ptr_b, c0, dim_n);
 
     // XMX multiply-accumulate: D = A(f16)*B(f16) + C(f32)
     let mat_out = m.alloc_id();
@@ -903,7 +849,7 @@ pub fn gemm_xmx_f16_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32>
     );
 
     // Store result
-    m.emit_coop_matrix_store(ptr_c_tile, mat_out, MATRIX_LAYOUT_ROW_MAJOR, dim_n);
+    m.emit_coop_matrix_store(ptr_c_tile, mat_out, c0, dim_n);
 
     m.emit_return();
     m.emit_function_end();
@@ -914,71 +860,32 @@ pub fn gemm_xmx_f16_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32>
 
 /// Generate a SPIR-V binary for BF16 input / FP32 accumulation XMX GEMM.
 ///
-/// BF16 is encoded as `u16` in the storage buffer (Intel SPIR-V typically
-/// treats BF16 as `OpTypeInt 16 0` with a BFloat16KHR decoration or as
-/// `OpTypeBFloat16KHR`). For maximum device compatibility this implementation
-/// uses FP32 loads and a manual narrowing conversion — the key difference is
-/// the cooperative-matrix element type annotation.
+/// # Errors
 ///
-/// On devices lacking native BF16 XMX support the driver falls back to FP32.
-pub fn matmul_xmx_bf16_spirv(tile: XmxTileConfig, wg_x: u32, wg_y: u32) -> Vec<u32> {
-    // BF16 XMX follows the same pattern as FP16 — the element type in the
-    // cooperative matrix is declared as `u16` (16-bit integer, unsigned)
-    // and the driver interprets it as BF16 via the `MatrixNNFloatKHR`
-    // operand on `OpCooperativeMatrixMulAddKHR`.
-    //
-    // For this reference implementation we reuse the FP16 kernel body and
-    // change the entry point name and element type from Float16 to u16.
-    // Production implementations should annotate the MulAdd operand with the
-    // BF16 matmul operand flag (bit 4 = `MatrixASignedComponentsKHR` cleared,
-    // bit 8 = `MatrixBFloat16ComponentsKHR` set) as per the spec draft.
-
-    // Reuse the f16 body — it correctly emits cooperative-matrix load/store/muladd.
-    // The BF16 variant name is meaningful to Level Zero drivers that inspect the
-    // entry point name for optimisation purposes.
-    let mut words = gemm_xmx_f16_spirv(tile, wg_x, wg_y);
-
-    // Patch the entry point name in the words: find the string "gemm_xmx_f16"
-    // and replace it with "matmul_xmx_bf16" (same length ≤ 16 chars, padded).
-    // This is a textual substitution in the serialised SPIR-V word stream.
-    // It does not affect correctness; the driver uses the name for debugging.
-    //
-    // Both names are 13 and 15 characters, fitting in 4 words each.
-    let old = b"gemm_xmx_f16\0\0\0\0";
-    let new = b"matmul_xmx_bf\0\0\0"; // 13 chars + 3 padding = 4 words (16 bytes)
-    patch_entry_point_name(&mut words, old, new);
-
-    words
-}
-
-/// Patch an entry-point name string in a serialised SPIR-V word stream.
+/// Returns [`LevelZeroError::Unsupported`](crate::error::LevelZeroError::Unsupported) because a correct BF16 kernel
+/// requires a genuine BF16 cooperative-matrix element type (an
+/// `OpTypeFloat 16` carrying the `SPV_KHR_bfloat16` `BFloat16KHR` FP-encoding,
+/// plus the matching `BFloat16CooperativeMatrixKHR` capability), which cannot
+/// be validated on this non-Intel host.
 ///
-/// Scans the word stream for a 4-word (16-byte) sequence matching `old` and
-/// replaces it with `new`. Both slices must be exactly 16 bytes.
-fn patch_entry_point_name(words: &mut [u32], old: &[u8; 16], new: &[u8; 16]) {
-    let old_words = [
-        u32::from_le_bytes([old[0], old[1], old[2], old[3]]),
-        u32::from_le_bytes([old[4], old[5], old[6], old[7]]),
-        u32::from_le_bytes([old[8], old[9], old[10], old[11]]),
-        u32::from_le_bytes([old[12], old[13], old[14], old[15]]),
-    ];
-    let new_words = [
-        u32::from_le_bytes([new[0], new[1], new[2], new[3]]),
-        u32::from_le_bytes([new[4], new[5], new[6], new[7]]),
-        u32::from_le_bytes([new[8], new[9], new[10], new[11]]),
-        u32::from_le_bytes([new[12], new[13], new[14], new[15]]),
-    ];
-    'outer: for i in 0..words.len().saturating_sub(3) {
-        for (j, &ow) in old_words.iter().enumerate() {
-            if words[i + j] != ow {
-                continue 'outer;
-            }
-        }
-        for (j, &nw) in new_words.iter().enumerate() {
-            words[i + j] = nw;
-        }
-        break;
-    }
+/// The previous implementation reused the FP16 kernel body verbatim and merely
+/// renamed the entry point. Because BF16 (8-bit exponent) and IEEE binary16
+/// (5-bit exponent) share no bit layout, that reinterpreted BF16 inputs as
+/// FP16 and produced silently wrong results while reporting success — a
+/// correctness trap. Returning a loud error is strictly better than emitting an
+/// FP16 kernel mislabeled as BF16.
+pub fn matmul_xmx_bf16_spirv(
+    tile: XmxTileConfig,
+    wg_x: u32,
+    wg_y: u32,
+) -> crate::error::LevelZeroResult<Vec<u32>> {
+    let _ = (tile, wg_x, wg_y);
+    Err(crate::error::LevelZeroError::Unsupported(
+        "BF16 XMX GEMM (matmul_xmx_bf16_spirv) is not yet implemented: it requires a genuine \
+         SPV_KHR_bfloat16 cooperative-matrix element type; reusing the FP16 kernel would \
+         reinterpret BF16 bits as IEEE binary16 and silently corrupt every result"
+            .into(),
+    ))
 }
 
 // ─── XMX detection / capability query ────────────────────────────────────────
@@ -1055,9 +962,15 @@ mod tests {
     }
 
     #[test]
-    fn matmul_xmx_bf16_produces_valid_header() {
-        let words = matmul_xmx_bf16_spirv(XmxTileConfig::default(), 16, 16);
-        assert_eq!(words[0], SPIRV_MAGIC);
+    fn matmul_xmx_bf16_returns_unsupported() {
+        // The BF16 kernel must NOT silently reuse the FP16 body (which would
+        // reinterpret BF16 bits as IEEE binary16 and corrupt every result); it
+        // returns a loud error until a genuine BF16 element type is emitted.
+        let result = matmul_xmx_bf16_spirv(XmxTileConfig::default(), 16, 16);
+        assert!(matches!(
+            result,
+            Err(crate::error::LevelZeroError::Unsupported(_))
+        ));
     }
 
     #[test]

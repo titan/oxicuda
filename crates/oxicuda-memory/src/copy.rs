@@ -178,18 +178,16 @@ pub fn copy_dtoh_async_raw<T: Copy>(
 /// Asynchronously copies data from one device buffer to another.
 ///
 /// Both buffers must have the same length.  The copy is enqueued on
-/// `stream`.
-///
-/// Note: The CUDA Driver API does not provide `cuMemcpyDtoDAsync` directly;
-/// this uses `cuMemcpyHtoDAsync_v2` semantics via the driver's internal
-/// routing for device-to-device copies.  For true async D2D, consider
-/// using peer copy functions or ensuring both buffers are in the same
-/// context.
+/// `stream` via `cuMemcpyDtoDAsync_v2` and may not be complete when this
+/// function returns; the caller must synchronise `stream` (or otherwise
+/// order subsequent accesses) before reading `dst` or reusing `src`.
 ///
 /// # Errors
 ///
 /// * [`CudaError::InvalidValue`] if `dst.len() != src.len()`.
-/// * Other driver errors.
+/// * [`CudaError::NotSupported`] if the loaded driver predates CUDA 4.0 and
+///   does not export `cuMemcpyDtoDAsync_v2`.
+/// * Other driver errors from `cuMemcpyDtoDAsync_v2`.
 pub fn copy_dtod_async<T: Copy>(
     dst: &mut DeviceBuffer<T>,
     src: &DeviceBuffer<T>,
@@ -198,13 +196,13 @@ pub fn copy_dtod_async<T: Copy>(
     if dst.len() != src.len() {
         return Err(CudaError::InvalidValue);
     }
-    // Use synchronous D2D copy followed by stream ordering via event.
-    // The CUDA driver routes D2D copies internally; we use the sync version
-    // and rely on stream ordering at the caller level.
-    // A future enhancement can add cuMemcpyDtoDAsync when the driver
-    // exposes it.
-    let _ = stream;
-    copy_dtod(dst, src)
+    let byte_size = src.byte_size();
+    oxicuda_driver::memory_info::memcpy_device_to_device_async(
+        dst.as_device_ptr(),
+        src.as_device_ptr(),
+        byte_size,
+        stream,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -477,5 +475,55 @@ mod tests {
             &oxicuda_driver::stream::Stream,
         ) -> super::CudaResult<()>;
         let _f: RegionHtodFn = super::copy_htod_region_async;
+    }
+
+    /// Regression test for F035: `copy_dtod_async` must actually enqueue a
+    /// real `cuMemcpyDtoDAsync_v2` on the given stream (rather than silently
+    /// falling back to a synchronous legacy-stream copy) and produce
+    /// correct data once the stream is synchronised.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn copy_dtod_async_round_trips_on_device() {
+        if oxicuda_driver::init().is_err() {
+            eprintln!("skipping: CUDA init failed");
+            return;
+        }
+        let Ok(dev) = oxicuda_driver::device::Device::get(0) else {
+            eprintln!("skipping: no CUDA device");
+            return;
+        };
+        let Ok(ctx) = oxicuda_driver::context::Context::new(&dev) else {
+            eprintln!("skipping: context creation failed");
+            return;
+        };
+        let ctx = std::sync::Arc::new(ctx);
+        let Ok(stream) = oxicuda_driver::stream::Stream::new(&ctx) else {
+            eprintln!("skipping: stream creation failed");
+            return;
+        };
+
+        let host_src: Vec<f32> = (0..1024).map(|i| i as f32 * 0.5).collect();
+        let Ok(src) = super::DeviceBuffer::<f32>::from_host(&host_src) else {
+            eprintln!("skipping: src alloc failed");
+            return;
+        };
+        let Ok(mut dst) = super::DeviceBuffer::<f32>::from_host(&vec![0.0f32; 1024]) else {
+            eprintln!("skipping: dst alloc failed");
+            return;
+        };
+
+        match super::copy_dtod_async(&mut dst, &src, &stream) {
+            Ok(()) => {}
+            Err(oxicuda_driver::error::CudaError::NotSupported) => {
+                eprintln!("skipping: driver lacks cuMemcpyDtoDAsync_v2");
+                return;
+            }
+            Err(e) => panic!("copy_dtod_async failed: {e:?}"),
+        }
+        stream.synchronize().expect("stream sync failed");
+
+        let mut host_out = vec![0.0f32; 1024];
+        dst.copy_to_host(&mut host_out).expect("copy back failed");
+        assert_eq!(host_out, host_src);
     }
 }

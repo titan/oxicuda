@@ -7,7 +7,7 @@
 //! |----------|------------------------------------|------------|--------------|
 //! | 16x8x8   | F16; **TF32** (Ampere+)            | F16, F32   | Volta/Turing |
 //! | 16x8x16  | F16, BF16; **S8/U8** (Ampere+)     | F32, S32   | Ampere+      |
-//! | 16x8x32  | F16, BF16, E4M3, E5M2; **S8/U8**  | F32, S32   | Hopper+/A+   |
+//! | 16x8x32  | E4M3, E5M2 (FP8); **S8/U8**       | F32, S32   | Hopper+/A+   |
 //! | 8x8x16   | **S8, U8** (Turing+)               | S32        | Turing+      |
 //! | 8x8x32   | **S4, U4** (Turing+)               | S32        | Turing+      |
 
@@ -112,12 +112,15 @@ impl MmaConfig {
                     )));
                 }
             },
-            // ── m16n8k32: FP/FP8 (Hopper+) or S8/U8 INT8 (Ampere+) ─────────
+            // ── m16n8k32: FP8 (Hopper+) or S8/U8 INT8 (Ampere+) ────────────
+            // Note: `mma.sync.m16n8k32` with F16/BF16 does NOT exist in the PTX
+            // ISA — 16-bit inputs cap at K=16. Only FP8 (E4M3/E5M2) and INT8
+            // (S8/U8) reach K=32.
             MmaShape::M16N8K32 => match self.a_type {
-                PtxType::F16 | PtxType::BF16 | PtxType::E4M3 | PtxType::E5M2 => {
+                PtxType::E4M3 | PtxType::E5M2 => {
                     if self.accumulator != PtxType::F32 {
                         return Err(PtxGenError::InvalidType(format!(
-                            "m16n8k32 FP: accumulator must be F32, got {}",
+                            "m16n8k32 FP8: accumulator must be F32, got {}",
                             self.accumulator.as_ptx_str()
                         )));
                     }
@@ -132,7 +135,8 @@ impl MmaConfig {
                 }
                 other => {
                     return Err(PtxGenError::InvalidType(format!(
-                        "m16n8k32 requires F16, BF16, E4M3, E5M2, S8, or U8 A/B, got {}",
+                        "m16n8k32 requires E4M3, E5M2, S8, or U8 A/B (F16/BF16 do not \
+                         exist at K=32), got {}",
                         other.as_ptx_str()
                     )));
                 }
@@ -253,12 +257,16 @@ impl MmaConfig {
     /// Returns an error if the configuration is invalid.
     pub fn regs_per_thread_a(&self) -> Result<u32, PtxGenError> {
         self.validate()?;
+        // Registers per thread = (M × K × elem_bits) / 1024, since a warp holds
+        // the fragment across 32 lanes × 32 bits per register = 1024 bits per
+        // register-per-thread unit. The count therefore depends on the element
+        // type, not just the shape (e.g. TF32 doubles the F16 count).
         Ok(match self.shape {
-            MmaShape::M16N8K8 => 2,  // 2 × B32/thread (F16/TF32)
-            MmaShape::M16N8K16 => 4, // 4 × B32/thread
-            MmaShape::M16N8K32 => 8, // 8 × B32/thread
-            // 1 × B32/thread: INT8 packed ×4 or INT4 packed ×8
+            // Sub-byte IMMA (INT8 ×4 / INT4 ×8) packs into a single register.
             MmaShape::M8N8K16 | MmaShape::M8N8K32 => 1,
+            MmaShape::M16N8K8 => 16 * 8 * mma_elem_bits(self.a_type) / 1024,
+            MmaShape::M16N8K16 => 16 * 16 * mma_elem_bits(self.a_type) / 1024,
+            MmaShape::M16N8K32 => 16 * 32 * mma_elem_bits(self.a_type) / 1024,
         })
     }
 
@@ -269,11 +277,12 @@ impl MmaConfig {
     /// Returns an error if the configuration is invalid.
     pub fn regs_per_thread_b(&self) -> Result<u32, PtxGenError> {
         self.validate()?;
+        // Registers per thread = (K × N × elem_bits) / 1024 (see `regs_per_thread_a`).
         Ok(match self.shape {
-            MmaShape::M16N8K16 => 2,
-            MmaShape::M16N8K32 => 4,
-            // M16N8K8, M8N8K16, M8N8K32 all use 1 register per thread for B
-            MmaShape::M16N8K8 | MmaShape::M8N8K16 | MmaShape::M8N8K32 => 1,
+            MmaShape::M8N8K16 | MmaShape::M8N8K32 => 1,
+            MmaShape::M16N8K8 => 8 * 8 * mma_elem_bits(self.a_type) / 1024,
+            MmaShape::M16N8K16 => 16 * 8 * mma_elem_bits(self.a_type) / 1024,
+            MmaShape::M16N8K32 => 32 * 8 * mma_elem_bits(self.a_type) / 1024,
         })
     }
 
@@ -310,6 +319,22 @@ impl MmaConfig {
             MmaShape::M8N8K16 => (8, 8, 16),
             MmaShape::M8N8K32 => (8, 8, 32),
         }
+    }
+}
+
+/// Element bit-width used for MMA fragment register counting.
+///
+/// TF32 is counted as 32 bits: although only 19 bits are significant, a TF32
+/// element still occupies a full 32-bit register lane. Sub-byte carriers
+/// (S8/U8 standing in for S4/U4) count as 8 bits, but the `M8N8K*` shapes that
+/// use them override the count to 1 in `regs_per_thread_*`.
+const fn mma_elem_bits(ty: PtxType) -> u32 {
+    match ty {
+        PtxType::F64 => 64,
+        PtxType::F32 | PtxType::TF32 => 32,
+        PtxType::F16 | PtxType::BF16 => 16,
+        // S8/U8/E4M3/E5M2 and other 8-bit carriers.
+        _ => 8,
     }
 }
 
@@ -360,21 +385,48 @@ mod tests {
             PtxType::F32,
         );
         assert!(cfg.validate().is_ok(), "TF32 m16n8k8 must be valid");
+        // TF32 elements occupy full 32-bit lanes, so m16n8k8 TF32 uses A=4/B=2
+        // registers per thread (double the F16 A=2/B=1).
         assert_eq!(
             cfg.regs_per_thread_a()
                 .expect("valid MMA config should return register counts without error"),
-            2
+            4
         );
         assert_eq!(
             cfg.regs_per_thread_b()
                 .expect("valid MMA config should return register counts without error"),
-            1
+            2
         );
         assert_eq!(
             cfg.regs_per_thread_c()
                 .expect("valid MMA config should return register counts without error"),
             4
         );
+    }
+
+    #[test]
+    fn m16n8k32_f16_bf16_rejected() {
+        // mma.sync.m16n8k32 with 16-bit inputs does not exist in the PTX ISA.
+        for ty in [PtxType::F16, PtxType::BF16] {
+            let cfg = MmaConfig::new(MmaShape::M16N8K32, ty, ty, PtxType::F32);
+            assert!(
+                cfg.validate().is_err(),
+                "m16n8k32 with {ty:?} must be rejected (no such instruction)"
+            );
+        }
+    }
+
+    #[test]
+    fn m16n8k32_fp8_int8_reg_counts() {
+        // FP8/INT8 m16n8k32: A=4, B=2 registers per thread.
+        for ty in [PtxType::E4M3, PtxType::E5M2] {
+            let cfg = MmaConfig::new(MmaShape::M16N8K32, ty, ty, PtxType::F32);
+            assert_eq!(cfg.regs_per_thread_a().expect("valid"), 4);
+            assert_eq!(cfg.regs_per_thread_b().expect("valid"), 2);
+        }
+        let s8 = MmaConfig::new(MmaShape::M16N8K32, PtxType::S8, PtxType::S8, PtxType::S32);
+        assert_eq!(s8.regs_per_thread_a().expect("valid"), 4);
+        assert_eq!(s8.regs_per_thread_b().expect("valid"), 2);
     }
 
     #[test]

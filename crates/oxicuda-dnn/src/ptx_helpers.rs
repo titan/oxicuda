@@ -90,6 +90,19 @@ pub(crate) fn add_float<T: GpuFloat>(
     }
 }
 
+/// Emits a subtraction: `dst = a - b`.
+pub(crate) fn sub_float<T: GpuFloat>(
+    b: &mut BodyBuilder<'_>,
+    a: Register,
+    bv: Register,
+) -> Register {
+    if T::PTX_TYPE == PtxType::F32 {
+        b.sub_f32(a, bv)
+    } else {
+        b.sub_f64(a, bv)
+    }
+}
+
 /// Emits a fused multiply-add: `dst = a * bv + c`.
 pub(crate) fn fma_float<T: GpuFloat>(
     b: &mut BodyBuilder<'_>,

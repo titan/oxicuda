@@ -164,24 +164,31 @@ impl RocmMemoryManager {
     pub fn copy_to_device(&self, handle: u64, src: &[u8]) -> RocmResult<()> {
         #[cfg(target_os = "linux")]
         {
-            let buffers = self
-                .buffers
-                .lock()
-                .map_err(|_| RocmError::DeviceError("mutex poisoned".into()))?;
-            let rec = buffers
-                .get(&handle)
-                .ok_or_else(|| RocmError::InvalidArgument(format!("unknown handle {handle}")))?;
-            let copy_len = src.len().min(rec.size as usize);
+            // Look the record up and copy the needed fields out, then release
+            // the mutex *before* the blocking `hipMemcpy` so concurrent
+            // allocate/free/copy calls on other buffers are not serialised
+            // behind this transfer.
+            let (device_ptr, buf_size) = {
+                let buffers = self
+                    .buffers
+                    .lock()
+                    .map_err(|_| RocmError::DeviceError("mutex poisoned".into()))?;
+                let rec = buffers.get(&handle).ok_or_else(|| {
+                    RocmError::InvalidArgument(format!("unknown handle {handle}"))
+                })?;
+                (rec.device_ptr, rec.size)
+            };
+            let copy_len = src.len().min(buf_size as usize);
             if copy_len == 0 {
                 return Ok(());
             }
-            // SAFETY: `hip_memcpy` is a valid fn ptr.  `rec.device_ptr` is a
-            // live HIP allocation; `src.as_ptr()` points to a valid CPU slice
-            // for `copy_len` bytes.  `HIP_MEMCPY_HOST_TO_DEVICE` is the
-            // correct transfer direction.
+            // SAFETY: `hip_memcpy` is a valid fn ptr.  `device_ptr` is a
+            // live HIP allocation for `buf_size` bytes; `src.as_ptr()` points to
+            // a valid CPU slice for `copy_len` bytes.  `HIP_MEMCPY_HOST_TO_DEVICE`
+            // is the correct transfer direction.
             let rc = unsafe {
                 (self.device.api.hip_memcpy)(
-                    rec.device_ptr,
+                    device_ptr,
                     src.as_ptr().cast(),
                     copy_len,
                     HIP_MEMCPY_HOST_TO_DEVICE,
@@ -205,25 +212,30 @@ impl RocmMemoryManager {
     pub fn copy_from_device(&self, dst: &mut [u8], handle: u64) -> RocmResult<()> {
         #[cfg(target_os = "linux")]
         {
-            let buffers = self
-                .buffers
-                .lock()
-                .map_err(|_| RocmError::DeviceError("mutex poisoned".into()))?;
-            let rec = buffers
-                .get(&handle)
-                .ok_or_else(|| RocmError::InvalidArgument(format!("unknown handle {handle}")))?;
-            let copy_len = dst.len().min(rec.size as usize);
+            // Release the mutex before the blocking `hipMemcpy` (see
+            // `copy_to_device`) so unrelated buffer operations run concurrently.
+            let (device_ptr, buf_size) = {
+                let buffers = self
+                    .buffers
+                    .lock()
+                    .map_err(|_| RocmError::DeviceError("mutex poisoned".into()))?;
+                let rec = buffers.get(&handle).ok_or_else(|| {
+                    RocmError::InvalidArgument(format!("unknown handle {handle}"))
+                })?;
+                (rec.device_ptr, rec.size)
+            };
+            let copy_len = dst.len().min(buf_size as usize);
             if copy_len == 0 {
                 return Ok(());
             }
-            // SAFETY: `hip_memcpy` is a valid fn ptr.  `rec.device_ptr` is a
-            // live HIP allocation; `dst.as_mut_ptr()` points to a valid
-            // writable CPU slice for `copy_len` bytes.
+            // SAFETY: `hip_memcpy` is a valid fn ptr.  `device_ptr` is a
+            // live HIP allocation for `buf_size` bytes; `dst.as_mut_ptr()` points
+            // to a valid writable CPU slice for `copy_len` bytes.
             // `HIP_MEMCPY_DEVICE_TO_HOST` is the correct direction.
             let rc = unsafe {
                 (self.device.api.hip_memcpy)(
                     dst.as_mut_ptr().cast(),
-                    rec.device_ptr.cast_const(),
+                    device_ptr.cast_const(),
                     copy_len,
                     HIP_MEMCPY_DEVICE_TO_HOST,
                 )

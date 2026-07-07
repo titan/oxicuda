@@ -59,6 +59,7 @@ fn build_axis_kernel(
     let ptx_source = template
         .generate()
         .map_err(|e| BlasError::PtxGeneration(format!("reduce_axis_{}: {e}", ptx_op.as_str())))?;
+    let ptx_source = super::ptx_fixup::relocate_perf_directives(&ptx_source);
     let module = Arc::new(
         Module::from_ptx(&ptx_source)
             .map_err(|e| BlasError::LaunchFailed(format!("module load for {kernel_name}: {e}")))?,

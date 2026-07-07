@@ -382,7 +382,7 @@ pub fn plan_dynamic_launch(
 ) -> Result<DynamicLaunchPlan, LaunchError> {
     validate_dynamic_config(config)?;
 
-    let parent_grid_total = config.child_grid.total() as u64;
+    let parent_grid_total = config.child_grid.total_u64();
     let estimated_child_launches =
         parent_grid_total.saturating_mul(config.child_block.total() as u64);
     let memory_overhead_bytes =

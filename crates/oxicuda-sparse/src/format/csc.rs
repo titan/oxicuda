@@ -102,6 +102,17 @@ impl<T: GpuFloat> CscMatrix<T> {
             }
         }
 
+        // Validate row indices are within [0, rows); an out-of-range
+        // row_idx would otherwise cause SpMV/SpMM kernels to read device
+        // memory out of bounds.
+        for (k, &r) in row_idx.iter().enumerate() {
+            if r < 0 || r as u32 >= rows {
+                return Err(SparseError::InvalidFormat(format!(
+                    "row_idx[{k}] = {r} out of range [0, {rows})"
+                )));
+            }
+        }
+
         let d_col_ptr = DeviceBuffer::from_host(col_ptr)?;
         let d_row_idx = DeviceBuffer::from_host(row_idx)?;
         let d_values = DeviceBuffer::from_host(values)?;
@@ -266,5 +277,18 @@ mod tests {
     fn csc_validation_zero_nnz() {
         let result = CscMatrix::<f32>::from_host(2, 2, &[0, 0, 0], &[], &[]);
         assert!(matches!(result, Err(SparseError::ZeroNnz)));
+    }
+
+    #[test]
+    fn csc_validation_row_idx_out_of_range() {
+        // rows = 2, so row index 2 is out of range
+        let result = CscMatrix::<f32>::from_host(2, 2, &[0, 1, 2], &[0, 2], &[1.0, 2.0]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
+    }
+
+    #[test]
+    fn csc_validation_negative_row_idx() {
+        let result = CscMatrix::<f32>::from_host(2, 2, &[0, 1, 2], &[0, -1], &[1.0, 2.0]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
     }
 }

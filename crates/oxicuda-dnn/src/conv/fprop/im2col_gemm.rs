@@ -178,9 +178,22 @@ impl Im2colGemmConv {
         let out_h = out_dims.first().copied().unwrap_or(1);
         let out_w = out_dims.get(1).copied().unwrap_or(1);
         let channels_per_group = self.problem.in_channels / self.problem.groups;
-        let filter_volume: u32 = self.problem.filter_dims.iter().product();
-        let total_elements =
-            self.problem.batch * out_h * out_w * channels_per_group * filter_volume;
+        let filter_volume: u64 = self
+            .problem
+            .filter_dims
+            .iter()
+            .map(|&d| u64::from(d))
+            .product();
+        let total_elements_u64 = u64::from(self.problem.batch)
+            * u64::from(out_h)
+            * u64::from(out_w)
+            * u64::from(channels_per_group)
+            * filter_volume;
+        let total_elements = u32::try_from(total_elements_u64).map_err(|_| {
+            DnnError::InvalidDimension(format!(
+                "im2col element count {total_elements_u64} exceeds u32::MAX (32-bit kernel indexing limit)"
+            ))
+        })?;
 
         let block_size = 256u32;
         let grid = grid_size_for(total_elements, block_size);
@@ -673,5 +686,91 @@ mod tests {
         let blas_n = gemm_m;
         let blas_k = gemm_k;
         assert_eq!((blas_m, blas_n, blas_k), (16, 64, 27));
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression for F019: 32-bit element-count overflow must be rejected,
+    // not silently truncated into an under-launched kernel.
+    // -----------------------------------------------------------------------
+
+    /// `launch_im2col` must reject (rather than silently truncate) an
+    /// element count that overflows `u32`, computing the product in `u64`
+    /// first. The problem below is built from plain integer dimensions (no
+    /// multi-gigabyte allocation is needed) whose product
+    /// `batch * out_h * out_w * channels_per_group * filter_volume` exceeds
+    /// `u32::MAX`; the check must fire before any device memory is touched
+    /// by the launch, so tiny 1-element `input`/`workspace` buffers suffice.
+    #[test]
+    #[cfg(feature = "gpu-tests")]
+    fn launch_im2col_rejects_element_count_overflow() {
+        use oxicuda_driver::{Context, Device};
+        use oxicuda_memory::DeviceBuffer;
+
+        use crate::types::TensorLayout;
+
+        if oxicuda_driver::init().is_err() {
+            eprintln!("skipping launch_im2col_rejects_element_count_overflow: no CUDA driver");
+            return;
+        }
+        let Ok(device) = Device::get(0) else {
+            eprintln!("skipping launch_im2col_rejects_element_count_overflow: no CUDA device");
+            return;
+        };
+        let Ok(context) = Context::new(&device) else {
+            eprintln!("skipping launch_im2col_rejects_element_count_overflow: no context");
+            return;
+        };
+        let ctx = Arc::new(context);
+        let Ok(handle) = DnnHandle::new(&ctx) else {
+            eprintln!("skipping launch_im2col_rejects_element_count_overflow: no DnnHandle");
+            return;
+        };
+
+        // filter_volume alone (65536 * 65536 = 2^32) already exceeds
+        // u32::MAX; in_dims match filter_dims exactly (pad=0, stride=1,
+        // dilation=1) so output_dims() resolves to [1, 1].
+        let problem = ConvProblem {
+            batch: 1,
+            in_channels: 1,
+            in_dims: vec![65536, 65536],
+            out_channels: 1,
+            filter_dims: vec![65536, 65536],
+            padding: vec![0, 0],
+            stride: vec![1, 1],
+            dilation: vec![1, 1],
+            groups: 1,
+            input_type: PtxType::F32,
+            output_type: PtxType::F32,
+            layout: TensorLayout::Nchw,
+        };
+        let filter_volume: u64 = problem.filter_dims.iter().map(|&d| u64::from(d)).product();
+        assert!(
+            filter_volume > u64::from(u32::MAX),
+            "test fixture must actually overflow u32"
+        );
+
+        let engine = Im2colGemmConv::new(problem, handle.sm_version());
+
+        let d_in = DeviceBuffer::<f32>::from_host(&[0.0f32]).expect("alloc input");
+        let input = TensorDesc::<f32>::from_raw(
+            d_in.as_device_ptr(),
+            vec![1, 1],
+            vec![1, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("build input descriptor");
+        let mut workspace = DeviceBuffer::<u8>::alloc(1).expect("alloc workspace");
+
+        match engine.launch_im2col(&handle, &input, &mut workspace) {
+            Err(DnnError::InvalidDimension(msg)) => {
+                assert!(
+                    msg.contains("u32::MAX"),
+                    "expected overflow message, got: {msg}"
+                );
+            }
+            other => {
+                panic!("expected DnnError::InvalidDimension overflow rejection, got {other:?}")
+            }
+        }
     }
 }

@@ -204,13 +204,25 @@ impl ConvProblem {
             )));
         }
 
+        if conv_desc.groups == 0 {
+            return Err(DnnError::InvalidArgument("groups must be >= 1".into()));
+        }
+
         // Extract dimensions based on layout.
         // NCHW: [N, C, H, W], filter: [K, C/g, R, S]
         // NHWC: [N, H, W, C], filter: [K, R, S, C/g]  (but we store canonically)
         let (batch, in_channels, in_dims) = Self::extract_input_dims(input)?;
         let (out_channels, filter_dims) = Self::extract_filter_dims(filter, spatial)?;
 
-        Ok(Self {
+        let expected_filter_in = in_channels / conv_desc.groups;
+        if filter.dims[1] != expected_filter_in {
+            return Err(DnnError::InvalidDimension(format!(
+                "filter in-channels ({}) != in_channels/groups ({in_channels}/{} = {expected_filter_in})",
+                filter.dims[1], conv_desc.groups
+            )));
+        }
+
+        let problem = Self {
             batch,
             in_channels,
             in_dims,
@@ -223,7 +235,21 @@ impl ConvProblem {
             input_type: T::PTX_TYPE,
             output_type: T::PTX_TYPE,
             layout,
-        })
+        };
+
+        let expected_out_spatial = problem.output_dims()?;
+        let actual_out_spatial = &output.dims[2..];
+        if output.dims[0] != problem.batch
+            || output.dims[1] != problem.out_channels
+            || actual_out_spatial != expected_out_spatial.as_slice()
+        {
+            return Err(DnnError::InvalidDimension(format!(
+                "output shape {:?} != expected [{}, {}, {:?}]",
+                output.dims, problem.batch, problem.out_channels, expected_out_spatial
+            )));
+        }
+
+        Ok(problem)
     }
 
     /// Validates that all problem parameters are consistent.
@@ -465,5 +491,169 @@ mod tests {
         let out = p.output_dims().ok().unwrap_or_default();
         // (32 + 2*1 - 1*(3-1) - 1)/2 + 1 = (32+2-2-1)/2+1 = 31/2+1 = 16
         assert_eq!(out, vec![16, 16]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression for F018: `from_descriptors` must reject a caller-supplied
+    // output tensor (or filter C/g) whose dims don't match the computed
+    // convolution shape, instead of silently proceeding to a kernel launch
+    // that writes `batch*out_channels*P*Q` elements regardless.
+    // -----------------------------------------------------------------------
+
+    /// A valid 5x5 input, 3x3 filter (in_channels=3, groups=1), `pad=0`,
+    /// `stride=1`, `dilation=1` convolution must produce a 3x3 output
+    /// (`5 - 3 + 1 = 3`).
+    #[test]
+    fn from_descriptors_accepts_matching_output_shape() {
+        let input = TensorDesc::<f32>::from_raw(
+            0,
+            vec![1, 3, 5, 5],
+            vec![75, 25, 5, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("input desc");
+        let filter =
+            TensorDesc::<f32>::from_raw(0, vec![4, 3, 3, 3], vec![27, 9, 3, 1], TensorLayout::Nchw)
+                .expect("filter desc");
+        let output = TensorDescMut::<f32>::from_raw(
+            0,
+            vec![1, 4, 3, 3],
+            vec![36, 9, 3, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("output desc");
+        let conv_desc = ConvolutionDescriptor::conv2d(0, 0, 1, 1, 1, 1, 1).expect("conv desc");
+
+        let problem = ConvProblem::from_descriptors(&input, &filter, &output, &conv_desc);
+        assert!(problem.is_ok(), "expected Ok, got {problem:?}");
+    }
+
+    /// Same problem as above but the caller's output tensor has the wrong
+    /// spatial shape (4x4 instead of the correct 3x3) -- must be rejected.
+    #[test]
+    fn from_descriptors_rejects_output_shape_mismatch() {
+        let input = TensorDesc::<f32>::from_raw(
+            0,
+            vec![1, 3, 5, 5],
+            vec![75, 25, 5, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("input desc");
+        let filter =
+            TensorDesc::<f32>::from_raw(0, vec![4, 3, 3, 3], vec![27, 9, 3, 1], TensorLayout::Nchw)
+                .expect("filter desc");
+        let bad_output = TensorDescMut::<f32>::from_raw(
+            0,
+            vec![1, 4, 4, 4],
+            vec![64, 16, 4, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("output desc");
+        let conv_desc = ConvolutionDescriptor::conv2d(0, 0, 1, 1, 1, 1, 1).expect("conv desc");
+
+        let problem = ConvProblem::from_descriptors(&input, &filter, &bad_output, &conv_desc);
+        assert!(
+            matches!(problem, Err(DnnError::InvalidDimension(_))),
+            "expected InvalidDimension, got {problem:?}"
+        );
+    }
+
+    /// Same problem as above but the output channel count is wrong (5
+    /// instead of the filter's 4 out-channels) -- must be rejected even
+    /// though the spatial dims are correct.
+    #[test]
+    fn from_descriptors_rejects_output_channel_mismatch() {
+        let input = TensorDesc::<f32>::from_raw(
+            0,
+            vec![1, 3, 5, 5],
+            vec![75, 25, 5, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("input desc");
+        let filter =
+            TensorDesc::<f32>::from_raw(0, vec![4, 3, 3, 3], vec![27, 9, 3, 1], TensorLayout::Nchw)
+                .expect("filter desc");
+        let bad_output = TensorDescMut::<f32>::from_raw(
+            0,
+            vec![1, 5, 3, 3],
+            vec![45, 9, 3, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("output desc");
+        let conv_desc = ConvolutionDescriptor::conv2d(0, 0, 1, 1, 1, 1, 1).expect("conv desc");
+
+        let problem = ConvProblem::from_descriptors(&input, &filter, &bad_output, &conv_desc);
+        assert!(
+            matches!(problem, Err(DnnError::InvalidDimension(_))),
+            "expected InvalidDimension, got {problem:?}"
+        );
+    }
+
+    /// The filter's per-group input-channel dim (`dims[1]`) must equal
+    /// `in_channels / groups`; a filter claiming 2 input channels against a
+    /// 3-channel input (groups=1) must be rejected before it ever reaches a
+    /// kernel that would read out of bounds.
+    #[test]
+    fn from_descriptors_rejects_filter_channel_mismatch() {
+        let input = TensorDesc::<f32>::from_raw(
+            0,
+            vec![1, 3, 5, 5],
+            vec![75, 25, 5, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("input desc");
+        let bad_filter =
+            TensorDesc::<f32>::from_raw(0, vec![4, 2, 3, 3], vec![18, 9, 3, 1], TensorLayout::Nchw)
+                .expect("filter desc");
+        let output = TensorDescMut::<f32>::from_raw(
+            0,
+            vec![1, 4, 3, 3],
+            vec![36, 9, 3, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("output desc");
+        let conv_desc = ConvolutionDescriptor::conv2d(0, 0, 1, 1, 1, 1, 1).expect("conv desc");
+
+        let problem = ConvProblem::from_descriptors(&input, &bad_filter, &output, &conv_desc);
+        assert!(
+            matches!(problem, Err(DnnError::InvalidDimension(_))),
+            "expected InvalidDimension, got {problem:?}"
+        );
+    }
+
+    /// `groups == 0` is nonsensical (division by zero downstream) and must
+    /// be rejected even when `ConvolutionDescriptor` is built via a struct
+    /// literal that bypasses `ConvolutionDescriptor::conv2d`'s own check.
+    #[test]
+    fn from_descriptors_rejects_zero_groups() {
+        let input = TensorDesc::<f32>::from_raw(
+            0,
+            vec![1, 3, 5, 5],
+            vec![75, 25, 5, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("input desc");
+        let filter =
+            TensorDesc::<f32>::from_raw(0, vec![4, 3, 3, 3], vec![27, 9, 3, 1], TensorLayout::Nchw)
+                .expect("filter desc");
+        let output = TensorDescMut::<f32>::from_raw(
+            0,
+            vec![1, 4, 3, 3],
+            vec![36, 9, 3, 1],
+            TensorLayout::Nchw,
+        )
+        .expect("output desc");
+        let conv_desc = ConvolutionDescriptor {
+            padding: vec![0, 0],
+            stride: vec![1, 1],
+            dilation: vec![1, 1],
+            groups: 0,
+        };
+
+        let problem = ConvProblem::from_descriptors(&input, &filter, &output, &conv_desc);
+        assert!(
+            matches!(problem, Err(DnnError::InvalidArgument(_))),
+            "expected InvalidArgument, got {problem:?}"
+        );
     }
 }

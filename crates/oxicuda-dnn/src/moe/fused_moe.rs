@@ -945,7 +945,7 @@ fn expand_tokens_by_topk<T: GpuFloat>(
 }
 
 /// Generates PTX for the token expansion kernel.
-fn generate_expand_ptx<T: GpuFloat>(sm: SmVersion, _top_k: u32) -> DnnResult<String> {
+pub(crate) fn generate_expand_ptx<T: GpuFloat>(sm: SmVersion, _top_k: u32) -> DnnResult<String> {
     let kernel_name = format!("moe_expand_tokens_{}", T::NAME);
     let elem_bytes = T::SIZE as u32;
 
@@ -1042,7 +1042,7 @@ fn apply_activation_inplace<T: GpuFloat>(
 }
 
 /// Generates PTX for an element-wise activation kernel.
-fn generate_activation_ptx<T: GpuFloat>(
+pub(crate) fn generate_activation_ptx<T: GpuFloat>(
     activation: Activation,
     sm: SmVersion,
 ) -> DnnResult<String> {

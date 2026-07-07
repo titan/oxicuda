@@ -476,21 +476,117 @@ impl FileStore {
 
     /// Atomically add `amount` to a counter stored in a file.
     ///
-    /// Uses a simple read-modify-write cycle. In production a file lock
-    /// would be required.
+    /// The read-modify-write cycle is guarded by a `FileLockGuard`: an
+    /// advisory, cross-process mutex built from a `create_new` sentinel file
+    /// next to the counter (rather than
+    /// [`File::lock`](std::fs::File::lock), which requires a newer Rust than
+    /// this crate's declared MSRV). The guard is held for the duration of
+    /// the read, update, and write, so concurrent callers — even across
+    /// separate processes sharing the same store directory — never lose an
+    /// update or observe a torn read.
     pub fn add(&self, key: &str, amount: i64) -> CudaResult<i64> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+
         let path = self.key_path(key);
-        let current: i64 = if path.exists() {
-            let bytes = std::fs::read(&path).map_err(|_| CudaError::InvalidValue)?;
-            let s = String::from_utf8(bytes).map_err(|_| CudaError::InvalidValue)?;
-            s.trim().parse().map_err(|_| CudaError::InvalidValue)?
-        } else {
+        let lock_path = lock_path_for(&path);
+        let _lock_guard = FileLockGuard::acquire(&lock_path)?;
+
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|_| CudaError::InvalidValue)?;
+
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)
+            .map_err(|_| CudaError::InvalidValue)?;
+        let trimmed = contents.trim();
+        let current: i64 = if trimmed.is_empty() {
             0
+        } else {
+            trimmed.parse().map_err(|_| CudaError::InvalidValue)?
         };
         let new_val = current + amount;
-        std::fs::write(&path, new_val.to_string().as_bytes())
+
+        file.set_len(0).map_err(|_| CudaError::InvalidValue)?;
+        file.seek(SeekFrom::Start(0))
             .map_err(|_| CudaError::InvalidValue)?;
+        file.write_all(new_val.to_string().as_bytes())
+            .map_err(|_| CudaError::InvalidValue)?;
+        file.flush().map_err(|_| CudaError::InvalidValue)?;
+
+        // `_lock_guard` releases the advisory lock (removes the sentinel
+        // file) here, on drop.
         Ok(new_val)
+    }
+}
+
+/// Returns the sentinel lock-file path for the counter file at `path`.
+///
+/// Real counter files are produced by [`FileStore::key_path`], which
+/// sanitizes the key to alphanumerics/`_`/`-`, so appending a literal `.lock`
+/// extension can never collide with a real counter file.
+fn lock_path_for(path: &Path) -> PathBuf {
+    let mut file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    file_name.push_str(".lock");
+    path.with_file_name(file_name)
+}
+
+/// RAII guard for an advisory, cross-process file lock.
+///
+/// The lock is a sentinel file created with
+/// [`OpenOptions::create_new`](std::fs::OpenOptions::create_new), which is
+/// atomic on every platform `std` supports: at most one caller can create it
+/// successfully at a time, and every other concurrent caller (including in
+/// other processes on a shared filesystem) observes
+/// [`ErrorKind::AlreadyExists`](std::io::ErrorKind::AlreadyExists) and spins
+/// until the holder drops its guard and removes the sentinel.
+struct FileLockGuard {
+    path: PathBuf,
+}
+
+impl FileLockGuard {
+    /// Maximum number of acquisition attempts before giving up, bounding the
+    /// wait so a crashed holder's stale lock file cannot hang callers
+    /// forever (roughly two seconds at the `RETRY_DELAY` below).
+    const MAX_ATTEMPTS: u32 = 10_000;
+    /// Delay between acquisition attempts while the lock is contended.
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_micros(200);
+
+    /// Spins until the sentinel lock file at `path` can be created
+    /// exclusively, or returns an error once [`Self::MAX_ATTEMPTS`] is
+    /// exhausted.
+    fn acquire(path: &Path) -> CudaResult<Self> {
+        for _ in 0..Self::MAX_ATTEMPTS {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+            {
+                Ok(_) => {
+                    return Ok(Self {
+                        path: path.to_path_buf(),
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    std::thread::sleep(Self::RETRY_DELAY);
+                }
+                Err(_) => return Err(CudaError::InvalidValue),
+            }
+        }
+        Err(CudaError::InvalidValue)
+    }
+}
+
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
@@ -902,6 +998,40 @@ mod tests {
         assert_eq!(v1, 10);
         let v2 = store.add("ctr", -3).expect("add");
         assert_eq!(v2, 7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Concurrent `add` calls on the same key, from multiple threads racing
+    /// on the same on-disk counter file, must never lose an update: the
+    /// final value must equal the sum of every increment. This guards
+    /// against the read-modify-write race fixed by the advisory file lock
+    /// in [`FileStore::add`].
+    #[test]
+    fn file_store_add_concurrent_no_lost_updates() {
+        let dir = std::env::temp_dir().join("oxicuda_test_filestore_add_concurrent");
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Arc::new(FileStore::new(&dir).expect("create file store"));
+
+        const THREADS: usize = 8;
+        const INCREMENTS_PER_THREAD: i64 = 25;
+
+        std::thread::scope(|scope| {
+            for _ in 0..THREADS {
+                let store_ref = Arc::clone(&store);
+                scope.spawn(move || {
+                    for _ in 0..INCREMENTS_PER_THREAD {
+                        store_ref.add("race_ctr", 1).expect("add should succeed");
+                    }
+                });
+            }
+        });
+
+        let final_val = store.add("race_ctr", 0).expect("final read via add");
+        assert_eq!(
+            final_val,
+            THREADS as i64 * INCREMENTS_PER_THREAD,
+            "concurrent add() calls lost updates"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

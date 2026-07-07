@@ -472,6 +472,56 @@ fn reduce_sum_small() {
 }
 
 #[test]
+fn reduce_sum_over_65536_elements() {
+    // Regression: the 1-D reduce previously dropped every partial past index
+    // 255 (i.e. every input element beyond 65 536) because the final pass only
+    // touched 256 partials.  100 000 ones must sum to exactly 100 000.
+    let Some(b) = try_init() else { return };
+    let n = 100_000usize;
+    let input = vec![1.0f32; n];
+    let in_h = upload_f32(&b, &input);
+    let out_h = b.alloc(4).expect("alloc output");
+
+    b.reduce(ReduceOp::Sum, in_h, out_h, &[n], 0)
+        .expect("reduce sum large");
+
+    let result = download_f32(&b, out_h, 1);
+    assert!(
+        (result[0] - n as f32).abs() < 1.0,
+        "expected {n}, got {}",
+        result[0]
+    );
+
+    b.free(in_h).expect("free");
+    b.free(out_h).expect("free");
+}
+
+#[test]
+fn reduce_max_over_65536_elements() {
+    // The true maximum lives past element 65 535; the pre-fix kernel would miss
+    // it because those partials were never folded in.
+    let Some(b) = try_init() else { return };
+    let n = 100_000usize;
+    let mut input = vec![0.5f32; n];
+    input[90_000] = 42.0; // maximum beyond the first 65 536 elements
+    let in_h = upload_f32(&b, &input);
+    let out_h = b.alloc(4).expect("alloc output");
+
+    b.reduce(ReduceOp::Max, in_h, out_h, &[n], 0)
+        .expect("reduce max large");
+
+    let result = download_f32(&b, out_h, 1);
+    assert!(
+        (result[0] - 42.0).abs() < 1e-4,
+        "expected 42.0, got {}",
+        result[0]
+    );
+
+    b.free(in_h).expect("free");
+    b.free(out_h).expect("free");
+}
+
+#[test]
 fn reduce_max_small() {
     let Some(b) = try_init() else { return };
     let input = [1.0f32, 5.0, 3.0, 2.0];
@@ -630,6 +680,81 @@ fn gemm_alpha_beta() {
     for (r, e) in result.iter().zip(expected.iter()) {
         assert!((r - e).abs() < 1e-4, "got {r}, expected {e}");
     }
+
+    b.free(a_h).expect("free");
+    b.free(b_h).expect("free");
+    b.free(c_h).expect("free");
+}
+
+#[test]
+fn gemm_honours_padded_lda() {
+    let Some(b) = try_init() else { return };
+    // Logical A = [[1,2],[3,4]] stored row-major with a leading dimension of 4
+    // (two real columns + two padding columns per row).  A correct kernel must
+    // read a[r*lda + i]; the pre-fix kernel read a[r*k + i] and returned wrong
+    // values.
+    let a_padded = [1.0f32, 2.0, 99.0, 99.0, 3.0, 4.0, 99.0, 99.0];
+    let eye = [1.0f32, 0.0, 0.0, 1.0];
+    let c_init = [0.0f32; 4];
+
+    let a_h = upload_f32(&b, &a_padded);
+    let b_h = upload_f32(&b, &eye);
+    let c_h = upload_f32(&b, &c_init);
+
+    b.gemm(
+        BackendTranspose::NoTrans,
+        BackendTranspose::NoTrans,
+        2,
+        2,
+        2,
+        1.0,
+        a_h,
+        4, // lda > packed (k=2): padded rows
+        b_h,
+        2,
+        0.0,
+        c_h,
+        2,
+    )
+    .expect("gemm with padded lda");
+
+    let result = download_f32(&b, c_h, 4);
+    let expected = [1.0f32, 2.0, 3.0, 4.0];
+    for (r, e) in result.iter().zip(expected.iter()) {
+        assert!((r - e).abs() < 1e-5, "got {r}, expected {e}");
+    }
+
+    b.free(a_h).expect("free");
+    b.free(b_h).expect("free");
+    b.free(c_h).expect("free");
+}
+
+#[test]
+fn gemm_rejects_too_small_lda() {
+    let Some(b) = try_init() else { return };
+    let a_h = upload_f32(&b, &[1.0f32, 2.0, 3.0, 4.0]);
+    let b_h = upload_f32(&b, &[1.0f32, 0.0, 0.0, 1.0]);
+    let c_h = upload_f32(&b, &[0.0f32; 4]);
+
+    // lda = 1 is smaller than the packed extent k = 2 → clean InvalidArgument.
+    let err = b
+        .gemm(
+            BackendTranspose::NoTrans,
+            BackendTranspose::NoTrans,
+            2,
+            2,
+            2,
+            1.0,
+            a_h,
+            1,
+            b_h,
+            2,
+            0.0,
+            c_h,
+            2,
+        )
+        .unwrap_err();
+    assert!(matches!(err, BackendError::InvalidArgument(_)));
 
     b.free(a_h).expect("free");
     b.free(b_h).expect("free");
@@ -1328,6 +1453,34 @@ fn gemm_f16_zero_dims_noop() {
     assert_eq!(b.gemm_f16(0, 4, 4, 1.0, 0, 0, 0.0, 0), Ok(()));
     assert_eq!(b.gemm_f16(4, 0, 4, 1.0, 0, 0, 0.0, 0), Ok(()));
     assert_eq!(b.gemm_f16(4, 4, 0, 1.0, 0, 0, 0.0, 0), Ok(()));
+}
+
+#[test]
+fn gemm_f16_real_dims_never_panics() {
+    // Regression: with real dimensions the f16 GEMM used to unconditionally
+    // build a module declaring `enable f16;` on a device created without the
+    // SHADER_F16 feature, which surfaced as a process-fatal validation error.
+    // It must now either run (feature enabled) or return a typed Unsupported
+    // error — never panic.
+    let Some(b) = try_init() else { return };
+    // 2×2 f16 operands: 2 bytes per element.
+    let a = b.alloc(4 * 2).expect("alloc a");
+    let bm = b.alloc(4 * 2).expect("alloc b");
+    let c = b.alloc(4 * 2).expect("alloc c");
+    let zeros = [0u8; 8];
+    b.copy_htod(a, &zeros).expect("htod a");
+    b.copy_htod(bm, &zeros).expect("htod b");
+    b.copy_htod(c, &zeros).expect("htod c");
+
+    match b.gemm_f16(2, 2, 2, 1.0, a, bm, 0.0, c) {
+        Ok(()) => {}
+        Err(BackendError::Unsupported(_)) => {}
+        Err(e) => panic!("unexpected gemm_f16 error: {e:?}"),
+    }
+
+    b.free(a).expect("free");
+    b.free(bm).expect("free");
+    b.free(c).expect("free");
 }
 
 // ── N-D reduce tests ──────────────────────────────────────────────────

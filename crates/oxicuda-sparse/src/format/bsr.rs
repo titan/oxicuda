@@ -115,6 +115,18 @@ impl<T: GpuFloat> BsrMatrix<T> {
             )));
         }
 
+        // Validate block column indices are within [0, block_cols); an
+        // out-of-range col_idx would otherwise cause SpMV/SpMM kernels to
+        // read device memory out of bounds.
+        let block_cols = cols / block_dim;
+        for (k, &c) in col_idx.iter().enumerate() {
+            if c < 0 || c as u32 >= block_cols {
+                return Err(SparseError::InvalidFormat(format!(
+                    "col_idx[{k}] = {c} out of range [0, {block_cols})"
+                )));
+            }
+        }
+
         let d_row_ptr = DeviceBuffer::from_host(row_ptr)?;
         let d_col_idx = DeviceBuffer::from_host(col_idx)?;
         let d_values = DeviceBuffer::from_host(values)?;
@@ -224,6 +236,20 @@ mod tests {
             &[1.0; 12],
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn bsr_validation_col_idx_out_of_range() {
+        // 4x4 matrix, block_dim = 2 => block_cols = 2, so block col index 2
+        // is out of range.
+        let result = BsrMatrix::<f32>::from_host(4, 4, 2, &[0, 1, 1], &[2], &[1.0; 4]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
+    }
+
+    #[test]
+    fn bsr_validation_negative_col_idx() {
+        let result = BsrMatrix::<f32>::from_host(4, 4, 2, &[0, 1, 1], &[-1], &[1.0; 4]);
+        assert!(matches!(result, Err(SparseError::InvalidFormat(_))));
     }
 
     #[test]

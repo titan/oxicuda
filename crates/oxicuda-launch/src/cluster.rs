@@ -186,9 +186,15 @@ impl ClusterLaunchParams {
 /// On Hopper+ GPUs (compute capability 9.0+), this groups thread blocks
 /// into clusters for enhanced cooperation via distributed shared memory.
 ///
-/// This function validates the cluster parameters and delegates to the
-/// standard kernel launch. On hardware that supports clusters natively,
-/// the CUDA driver would use `cuLaunchKernelEx` with cluster attributes.
+/// A degenerate `1x1x1` cluster carries no cluster semantics, so it is
+/// launched via the standard `cuLaunchKernel` path. Any other cluster
+/// dimension is launched via the CUDA 12.x extended launch API
+/// (`cuLaunchKernelEx`) with a `ClusterDimension` launch attribute, so the
+/// requested cluster geometry actually reaches the driver. This requires
+/// a CUDA 12.0+ driver exposing `cuLaunchKernelEx`; on hardware that does
+/// not support thread block clusters (anything below Hopper / compute
+/// capability 9.0, including this workstation's Ampere sm_86 GPU), the
+/// driver itself rejects the launch.
 ///
 /// # Parameters
 ///
@@ -200,8 +206,11 @@ impl ClusterLaunchParams {
 /// # Errors
 ///
 /// Returns [`CudaError::InvalidValue`] if the parameters are invalid
-/// (zero dimensions, grid not divisible by cluster, etc.), or another
-/// error from the underlying kernel launch.
+/// (zero dimensions, grid not divisible by cluster, etc.).
+/// Returns [`CudaError::NotSupported`] if the loaded driver does not
+/// expose `cuLaunchKernelEx` (CUDA < 12.0). Returns another [`CudaError`]
+/// from the underlying kernel launch, including driver errors reported
+/// when the GPU does not support thread block clusters.
 pub fn cluster_launch<A: KernelArgs>(
     kernel: &Kernel,
     params: &ClusterLaunchParams,
@@ -210,15 +219,57 @@ pub fn cluster_launch<A: KernelArgs>(
 ) -> CudaResult<()> {
     params.validate()?;
 
-    // Convert to standard launch params. The cluster dimension is
-    // a hint to the driver; the actual grid/block stays the same.
-    let launch_params = crate::params::LaunchParams {
-        grid: params.grid,
-        block: params.block,
-        shared_mem_bytes: params.shared_mem_bytes,
+    // A degenerate 1x1x1 cluster has no cluster semantics — preserve the
+    // existing plain-launch behaviour rather than paying for the extended
+    // launch API.
+    if params.cluster.total() == 1 {
+        let launch_params = crate::params::LaunchParams {
+            grid: params.grid,
+            block: params.block,
+            shared_mem_bytes: params.shared_mem_bytes,
+        };
+        return kernel.launch(&launch_params, stream, args);
+    }
+
+    // Non-degenerate cluster: the cluster dimensions must actually reach
+    // the driver, which requires the CUDA 12.x extended launch API.
+    let driver = oxicuda_driver::loader::try_driver()?;
+    let cu_launch_kernel_ex = driver.cu_launch_kernel_ex.ok_or(CudaError::NotSupported)?;
+
+    let cluster_attr = oxicuda_driver::CuLaunchAttribute {
+        id: oxicuda_driver::CuLaunchAttributeId::ClusterDimension,
+        pad: [0u8; 4],
+        value: oxicuda_driver::CuLaunchAttributeValue {
+            cluster_dim: oxicuda_driver::CuLaunchAttributeClusterDim {
+                x: params.cluster.x,
+                y: params.cluster.y,
+                z: params.cluster.z,
+            },
+        },
     };
 
-    kernel.launch(&launch_params, stream, args)
+    let config = oxicuda_driver::CuLaunchConfig {
+        grid_dim_x: params.grid.x,
+        grid_dim_y: params.grid.y,
+        grid_dim_z: params.grid.z,
+        block_dim_x: params.block.x,
+        block_dim_y: params.block.y,
+        block_dim_z: params.block.z,
+        shared_mem_bytes: params.shared_mem_bytes,
+        stream: stream.raw(),
+        attrs: &cluster_attr as *const oxicuda_driver::CuLaunchAttribute,
+        num_attrs: 1,
+    };
+
+    let mut param_ptrs = args.as_param_ptrs();
+    oxicuda_driver::error::check(unsafe {
+        cu_launch_kernel_ex(
+            &config,
+            kernel.function().raw(),
+            param_ptrs.as_mut_ptr(),
+            std::ptr::null_mut(),
+        )
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -385,5 +436,117 @@ mod tests {
         assert_eq!(p.cluster.y, 1);
         assert_eq!(p.cluster.z, 1);
         assert_eq!(p.cluster.total(), 2);
+    }
+
+    // ---------------------------------------------------------------------------
+    // On-device regression tests (F031): the cluster dimensions must actually
+    // reach the driver instead of being silently discarded.
+    // ---------------------------------------------------------------------------
+
+    /// A minimal, arch-portable empty kernel (no parameters).
+    #[cfg(feature = "gpu-tests")]
+    const NOOP_PTX: &str = "\
+.version 7.0
+.target sm_70
+.address_size 64
+.visible .entry noop_kernel()
+{
+    ret;
+}
+";
+
+    /// Regression test for the bug where `cluster_launch` never passed the
+    /// cluster dimensions to the driver and always launched via plain
+    /// `cuLaunchKernel`, returning `Ok(())` even though the requested
+    /// cluster geometry was never honored. This workstation's Ampere
+    /// (sm_86) GPU does not support thread block clusters (Hopper sm_90+
+    /// only), so a *correct* implementation must now surface a driver
+    /// error for a non-degenerate cluster instead of silently succeeding
+    /// as if the cluster had been applied. Self-skips if there is no
+    /// GPU/driver.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn cluster_launch_non_degenerate_on_unsupported_hardware_errors() {
+        use std::sync::Arc;
+
+        let Ok(dev) = oxicuda_driver::device::Device::get(0) else {
+            return;
+        };
+        let ctx = match oxicuda_driver::context::Context::new(&dev) {
+            Ok(c) => Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let module = match oxicuda_driver::module::Module::from_ptx(NOOP_PTX) {
+            Ok(m) => Arc::new(m),
+            Err(_) => return,
+        };
+        let kernel = match Kernel::from_module(module, "noop_kernel") {
+            Ok(k) => k,
+            Err(_) => return,
+        };
+
+        let params = ClusterLaunchParams {
+            grid: Dim3::x(4),
+            block: Dim3::x(32),
+            cluster: ClusterDim::x(2),
+            shared_mem_bytes: 0,
+        };
+
+        let result = cluster_launch(&kernel, &params, &stream, &());
+        assert!(
+            result.is_err(),
+            "cluster_launch with a non-degenerate cluster on sm_86 (no cluster \
+             hardware support) must return an error, not silently succeed as a \
+             plain launch: {result:?}"
+        );
+    }
+
+    /// A degenerate `1x1x1` cluster carries no cluster semantics and must
+    /// keep working (via the plain-launch fallback) even on hardware
+    /// without cluster support.
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn cluster_launch_degenerate_cluster_still_succeeds() {
+        use std::sync::Arc;
+
+        let Ok(dev) = oxicuda_driver::device::Device::get(0) else {
+            return;
+        };
+        let ctx = match oxicuda_driver::context::Context::new(&dev) {
+            Ok(c) => Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let module = match oxicuda_driver::module::Module::from_ptx(NOOP_PTX) {
+            Ok(m) => Arc::new(m),
+            Err(_) => return,
+        };
+        let kernel = match Kernel::from_module(module, "noop_kernel") {
+            Ok(k) => k,
+            Err(_) => return,
+        };
+
+        let params = ClusterLaunchParams {
+            grid: Dim3::x(4),
+            block: Dim3::x(32),
+            cluster: ClusterDim::new(1, 1, 1),
+            shared_mem_bytes: 0,
+        };
+
+        let result = cluster_launch(&kernel, &params, &stream, &());
+        assert!(
+            result.is_ok(),
+            "degenerate 1x1x1 cluster must launch normally: {result:?}"
+        );
+        stream
+            .synchronize()
+            .expect("stream sync after degenerate cluster launch");
     }
 }

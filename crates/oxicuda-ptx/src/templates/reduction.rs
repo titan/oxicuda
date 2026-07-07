@@ -171,11 +171,14 @@ impl ReductionTemplate {
         writeln!(ptx, "    .param .u64 %param_output,").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .param .u32 %param_n").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+        // `.maxntid` is a kernel-header directive: per the PTX ISA it must
+        // appear between the parameter list and the body brace, with NO
+        // trailing semicolon (ptxas rejects it inside the body).
+        writeln!(ptx, "    .maxntid {}, 1, 1", self.block_size)
+            .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
-        // Directives and declarations
-        writeln!(ptx, "    .maxntid {}, 1, 1;", self.block_size)
-            .map_err(PtxGenError::FormatError)?;
+        // Declarations
         writeln!(ptx, "    .reg .b32 %r<16>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b64 %rd<8>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .f32 %f<8>;").map_err(PtxGenError::FormatError)?;
@@ -424,11 +427,13 @@ impl PerAxisReductionTemplate {
             writeln!(ptx, "    .param .u32 %param_inner").map_err(PtxGenError::FormatError)?;
         }
         writeln!(ptx, ")").map_err(PtxGenError::FormatError)?;
+        // `.maxntid` must appear between the parameter list and the body
+        // brace with no trailing semicolon (ptxas rejects it inside the body).
+        writeln!(ptx, "    .maxntid {}, 1, 1", self.block_size)
+            .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "{{").map_err(PtxGenError::FormatError)?;
 
-        // Directives and declarations
-        writeln!(ptx, "    .maxntid {}, 1, 1;", self.block_size)
-            .map_err(PtxGenError::FormatError)?;
+        // Declarations
         writeln!(ptx, "    .reg .b32 %r<20>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b64 %rd<12>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg {reg_ty} %f<12>;").map_err(PtxGenError::FormatError)?;

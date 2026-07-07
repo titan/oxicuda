@@ -403,6 +403,28 @@ pub fn lstm_sequence_forward<T: GpuFloat>(
 // PTX generation
 // ---------------------------------------------------------------------------
 
+/// Accumulates `acc += a * bv` **in place** on a loop-carried register.
+///
+/// The dot-product loops below are emitted as a single runtime loop body
+/// (label + branch), so the accumulator must be a *stable* register that is
+/// read-modified-written each iteration. Using the builder's `fma_float`
+/// (which allocates a fresh destination and would be seeded from the
+/// loop-invariant bias every iteration) silently drops every term but the
+/// last — hence this raw in-place form.
+fn fma_acc_inplace<T: GpuFloat>(
+    b: &mut oxicuda_ptx::builder::BodyBuilder<'_>,
+    acc: &oxicuda_ptx::ir::Register,
+    a: &oxicuda_ptx::ir::Register,
+    bv: &oxicuda_ptx::ir::Register,
+) {
+    let op = if T::PTX_TYPE == PtxType::F32 {
+        "fma.rn.f32"
+    } else {
+        "fma.rn.f64"
+    };
+    b.raw_ptx(&format!("{op} {acc}, {a}, {bv}, {acc};"));
+}
+
 /// Generates a fused LSTM gate-computation PTX kernel.
 ///
 /// Each thread handles one `(batch, hidden_unit)` pair and computes:
@@ -410,7 +432,7 @@ pub fn lstm_sequence_forward<T: GpuFloat>(
 /// 2. Activations: sigmoid for i, f, o; tanh for g
 /// 3. Cell update: `c_t = f * c_prev + i * g`
 /// 4. Hidden update: `h_t = o * tanh(c_t)`
-fn generate_lstm_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
+pub(crate) fn generate_lstm_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
     let kernel_name = format!("dnn_lstm_fused_{}", T::NAME);
 
     let ptx = KernelBuilder::new(&kernel_name)
@@ -508,9 +530,7 @@ fn generate_lstm_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                     ));
                     let w_addr = b.byte_offset_addr(w_x_ptr.clone(), w_offset, T::size_u32());
                     let w_val = load_global_float::<T>(b, w_addr);
-                    let new_acc =
-                        fma_float::<T>(b, w_val, x_val.clone(), gate_accum[gate as usize].clone());
-                    gate_accum[gate as usize] = new_acc;
+                    fma_acc_inplace::<T>(b, &gate_accum[gate as usize], &w_val, &x_val);
                 }
 
                 b.raw_ptx(&format!("add.u32 {k_reg}, {k_reg}, 1;"));
@@ -547,9 +567,7 @@ fn generate_lstm_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
                     ));
                     let w_addr = b.byte_offset_addr(w_h_ptr.clone(), w_offset, T::size_u32());
                     let w_val = load_global_float::<T>(b, w_addr);
-                    let new_acc =
-                        fma_float::<T>(b, w_val, h_val.clone(), gate_accum[gate as usize].clone());
-                    gate_accum[gate as usize] = new_acc;
+                    fma_acc_inplace::<T>(b, &gate_accum[gate as usize], &w_val, &h_val);
                 }
 
                 b.raw_ptx(&format!("add.u32 {kh_reg}, {kh_reg}, 1;"));
@@ -637,7 +655,7 @@ fn generate_lstm_fused_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
 }
 
 /// Generates a simple D2D copy kernel used for final state extraction.
-fn generate_copy_kernel_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
+pub(crate) fn generate_copy_kernel_ptx<T: GpuFloat>(sm: SmVersion) -> DnnResult<String> {
     let kernel_name = format!("dnn_copy_{}", T::NAME);
 
     let ptx = KernelBuilder::new(&kernel_name)

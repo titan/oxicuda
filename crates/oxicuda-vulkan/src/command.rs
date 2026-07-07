@@ -6,7 +6,7 @@
 //! dispatch in this backend).
 
 use ash::vk;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::device::VulkanDevice;
 use crate::error::{VulkanError, VulkanResult};
@@ -16,6 +16,11 @@ use crate::error::{VulkanError, VulkanResult};
 pub struct VulkanCommandPool {
     device: Arc<VulkanDevice>,
     command_pool: vk::CommandPool,
+    /// Serialises `record_and_submit` so that command-buffer allocation/free on
+    /// the pool and submission on the shared queue satisfy Vulkan's
+    /// external-synchronisation requirement even when this pool is shared across
+    /// threads (the type is `Sync`).
+    submit_lock: Mutex<()>,
 }
 
 // SAFETY: VulkanDevice is Send+Sync and command pool handles are safe to send
@@ -37,6 +42,7 @@ impl VulkanCommandPool {
         Ok(Self {
             device,
             command_pool,
+            submit_lock: Mutex::new(()),
         })
     }
 
@@ -49,6 +55,13 @@ impl VulkanCommandPool {
     where
         F: FnOnce(vk::CommandBuffer) -> VulkanResult<()>,
     {
+        // Serialise allocate/free on the pool and submit on the shared queue —
+        // both are externally-synchronised Vulkan objects.
+        let _submit_guard = self
+            .submit_lock
+            .lock()
+            .map_err(|_| VulkanError::CommandBufferError("submit lock poisoned".into()))?;
+
         let vk_dev = self.device.device();
 
         // 1. Allocate one command buffer.

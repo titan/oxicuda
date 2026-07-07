@@ -200,75 +200,80 @@ fn emit_spmm_kernel<T: GpuFloat>(sm: SmVersion) -> SparseResult<String> {
                 let re = b.alloc_reg(PtxType::U32);
                 b.raw_ptx(&format!("mov.b32 {re}, {re_i32};"));
 
-                // We process 1 column (simplified approach for correctness)
-                // In production, we'd unroll tile_cols times
-                let col = col_start;
-                // Skip out-of-range columns (col >= n). Inverted skip-branch
-                // (`setp.lo` -> `setp.hs`) routed through the structured
-                // `branch_if` so the target matches the `$`-prefixed label.
-                let col_oob = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.hs.u32 {col_oob}, {col}, {n_param};"));
-
-                let do_col = b.fresh_label("spmm_do_col");
-                let skip_col = b.fresh_label("spmm_skip_col");
-                b.branch_if(col_oob, &skip_col);
-                b.label(&do_col);
-
-                // Accumulate: acc = sum(A[row,k] * B[k, col])
-                let acc = load_float_imm::<T>(b, 0.0);
-                let k_reg = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("mov.u32 {k_reg}, {rs};"));
-
-                let loop_label = b.fresh_label("spmm_loop");
-                let done_label = b.fresh_label("spmm_done");
-
-                b.label(&loop_label);
-                // Exit when k >= row_end (inverted skip-branch via branch_if).
-                let pred = b.alloc_reg(PtxType::Pred);
-                b.raw_ptx(&format!("setp.hs.u32 {pred}, {k_reg}, {re};"));
-                b.branch_if(pred, &done_label);
-
-                // Load A value and column
-                let ci_addr = b.byte_offset_addr(col_idx_base.clone(), k_reg.clone(), 4);
-                let a_col_i32 = b.load_global_i32(ci_addr);
-                let a_col = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("mov.b32 {a_col}, {a_col_i32};"));
-
-                let v_addr = b.byte_offset_addr(values_base.clone(), k_reg.clone(), elem_bytes);
-                let a_val = load_global_float::<T>(b, v_addr);
-
-                // Load B[a_col, col] = b_ptr + (a_col * ldb + col) * elem_bytes
-                // Row-major: B[a_col][col] = b_ptr + a_col * ldb + col
-                let b_row_off = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("mul.lo.u32 {b_row_off}, {a_col}, {ldb};"));
-                let b_idx = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("add.u32 {b_idx}, {b_row_off}, {col};"));
-                let b_addr = b.byte_offset_addr(b_ptr.clone(), b_idx, elem_bytes);
-                let b_val = load_global_float::<T>(b, b_addr);
-
-                // acc += a_val * b_val
-                let new_acc = fma_float::<T>(b, a_val, b_val, acc.clone());
+                // This thread owns the whole tile of `tile_cols` consecutive
+                // output columns starting at `col_start`. The grid spawns
+                // exactly one thread per (row, tile) pair, so *every* column in
+                // the tile must be computed here -- handling only `col_start`
+                // would leave any column whose index is not a multiple of
+                // `tile_cols` permanently unwritten.
                 let mov_suffix = if is_f64 { "f64" } else { "f32" };
-                b.raw_ptx(&format!("mov.{mov_suffix} {acc}, {new_acc};"));
+                for tc in 0..tile_cols {
+                    let col = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("add.u32 {col}, {col_start}, {tc};"));
 
-                b.raw_ptx(&format!("add.u32 {k_reg}, {k_reg}, 1;"));
-                b.branch(&loop_label);
-                b.label(&done_label);
+                    // Skip out-of-range columns (col >= n). Inverted skip-branch
+                    // (`setp.lo` -> `setp.hs`) routed through the structured
+                    // `branch_if` so the target matches the `$`-prefixed label.
+                    let col_oob = b.alloc_reg(PtxType::Pred);
+                    b.raw_ptx(&format!("setp.hs.u32 {col_oob}, {col}, {n_param};"));
+                    let skip_col = b.fresh_label("spmm_skip_col");
+                    b.branch_if(col_oob, &skip_col);
 
-                // Write C[row, col] = alpha * acc + beta * C_old
-                let c_row_off = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("mul.lo.u32 {c_row_off}, {row}, {ldc};"));
-                let c_idx = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("add.u32 {c_idx}, {c_row_off}, {col};"));
-                let c_addr = b.byte_offset_addr(c_ptr, c_idx, elem_bytes);
-                let c_old = load_global_float::<T>(b, c_addr.clone());
+                    // Accumulate: acc = sum(A[row,k] * B[k, col])
+                    let acc = load_float_imm::<T>(b, 0.0);
+                    let k_reg = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mov.u32 {k_reg}, {rs};"));
 
-                let alpha_acc = mul_float::<T>(b, alpha, acc);
-                let beta_c = mul_float::<T>(b, beta, c_old);
-                let result = add_float::<T>(b, alpha_acc, beta_c);
-                store_global_float::<T>(b, c_addr, result);
+                    let loop_label = b.fresh_label("spmm_loop");
+                    let done_label = b.fresh_label("spmm_done");
 
-                b.label(&skip_col);
+                    b.label(&loop_label);
+                    // Exit when k >= row_end (inverted skip-branch via branch_if).
+                    let pred = b.alloc_reg(PtxType::Pred);
+                    b.raw_ptx(&format!("setp.hs.u32 {pred}, {k_reg}, {re};"));
+                    b.branch_if(pred, &done_label);
+
+                    // Load A value and column
+                    let ci_addr = b.byte_offset_addr(col_idx_base.clone(), k_reg.clone(), 4);
+                    let a_col_i32 = b.load_global_i32(ci_addr);
+                    let a_col = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mov.b32 {a_col}, {a_col_i32};"));
+
+                    let v_addr = b.byte_offset_addr(values_base.clone(), k_reg.clone(), elem_bytes);
+                    let a_val = load_global_float::<T>(b, v_addr);
+
+                    // Load B[a_col, col] = b_ptr + (a_col * ldb + col) * elem_bytes
+                    // Row-major: B[a_col][col] = b_ptr + a_col * ldb + col
+                    let b_row_off = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mul.lo.u32 {b_row_off}, {a_col}, {ldb};"));
+                    let b_idx = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("add.u32 {b_idx}, {b_row_off}, {col};"));
+                    let b_addr = b.byte_offset_addr(b_ptr.clone(), b_idx, elem_bytes);
+                    let b_val = load_global_float::<T>(b, b_addr);
+
+                    // acc += a_val * b_val
+                    let new_acc = fma_float::<T>(b, a_val, b_val, acc.clone());
+                    b.raw_ptx(&format!("mov.{mov_suffix} {acc}, {new_acc};"));
+
+                    b.raw_ptx(&format!("add.u32 {k_reg}, {k_reg}, 1;"));
+                    b.branch(&loop_label);
+                    b.label(&done_label);
+
+                    // Write C[row, col] = alpha * acc + beta * C_old
+                    let c_row_off = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("mul.lo.u32 {c_row_off}, {row}, {ldc};"));
+                    let c_idx = b.alloc_reg(PtxType::U32);
+                    b.raw_ptx(&format!("add.u32 {c_idx}, {c_row_off}, {col};"));
+                    let c_addr = b.byte_offset_addr(c_ptr.clone(), c_idx, elem_bytes);
+                    let c_old = load_global_float::<T>(b, c_addr.clone());
+
+                    let alpha_acc = mul_float::<T>(b, alpha.clone(), acc);
+                    let beta_c = mul_float::<T>(b, beta.clone(), c_old);
+                    let result = add_float::<T>(b, alpha_acc, beta_c);
+                    store_global_float::<T>(b, c_addr, result);
+
+                    b.label(&skip_col);
+                }
             });
 
             b.ret();
@@ -490,5 +495,210 @@ mod tests {
                 "C[{i}] = {ci}, expected 0.0 for zero sparse matrix"
             );
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::{assert_close, gpu_handle};
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+    use oxicuda_blas::types::Layout;
+    use oxicuda_memory::DeviceBuffer;
+
+    /// CPU oracle for `C = alpha * A * B + beta * C0`, all row-major dense.
+    #[allow(clippy::too_many_arguments)]
+    fn cpu_spmm(
+        m: usize,
+        n: usize,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        b: &[f64],
+        c0: &[f64],
+        alpha: f64,
+        beta: f64,
+    ) -> Vec<f64> {
+        let mut c = vec![0.0_f64; m * n];
+        for row in 0..m {
+            let mut acc = vec![0.0_f64; n];
+            for k in row_ptr[row] as usize..row_ptr[row + 1] as usize {
+                let a_col = col_idx[k] as usize;
+                let a_val = values[k];
+                for (col, slot) in acc.iter_mut().enumerate() {
+                    *slot += a_val * b[a_col * n + col];
+                }
+            }
+            for col in 0..n {
+                c[row * n + col] = alpha * acc[col] + beta * c0[row * n + col];
+            }
+        }
+        c
+    }
+
+    /// Drive the production `spmm` op and compare to the CPU oracle.
+    #[allow(clippy::too_many_arguments)]
+    fn run_spmm<T: GpuFloat>(
+        m: u32,
+        k: u32,
+        n: u32,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        b_dense: &[f64],
+        c0: &[f64],
+        alpha: f64,
+        beta: f64,
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let dev_values: Vec<T> = values.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let a = CsrMatrix::<T>::from_host(m, k, row_ptr, col_idx, &dev_values)
+            .expect("test: build CSR");
+
+        let dev_b: Vec<T> = b_dense.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let dev_c: Vec<T> = c0.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let b_buf = DeviceBuffer::from_host(&dev_b).expect("test: upload B");
+        let c_buf = DeviceBuffer::from_host(&dev_c).expect("test: upload C");
+
+        let b_desc = MatrixDesc::<T>::from_raw(b_buf.as_device_ptr(), k, n, n, Layout::RowMajor);
+        let mut c_desc =
+            MatrixDescMut::<T>::from_raw(c_buf.as_device_ptr(), m, n, n, Layout::RowMajor);
+
+        spmm::<T>(
+            &handle,
+            f64_to_gpu::<T>(alpha),
+            &a,
+            &b_desc,
+            f64_to_gpu::<T>(beta),
+            &mut c_desc,
+        )
+        .expect("test: spmm launch");
+        handle.stream().synchronize().expect("test: sync");
+
+        let mut out = vec![T::gpu_zero(); (m * n) as usize];
+        c_buf.copy_to_host(&mut out).expect("test: download C");
+        let got: Vec<f64> = out.iter().map(|&v| gpu_to_f64(v)).collect();
+        let want = cpu_spmm(
+            m as usize, n as usize, row_ptr, col_idx, values, b_dense, c0, alpha, beta,
+        );
+        assert_close(&got, &want, tol, tag);
+    }
+
+    /// A = 3x4 CSR:
+    /// [1 0 2 0]
+    /// [0 3 0 4]
+    /// [5 0 0 6]
+    fn matrix_3x4() -> (u32, u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        let row_ptr = vec![0, 2, 4, 6];
+        let col_idx = vec![0, 2, 1, 3, 0, 3];
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        (3, 4, row_ptr, col_idx, values)
+    }
+
+    /// B is k x n row-major. Build a deterministic dense matrix.
+    fn dense(k: usize, n: usize, base: f64) -> Vec<f64> {
+        (0..k * n)
+            .map(|idx| base + 0.5 * (idx as f64) - 0.1 * ((idx % 3) as f64))
+            .collect()
+    }
+
+    #[test]
+    fn spmm_f64_n3_alpha_beta() {
+        // n = 3 is NOT a multiple of the internal tile width (4): this is the
+        // exact configuration that exposes a one-column-per-tile kernel bug.
+        let (m, k, rp, ci, v) = matrix_3x4();
+        let n = 3usize;
+        let b = dense(k as usize, n, 1.0);
+        let c0 = dense(m as usize, n, 7.0);
+        run_spmm::<f64>(
+            m,
+            k,
+            n as u32,
+            &rp,
+            &ci,
+            &v,
+            &b,
+            &c0,
+            1.75,
+            -0.5,
+            1e-10,
+            "spmm_f64_n3",
+        );
+    }
+
+    #[test]
+    fn spmm_f64_n5_alpha_beta() {
+        // n = 5 spans more than one tile and is not a multiple of 4.
+        let (m, k, rp, ci, v) = matrix_3x4();
+        let n = 5usize;
+        let b = dense(k as usize, n, -2.0);
+        let c0 = dense(m as usize, n, 0.25);
+        run_spmm::<f64>(
+            m,
+            k,
+            n as u32,
+            &rp,
+            &ci,
+            &v,
+            &b,
+            &c0,
+            2.0,
+            0.5,
+            1e-10,
+            "spmm_f64_n5",
+        );
+    }
+
+    #[test]
+    fn spmm_f32_n3_alpha_beta() {
+        let (m, k, rp, ci, v) = matrix_3x4();
+        let n = 3usize;
+        let b = dense(k as usize, n, 0.5);
+        let c0 = dense(m as usize, n, 3.0);
+        run_spmm::<f32>(
+            m,
+            k,
+            n as u32,
+            &rp,
+            &ci,
+            &v,
+            &b,
+            &c0,
+            1.25,
+            -0.75,
+            1e-4,
+            "spmm_f32_n3",
+        );
+    }
+
+    #[test]
+    fn spmm_f64_single_column_beta_zero() {
+        // n = 1 (the only width the old kernel handled) with beta = 0.
+        let (m, k, rp, ci, v) = matrix_3x4();
+        let n = 1usize;
+        let b = dense(k as usize, n, 1.0);
+        let c0 = vec![1e8; (m as usize) * n];
+        run_spmm::<f64>(
+            m,
+            k,
+            n as u32,
+            &rp,
+            &ci,
+            &v,
+            &b,
+            &c0,
+            1.0,
+            0.0,
+            1e-10,
+            "spmm_f64_n1",
+        );
     }
 }

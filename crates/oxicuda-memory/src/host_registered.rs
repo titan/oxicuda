@@ -312,7 +312,21 @@ pub fn register<T: Copy>(
             let rc2 = unsafe {
                 (api.cu_mem_host_get_device_pointer_v2)(&mut dptr, ptr.cast::<c_void>(), 0)
             };
-            oxicuda_driver::check(rc2)?;
+            if let Err(e) = oxicuda_driver::check(rc2) {
+                // The host pages are already registered at this point; if we
+                // returned directly here without unregistering, the
+                // registration (and its pinned pages) would leak since the
+                // caller never receives a `RegisteredMemory` handle to drop.
+                let rc_unreg = unsafe { (api.cu_mem_host_unregister)(ptr.cast::<c_void>()) };
+                if rc_unreg != 0 {
+                    tracing::warn!(
+                        cuda_error = rc_unreg,
+                        "cuMemHostUnregister failed while rolling back after \
+                         cuMemHostGetDevicePointer error"
+                    );
+                }
+                return Err(e);
+            }
             dptr
         } else {
             0

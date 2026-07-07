@@ -302,22 +302,52 @@ thread_local! {
 /// RAII guard for autocast context.
 ///
 /// While this guard exists, autocast is active on the current thread.
+///
+/// # Drop order
+///
+/// Each guard remembers the stack depth it was pushed at and restores the
+/// thread-local stack by *truncating* to that depth, rather than blindly
+/// popping the top entry. Guards are normally dropped in LIFO order (matching
+/// their nested `enter_autocast` scopes), in which case this behaves exactly
+/// like a plain pop. If guards are instead dropped out of order — e.g. an
+/// outer guard is dropped while an inner one is still alive — dropping the
+/// outer guard also unwinds every inner scope pushed after it (matching the
+/// scope's intended semantics), and the later drop of the already-unwound
+/// inner guard becomes a harmless no-op instead of silently popping an
+/// unrelated, unrelated entry pushed by someone else.
+///
+/// The guard is intentionally `!Send`: an autocast context is thread-local,
+/// so moving a guard to another thread and dropping it there would truncate
+/// that *other* thread's stack rather than the one it was pushed onto.
 pub struct AutocastGuard {
-    _private: (),
+    /// Stack depth (length of `AUTOCAST_STACK` after `push`) this guard is
+    /// bound to; `drop` restores the stack to this depth.
+    depth: usize,
+    /// Makes the guard `!Send` (and `!Sync`) so it cannot be dropped on a
+    /// different thread than the one that pushed it.
+    _not_send: std::marker::PhantomData<*const ()>,
 }
 
 /// Enter an autocast context.
 pub fn enter_autocast(autocast: Autocast) -> AutocastGuard {
-    AUTOCAST_STACK.with(|stack| {
-        stack.borrow_mut().push(autocast);
+    let depth = AUTOCAST_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        stack.push(autocast);
+        stack.len() - 1
     });
-    AutocastGuard { _private: () }
+    AutocastGuard {
+        depth,
+        _not_send: std::marker::PhantomData,
+    }
 }
 
 impl Drop for AutocastGuard {
     fn drop(&mut self) {
         AUTOCAST_STACK.with(|stack| {
-            stack.borrow_mut().pop();
+            let mut stack = stack.borrow_mut();
+            if stack.len() > self.depth {
+                stack.truncate(self.depth);
+            }
         });
     }
 }
@@ -500,6 +530,53 @@ mod tests {
                     .is_enabled()
             );
         }
+        assert!(current_autocast().is_none());
+    }
+
+    /// Regression test: dropping guards out of LIFO order must not silently
+    /// activate the wrong autocast context. Each guard truncates the
+    /// thread-local stack back to the depth it was pushed at, so dropping an
+    /// outer guard also unwinds any inner scopes pushed after it, and a later
+    /// drop of an already-unwound inner guard is a harmless no-op rather than
+    /// clobbering whatever guard is on top by then.
+    #[test]
+    fn test_autocast_guard_out_of_order_drop() {
+        assert!(current_autocast().is_none());
+
+        let mut outer_ac = Autocast::new();
+        outer_ac.set_enabled(true);
+        let outer_guard = enter_autocast(outer_ac);
+
+        let mut inner_ac = Autocast::new();
+        inner_ac.set_enabled(false);
+        let inner_guard = enter_autocast(inner_ac);
+
+        // Stack top is the inner (disabled) context.
+        assert!(
+            !current_autocast()
+                .expect("autocast should be active")
+                .is_enabled()
+        );
+
+        // Drop the OUTER guard first (out of LIFO order). A blind "pop the
+        // top" implementation would only remove the inner entry and leave the
+        // outer one active; truncating to the outer guard's captured depth
+        // must unwind both.
+        drop(outer_guard);
+        assert!(
+            current_autocast().is_none(),
+            "dropping an outer guard must unwind inner scopes pushed after it"
+        );
+
+        // A guard pushed after the (already fully unwound) inner guard must
+        // survive the inner guard's later drop.
+        let unrelated_guard = enter_autocast(Autocast::new());
+        drop(inner_guard);
+        assert!(
+            current_autocast().is_some(),
+            "an out-of-order inner-guard drop must not clobber an unrelated later guard"
+        );
+        drop(unrelated_guard);
         assert!(current_autocast().is_none());
     }
 

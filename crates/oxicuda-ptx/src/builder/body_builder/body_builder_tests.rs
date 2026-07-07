@@ -1146,12 +1146,16 @@ fn redux_fails_on_sm75() {
 #[test]
 fn stmatrix_emits_on_sm90() {
     let ptx = build_with_body_sm90(|b| {
-        let _r = b.stmatrix_m8n8x4("%r0", "%r1");
+        let _r = b.stmatrix_m8n8x4("%r0", &["%r1", "%r2", "%r3", "%r4"]);
         b.ret();
     });
     assert!(
         ptx.contains("stmatrix.sync.aligned.m8n8.x4"),
         "expected stmatrix in:\n{ptx}"
+    );
+    assert!(
+        ptx.contains("{%r1, %r2, %r3, %r4}"),
+        "stmatrix.x4 must emit a 4-register source vector:\n{ptx}"
     );
 }
 
@@ -1205,8 +1209,12 @@ fn fence_proxy_emits() {
         b.ret();
     });
     assert!(
-        ptx.contains("fence.proxy.async.gpu.shared;"),
-        "expected fence.proxy in:\n{ptx}"
+        ptx.contains("fence.proxy.async.shared::cta;"),
+        "expected fence.proxy (legal space-only form) in:\n{ptx}"
+    );
+    assert!(
+        !ptx.contains(".gpu"),
+        "fence.proxy must not carry an illegal thread-scope modifier:\n{ptx}"
     );
 }
 
@@ -1253,8 +1261,8 @@ fn round_trip_kernel_with_ptx8_instructions() {
         "should have griddepcontrol"
     );
     assert!(
-        ptx.contains("fence.proxy.async.cta.shared"),
-        "should have fence.proxy"
+        ptx.contains("fence.proxy.async.shared::cta"),
+        "should have fence.proxy (legal space-only form)"
     );
     assert!(ptx.contains("setmaxnreg.inc 96"), "should have setmaxnreg");
     assert!(ptx.contains("ret;"), "should have ret");
@@ -1380,12 +1388,26 @@ fn cvt_f32_to_bf16_emits_rn_mode() {
 #[test]
 fn wgmma_mma_async_emits_on_sm90() {
     let ptx = build_with_body_sm90(|b| {
-        let _r = b.wgmma_mma_async_m64n128k16_f16("%desc_a", "%desc_b");
+        let desc_a = b.regs.alloc(PtxType::U64);
+        let desc_b = b.regs.alloc(PtxType::U64);
+        let r = b
+            .wgmma_mma_async_m64n128k16_f16(desc_a, desc_b)
+            .expect("wgmma on sm_90");
+        assert!(!r.is_empty(), "wgmma must return accumulator registers");
         b.ret();
     });
     assert!(
         ptx.contains("wgmma.mma_async.sync.aligned.m64n128k16.f32.f16.f16"),
         "expected wgmma instruction in PTX:\n{ptx}"
+    );
+    // The destination list must contain real registers, not a placeholder.
+    assert!(
+        !ptx.contains("{...}"),
+        "wgmma destination list must not be the literal placeholder:\n{ptx}"
+    );
+    assert!(
+        ptx.contains("{%f"),
+        "wgmma destination list must contain real %f registers:\n{ptx}"
     );
 }
 
@@ -1396,7 +1418,9 @@ fn wgmma_mma_async_rejected_below_sm90() {
         .param("a", PtxType::U64)
         .param("n", PtxType::U32)
         .body(|b| {
-            let r = b.wgmma_mma_async_m64n128k16_f16("%desc_a", "%desc_b");
+            let desc_a = b.regs.alloc(PtxType::U64);
+            let desc_b = b.regs.alloc(PtxType::U64);
+            let r = b.wgmma_mma_async_m64n128k16_f16(desc_a, desc_b);
             assert!(r.is_err(), "wgmma should error on sm_80");
             b.ret();
         })
@@ -1551,13 +1575,16 @@ fn test_tma_cp_async_bulk_ptx() {
         let dst = b.alloc_reg(PtxType::U64);
         let src = b.alloc_reg(PtxType::U64);
         let desc = b.alloc_reg(PtxType::U64);
-        b.cp_async_bulk_tensor_1d(dst, src, desc)
+        let barrier = b.alloc_reg(PtxType::U64);
+        b.cp_async_bulk_tensor_1d(dst, src, desc, barrier)
             .expect("cp_async_bulk_tensor_1d should succeed on sm_90");
         b.ret();
     });
     assert!(
-        ptx.contains("cp.async.bulk.tensor.1d.shared::cluster.global.tile.bulk_group"),
-        "expected cp.async.bulk.tensor.1d in PTX:\n{ptx}"
+        ptx.contains(
+            "cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"
+        ),
+        "expected cp.async.bulk.tensor.1d with mbarrier completion in PTX:\n{ptx}"
     );
 }
 
@@ -1571,7 +1598,8 @@ fn test_tma_bulk_rejected_below_sm90() {
             let dst = b.alloc_reg(PtxType::U64);
             let src = b.alloc_reg(PtxType::U64);
             let desc = b.alloc_reg(PtxType::U64);
-            let r = b.cp_async_bulk_tensor_1d(dst, src, desc);
+            let barrier = b.alloc_reg(PtxType::U64);
+            let r = b.cp_async_bulk_tensor_1d(dst, src, desc, barrier);
             assert!(r.is_err(), "cp_async_bulk should fail on sm_80");
             b.ret();
         })

@@ -31,6 +31,7 @@
 //! assert!(!viable.is_empty());
 //! ```
 
+use oxicuda_driver::{CudaError, Stream};
 use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{BenchmarkConfig, BenchmarkEngine, BenchmarkResult};
@@ -428,6 +429,18 @@ impl ConstrainedTuner {
     /// The `run_fn` closure receives a [`Config`] reference and should
     /// execute the kernel (or a representative workload) once.
     ///
+    /// # Blocking precondition
+    ///
+    /// This method times `run_fn` with [`BenchmarkEngine::benchmark_wallclock`],
+    /// which performs **no GPU synchronization of its own**. If `run_fn`
+    /// launches GPU work asynchronously, it **must block until the
+    /// measured work completes** (e.g. call `stream.synchronize()`)
+    /// before returning, otherwise only launch overhead is measured and
+    /// the "best" config chosen here will be wrong. For real on-device
+    /// tuning, prefer [`Self::tune_on_stream`], which uses CUDA
+    /// event-based timing and synchronizes correctly without requiring
+    /// `run_fn` to do so itself.
+    ///
     /// # Errors
     ///
     /// Returns [`AutotuneError::NoViableConfig`] if no configuration
@@ -469,6 +482,67 @@ impl ConstrainedTuner {
                 Err(_) => {
                     // Skip configs that fail to benchmark — they may
                     // hit runtime limits not captured by the estimator.
+                    continue;
+                }
+            }
+        }
+
+        best.ok_or(AutotuneError::NoViableConfig)
+    }
+
+    /// Benchmarks all memory-feasible configurations on a live CUDA
+    /// stream using event-based timing, and returns the best result.
+    ///
+    /// Unlike [`Self::tune`] (which uses wall-clock timing and requires
+    /// `run_fn` to synchronize internally whenever it launches GPU
+    /// work), this method delegates to [`BenchmarkEngine::benchmark`],
+    /// which records CUDA events around each launch and synchronizes on
+    /// them automatically. `run_fn` only needs to *enqueue* work onto
+    /// `stream` — it must **not** synchronize the stream itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AutotuneError::NoViableConfig`] if no configuration
+    /// fits the budget. Individual configs that fail to benchmark (e.g.
+    /// a launch error) are skipped rather than aborting the whole
+    /// search.
+    pub fn tune_on_stream<F>(
+        &self,
+        stream: &Stream,
+        estimator: &dyn MemoryEstimator,
+        run_fn: F,
+    ) -> AutotuneResult<BenchmarkResult>
+    where
+        F: Fn(&Config, &Stream) -> Result<(), CudaError>,
+    {
+        let viable = self.constrained_space.prune_by_memory(estimator);
+
+        if viable.is_empty() {
+            return Err(AutotuneError::NoViableConfig);
+        }
+
+        let flops = self.constrained_space.dims.gemm_flops();
+
+        let mut best: Option<BenchmarkResult> = None;
+
+        for cfg in &viable {
+            let result = self
+                .bench_engine
+                .benchmark(stream, cfg, Some(flops), |s| run_fn(cfg, s));
+
+            match result {
+                Ok(res) => {
+                    let dominated = best
+                        .as_ref()
+                        .map(|b| res.median_us < b.median_us)
+                        .unwrap_or(true);
+                    if dominated {
+                        best = Some(res);
+                    }
+                }
+                Err(_) => {
+                    // Skip configs that fail to benchmark — they may hit
+                    // runtime limits not captured by the estimator.
                     continue;
                 }
             }
@@ -826,5 +900,47 @@ mod tests {
         assert!(suggestion.is_some());
         let s = suggestion.expect("checked above");
         assert!(s.needs_shared_increase());
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression (F050): `tune_on_stream` must drive real CUDA-event
+    // timing (record + synchronize) over a live stream/context instead of
+    // relying on the caller to synchronize, unlike `tune`'s wall-clock
+    // path. Self-skips when no CUDA device is available.
+    // -----------------------------------------------------------------------
+    #[cfg(feature = "gpu-tests")]
+    #[test]
+    fn tune_on_stream_finds_best_config_on_real_gpu() {
+        use std::sync::Arc;
+
+        oxicuda_driver::init().ok();
+        let Ok(dev) = oxicuda_driver::device::Device::get(0) else {
+            return; // no CUDA device on this machine — self-skip
+        };
+        let Ok(ctx) = oxicuda_driver::context::Context::new(&dev).map(Arc::new) else {
+            return;
+        };
+        let Ok(stream) = Stream::new(&ctx) else {
+            return;
+        };
+
+        let space = small_space();
+        let constrained = ConstrainedSearchSpace::new(space, generous_budget(), default_dims());
+        let tuner = ConstrainedTuner::with_bench_config(
+            constrained,
+            BenchmarkConfig {
+                warmup: crate::benchmark::WarmupStrategy::Fixed(1),
+                benchmark_runs: 2,
+            },
+        );
+
+        let result = tuner.tune_on_stream(&stream, &GemmMemoryEstimator, |_cfg, _stream| Ok(()));
+
+        assert!(
+            result.is_ok(),
+            "tune_on_stream should find a best config on a real GPU"
+        );
+        let best = result.expect("checked above");
+        assert!(best.median_us >= 0.0);
     }
 }

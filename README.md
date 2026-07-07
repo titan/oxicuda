@@ -5,7 +5,7 @@
 [![CI](https://github.com/cool-japan/oxicuda/workflows/CI/badge.svg)](https://github.com/cool-japan/oxicuda/actions)
 [![License](https://img.shields.io/crates/l/oxicuda.svg)](LICENSE)
 
-**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~1.27M SLoC of safe Rust across 73 crates.**
+**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~1.28M SLoC of safe Rust across 73 crates.**
 
 OxiCUDA replaces the entire NVIDIA CUDA Toolkit software stack with type-safe,
 memory-safe Rust code. The only runtime dependency is the NVIDIA driver
@@ -212,136 +212,136 @@ fn main() -> Result<(), oxicuda::Error> {
 | Crate | CUDA Equivalent | Description | SLoC | Tests |
 |-------|-----------------|-------------|------|-------|
 | **Vol.1 -- Foundation** | | | | |
-| `oxicuda-driver` | Driver API | FFI, device/context/stream/event/module | 15,228 | 379 |
-| `oxicuda-memory` | cuMemAlloc | DeviceBuffer, PinnedBuffer, unified, pool | 6,451 | 275 |
-| `oxicuda-launch` | cuLaunchKernel | Dim3, LaunchParams, `launch!` macro | 5,112 | 214 |
-| `oxicuda-runtime` | CUDA Runtime | High-level cudaRT API layer | 4,856 | 121 |
+| `oxicuda-driver` | Driver API | FFI, device/context/stream/event/module | 14,366 | 458 |
+| `oxicuda-memory` | cuMemAlloc | DeviceBuffer, PinnedBuffer, unified, pool | 6,812 | 301 |
+| `oxicuda-launch` | cuLaunchKernel | Dim3, LaunchParams, `launch!` macro | 5,506 | 231 |
+| `oxicuda-runtime` | CUDA Runtime | High-level cudaRT API layer | 4,955 | 126 |
 | **Vol.2 -- PTX Codegen & Autotuner** | | | | |
-| `oxicuda-ptx` | nvcc / CUTLASS | PTX IR, codegen DSL, Tensor Core gen | 33,988 | 1,006 |
-| `oxicuda-autotune` | -- | Search space, benchmark, tuning DB | 16,198 | 467 |
+| `oxicuda-ptx` | nvcc / CUTLASS | PTX IR, codegen DSL, Tensor Core gen | 35,030 | 1,029 |
+| `oxicuda-autotune` | -- | Search space, benchmark, tuning DB | 16,500 | 472 |
 | **Vol.3 -- Linear Algebra** | | | | |
-| `oxicuda-blas` | cuBLAS | BLAS L1/L2/L3, GEMM, batched, elementwise | 29,765 | 791 |
+| `oxicuda-blas` | cuBLAS | BLAS L1/L2/L3, GEMM, batched, elementwise | 33,597 | 981 |
 | **Vol.4 -- Deep Learning** | | | | |
-| `oxicuda-dnn` | cuDNN | Conv, attention, MoE, norm, pool, quantize | 40,845 | 1,075 |
+| `oxicuda-dnn` | cuDNN | Conv, attention, MoE, norm, pool, quantize | 47,562 | 1,262 |
 | **Vol.5 -- Scientific Computing** | | | | |
-| `oxicuda-fft` | cuFFT | Stockham, radix-2/4/8, Bluestein, 1D/2D/3D | 15,764 | 427 |
-| `oxicuda-sparse` | cuSPARSE | CSR/CSC/COO/BSR/ELL, SpMV, SpMM, SpGEMM | 16,320 | 417 |
-| `oxicuda-solver` | cuSOLVER | LU, QR, SVD, Cholesky, eig, CG, GMRES | 24,587 | 530 |
-| `oxicuda-rand` | cuRAND | Philox, MRG32k3a, Sobol, distributions | 14,384 | 433 |
+| `oxicuda-fft` | cuFFT | Stockham, radix-2/4/8, Bluestein, 1D/2D/3D | 15,182 | 437 |
+| `oxicuda-sparse` | cuSPARSE | CSR/CSC/COO/BSR/ELL, SpMV, SpMM, SpGEMM | 17,851 | 463 |
+| `oxicuda-solver` | cuSOLVER | LU, QR, SVD, Cholesky, eig, CG, GMRES | 24,858 | 534 |
+| `oxicuda-rand` | cuRAND | Philox, MRG32k3a, Sobol, distributions | 14,300 | 435 |
 | **Vol.6 -- Signal Processing** | | | | |
-| `oxicuda-signal` | -- | Audio/image DSP, DCT, DWT, IIR/FIR filters | 14,381 | 508 |
+| `oxicuda-signal` | -- | Audio/image DSP, DCT, DWT, IIR/FIR filters | 14,440 | 512 |
 | **Vol.7 -- Computation Graph** | | | | |
-| `oxicuda-graph` | CUDA Graphs | Graph capture, dep-sorted exec, events | 8,362 | 299 |
+| `oxicuda-graph` | CUDA Graphs | Graph capture, dep-sorted exec, events | 8,122 | 299 |
 | **Vol.8 -- GPU Training** | | | | |
-| `oxicuda-train` | -- | AMP, grad accum/clip, LR schedulers, optimizers | 11,901 | 362 |
-| `oxicuda-quant` | -- | INT8/INT4/FP8 quantization, block-scaled | 9,007 | 288 |
+| `oxicuda-train` | -- | AMP, grad accum/clip, LR schedulers, optimizers | 11,760 | 364 |
+| `oxicuda-quant` | -- | INT8/INT4/FP8 quantization, block-scaled | 8,811 | 288 |
 | **Vol.9 -- Inference Engine** | | | | |
-| `oxicuda-infer` | -- | KV-cache, paged attention, speculative decode | 10,925 | 399 |
+| `oxicuda-infer` | -- | KV-cache, paged attention, speculative decode | 10,687 | 405 |
 | `oxicuda-dist-infer` | -- | Tensor/pipeline parallelism, distributed infer | 7,735 | 239 |
-| `oxicuda-lm` | -- | BPE tokenizer, vocab, sampling strategies | 7,252 | 275 |
+| `oxicuda-lm` | -- | BPE tokenizer, vocab, sampling strategies | 7,025 | 275 |
 | **Vol.10 -- Reinforcement Learning** | | | | |
 | `oxicuda-rl` | -- | Replay buffers, policy dists, PPO/DQN/SAC/TD3 | 12,473 | 453 |
 | **Backends** | | | | |
 | `oxicuda-backend` | -- | Backend trait abstraction | 4,038 | 101 |
 | `oxicuda-primitives` | CUB | GPU scan, reduce, sort, histogram | 10,114 | 260 |
-| `oxicuda-metal` | -- | Metal compute backend (macOS) | 7,287 | 255 |
-| `oxicuda-vulkan` | -- | Vulkan Compute backend | 7,366 | 150 |
-| `oxicuda-webgpu` | -- | WebGPU backend | 5,430 | 216 |
-| `oxicuda-rocm` | -- | AMD ROCm backend | 6,523 | 213 |
-| `oxicuda-levelzero` | -- | Intel oneAPI / LevelZero backend | 8,248 | 153 |
+| `oxicuda-metal` | -- | Metal compute backend (macOS) | 7,456 | 262 |
+| `oxicuda-vulkan` | -- | Vulkan Compute backend | 7,493 | 151 |
+| `oxicuda-webgpu` | -- | WebGPU backend | 5,736 | 226 |
+| `oxicuda-rocm` | -- | AMD ROCm backend | 6,755 | 217 |
+| `oxicuda-levelzero` | -- | Intel oneAPI / LevelZero backend | 8,290 | 155 |
 | **Vol.17 -- Generative AI** | | | | |
-| `oxicuda-gen` | -- | Diffusion (DDPM/DDIM/DPM-Solver++/Flow Matching), CFG, VAE, LoRA | 16,612 | 596 |
+| `oxicuda-gen` | -- | Diffusion (DDPM/DDIM/DPM-Solver++/Flow Matching), CFG, VAE, LoRA | 16,532 | 596 |
 | **Vol.18 -- Graph Neural Networks** | | | | |
-| `oxicuda-gnn` | -- | CSR/COO/Hetero graphs, GCN/GAT/GraphSAGE/GIN, pooling | 19,452 | 670 |
+| `oxicuda-gnn` | -- | CSR/COO/Hetero graphs, GCN/GAT/GraphSAGE/GIN, pooling | 19,328 | 670 |
 | **Vol.19 -- State Space Models** | | | | |
-| `oxicuda-mamba` | -- | HiPPO-NPLR, S4D/S5 selective scan, Mamba SSM, RWKV | 16,613 | 678 |
+| `oxicuda-mamba` | -- | HiPPO-NPLR, S4D/S5 selective scan, Mamba SSM, RWKV | 16,546 | 680 |
 | **Vol.20 -- Vision Transformers** | | | | |
-| `oxicuda-vision` | -- | ViT, patch embedding, CLIP towers | 22,299 | 853 |
+| `oxicuda-vision` | -- | ViT, patch embedding, CLIP towers | 22,188 | 853 |
 | **Vol.21 -- Audio/Speech ML** | | | | |
-| `oxicuda-audio` | -- | Conformer, Wav2Vec2, CTC/RNN-T, WaveNet, SpecAugment, x-vector | 24,396 | 853 |
+| `oxicuda-audio` | -- | Conformer, Wav2Vec2, CTC/RNN-T, WaveNet, SpecAugment, x-vector | 24,247 | 853 |
 | **Vol.22 -- Time-Series Forecasting** | | | | |
-| `oxicuda-timeseries` | -- | TCN, NHiTS, PatchTST, TimesNet, iTransformer, RevIN | 22,887 | 711 |
+| `oxicuda-timeseries` | -- | TCN, NHiTS, PatchTST, TimesNet, iTransformer, RevIN | 22,739 | 711 |
 | **Vol.23 -- Bayesian Deep Learning** | | | | |
-| `oxicuda-bayes` | -- | Variational inference, MC Dropout, Deep Ensembles, SWAG, Laplace | 21,380 | 675 |
+| `oxicuda-bayes` | -- | Variational inference, MC Dropout, Deep Ensembles, SWAG, Laplace | 21,192 | 675 |
 | **Vol.24 -- Federated Learning** | | | | |
-| `oxicuda-federated` | -- | FedAvg/FedProx/SCAFFOLD/FedAdam, DP, secure aggregation | 12,084 | 502 |
+| `oxicuda-federated` | -- | FedAvg/FedProx/SCAFFOLD/FedAdam, DP, secure aggregation | 11,941 | 502 |
 | **Vol.25 -- Neural Architecture Search** | | | | |
-| `oxicuda-nas` | -- | DARTS, supernet, NSGA-II, hardware-aware FLOPs predictor | 12,155 | 389 |
+| `oxicuda-nas` | -- | DARTS, supernet, NSGA-II, hardware-aware FLOPs predictor | 12,000 | 389 |
 | **Vol.26 -- Self-Supervised Learning** | | | | |
-| `oxicuda-ssl` | -- | SimCLR/MoCo/BYOL/Barlow Twins/MAE/DINO | 15,076 | 459 |
+| `oxicuda-ssl` | -- | SimCLR/MoCo/BYOL/Barlow Twins/MAE/DINO | 14,885 | 459 |
 | **Vol.27 -- Adversarial Robustness** | | | | |
-| `oxicuda-adversarial` | -- | FGSM/PGD/CW/TRADES/MART | 14,138 | 549 |
+| `oxicuda-adversarial` | -- | FGSM/PGD/CW/TRADES/MART | 13,971 | 549 |
 | **Vol.28 -- Multi-Modal Learning** | | | | |
-| `oxicuda-multimodal` | -- | Cross-modal attention, CLIP/ImageBind | 15,297 | 480 |
+| `oxicuda-multimodal` | -- | Cross-modal attention, CLIP/ImageBind | 15,112 | 480 |
 | **Vol.29 -- Continual Learning** | | | | |
-| `oxicuda-continual` | -- | EWC/SI/PackNet/GEM/DER++ | 16,361 | 548 |
+| `oxicuda-continual` | -- | EWC/SI/PackNet/GEM/DER++ | 16,164 | 548 |
 | **Vol.30 -- 3D Geometry & Point Clouds** | | | | |
-| `oxicuda-geometry3d` | -- | FPS/kNN/PointNet/DGCNN/ICP | 18,546 | 557 |
+| `oxicuda-geometry3d` | -- | FPS/kNN/PointNet/DGCNN/ICP | 18,373 | 557 |
 | **Vol.31 -- Physics-Informed Neural Networks** | | | | |
-| `oxicuda-pinn` | -- | PINN/NeuralODE/FNO/DeepONet | 22,238 | 727 |
+| `oxicuda-pinn` | -- | PINN/NeuralODE/FNO/DeepONet | 22,082 | 727 |
 | **Vol.32 -- RLHF & Alignment** | | | | |
-| `oxicuda-rlhf` | -- | DPO/IPO/KTO/ORPO/PPO-RLHF/reward-model | 17,134 | 667 |
+| `oxicuda-rlhf` | -- | DPO/IPO/KTO/ORPO/PPO-RLHF/reward-model | 17,018 | 667 |
 | **Vol.33 -- Meta-Learning** | | | | |
-| `oxicuda-meta` | -- | MAML/FOMAML/ANIL/Reptile/ProtoNet | 17,594 | 530 |
+| `oxicuda-meta` | -- | MAML/FOMAML/ANIL/Reptile/ProtoNet | 17,440 | 530 |
 | **Vol.34 -- Neural Radiance Fields** | | | | |
-| `oxicuda-nerf` | -- | NeRF/Instant-NGP/Mip-NeRF/TensoRF | 14,404 | 395 |
+| `oxicuda-nerf` | -- | NeRF/Instant-NGP/Mip-NeRF/TensoRF | 14,289 | 395 |
 | **Vol.35 -- Mixture of Experts** | | | | |
-| `oxicuda-moe` | -- | Switch/Top-K/Expert-Choice/Soft-MoE | 11,830 | 352 |
+| `oxicuda-moe` | -- | Switch/Top-K/Expert-Choice/Soft-MoE | 11,698 | 352 |
 | **Vol.36 -- Tabular Deep Learning** | | | | |
-| `oxicuda-tabular` | -- | TabNet/SAINT/FT-Transformer/NODE | 23,054 | 564 |
+| `oxicuda-tabular` | -- | TabNet/SAINT/FT-Transformer/NODE | 22,938 | 564 |
 | **Vol.37 -- Anomaly Detection** | | | | |
-| `oxicuda-anomaly` | -- | DeepSVDD/LOF/COPOD/Mahalanobis/IsoForest | 25,527 | 611 |
+| `oxicuda-anomaly` | -- | DeepSVDD/LOF/COPOD/Mahalanobis/IsoForest | 25,368 | 611 |
 | **Vol.38 -- Quantum Simulation** | | | | |
-| `oxicuda-quantum` | -- | State-vector/VQE/QAOA/QML-kernels | 16,752 | 490 |
+| `oxicuda-quantum` | -- | State-vector/VQE/QAOA/QML-kernels | 16,687 | 491 |
 | **Vol.39 -- Approximate Nearest Neighbor** | | | | |
-| `oxicuda-ann` | -- | HNSW/IVF/PQ/IVFPQ/LSH | 16,482 | 464 |
+| `oxicuda-ann` | -- | HNSW/IVF/PQ/IVFPQ/LSH | 16,462 | 465 |
 | **Vol.40 -- Recommender Systems** | | | | |
-| `oxicuda-recsys` | -- | ALS/BPR/NCF/DeepFM/SASRec/LightGCN | 19,223 | 597 |
+| `oxicuda-recsys` | -- | ALS/BPR/NCF/DeepFM/SASRec/LightGCN | 19,181 | 597 |
 | **Vol.41 -- Causal Inference** | | | | |
-| `oxicuda-causal` | -- | NOTEARS/IPW/S-T-X-learners/DML/CausalForest | 28,454 | 788 |
+| `oxicuda-causal` | -- | NOTEARS/IPW/S-T-X-learners/DML/CausalForest | 28,424 | 788 |
 | **Vol.42 -- Parameter-Efficient Fine-Tuning** | | | | |
-| `oxicuda-peft` | -- | LoRA/QLoRA/AdaLoRA/Prefix-Tuning | 23,516 | 790 |
+| `oxicuda-peft` | -- | LoRA/QLoRA/AdaLoRA/Prefix-Tuning | 23,507 | 791 |
 | **Vol.43 -- Knowledge Distillation** | | | | |
-| `oxicuda-distill` | -- | Hinton/FitNets/AT/CRD/DML/ZSKD | 14,820 | 530 |
+| `oxicuda-distill` | -- | Hinton/FitNets/AT/CRD/DML/ZSKD | 14,792 | 530 |
 | **Vol.44 -- Optimal Transport** | | | | |
-| `oxicuda-ot` | -- | Sinkhorn/EMD/Gromov-Wasserstein/Wasserstein-kmeans | 26,462 | 657 |
+| `oxicuda-ot` | -- | Sinkhorn/EMD/Gromov-Wasserstein/Wasserstein-kmeans | 26,402 | 657 |
 | **Vol.45 -- Spiking Neural Networks** | | | | |
-| `oxicuda-snn` | -- | LIF/IF/BPTT/STBP/SLAYER/STDP/ANN→SNN | 26,057 | 845 |
+| `oxicuda-snn` | -- | LIF/IF/BPTT/STBP/SLAYER/STDP/ANN→SNN | 25,999 | 845 |
 | **Vol.46 -- Differential Privacy** | | | | |
-| `oxicuda-privacy` | -- | DP-FTRL/DP-Adam/RDP/zCDP/PRV/OUE/RAPPOR | 21,747 | 823 |
+| `oxicuda-privacy` | -- | DP-FTRL/DP-Adam/RDP/zCDP/PRV/OUE/RAPPOR | 21,690 | 823 |
 | **Vol.47 -- Hyperdimensional Computing** | | | | |
-| `oxicuda-hdc` | -- | Binary/integer/complex HVs, AM/classifier | 16,640 | 609 |
+| `oxicuda-hdc` | -- | Binary/integer/complex HVs, AM/classifier | 16,573 | 609 |
 | **Vol.48 -- Evolutionary Algorithms** | | | | |
-| `oxicuda-evol` | -- | CMA-ES/NSGA-II/MOEA-D/NEAT/DE/PSO/ACO | 23,030 | 612 |
+| `oxicuda-evol` | -- | CMA-ES/NSGA-II/MOEA-D/NEAT/DE/PSO/ACO | 22,613 | 612 |
 | **Vol.49 -- Topological Data Analysis** | | | | |
-| `oxicuda-tda` | -- | Vietoris-Rips/persistent-homology/Mapper | 13,342 | 398 |
+| `oxicuda-tda` | -- | Vietoris-Rips/persistent-homology/Mapper | 13,502 | 402 |
 | **Vol.50 -- Tensor Networks** | | | | |
-| `oxicuda-tn` | -- | MPS/MPO/DMRG/TEBD/PEPS/TT-cross/CP-ALS/einsum | 28,138 | 540 |
+| `oxicuda-tn` | -- | MPS/MPO/DMRG/TEBD/PEPS/TT-cross/CP-ALS/einsum | 27,707 | 540 |
 | **Vol.51 -- Sequence Models** | | | | |
-| `oxicuda-seq` | -- | HMM/CRF/Kalman/EKF/Viterbi/Baum-Welch | 25,130 | 706 |
+| `oxicuda-seq` | -- | HMM/CRF/Kalman/EKF/Viterbi/Baum-Welch | 24,983 | 706 |
 | **Vol.52 -- Numerical PDE Solvers** | | | | |
-| `oxicuda-pde` | -- | FDM/FEM/spectral/multigrid/CG | 26,515 | 725 |
+| `oxicuda-pde` | -- | FDM/FEM/spectral/multigrid/CG | 26,402 | 725 |
 | **Vol.53 -- Manifold Learning** | | | | |
-| `oxicuda-manifold` | -- | t-SNE/UMAP/LLE/Isomap/Diffusion-Maps/SMACOF | 29,018 | 620 |
+| `oxicuda-manifold` | -- | t-SNE/UMAP/LLE/Isomap/Diffusion-Maps/SMACOF | 28,950 | 620 |
 | **Vol.54 -- Statistical Inference** | | | | |
-| `oxicuda-stats` | -- | t-test/ANOVA/KS/bootstrap/regression/power | 35,055 | 1,015 |
+| `oxicuda-stats` | -- | t-test/ANOVA/KS/bootstrap/regression/power | 34,954 | 1,015 |
 | **Vol.55 -- Streaming Sketches** | | | | |
-| `oxicuda-sketch` | -- | HyperLogLog/Count-Min/Bloom/t-Digest/MinHash | 15,893 | 583 |
+| `oxicuda-sketch` | -- | HyperLogLog/Count-Min/Bloom/t-Digest/MinHash | 15,757 | 583 |
 | **Vol.56 -- Survival Analysis** | | | | |
-| `oxicuda-survival` | -- | Kaplan-Meier/Cox-PH/AFT/Fine-Gray/Brier | 33,336 | 819 |
+| `oxicuda-survival` | -- | Kaplan-Meier/Cox-PH/AFT/Fine-Gray/Brier | 33,231 | 819 |
 | **Vol.57 -- Convex Optimization** | | | | |
-| `oxicuda-cvx` | -- | LP/QP/SOCP/SDP/ADMM/FISTA/proximal-gradient | 23,860 | 669 |
+| `oxicuda-cvx` | -- | LP/QP/SOCP/SDP/ADMM/FISTA/proximal-gradient | 23,736 | 669 |
 | **Vol.58 -- Compressed Sensing** | | | | |
-| `oxicuda-cs` | -- | OMP/CoSaMP/IHT/AMP/K-SVD/LASSO/nuclear-norm | 12,474 | 291 |
+| `oxicuda-cs` | -- | OMP/CoSaMP/IHT/AMP/K-SVD/LASSO/nuclear-norm | 12,350 | 291 |
 | **Vol.59 -- Graph Algorithms** | | | | |
-| `oxicuda-graphalg` | -- | BFS/DFS/Dijkstra/MST/flow/matching/SCC/TSP | 13,259 | 358 |
+| `oxicuda-graphalg` | -- | BFS/DFS/Dijkstra/MST/flow/matching/SCC/TSP | 13,143 | 358 |
 | **Vol.60 -- Numerical Analysis** | | | | |
-| `oxicuda-numeric` | -- | Root-finding/quadrature/special-functions/ODE/interpolation | 17,147 | 545 |
+| `oxicuda-numeric` | -- | Root-finding/quadrature/special-functions/ODE/interpolation | 17,025 | 545 |
 | **Vol.61 -- 2D Computational Geometry** | | | | |
-| `oxicuda-geom2d` | -- | Delaunay/Voronoi/convex-hull/sweep-line | 11,159 | 301 |
+| `oxicuda-geom2d` | -- | Delaunay/Voronoi/convex-hull/sweep-line | 11,071 | 301 |
 | **Umbrella** | | | | |
-| `oxicuda` | -- | Umbrella re-export crate | 21,994 | 521 |
-| | | **Total** | **~1,273,120** | **38,093** |
+| `oxicuda` | -- | Umbrella re-export crate | 21,496 | 526 |
+| | | **Total** | **~1,280,142** | **38,612** |
 
 ## Feature Flags
 
@@ -470,6 +470,14 @@ cargo nextest run --all-features
 - Algorithm completions: `oxicuda-pde` `fem_assemble_kernel` now a full unconstrained P1 stiffness assembly; `oxicuda-tabular` sparsemax/quantile-norm/NODE-tree kernels now exact (plus new `VarObliviousLayer` and `TabRecordLayer`); `oxicuda-moe` `soft_moe_dispatch_kernel` now the real 3-pass slot-softmax; `oxicuda-geometry3d` Gaussian-splatting `project_kernel`/`sh_eval_kernel` now full EWA covariance + 9-term spherical harmonics
 - New: preconditioned conjugate gradient (`oxicuda-cvx`), GPT-NeoX half-split RoPE (`oxicuda-dnn`), pure-Rust FFT for FNO spectral convolution (`oxicuda-pinn`)
 - Test suite expanded to 38,093 passing tests (`--all-features`; 37,166 with default features), up from 36,984 at 0.3.0, including large analytic test-coverage expansions across `oxicuda-rlhf`, `oxicuda-recsys`, `oxicuda-peft`, `oxicuda-meta`, `oxicuda-numeric`, `oxicuda-evol`, `oxicuda-solver`, and `oxicuda-ann`
+
+**Released (v0.4.1) -- 2026-07-07** *(38,612 tests passing, ~1.28M SLoC, 73 crates)*
+- On-device GPU validation sweep continues into `oxicuda-blas` (Level-1/Level-2/GEMM/reduction kernels plus Ampere `mma.sync` tensor-core paths), `oxicuda-dnn` (attention, RNN, convolution, normalization, pooling, quantization), and the `oxicuda-driver`/`oxicuda-runtime`/`oxicuda-memory`/`oxicuda-launch` stack itself -- context/stream/graph lifetime, peer access, and pooled-buffer reuse races that only surface under real concurrent device execution
+- Sweep also reaches `oxicuda-sparse` (all major formats/ops), `oxicuda-solver`'s batched LU/Cholesky factorization (previously stub bodies), and `oxicuda-autotune`'s benchmark timing and result-database concurrency
+- First-ever correctness pass across the non-CUDA GPU backends -- Vulkan/SPIR-V, WebGPU/WGSL, Metal/MSL, ROCm/HIP, Level Zero/SPIR-V -- against real backend compilers/validators, turning up dozens of invalid-shader-module and wrong-ISA-encoding bugs plus several silently-wrong GEMM, attention, and quantization computations
+- Real driver-backed CUDA Graph stream capture (`cuStreamBeginCapture_v2`/`cuStreamEndCapture`, finalized into a launchable graph) lands for the first time
+- Security hardening: PTX cache symlink/cache-poisoning fix (`oxicuda-ptx`), plus untrusted-input allocation-size fixes in device-printf parsing (`oxicuda-driver`) and index/adapter deserializers (`oxicuda-ann`, `oxicuda-peft`)
+- Test suite expanded to 38,612 passing tests (`--all-features`; 37,288 with default features), up from 38,093/37,166 at 0.4.0
 
 **Next**
 - Published documentation on docs.rs

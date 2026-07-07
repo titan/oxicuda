@@ -57,10 +57,17 @@ pub fn top_p_filter(logits: &mut [f32], p: f32) -> InferResult<()> {
     let n = logits.len();
     // Compute softmax probabilities (operate on a copy for sorting).
     let probs = softmax(logits);
+    // `logits` was already checked above for NaN, but fully-masked
+    // (all `-inf`) or `+inf`-containing inputs produce `inf - inf = NaN`
+    // inside softmax's normalization even though no individual logit is
+    // NaN; guard against that here so the sort below can never observe NaN.
+    if probs.iter().any(|pr| pr.is_nan()) {
+        return Err(InferError::NanLogits);
+    }
 
     // Sort indices by probability descending.
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_unstable_by(|&a, &b| probs[b].partial_cmp(&probs[a]).expect("no NaN"));
+    order.sort_unstable_by(|&a, &b| probs[b].total_cmp(&probs[a]));
 
     // Find the nucleus cutoff index.
     let mut cumsum = 0.0_f32;
@@ -76,28 +83,8 @@ pub fn top_p_filter(logits: &mut [f32], p: f32) -> InferResult<()> {
     // Determine the probability threshold = logit value at `cutoff` index.
     let threshold_prob = probs[cutoff];
 
-    // Mask logits with probability < threshold.
-    // Keep exactly the nucleus (positions where prob >= threshold, up to
-    // the cutoff position in the sorted order).
-    let nucleus_set: std::collections::HashSet<usize> = order
-        .iter()
-        .copied()
-        .take_while(|&idx| {
-            let mut c = 0.0_f32;
-            // Recompute cumulative up to this position.
-            for &i in order.iter().take_while(|&&j| j != idx || { true }) {
-                c += probs[i];
-                if i == idx {
-                    break;
-                }
-            }
-            c <= cumsum
-        })
-        .collect();
-    let _ = nucleus_set; // Not used; we use the threshold approach below.
-
-    // Simpler: mask any token whose probability is strictly less than
-    // the threshold probability (the tail beyond the nucleus).
+    // Mask any token whose probability is strictly less than the threshold
+    // probability (the tail beyond the nucleus).
     for (i, v) in logits.iter_mut().enumerate() {
         if probs[i] < threshold_prob {
             *v = f32::NEG_INFINITY;
@@ -167,6 +154,31 @@ mod tests {
         assert!(matches!(
             top_p_filter(&mut l, -0.1),
             Err(InferError::SamplingError(_))
+        ));
+    }
+
+    /// Regression for F029: a fully-masked (all `-inf`) logits vector makes
+    /// softmax produce NaN probabilities (`-inf - -inf = NaN`) even though no
+    /// individual input logit is NaN; `top_p_filter` must return
+    /// `Err(NanLogits)` instead of panicking in the sort comparator.
+    #[test]
+    fn filter_all_neg_inf_returns_nan_logits_error_not_panic() {
+        let mut l = vec![f32::NEG_INFINITY; 4];
+        assert!(matches!(
+            top_p_filter(&mut l, 0.9),
+            Err(InferError::NanLogits)
+        ));
+    }
+
+    /// Regression for F029: a `+inf` logit makes softmax produce NaN
+    /// (`inf - inf = NaN` for the max-shifted +inf entry itself); must return
+    /// `Err(NanLogits)` instead of panicking.
+    #[test]
+    fn filter_pos_inf_logit_returns_nan_logits_error_not_panic() {
+        let mut l = vec![1.0_f32, f32::INFINITY, 2.0];
+        assert!(matches!(
+            top_p_filter(&mut l, 0.9),
+            Err(InferError::NanLogits)
         ));
     }
 

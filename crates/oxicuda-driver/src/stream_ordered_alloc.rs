@@ -255,12 +255,23 @@ pub struct PoolExportDescriptor {
 
 /// Handle to a stream-ordered memory allocation.
 ///
-/// An allocation lives on the GPU and is associated with a specific stream
-/// and memory pool.  It becomes available when all preceding work on the
-/// stream has completed, and is returned to the pool when freed (also
-/// stream-ordered).
+/// The allocation is produced by the pool's faithful CPU model — the source of
+/// truth for byte accounting, block reuse, and per-stream ordering. It is
+/// associated with a specific stream and memory pool: it becomes available when
+/// all preceding work on the stream has completed, and is returned to the pool
+/// when freed (also stream-ordered).
+///
+/// # Pointer semantics
+///
+/// [`as_ptr`](StreamAllocation::as_ptr) returns the *model* address, which is
+/// the allocator's identity token — **not** a device pointer you can pass to a
+/// kernel. Obtaining a real on-device `CUdeviceptr` requires the driver-backed
+/// `cuMemAllocAsync` / `cuMemAllocFromPoolAsync` path (see the module's
+/// `gpu_*` bindings); the model address is stable and unique for reuse and
+/// ordering bookkeeping only.
 pub struct StreamAllocation {
-    /// Device pointer (`CUdeviceptr`).
+    /// Model address (allocator identity token), typed as `CUdeviceptr`. This
+    /// is **not** a dereferenceable on-device pointer — see the type docs.
     ptr: CUdeviceptr,
     /// Size of the allocation in bytes.
     size: usize,
@@ -276,7 +287,12 @@ pub struct StreamAllocation {
 }
 
 impl StreamAllocation {
-    /// Returns the device pointer as a raw `u64` (`CUdeviceptr`).
+    /// Returns the allocator's *model* address as a raw `u64`.
+    ///
+    /// This is a stable, unique identity token used for reuse and ordering
+    /// bookkeeping — **not** a dereferenceable on-device `CUdeviceptr`. A real
+    /// device pointer must be obtained via the driver-backed `cuMemAllocAsync`
+    /// path (see the type-level documentation).
     #[inline]
     pub fn as_ptr(&self) -> u64 {
         self.ptr
@@ -358,6 +374,12 @@ impl fmt::Debug for StreamAllocation {
 pub struct StreamMemoryPool {
     /// Raw `CUmemoryPool` handle (0 if not backed by a real driver pool).
     handle: u64,
+    /// Whether this wrapper *owns* the driver-side pool and must destroy it on
+    /// drop. `true` only for pools created by [`StreamMemoryPool::new`] via
+    /// `cuMemPoolCreate`; `false` for the CPU model, and crucially for the
+    /// driver-owned default pool from [`StreamMemoryPool::default_pool`] (which
+    /// must never be passed to `cuMemPoolDestroy`).
+    owned: bool,
     /// Device ordinal.
     device: i32,
     /// Configuration used to create this pool.
@@ -415,6 +437,9 @@ impl StreamMemoryPool {
         #[cfg(not(target_os = "macos"))]
         {
             pool.handle = Self::gpu_create_pool(&pool.config)?;
+            // We created the driver-side pool, so we own it and must destroy
+            // it on drop.
+            pool.owned = true;
         }
 
         Ok(pool)
@@ -440,6 +465,7 @@ impl StreamMemoryPool {
         let model = StreamOrderModel::new(Self::model_limits(&config));
         Self {
             handle: 0,
+            owned: false,
             device: config.device,
             config,
             active_allocations: 0,
@@ -1124,29 +1150,89 @@ impl StreamMemoryPool {
     }
 }
 
+impl Drop for StreamMemoryPool {
+    /// Destroy the driver-side pool if this wrapper created (and therefore
+    /// owns) it.
+    ///
+    /// Only pools built by [`StreamMemoryPool::new`] via `cuMemPoolCreate` are
+    /// owned; the CPU model owns no driver resource, and the driver-owned
+    /// default pool must never be destroyed. Errors are logged via
+    /// `tracing::warn!` rather than propagated (destructors must not panic),
+    /// mirroring the [`Stream`]/`Event`/`Module` drop pattern.
+    fn drop(&mut self) {
+        if !self.owned || self.handle == 0 {
+            return;
+        }
+        if let Ok(api) = crate::loader::try_driver() {
+            if let Some(destroy) = api.cu_mem_pool_destroy {
+                let pool = crate::ffi::CUmemoryPool(self.handle as usize as *mut std::ffi::c_void);
+                // SAFETY: `destroy` was just resolved from the driver; `pool`
+                // is the handle returned by `cuMemPoolCreate` for this wrapper
+                // and has not been destroyed yet (owned pools are destroyed
+                // exactly once, here).
+                let rc = unsafe { destroy(pool) };
+                if rc != 0 {
+                    tracing::warn!(
+                        cuda_error = rc,
+                        pool = format_args!("0x{:016x}", self.handle),
+                        "cuMemPoolDestroy failed during StreamMemoryPool drop"
+                    );
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Convenience free functions
 // ---------------------------------------------------------------------------
 
-/// Allocate memory on a stream using the default pool for device 0.
+/// Process-wide default pool backing [`stream_alloc`] / [`stream_free`].
 ///
-/// This is a convenience wrapper around [`StreamMemoryPool::default_pool`]
-/// and [`StreamMemoryPool::alloc_async`].
+/// Initialised lazily from [`StreamMemoryPool::default_pool`] for device 0 so
+/// that byte accounting and block reuse persist across calls (rather than being
+/// discarded with a throwaway pool on every allocation). The default pool is
+/// driver-owned, so this wrapper does not destroy it. A failed initialisation
+/// is *not* cached (the cell stays empty), allowing a later retry once a driver
+/// becomes available.
+static DEFAULT_POOL: std::sync::OnceLock<std::sync::Mutex<StreamMemoryPool>> =
+    std::sync::OnceLock::new();
+
+/// Obtain (initialising on first use) the shared default pool.
+fn shared_default_pool() -> CudaResult<&'static std::sync::Mutex<StreamMemoryPool>> {
+    if let Some(pool) = DEFAULT_POOL.get() {
+        return Ok(pool);
+    }
+    // Build the pool *before* touching the cell so a transient failure (e.g. no
+    // driver yet) is not cached permanently.
+    let pool = StreamMemoryPool::default_pool(0)?;
+    Ok(DEFAULT_POOL.get_or_init(|| std::sync::Mutex::new(pool)))
+}
+
+/// Allocate memory on a stream using a shared, process-wide default pool for
+/// device 0.
+///
+/// Unlike a throwaway pool, the returned [`StreamAllocation`] stays accounted
+/// for and can be returned to the same pool via [`stream_free`].
 ///
 /// # Errors
 ///
 /// Propagates errors from pool creation and allocation.
 pub fn stream_alloc(size: usize, stream: u64) -> CudaResult<StreamAllocation> {
-    let mut pool = StreamMemoryPool::default_pool(0)?;
-    pool.alloc_async(size, stream)
+    let pool = shared_default_pool()?;
+    // A poisoned lock only means a previous holder panicked; the pool state is
+    // still consistent enough to keep serving accounting, so recover the guard.
+    let mut guard = pool.lock().unwrap_or_else(|e| e.into_inner());
+    guard.alloc_async(size, stream)
 }
 
 /// Free a stream-ordered allocation.
 ///
-/// Marks the allocation freed.  This convenience function operates on the
-/// allocation handle only (it does not require the owning pool); use
-/// [`StreamMemoryPool::free_on`] when you need the freed block to re-enter a
-/// specific pool's reuse list.
+/// If the allocation came from the shared default pool (see [`stream_alloc`]),
+/// it is returned to that pool via [`StreamMemoryPool::free_on`] so the freed
+/// block re-enters the reuse list and accounting stays consistent. Otherwise
+/// the allocation is simply marked freed. For allocations from an explicit
+/// pool, prefer [`StreamMemoryPool::free_on`] directly.
 ///
 /// # Errors
 ///
@@ -1154,6 +1240,14 @@ pub fn stream_alloc(size: usize, stream: u64) -> CudaResult<StreamAllocation> {
 pub fn stream_free(alloc: &mut StreamAllocation) -> CudaResult<()> {
     if alloc.freed {
         return Err(CudaError::InvalidValue);
+    }
+
+    if let Some(pool) = DEFAULT_POOL.get() {
+        let mut guard = pool.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.handle() == alloc.pool {
+            let stream = alloc.stream_id();
+            return guard.free_on(alloc, stream);
+        }
     }
 
     alloc.freed = true;

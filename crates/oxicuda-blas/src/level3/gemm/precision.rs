@@ -219,6 +219,7 @@ mod tests {
                 accumulator,
                 Transpose::NoTrans,
                 Transpose::NoTrans,
+                None,
             )
             .generate()
             .expect("SIMT GEMM should generate");

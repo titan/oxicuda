@@ -4,9 +4,6 @@
 //! Phase 1 computes partial sums of squares per block; Phase 2 reduces those
 //! partials and takes the square root.
 
-use std::sync::Arc;
-
-use oxicuda_driver::Module;
 use oxicuda_launch::{Kernel, LaunchParams, grid_size_for};
 use oxicuda_memory::DeviceBuffer;
 use oxicuda_ptx::prelude::*;
@@ -73,9 +70,9 @@ pub fn nrm2<T: GpuFloat>(
     // Phase 1: partial sum-of-squares per block.
     let partials = DeviceBuffer::<T>::zeroed(num_blocks as usize)?;
 
-    let ptx_p1 = generate_nrm2_phase1_ptx::<T>(sm)?;
-    let module_p1 = Arc::new(Module::from_ptx(&ptx_p1)?);
-    let kernel_p1 = Kernel::from_module(module_p1, &nrm2_phase1_name::<T>())?;
+    let p1_name = nrm2_phase1_name::<T>();
+    let module_p1 = handle.get_or_compile_module(&p1_name, || generate_nrm2_phase1_ptx::<T>(sm))?;
+    let kernel_p1 = Kernel::from_module(module_p1, &p1_name)?;
 
     let params_p1 =
         LaunchParams::new(num_blocks, L1_BLOCK_SIZE).with_shared_mem(L1_BLOCK_SIZE * T::size_u32());
@@ -84,9 +81,9 @@ pub fn nrm2<T: GpuFloat>(
     kernel_p1.launch(&params_p1, handle.stream(), &args_p1)?;
 
     // Phase 2: reduce partials and apply sqrt.
-    let ptx_p2 = generate_nrm2_phase2_ptx::<T>(sm)?;
-    let module_p2 = Arc::new(Module::from_ptx(&ptx_p2)?);
-    let kernel_p2 = Kernel::from_module(module_p2, &nrm2_phase2_name::<T>())?;
+    let p2_name = nrm2_phase2_name::<T>();
+    let module_p2 = handle.get_or_compile_module(&p2_name, || generate_nrm2_phase2_ptx::<T>(sm))?;
+    let kernel_p2 = Kernel::from_module(module_p2, &p2_name)?;
 
     let params_p2 =
         LaunchParams::new(1u32, L1_BLOCK_SIZE).with_shared_mem(L1_BLOCK_SIZE * T::size_u32());

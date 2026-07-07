@@ -16,7 +16,7 @@ use oxicuda_ptx::ir::PtxType;
 
 use super::precision;
 use crate::error::{BlasError, BlasResult};
-use crate::types::Transpose;
+use crate::types::{FillMode, Transpose};
 
 // ---------------------------------------------------------------------------
 // SimtGemmBuilder
@@ -37,6 +37,11 @@ pub struct SimtGemmBuilder {
     trans_a: Transpose,
     /// Transpose mode for B.
     trans_b: Transpose,
+    /// Optional triangle-write mask. `None` (or `Some(Full)`) writes every
+    /// output element; `Some(Upper)`/`Some(Lower)` skip the store (leaving `C`
+    /// untouched) for elements outside the requested triangle, which SYRK /
+    /// SYR2K rely on to preserve the off-triangle.
+    fill_mode: Option<FillMode>,
 }
 
 impl SimtGemmBuilder {
@@ -47,6 +52,7 @@ impl SimtGemmBuilder {
         accumulator: PtxType,
         trans_a: Transpose,
         trans_b: Transpose,
+        fill_mode: Option<FillMode>,
     ) -> Self {
         Self {
             target,
@@ -54,6 +60,7 @@ impl SimtGemmBuilder {
             accumulator,
             trans_a,
             trans_b,
+            fill_mode,
         }
     }
 
@@ -63,7 +70,8 @@ impl SimtGemmBuilder {
         let acc = self.accumulator.as_ptx_str().trim_start_matches('.');
         let ta = trans_label(self.trans_a);
         let tb = trans_label(self.trans_b);
-        format!("simt_gemm_{prec}_{acc}_{ta}_{tb}")
+        let fill = fill_label(self.fill_mode);
+        format!("simt_gemm_{prec}_{acc}_{ta}_{tb}_{fill}")
     }
 
     /// Generates the complete PTX module text.
@@ -252,6 +260,26 @@ impl SimtGemmBuilder {
         write_line(&mut ptx, "$SIMT_K_DONE:")?;
         write_line(&mut ptx, "")?;
 
+        // Triangle-write mask (SYRK / SYR2K). Skip the entire epilogue —
+        // including the beta*C read — for output elements outside the requested
+        // triangle, so C is left byte-for-byte unchanged there. row=%r7,
+        // col=%r6.
+        match self.fill_mode {
+            Some(FillMode::Upper) => {
+                // Store only when col >= row → skip when col < row.
+                write_line(&mut ptx, "    setp.lt.u32 %p3, %r6, %r7;")?;
+                write_line(&mut ptx, "    @%p3 bra $SIMT_DONE;")?;
+                write_line(&mut ptx, "")?;
+            }
+            Some(FillMode::Lower) => {
+                // Store only when row >= col → skip when row < col.
+                write_line(&mut ptx, "    setp.lt.u32 %p3, %r7, %r6;")?;
+                write_line(&mut ptx, "    @%p3 bra $SIMT_DONE;")?;
+                write_line(&mut ptx, "")?;
+            }
+            None | Some(FillMode::Full) => {}
+        }
+
         // Epilogue: C[row, col] = alpha * acc + beta * C_old
         write_line(&mut ptx, "    mad.lo.u32 %r14, %r7, %r22, %r6;")?;
         write_line(&mut ptx, "    cvt.u64.u32 %rd7, %r14;")?;
@@ -335,6 +363,16 @@ fn trans_label(t: Transpose) -> &'static str {
     }
 }
 
+/// Short label for the triangle-write mask, used in kernel names so masked and
+/// unmasked variants get distinct module symbols and cache entries.
+fn fill_label(f: Option<FillMode>) -> &'static str {
+    match f {
+        None | Some(FillMode::Full) => "full",
+        Some(FillMode::Upper) => "up",
+        Some(FillMode::Lower) => "lo",
+    }
+}
+
 /// Writes a line to the PTX string, mapping fmt errors to `BlasError`.
 fn write_line(ptx: &mut String, line: &str) -> BlasResult<()> {
     writeln!(ptx, "{line}").map_err(|e| BlasError::PtxGeneration(format!("fmt error: {e}")))
@@ -356,6 +394,7 @@ mod tests {
             PtxType::F32,
             Transpose::NoTrans,
             Transpose::NoTrans,
+            None,
         );
         let ptx = builder.generate().expect("SIMT GEMM generation failed");
         assert!(ptx.contains(".entry simt_gemm_"));
@@ -371,6 +410,7 @@ mod tests {
             PtxType::F32,
             Transpose::Trans,
             Transpose::NoTrans,
+            None,
         );
         let ptx = builder.generate().expect("SIMT GEMM TN generation failed");
         assert!(ptx.contains("simt_gemm_f32_f32_tt_nn"));
@@ -384,8 +424,9 @@ mod tests {
             PtxType::F64,
             Transpose::NoTrans,
             Transpose::Trans,
+            None,
         );
-        assert_eq!(builder.kernel_name(), "simt_gemm_f64_f64_nn_tt");
+        assert_eq!(builder.kernel_name(), "simt_gemm_f64_f64_nn_tt_full");
     }
 
     #[test]
@@ -396,7 +437,60 @@ mod tests {
             PtxType::F32,
             Transpose::NoTrans,
             Transpose::NoTrans,
+            None,
         );
         assert!(builder.generate().is_err());
+    }
+
+    #[test]
+    fn masked_upper_emits_predicated_store_skip() {
+        let builder = SimtGemmBuilder::new(
+            SmVersion::Sm80,
+            PtxType::F32,
+            PtxType::F32,
+            Transpose::NoTrans,
+            Transpose::Trans,
+            Some(FillMode::Upper),
+        );
+        let ptx = builder
+            .generate()
+            .expect("masked SIMT GEMM generation failed");
+        // Upper triangle: skip the store when col (%r6) < row (%r7).
+        assert!(ptx.contains("simt_gemm_f32_f32_nn_tt_up"));
+        assert!(ptx.contains("setp.lt.u32 %p3, %r6, %r7;"));
+        assert!(ptx.contains("@%p3 bra $SIMT_DONE;"));
+    }
+
+    #[test]
+    fn masked_lower_emits_predicated_store_skip() {
+        let builder = SimtGemmBuilder::new(
+            SmVersion::Sm80,
+            PtxType::F64,
+            PtxType::F64,
+            Transpose::NoTrans,
+            Transpose::Trans,
+            Some(FillMode::Lower),
+        );
+        let ptx = builder
+            .generate()
+            .expect("masked SIMT GEMM generation failed");
+        // Lower triangle: skip the store when row (%r7) < col (%r6).
+        assert!(ptx.contains("simt_gemm_f64_f64_nn_tt_lo"));
+        assert!(ptx.contains("setp.lt.u32 %p3, %r7, %r6;"));
+        assert!(ptx.contains("@%p3 bra $SIMT_DONE;"));
+    }
+
+    #[test]
+    fn unmasked_has_no_triangle_predicate() {
+        let builder = SimtGemmBuilder::new(
+            SmVersion::Sm80,
+            PtxType::F32,
+            PtxType::F32,
+            Transpose::NoTrans,
+            Transpose::Trans,
+            None,
+        );
+        let ptx = builder.generate().expect("SIMT GEMM generation failed");
+        assert!(!ptx.contains("%p3"));
     }
 }

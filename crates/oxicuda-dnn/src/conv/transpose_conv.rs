@@ -567,7 +567,7 @@ fn emit_col2im_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, p: &Col2imPar
                 b.raw_ptx(&format!("add.rn.f64 {acc}, {acc}, {loaded_val};"));
             }
 
-            b.label(&skip);
+            b.raw_ptx(&format!("{skip}:"));
         }
     }
 
@@ -586,7 +586,7 @@ fn emit_col2im_body(b: &mut oxicuda_ptx::builder::BodyBuilder<'_>, p: &Col2imPar
         b.raw_ptx(&format!("st.global.f64 [{out_addr}], {acc};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }
 
@@ -778,7 +778,7 @@ fn emit_weight_reshape_body(
         b.raw_ptx(&format!("st.global.f64 [{dst_addr}], {val};"));
     }
 
-    b.label(&exit_label);
+    b.raw_ptx(&format!("{exit_label}:"));
     b.ret();
 }
 

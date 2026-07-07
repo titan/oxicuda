@@ -308,3 +308,185 @@ mod tests {
         assert!(ptx_str.contains(".target sm_75"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::{assert_close, gpu_handle};
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+    use oxicuda_memory::DeviceBuffer;
+
+    /// CPU oracle for SDDMM: for each non-zero `(row, col)` of `S`,
+    /// `S = alpha * sum_k A[row,k]*B[k,col] + beta * S_old`.
+    /// `A` is m x k row-major, `B` is k x n row-major (contiguous, no padding).
+    #[allow(clippy::too_many_arguments)]
+    fn cpu_sddmm(
+        m: usize,
+        k: usize,
+        n: usize,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        s_old: &[f64],
+        a: &[f64],
+        b: &[f64],
+        alpha: f64,
+        beta: f64,
+    ) -> Vec<f64> {
+        let mut s = s_old.to_vec();
+        for row in 0..m {
+            for nz in row_ptr[row] as usize..row_ptr[row + 1] as usize {
+                let col = col_idx[nz] as usize;
+                let mut dot = 0.0_f64;
+                for kk in 0..k {
+                    // A is m x k row-major; B is k x n row-major.
+                    dot += a[row * k + kk] * b[kk * n + col];
+                }
+                s[nz] = alpha * dot + beta * s_old[nz];
+            }
+        }
+        s
+    }
+
+    /// Drive the production `sddmm` op and compare to the CPU oracle.
+    #[allow(clippy::too_many_arguments)]
+    fn run_sddmm<T: GpuFloat>(
+        m: u32,
+        k: u32,
+        n: u32,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        s_old: &[f64],
+        a: &[f64],
+        b: &[f64],
+        alpha: f64,
+        beta: f64,
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let dev_s: Vec<T> = s_old.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let mut s =
+            CsrMatrix::<T>::from_host(m, n, row_ptr, col_idx, &dev_s).expect("test: build CSR S");
+
+        let dev_a: Vec<T> = a.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let dev_b: Vec<T> = b.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let a_buf = DeviceBuffer::from_host(&dev_a).expect("test: upload A");
+        let b_buf = DeviceBuffer::from_host(&dev_b).expect("test: upload B");
+
+        sddmm::<T>(
+            &handle,
+            f64_to_gpu::<T>(alpha),
+            a_buf.as_device_ptr(),
+            m,
+            k,
+            k, // a_ld (row-major, contiguous)
+            b_buf.as_device_ptr(),
+            n,
+            n, // b_ld (row-major, contiguous)
+            f64_to_gpu::<T>(beta),
+            &mut s,
+        )
+        .expect("test: sddmm launch");
+        handle.stream().synchronize().expect("test: sync");
+
+        let (_rp, _ci, out_vals) = s.to_host().expect("test: download S");
+        let got: Vec<f64> = out_vals.iter().map(|&v| gpu_to_f64(v)).collect();
+        let want = cpu_sddmm(
+            m as usize, k as usize, n as usize, row_ptr, col_idx, s_old, a, b, alpha, beta,
+        );
+        assert_close(&got, &want, tol, tag);
+    }
+
+    /// Sparse mask S (3x4):
+    /// nonzeros at (0,0),(0,2),(1,1),(1,3),(2,0),(2,3)
+    fn mask_3x4() -> (u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        let row_ptr = vec![0, 2, 4, 6];
+        let col_idx = vec![0, 2, 1, 3, 0, 3];
+        // pre-existing S values (used by the beta term)
+        let s_old = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0];
+        (4, row_ptr, col_idx, s_old)
+    }
+
+    fn dense(rows: usize, cols: usize, base: f64) -> Vec<f64> {
+        (0..rows * cols)
+            .map(|idx| base + 0.25 * (idx as f64) - 0.05 * ((idx % 5) as f64))
+            .collect()
+    }
+
+    #[test]
+    fn sddmm_f64_alpha_beta() {
+        let m = 3usize;
+        let k = 5usize;
+        let (n, rp, ci, s_old) = mask_3x4();
+        let a = dense(m, k, 1.0);
+        let b = dense(k, n as usize, -0.5);
+        run_sddmm::<f64>(
+            m as u32,
+            k as u32,
+            n,
+            &rp,
+            &ci,
+            &s_old,
+            &a,
+            &b,
+            1.5,
+            -0.75,
+            1e-10,
+            "sddmm_f64",
+        );
+    }
+
+    #[test]
+    fn sddmm_f32_alpha_beta() {
+        let m = 3usize;
+        let k = 4usize;
+        let (n, rp, ci, s_old) = mask_3x4();
+        let a = dense(m, k, 0.5);
+        let b = dense(k, n as usize, 1.0);
+        run_sddmm::<f32>(
+            m as u32,
+            k as u32,
+            n,
+            &rp,
+            &ci,
+            &s_old,
+            &a,
+            &b,
+            2.0,
+            0.5,
+            1e-4,
+            "sddmm_f32",
+        );
+    }
+
+    #[test]
+    fn sddmm_f64_beta_zero() {
+        // beta = 0: result depends only on the dense product, not S_old.
+        let m = 3usize;
+        let k = 6usize;
+        let (n, rp, ci, _s_old) = mask_3x4();
+        let s_old = vec![1e7; 6];
+        let a = dense(m, k, 2.0);
+        let b = dense(k, n as usize, 0.3);
+        run_sddmm::<f64>(
+            m as u32,
+            k as u32,
+            n,
+            &rp,
+            &ci,
+            &s_old,
+            &a,
+            &b,
+            1.0,
+            0.0,
+            1e-10,
+            "sddmm_beta0",
+        );
+    }
+}

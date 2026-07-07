@@ -435,3 +435,207 @@ mod tests {
         assert_eq!(levels[0].len(), 3);
     }
 }
+
+// ---------------------------------------------------------------------------
+// On-device numeric validation (feature = "gpu-tests")
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "gpu-tests"))]
+mod gpu_device_tests {
+    use super::*;
+    use crate::gpu_test_support::{assert_close, gpu_handle};
+    use crate::host_csr::{f64_to_gpu, gpu_to_f64};
+    use oxicuda_memory::DeviceBuffer;
+
+    /// CPU oracle for a triangular solve `T x = b`. For lower fill, performs
+    /// forward substitution; for upper, back substitution. The diagonal of each
+    /// row must be present.
+    fn cpu_trsv(
+        n: usize,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        b: &[f64],
+        lower: bool,
+    ) -> Vec<f64> {
+        let mut x = vec![0.0_f64; n];
+        let order: Vec<usize> = if lower {
+            (0..n).collect()
+        } else {
+            (0..n).rev().collect()
+        };
+        for &i in &order {
+            let mut acc = b[i];
+            let mut diag = 1.0_f64;
+            for nz in row_ptr[i] as usize..row_ptr[i + 1] as usize {
+                let col = col_idx[nz] as usize;
+                let val = values[nz];
+                if col == i {
+                    diag = val;
+                } else if (lower && col < i) || (!lower && col > i) {
+                    acc -= val * x[col];
+                }
+            }
+            x[i] = acc / diag;
+        }
+        x
+    }
+
+    /// Drive the production `sptrsv` op and compare to the CPU oracle.
+    #[allow(clippy::too_many_arguments)]
+    fn run_sptrsv<T: GpuFloat>(
+        fill: FillMode,
+        n: u32,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[f64],
+        b: &[f64],
+        tol: f64,
+        tag: &str,
+    ) {
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let dev_values: Vec<T> = values.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let a = CsrMatrix::<T>::from_host(n, n, row_ptr, col_idx, &dev_values)
+            .expect("test: build CSR");
+        let dev_b: Vec<T> = b.iter().map(|&v| f64_to_gpu::<T>(v)).collect();
+        let b_buf = DeviceBuffer::from_host(&dev_b).expect("test: upload b");
+        let x_buf =
+            DeviceBuffer::from_host(&vec![T::gpu_zero(); n as usize]).expect("test: alloc x");
+
+        sptrsv::<T>(
+            &handle,
+            fill,
+            &a,
+            b_buf.as_device_ptr(),
+            x_buf.as_device_ptr(),
+        )
+        .expect("test: sptrsv launch");
+        handle.stream().synchronize().expect("test: sync");
+
+        let mut out = vec![T::gpu_zero(); n as usize];
+        x_buf.copy_to_host(&mut out).expect("test: download x");
+        let got: Vec<f64> = out.iter().map(|&v| gpu_to_f64(v)).collect();
+        let want = cpu_trsv(
+            n as usize,
+            row_ptr,
+            col_idx,
+            values,
+            b,
+            matches!(fill, FillMode::Lower),
+        );
+        assert_close(&got, &want, tol, tag);
+    }
+
+    /// Lower-triangular 5x5 with a long-range dependency in the last row
+    /// (forces multiple dependency levels).
+    fn lower_5x5() -> (u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        // row0: (0,0)=2
+        // row1: (1,0)=-1 (1,1)=2
+        // row2: (2,1)=-1 (2,2)=2
+        // row3: (3,2)=-1 (3,3)=2
+        // row4: (4,1)=0.5 (4,3)=-1 (4,4)=3
+        let row_ptr = vec![0, 1, 3, 5, 7, 10];
+        let col_idx = vec![0, 0, 1, 1, 2, 2, 3, 1, 3, 4];
+        let values = vec![2.0, -1.0, 2.0, -1.0, 2.0, -1.0, 2.0, 0.5, -1.0, 3.0];
+        (5, row_ptr, col_idx, values)
+    }
+
+    /// Upper-triangular 5x5 with a long-range dependency in the first row.
+    fn upper_5x5() -> (u32, Vec<i32>, Vec<i32>, Vec<f64>) {
+        // row0: (0,0)=2 (0,1)=-1 (0,4)=0.5
+        // row1: (1,1)=2 (1,2)=-1
+        // row2: (2,2)=2 (2,3)=-1
+        // row3: (3,3)=2 (3,4)=-1
+        // row4: (4,4)=3
+        let row_ptr = vec![0, 3, 5, 7, 9, 10];
+        let col_idx = vec![0, 1, 4, 1, 2, 2, 3, 3, 4, 4];
+        let values = vec![2.0, -1.0, 0.5, 2.0, -1.0, 2.0, -1.0, 2.0, -1.0, 3.0];
+        (5, row_ptr, col_idx, values)
+    }
+
+    #[test]
+    fn sptrsv_lower_f64() {
+        let (n, rp, ci, v) = lower_5x5();
+        let b = vec![2.0, 1.0, 3.0, -1.0, 5.0];
+        run_sptrsv::<f64>(
+            FillMode::Lower,
+            n,
+            &rp,
+            &ci,
+            &v,
+            &b,
+            1e-10,
+            "sptrsv_lower_f64",
+        );
+    }
+
+    #[test]
+    fn sptrsv_upper_f64() {
+        let (n, rp, ci, v) = upper_5x5();
+        let b = vec![2.0, 1.0, 3.0, -1.0, 6.0];
+        run_sptrsv::<f64>(
+            FillMode::Upper,
+            n,
+            &rp,
+            &ci,
+            &v,
+            &b,
+            1e-10,
+            "sptrsv_upper_f64",
+        );
+    }
+
+    #[test]
+    fn sptrsv_lower_f32() {
+        let (n, rp, ci, v) = lower_5x5();
+        let b = vec![1.0, 2.0, -1.0, 4.0, 0.5];
+        run_sptrsv::<f32>(
+            FillMode::Lower,
+            n,
+            &rp,
+            &ci,
+            &v,
+            &b,
+            1e-4,
+            "sptrsv_lower_f32",
+        );
+    }
+
+    #[test]
+    fn sptrsv_lower_solution_satisfies_system() {
+        // Cross-check: the solved x must satisfy L x = b to tolerance.
+        let Some(handle) = gpu_handle() else {
+            return;
+        };
+        let (n, rp, ci, v) = lower_5x5();
+        let b = vec![3.0, -2.0, 1.0, 4.0, 2.0];
+        let dev_values: Vec<f64> = v.clone();
+        let a = CsrMatrix::<f64>::from_host(n, n, &rp, &ci, &dev_values).expect("test: build CSR");
+        let b_buf = DeviceBuffer::from_host(&b).expect("test: upload b");
+        let x_buf = DeviceBuffer::from_host(&vec![0.0_f64; n as usize]).expect("test: alloc x");
+        sptrsv::<f64>(
+            &handle,
+            FillMode::Lower,
+            &a,
+            b_buf.as_device_ptr(),
+            x_buf.as_device_ptr(),
+        )
+        .expect("test: sptrsv");
+        handle.stream().synchronize().expect("test: sync");
+        let mut x = vec![0.0_f64; n as usize];
+        x_buf.copy_to_host(&mut x).expect("test: download x");
+
+        // Residual L x - b.
+        let mut lx = vec![0.0_f64; n as usize];
+        for i in 0..n as usize {
+            let mut acc = 0.0;
+            for nz in rp[i] as usize..rp[i + 1] as usize {
+                acc += v[nz] * x[ci[nz] as usize];
+            }
+            lx[i] = acc;
+        }
+        assert_close(&lx, &b, 1e-10, "sptrsv_lower_residual");
+    }
+}

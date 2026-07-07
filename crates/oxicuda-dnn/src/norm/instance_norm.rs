@@ -167,8 +167,8 @@ pub fn generate_forward_ptx<T: GpuFloat>(
     writeln!(ptx, "    .param .u32 %param_spatial,").map_err(fmt_err)?;
     writeln!(ptx, "    .param .u32 %param_epsilon_bits").map_err(fmt_err)?;
     writeln!(ptx, ")").map_err(fmt_err)?;
+    writeln!(ptx, ".maxntid {block_size}, 1, 1").map_err(fmt_err)?;
     writeln!(ptx, "{{").map_err(fmt_err)?;
-    writeln!(ptx, "    .maxntid {block_size}, 1, 1;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b32 %r<32>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b64 %rd<24>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .f32 %f<32>;").map_err(fmt_err)?;
@@ -376,8 +376,8 @@ pub fn generate_backward_ptx<T: GpuFloat>(
     writeln!(ptx, "    .param .u32 %param_spatial,").map_err(fmt_err)?;
     writeln!(ptx, "    .param .u32 %param_epsilon_bits").map_err(fmt_err)?;
     writeln!(ptx, ")").map_err(fmt_err)?;
+    writeln!(ptx, ".maxntid {block_size}, 1, 1").map_err(fmt_err)?;
     writeln!(ptx, "{{").map_err(fmt_err)?;
-    writeln!(ptx, "    .maxntid {block_size}, 1, 1;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b32 %r<32>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b64 %rd<24>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .f32 %f<32>;").map_err(fmt_err)?;
@@ -512,13 +512,19 @@ pub fn generate_backward_ptx<T: GpuFloat>(
     writeln!(ptx, "    bra $INB_DSUM_LOOP;").map_err(fmt_err)?;
     writeln!(ptx, "$INB_DSUM_DONE:").map_err(fmt_err)?;
 
+    // Preserve this thread's sum_dy_xhat partial before reducing sum_dy:
+    // `write_smem_reduce_f32` uses %f15/%f16 as scratch and would otherwise
+    // clobber the partial held in %f16 for the low-lane threads, corrupting
+    // the subsequent sum_dy_xhat reduction.
+    writeln!(ptx, "    mov.f32 %f23, %f16;").map_err(fmt_err)?;
+
     // Reduce sum_dy
     write_smem_reduce_f32(&mut ptx, "%f15", block_size, "DY")?;
     writeln!(ptx, "    ld.shared.f32 %f21, [smem_in];").map_err(fmt_err)?; // sum_dy
     writeln!(ptx, "    bar.sync 0;").map_err(fmt_err)?;
 
-    // Reduce sum_dy_xhat
-    write_smem_reduce_f32(&mut ptx, "%f16", block_size, "DYX")?;
+    // Reduce sum_dy_xhat (from the preserved partial in %f23)
+    write_smem_reduce_f32(&mut ptx, "%f23", block_size, "DYX")?;
     writeln!(ptx, "    ld.shared.f32 %f22, [smem_in];").map_err(fmt_err)?; // sum_dy_xhat
     writeln!(ptx, "    bar.sync 0;").map_err(fmt_err)?;
 

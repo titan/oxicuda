@@ -414,6 +414,15 @@ pub fn deserialize_ivf_postings(bytes: &[u8]) -> AnnResult<IvfPostingsBlob> {
         });
     }
     let n_lists = r.get_usize()?;
+    // Guard against a corrupt/malicious length claiming more lists than the
+    // buffer could possibly hold: each posting list costs at least its own
+    // 8-byte u64 length prefix (an empty list still occupies those 8 bytes),
+    // so this bound is exact and rejects no valid file.
+    if n_lists.saturating_mul(8) > r.remaining() {
+        return Err(AnnError::Internal {
+            msg: "unexpected end of buffer while deserialising".to_string(),
+        });
+    }
     let mut posting_lists = Vec::with_capacity(n_lists);
     for _ in 0..n_lists {
         posting_lists.push(r.get_u32_slice()?);
@@ -558,6 +567,21 @@ mod tests {
     fn ivf_postings_wrong_kind_errors() {
         let flat = serialize_flat(2, 1, &[1.0, 2.0]).expect("serialize flat");
         assert!(deserialize_ivf_postings(&flat).is_err());
+    }
+
+    #[test]
+    fn ivf_postings_corrupt_huge_n_lists_errors_without_oom() {
+        // Craft a header followed by a wildly oversized `n_lists` claim with
+        // no backing data. A vulnerable implementation would forward this
+        // straight to `Vec::with_capacity`, aborting the process on capacity
+        // overflow / OOM instead of returning a decode error.
+        let lists: Vec<Vec<u32>> = vec![vec![1, 2, 3]];
+        let mut bytes = serialize_ivf_postings(&lists);
+        // The `n_lists` u64 sits immediately after the 8-byte magic + 4-byte
+        // version + 4-byte kind header.
+        let n_lists_off = 8 + 4 + 4;
+        bytes[n_lists_off..n_lists_off + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+        assert!(deserialize_ivf_postings(&bytes).is_err());
     }
 
     // ── header byte-exactness ──────────────────────────────────────────────

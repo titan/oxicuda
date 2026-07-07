@@ -331,8 +331,8 @@ pub fn overflow_check_ptx(sm: u32) -> String {
     .param .u32 n
 )
 {{
-    .reg .u64  %addr, %res_addr;
-    .reg .u32  %tid, %ntid, %ctaid, %nctaid, %idx, %n, %flag;
+    .reg .u64  %addr, %res_addr, %eaddr;
+    .reg .u32  %t, %nt, %bid, %nc, %idx, %n, %stride, %flag;
     .reg .f32  %val;
     .reg .pred %p_bounds, %p_inf;
 
@@ -340,51 +340,31 @@ pub fn overflow_check_ptx(sm: u32) -> String {
     ld.param.u64  %res_addr, [ptr_result];
     ld.param.u32  %n,        [n];
 
-    mov.u32 %tid,   %tid.x;
-    mov.u32 %ntid,  %ntid.x;
-    mov.u32 %ctaid, %ctaid.x;
-    mov.u32 %nctaid,%nctaid.x;
+    mov.u32 %t,   %tid.x;
+    mov.u32 %nt,  %ntid.x;
+    mov.u32 %bid, %ctaid.x;
+    mov.u32 %nc,  %nctaid.x;
 
-    mad.lo.u32 %idx, %ctaid, %ntid, %tid;
+    mad.lo.u32 %idx,    %bid, %nt, %t;
+    mul.lo.u32 %stride, %nc, %nt;
 
 LOOP:
     setp.ge.u32 %p_bounds, %idx, %n;
     @%p_bounds bra DONE;
 
     // load element
-    .reg .u64 %eaddr;
     mul.wide.u32 %eaddr, %idx, 4;
     add.u64  %eaddr, %addr, %eaddr;
     ld.global.f32 %val, [%eaddr];
 
-    // abs(val) > val | val != val  →  inf or NaN
-    testp.infinite.f32 %p_inf, %val;
+    // inf or NaN  →  flag the buffer
+    testp.infinite.f32    %p_inf, %val;
     @%p_inf bra FOUND;
-    testp.nan.f32      %p_inf, %val;
+    testp.notanumber.f32  %p_inf, %val;
     @%p_inf bra FOUND;
 
-    // advance grid-stride
-    add.u32 %idx, %idx, %ntid;
-    mul.wide.u32 %eaddr, %nctaid, %ntid;  // total_threads (reuse %eaddr)
-    cvt.u32.u64 %flag, %eaddr;
-    add.u32 %idx, %idx, %flag;
-    sub.u32 %idx, %idx, %ntid;
-    add.u32 %idx, %idx, %ntid;
-    mov.u32 %flag, %ntid;
-    mul.lo.u32 %flag, %nctaid, %flag;
-    add.u32 %idx, %idx, %flag;
-    sub.u32 %idx, %idx, %ntid;
-    // --- simplified grid-stride: idx += gridDim.x * blockDim.x
-    mov.u32 %flag, %ntid;
-    mul.lo.u32 %flag, %nctaid, %flag;
-    add.u32 %idx, %tid, 0;
-    mad.lo.u32 %idx, %ctaid, %ntid, %tid;
-    add.u32 %idx, %idx, %flag;
-    // (reset to avoid accumulation bugs — recompute from scratch)
-    mad.lo.u32 %idx, %ctaid, %ntid, %tid;
-    add.u32 %idx, %idx, %flag;
-    sub.u32 %idx, %idx, %flag;
-    add.u32 %idx, %idx, %flag;
+    // advance grid-stride: idx += gridDim.x * blockDim.x
+    add.u32 %idx, %idx, %stride;
     bra LOOP;
 
 FOUND:
@@ -418,20 +398,20 @@ pub fn unscale_ptx(sm: u32) -> String {
 )
 {{
     .reg .u64  %addr, %eaddr;
-    .reg .u32  %tid, %ntid, %ctaid, %nctaid, %idx, %n, %stride;
+    .reg .u32  %t, %nt, %bid, %nc, %idx, %n, %stride;
     .reg .f32  %val, %inv;
 
     ld.param.u64  %addr, [ptr_data];
     ld.param.u32  %n,    [n];
     ld.param.f32  %inv,  [inv_scale];
 
-    mov.u32 %tid,   %tid.x;
-    mov.u32 %ntid,  %ntid.x;
-    mov.u32 %ctaid, %ctaid.x;
-    mov.u32 %nctaid,%nctaid.x;
+    mov.u32 %t,   %tid.x;
+    mov.u32 %nt,  %ntid.x;
+    mov.u32 %bid, %ctaid.x;
+    mov.u32 %nc,  %nctaid.x;
 
-    mad.lo.u32 %idx,    %ctaid, %ntid, %tid;
-    mul.lo.u32 %stride, %nctaid, %ntid;
+    mad.lo.u32 %idx,    %bid, %nt, %t;
+    mul.lo.u32 %stride, %nc, %nt;
 
 LOOP:
     .reg .pred %p;

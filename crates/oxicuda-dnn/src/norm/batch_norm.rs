@@ -95,10 +95,13 @@ pub fn batch_norm_forward<T: GpuFloat>(
     let kernel = Kernel::from_module(module, &kernel_name)
         .map_err(|e| DnnError::LaunchFailed(format!("kernel lookup for {kernel_name}: {e}")))?;
 
-    // One block per channel. Thread count = min(spatial * batch, 1024) rounded
-    // up to next power of two, capped at 1024.
-    let nhw = (batch as u64) * (spatial as u64);
-    let block_size = (nhw as u32).next_power_of_two().clamp(32, 1024);
+    // One block per channel. The block size MUST match the constant baked into
+    // the PTX (`generate_batch_norm_ptx` uses `spatial * 32` as the strided-loop
+    // stride and shared-memory reduction-tree width); launching with a different
+    // thread count would corrupt the reduction. The strided loop covers the
+    // actual `batch * spatial` elements regardless of the chosen block size.
+    let nhw_est = (spatial as u64) * 32;
+    let block_size = (nhw_est as u32).next_power_of_two().clamp(32, 1024);
     let params = LaunchParams::new(channels, block_size);
 
     let eps_bits = epsilon.to_bits();
@@ -251,8 +254,8 @@ fn generate_batch_norm_ptx<T: GpuFloat>(
     writeln!(ptx, "    .param .u64 %param_save_mean,").map_err(fmt_err)?;
     writeln!(ptx, "    .param .u64 %param_save_invvar").map_err(fmt_err)?;
     writeln!(ptx, ")").map_err(fmt_err)?;
+    writeln!(ptx, ".maxntid {block_size}, 1, 1").map_err(fmt_err)?;
     writeln!(ptx, "{{").map_err(fmt_err)?;
-    writeln!(ptx, "    .maxntid {block_size}, 1, 1;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b32 %r<32>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b64 %rd<24>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .f32 %f<32>;").map_err(fmt_err)?;

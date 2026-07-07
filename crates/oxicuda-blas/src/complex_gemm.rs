@@ -140,9 +140,12 @@ pub fn complex_gemm<T: GpuFloat>(
     let kernel_name = complex_gemm_kernel_name::<T>(transa, transb);
     let kernel = Kernel::from_module(module, &kernel_name).map_err(BlasError::Cuda)?;
 
-    // Configure 2D launch: one thread per output complex element.
+    // Configure 2D launch: one thread per output complex element. grid.y is
+    // clamped to the hardware limit (65_535); the kernel walks any remaining
+    // rows with a grid-stride loop, so a matrix with m > 65_535 * CGEMM_BLOCK_Y
+    // rows is still fully computed instead of failing the launch.
     let grid_x = grid_size_for(n as u32, CGEMM_BLOCK_X);
-    let grid_y = grid_size_for(m as u32, CGEMM_BLOCK_Y);
+    let grid_y = grid_size_for(m as u32, CGEMM_BLOCK_Y).min(65_535);
     let grid = Dim3::xy(grid_x, grid_y);
     let block = Dim3::xy(CGEMM_BLOCK_X, CGEMM_BLOCK_Y);
     let params = LaunchParams::new(grid, block);
@@ -409,7 +412,14 @@ fn generate_complex_gemm_ptx<T: GpuFloat>(
     )?;
     wl(&mut p, "")?;
 
-    // Bounds check
+    // Row grid-stride loop: %r7 (row) is advanced by gridDim.y * ntid.y each
+    // iteration so a clamped grid.y still covers every row. The loop body
+    // (bounds check → accumulators → K-loop → epilogue) re-initialises its
+    // accumulators and k at the top on each pass.
+    wl(&mut p, "$CGEMM_ROW_LOOP:")?;
+
+    // Bounds check: row >= m exits the loop; col is fixed per thread, so an
+    // out-of-range column terminates the thread outright.
     wl(&mut p, "    setp.ge.u32 %p0, %r7, %r8;")?;
     wl(&mut p, "    setp.ge.u32 %p1, %r6, %r9;")?;
     wl(&mut p, "    @%p0 bra $CGEMM_DONE;")?;
@@ -570,6 +580,12 @@ fn generate_complex_gemm_ptx<T: GpuFloat>(
         &mut p,
         &format!("    st.global.{ld_ty} [%rd8+{byte_size}], %{fr}13;"),
     )?;
+    wl(&mut p, "")?;
+
+    // row += gridDim.y * ntid.y, then re-enter the loop for the next row band.
+    wl(&mut p, "    mov.u32 %r33, %nctaid.y;")?;
+    wl(&mut p, "    mad.lo.u32 %r7, %r33, %r5, %r7;")?;
+    wl(&mut p, "    bra $CGEMM_ROW_LOOP;")?;
     wl(&mut p, "")?;
 
     wl(&mut p, "$CGEMM_DONE:")?;
@@ -890,6 +906,10 @@ mod tests {
         assert!(ptx.contains("$CGEMM_K_LOOP"));
         assert!(ptx.contains("$CGEMM_K_DONE"));
         assert!(ptx.contains("neg.f32"));
+        // Row grid-stride loop (so a clamped grid.y covers m > 65_535 * block).
+        assert!(ptx.contains("$CGEMM_ROW_LOOP"));
+        assert!(ptx.contains("bra $CGEMM_ROW_LOOP"));
+        assert!(ptx.contains("mov.u32 %r33, %nctaid.y;"));
     }
 
     #[test]

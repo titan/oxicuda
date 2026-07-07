@@ -150,6 +150,17 @@ impl MetalMemoryManager {
                 "import len_bytes {len_bytes} exceeds buffer length {physical}"
             )));
         }
+        // The host copy helpers (`copy_to_device` / `copy_from_device`)
+        // dereference `buffer.contents()`, which Metal returns as NULL for
+        // storage modes that are not CPU-accessible (Private / Memoryless).
+        // Reject those at import time so a later host copy cannot deref null.
+        let mode = buffer.storage_mode();
+        if mode == metal::MTLStorageMode::Private || mode == metal::MTLStorageMode::Memoryless {
+            return Err(MetalError::InvalidArgument(format!(
+                "import_external requires a CPU-accessible buffer \
+                 (Shared or Managed); got storage mode {mode:?}"
+            )));
+        }
         // Take an independent retain so the buffer survives for the handle's
         // lifetime regardless of what the caller does with its own reference.
         let retained = buffer.to_owned();
@@ -225,21 +236,37 @@ impl MetalMemoryManager {
     pub fn copy_to_device(&self, handle: u64, src: &[u8]) -> MetalResult<()> {
         #[cfg(target_os = "macos")]
         {
-            let buffers = self
-                .buffers
-                .lock()
-                .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?;
-            let info = buffers
-                .get(&handle)
-                .ok_or_else(|| MetalError::InvalidArgument(format!("unknown handle {handle}")))?;
-            let copy_len = src.len().min(info.size as usize);
-            // SAFETY: Metal shared-mode buffers are CPU-accessible; `contents()`
-            // returns a valid `*mut c_void` for the entire buffer lifetime.
+            // Resolve the buffer and validate the size under the lock, then take
+            // an independent retain so the `memcpy` runs *outside* the critical
+            // section — concurrent alloc/free/copy on unrelated handles are not
+            // serialised behind this transfer, and the retain guarantees the
+            // buffer cannot be freed out from under the copy.
+            let buffer = {
+                let buffers = self
+                    .buffers
+                    .lock()
+                    .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?;
+                let info = buffers.get(&handle).ok_or_else(|| {
+                    MetalError::InvalidArgument(format!("unknown handle {handle}"))
+                })?;
+                if src.len() as u64 > info.size {
+                    return Err(MetalError::InvalidArgument(format!(
+                        "copy_to_device: src length {} exceeds buffer length {}",
+                        src.len(),
+                        info.size
+                    )));
+                }
+                info.buffer.to_owned()
+            };
+            // SAFETY: Metal Shared/Managed buffers are CPU-accessible; `contents()`
+            // returns a valid `*mut c_void` for the buffer's lifetime, which the
+            // retain above extends across this copy. `src.len() <= buffer length`
+            // was verified, so the write stays in bounds.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     src.as_ptr(),
-                    info.buffer.contents() as *mut u8,
-                    copy_len,
+                    buffer.contents() as *mut u8,
+                    src.len(),
                 );
             }
             Ok(())
@@ -257,21 +284,34 @@ impl MetalMemoryManager {
     pub fn copy_from_device(&self, dst: &mut [u8], handle: u64) -> MetalResult<()> {
         #[cfg(target_os = "macos")]
         {
-            let buffers = self
-                .buffers
-                .lock()
-                .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?;
-            let info = buffers
-                .get(&handle)
-                .ok_or_else(|| MetalError::InvalidArgument(format!("unknown handle {handle}")))?;
-            let copy_len = dst.len().min(info.size as usize);
-            // SAFETY: Metal shared-mode buffers are CPU-accessible; `contents()`
-            // returns a valid `*const c_void` for the entire buffer lifetime.
+            // Resolve + validate under the lock, retain, then copy outside the
+            // critical section (see `copy_to_device` for the rationale).
+            let buffer = {
+                let buffers = self
+                    .buffers
+                    .lock()
+                    .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?;
+                let info = buffers.get(&handle).ok_or_else(|| {
+                    MetalError::InvalidArgument(format!("unknown handle {handle}"))
+                })?;
+                if dst.len() as u64 > info.size {
+                    return Err(MetalError::InvalidArgument(format!(
+                        "copy_from_device: dst length {} exceeds buffer length {}",
+                        dst.len(),
+                        info.size
+                    )));
+                }
+                info.buffer.to_owned()
+            };
+            // SAFETY: Metal Shared/Managed buffers are CPU-accessible; `contents()`
+            // returns a valid `*const c_void` for the buffer's lifetime, extended
+            // across the copy by the retain. `dst.len() <= buffer length` was
+            // verified, so the read stays in bounds.
             unsafe {
                 std::ptr::copy_nonoverlapping(
-                    info.buffer.contents() as *const u8,
+                    buffer.contents() as *const u8,
                     dst.as_mut_ptr(),
-                    copy_len,
+                    dst.len(),
                 );
             }
             Ok(())
@@ -304,36 +344,54 @@ impl MetalMemoryManager {
                     "copy_device_to_device requires distinct src and dst handles".into(),
                 ));
             }
-            let buffers = self
-                .buffers
-                .lock()
-                .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?;
-            let src_info = buffers
-                .get(&src)
-                .ok_or_else(|| MetalError::InvalidArgument(format!("unknown src handle {src}")))?;
-            let dst_info = buffers
-                .get(&dst)
-                .ok_or_else(|| MetalError::InvalidArgument(format!("unknown dst handle {dst}")))?;
-            if len_bytes as u64 > src_info.size {
-                return Err(MetalError::InvalidArgument(format!(
-                    "len_bytes {len_bytes} exceeds src length {}",
-                    src_info.size
-                )));
-            }
-            if len_bytes as u64 > dst_info.size {
-                return Err(MetalError::InvalidArgument(format!(
-                    "len_bytes {len_bytes} exceeds dst length {}",
-                    dst_info.size
-                )));
-            }
-            // SAFETY: both shared-mode buffers are CPU-accessible for their full
-            // lifetime; the handles are distinct, so the regions do not alias.
+            // Resolve + validate under the lock, retain both buffers, then copy
+            // outside the critical section (see `copy_to_device`).
+            let (src_buf, dst_buf) = {
+                let buffers = self
+                    .buffers
+                    .lock()
+                    .map_err(|_| MetalError::CommandBufferError("mutex poisoned".into()))?;
+                let src_info = buffers.get(&src).ok_or_else(|| {
+                    MetalError::InvalidArgument(format!("unknown src handle {src}"))
+                })?;
+                let dst_info = buffers.get(&dst).ok_or_else(|| {
+                    MetalError::InvalidArgument(format!("unknown dst handle {dst}"))
+                })?;
+                if len_bytes as u64 > src_info.size {
+                    return Err(MetalError::InvalidArgument(format!(
+                        "len_bytes {len_bytes} exceeds src length {}",
+                        src_info.size
+                    )));
+                }
+                if len_bytes as u64 > dst_info.size {
+                    return Err(MetalError::InvalidArgument(format!(
+                        "len_bytes {len_bytes} exceeds dst length {}",
+                        dst_info.size
+                    )));
+                }
+                (src_info.buffer.to_owned(), dst_info.buffer.to_owned())
+            };
+            let src_ptr = src_buf.contents() as *const u8;
+            let dst_ptr = dst_buf.contents() as *mut u8;
+            // Distinct handles can still alias the *same* physical MTLBuffer
+            // (e.g. the same buffer imported twice), so `src_ptr == dst_ptr` or
+            // overlapping byte ranges are possible. `copy_nonoverlapping`
+            // requires disjoint regions; fall back to the overlap-safe `copy`
+            // (memmove) whenever the ranges overlap.
+            let src_addr = src_ptr as usize;
+            let dst_addr = dst_ptr as usize;
+            let overlaps = src_addr < dst_addr + len_bytes && dst_addr < src_addr + len_bytes;
+            // SAFETY: both Shared/Managed buffers are CPU-accessible for their
+            // full lifetime (extended across the copy by the retains above); the
+            // validated `len_bytes` fits within both. `copy` is used for the
+            // aliasing/overlapping case, `copy_nonoverlapping` only when the
+            // regions are provably disjoint.
             unsafe {
-                std::ptr::copy_nonoverlapping(
-                    src_info.buffer.contents() as *const u8,
-                    dst_info.buffer.contents() as *mut u8,
-                    len_bytes,
-                );
+                if overlaps {
+                    std::ptr::copy(src_ptr, dst_ptr, len_bytes);
+                } else {
+                    std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, len_bytes);
+                }
             }
             Ok(())
         }

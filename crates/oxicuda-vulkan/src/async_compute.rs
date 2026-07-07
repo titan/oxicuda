@@ -247,9 +247,16 @@ impl AsyncComputeManager {
 
         // Wait for previous work on this queue to complete before reuse.
         slot.fence.wait()?;
-        slot.fence.reset()?;
 
         let vk_dev = self.device.device();
+
+        // The previous submission has completed (the fence wait above), so its
+        // command buffer is idle. Reset the pool to reclaim it — otherwise every
+        // call would leak one command buffer until the manager is dropped.
+        unsafe {
+            vk_dev.reset_command_pool(slot.command_pool.raw(), vk::CommandPoolResetFlags::empty())
+        }
+        .map_err(|e| VulkanError::CommandBufferError(format!("reset_command_pool: {e}")))?;
 
         // Allocate a one-shot command buffer.
         let alloc_info = vk::CommandBufferAllocateInfo::default()
@@ -277,6 +284,12 @@ impl AsyncComputeManager {
 
         record_result?;
         end_result?;
+
+        // Reset the fence to the unsignalled state ONLY now — immediately before
+        // the guaranteed submit. If any fallible step above returned early, the
+        // fence keeps its prior (signalled) state, so the slot is never left with
+        // a fence that can never be signalled (which would brick the queue slot).
+        slot.fence.reset()?;
 
         // Submit with fence for later synchronisation.
         let submit_info = vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buf));

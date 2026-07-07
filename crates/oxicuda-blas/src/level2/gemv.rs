@@ -5,11 +5,19 @@
 //!
 //! # GPU Strategy
 //!
-//! - **Row-major + NoTrans**: each thread computes one element of `y` by
-//!   performing a dot product of one row of `A` with `x`.
-//! - **Col-major + NoTrans** or **Row-major + Trans**: a warp-collaborative
-//!   approach where multiple threads contribute partial sums for each output.
-//! - For large inner dimensions the kernel uses shared memory tiling.
+//! The kernel addresses `A` as **row-major** (`A[i][j] = ptr[i * lda + j]`)
+//! for both the `NoTrans` and `Trans` cases:
+//!
+//! - **NoTrans**: each thread computes one element of `y` by performing a dot
+//!   product of one row of `A` with `x`.
+//! - **Trans**: each thread walks one column of `A` (stride `lda`), so the
+//!   result is `A^T * x`.
+//!
+//! Column-major descriptors are **not** supported by this kernel and are
+//! rejected up-front with [`BlasError::InvalidArgument`]; a caller with a
+//! column-major matrix can pass its transpose as a row-major view instead.
+//! All index/offset arithmetic is performed in 64-bit so matrices larger than
+//! 4 GiB are addressed correctly.
 
 use std::sync::Arc;
 
@@ -20,7 +28,7 @@ use oxicuda_ptx::prelude::*;
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
-use crate::types::{GpuFloat, MatrixDesc, Transpose};
+use crate::types::{GpuFloat, Layout, MatrixDesc, Transpose};
 
 /// Default block size for GEMV kernels.
 const GEMV_BLOCK_SIZE: u32 = 256;
@@ -79,6 +87,16 @@ pub fn gemv<T: GpuFloat>(
     if incy <= 0 {
         return Err(BlasError::InvalidArgument(
             "incy must be positive".to_string(),
+        ));
+    }
+
+    // -- Reject unsupported layout: the kernel hard-codes row-major A --
+    if a.layout == Layout::ColMajor {
+        return Err(BlasError::InvalidArgument(
+            "gemv: ColMajor layout is not supported by this kernel; pass a RowMajor descriptor \
+             (a column-major m x n matrix equals a row-major n x m view with the transpose flag \
+             flipped)"
+                .to_string(),
         ));
     }
 
@@ -147,6 +165,14 @@ fn validate_gemv_dimensions<T: GpuFloat>(
         return Err(BlasError::InvalidDimension(format!(
             "A.cols ({}) < n ({})",
             a.cols, n
+        )));
+    }
+    // Row-major leading dimension must span at least a full row. `with_ld`
+    // performs no validation, so guard the extent the kernel will address here.
+    if a.ld < a.cols {
+        return Err(BlasError::InvalidDimension(format!(
+            "A.ld ({}) < A.cols ({}) for RowMajor layout",
+            a.ld, a.cols
         )));
     }
 
@@ -270,17 +296,22 @@ fn generate_gemv_ptx<T: GpuFloat>(sm: SmVersion, trans: Transpose) -> BlasResult
                 let use_trans = matches!(trans, Transpose::Trans | Transpose::ConjTrans);
 
                 // Row base offset: gid * lda * elem_bytes (NoTrans) or
-                //                  gid * elem_bytes (Trans)
+                //                  gid * elem_bytes (Trans).
+                //
+                // The NoTrans product `gid * lda` can exceed 2^32 for a matrix
+                // wider than 4 GiB, so it is formed with `mul.wide.u32` (→ u64)
+                // and byte-scaled in 64-bit; a 32-bit `mul.lo` here would wrap
+                // and read the wrong row.
                 let row_base = if !use_trans {
-                    // stride = lda * elem_bytes (runtime), so use raw PTX
-                    let stride = b.alloc_reg(PtxType::U32);
-                    b.raw_ptx(&format!("mul.lo.u32 {stride}, {lda}, {};", elem_bytes));
-                    let row_idx = b.alloc_reg(PtxType::U32);
-                    b.raw_ptx(&format!("mul.lo.u32 {row_idx}, {gid}, {stride};"));
-                    let row_off64 = b.cvt_u32_to_u64(row_idx);
-                    b.add_u64(a_ptr, row_off64)
+                    let row_elems64 = b.mul_wide_u32_to_u64(gid.clone(), lda.clone());
+                    let row_off = b.alloc_reg(PtxType::U64);
+                    b.raw_ptx(&format!(
+                        "mul.lo.u64 {row_off}, {row_elems64}, {elem_bytes};"
+                    ));
+                    b.add_u64(a_ptr, row_off)
                 } else {
-                    // a_ptr + gid * elem_bytes
+                    // a_ptr + gid * elem_bytes (gid < output_len fits a u32;
+                    // byte_offset_addr scales the offset in 64-bit).
                     b.byte_offset_addr(a_ptr, gid.clone(), elem_bytes)
                 };
 
@@ -295,7 +326,7 @@ fn generate_gemv_ptx<T: GpuFloat>(sm: SmVersion, trans: Transpose) -> BlasResult
                 // Check k < inner_len
                 let pred_loop = b.alloc_reg(PtxType::Pred);
                 b.raw_ptx(&format!("setp.lo.u32 {pred_loop}, {k}, {inner_len};"));
-                b.raw_ptx(&format!("@!{pred_loop} bra {done_label};"));
+                b.raw_ptx(&format!("@!{pred_loop} bra ${done_label};"));
 
                 // Compute address of A element:
                 // NoTrans: A[gid][k] => row_base + k * elem_bytes
@@ -303,21 +334,24 @@ fn generate_gemv_ptx<T: GpuFloat>(sm: SmVersion, trans: Transpose) -> BlasResult
                 let a_addr = if !use_trans {
                     b.byte_offset_addr(row_base.clone(), k.clone(), elem_bytes)
                 } else {
-                    // For trans, stride between elements is lda * elem_bytes
-                    // but we cannot use lda directly as a const -- emit as raw
-                    let stride_reg = b.alloc_reg(PtxType::U32);
-                    b.raw_ptx(&format!("mul.lo.u32 {stride_reg}, {lda}, {};", elem_bytes));
+                    // For trans, stride between elements is lda * elem_bytes;
+                    // form it in 64-bit so a large leading dimension cannot
+                    // wrap, then scale by the 64-bit element index k.
+                    let lda64 = b.cvt_u32_to_u64(lda.clone());
+                    let stride64 = b.alloc_reg(PtxType::U64);
+                    b.raw_ptx(&format!("mul.lo.u64 {stride64}, {lda64}, {elem_bytes};"));
                     let k64 = b.cvt_u32_to_u64(k.clone());
-                    let stride64 = b.cvt_u32_to_u64(stride_reg);
                     let off = b.alloc_reg(PtxType::U64);
                     b.raw_ptx(&format!("mul.lo.u64 {off}, {k64}, {stride64};"));
                     b.add_u64(row_base.clone(), off)
                 };
 
-                // Compute address of x[k * incx]
-                let x_elem_idx = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("mul.lo.u32 {x_elem_idx}, {k}, {incx};"));
-                let x_addr = b.byte_offset_addr(x_ptr.clone(), x_elem_idx, elem_bytes);
+                // Compute address of x[k * incx] in 64-bit (k * incx can exceed
+                // 2^32 for a long strided vector).
+                let x_elem64 = b.mul_wide_u32_to_u64(k.clone(), incx.clone());
+                let x_off = b.alloc_reg(PtxType::U64);
+                b.raw_ptx(&format!("mul.lo.u64 {x_off}, {x_elem64}, {elem_bytes};"));
+                let x_addr = b.add_u64(x_ptr.clone(), x_off);
 
                 // Load A[..][..] and x[k*incx]
                 let a_val = if is_f64 {
@@ -348,10 +382,11 @@ fn generate_gemv_ptx<T: GpuFloat>(sm: SmVersion, trans: Transpose) -> BlasResult
 
                 b.label(&done_label);
 
-                // Compute y address: y_ptr + gid * incy * elem_bytes
-                let y_elem_idx = b.alloc_reg(PtxType::U32);
-                b.raw_ptx(&format!("mul.lo.u32 {y_elem_idx}, {gid}, {incy};"));
-                let y_addr = b.byte_offset_addr(y_ptr, y_elem_idx, elem_bytes);
+                // Compute y address: y_ptr + gid * incy * elem_bytes, in 64-bit.
+                let y_elem64 = b.mul_wide_u32_to_u64(gid.clone(), incy.clone());
+                let y_off = b.alloc_reg(PtxType::U64);
+                b.raw_ptx(&format!("mul.lo.u64 {y_off}, {y_elem64}, {elem_bytes};"));
+                let y_addr = b.add_u64(y_ptr, y_off);
 
                 // Load current y value
                 let y_cur = if is_f64 {

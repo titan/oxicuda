@@ -365,9 +365,19 @@ impl MetalFftPlan {
                 MTLResourceOptions::StorageModeShared,
             );
 
-            // ── Command buffer: bit-reversal permutation ──────────────────────
+            // ── Single command buffer: bit-reversal + all butterfly stages ────
+            //
+            // The whole transform is encoded into ONE command buffer with a
+            // separate serial compute encoder per pass. Metal automatically
+            // tracks read/write hazards between successive serial encoders in a
+            // command buffer (and executes them in encode order on a serial
+            // queue), so the in-place stages stay correctly ordered without a
+            // blocking CPU↔GPU round-trip between them — we commit + wait exactly
+            // once instead of `log2n + 1` times per batch element.
+            let cmd_buf = self.command_queue.new_command_buffer();
+
+            // Pass 0: bit-reversal permutation (buf_input → buf_output).
             {
-                let cmd_buf = self.command_queue.new_command_buffer();
                 let encoder = cmd_buf.new_compute_command_encoder();
                 encoder.set_compute_pipeline_state(&self.bit_reverse_pipeline);
                 // buffer(0) = input (read-only in shader)
@@ -402,29 +412,27 @@ impl MetalFftPlan {
                     },
                 );
                 encoder.end_encoding();
-                cmd_buf.commit();
-                cmd_buf.wait_until_completed();
-
-                check_command_buffer_status(cmd_buf)?;
             }
 
             // After bit_reverse the data lives in buf_output.
             // fft_butterfly operates in-place on buf_output.
 
-            // ── Command buffer(s): butterfly stages ───────────────────────────
+            // ── Butterfly stages ──────────────────────────────────────────────
             //
             // Each stage is dispatched as n/2 threads (one per butterfly pair).
+            // `stage_vals` keeps every per-stage constant alive until commit,
+            // since `set_bytes` copies at encode time but the encoders are only
+            // submitted when the shared command buffer is committed below.
             let half_n = (n / 2) as u64;
             let n_val = n as u32;
+            let stage_vals: Vec<u32> = (0..log2n).collect();
 
-            for stage in 0..log2n {
-                let cmd_buf = self.command_queue.new_command_buffer();
+            for &stage_val in &stage_vals {
                 let encoder = cmd_buf.new_compute_command_encoder();
                 encoder.set_compute_pipeline_state(&self.butterfly_pipeline);
                 // buffer(0) = data (in-place)
                 encoder.set_buffer(0, Some(&buf_output), 0);
                 // buffer(1) = stage index
-                let stage_val = stage;
                 // SAFETY: pointer is valid for the byte size passed.
                 encoder.set_bytes(
                     1,
@@ -463,11 +471,12 @@ impl MetalFftPlan {
                     },
                 );
                 encoder.end_encoding();
-                cmd_buf.commit();
-                cmd_buf.wait_until_completed();
-
-                check_command_buffer_status(cmd_buf)?;
             }
+
+            // Submit the whole transform once and wait for completion.
+            cmd_buf.commit();
+            cmd_buf.wait_until_completed();
+            check_command_buffer_status(cmd_buf)?;
 
             // ── Read back GPU results ─────────────────────────────────────────
             let batch_output = &mut output[offset..offset + n];

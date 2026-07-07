@@ -271,8 +271,8 @@ fn generate_fused_ptx<T: GpuFloat>(
     writeln!(ptx, "    .param .u32 %param_d,").map_err(fmt_err)?;
     writeln!(ptx, "    .param .u32 %param_epsilon_bits").map_err(fmt_err)?;
     writeln!(ptx, ")").map_err(fmt_err)?;
+    writeln!(ptx, ".maxntid {block_size}, 1, 1").map_err(fmt_err)?;
     writeln!(ptx, "{{").map_err(fmt_err)?;
-    writeln!(ptx, "    .maxntid {block_size}, 1, 1;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b32 %r<32>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .b64 %rd<16>;").map_err(fmt_err)?;
     writeln!(ptx, "    .reg .f32 %f<32>;").map_err(fmt_err)?;

@@ -152,6 +152,10 @@ impl SearchSpace {
     /// 4. **Insufficient threads** — the number of warps needed to
     ///    cover the block tile (based on warp tiles) exceeds the warps
     ///    available at the given `block_size`.
+    /// 5. **Invalid block size** — `block_size` is zero, exceeds 1024
+    ///    (the `maxThreadsPerBlock` limit on every CUDA device since
+    ///    Compute Capability 2.0), or is not a multiple of the 32-thread
+    ///    warp size.
     ///
     /// `element_bytes` is the size of one matrix element in bytes
     /// (e.g. 4 for `f32`, 2 for `f16`).
@@ -165,6 +169,13 @@ impl SearchSpace {
         self.enumerate()
             .into_iter()
             .filter(|cfg| {
+                // Constraint 5: block size must be a valid CUDA thread-block
+                // size. Checked first so it also guards the division inside
+                // `estimated_registers_per_thread` below.
+                if cfg.block_size == 0 || cfg.block_size > 1024 || cfg.block_size % 32 != 0 {
+                    return false;
+                }
+
                 // Constraint 1: shared memory
                 let shared = cfg.estimated_shared_mem(element_bytes);
                 if shared as usize > max_shared_mem {
@@ -335,6 +346,10 @@ fn satisfies_prune_constraints(
     max_regs: u32,
     elem_bytes: u32,
 ) -> bool {
+    // Constraint 5: block size must be a valid CUDA thread-block size.
+    if cfg.block_size == 0 || cfg.block_size > 1024 || cfg.block_size % 32 != 0 {
+        return false;
+    }
     // Constraint 1: shared memory
     if cfg.estimated_shared_mem(elem_bytes) as usize > max_shared {
         return false;
@@ -643,5 +658,54 @@ mod pruning_tests {
 
         let pruned = space.prune(256 * 1024, 255, 4);
         assert!(pruned.is_empty(), "expected empty after warp-tile pruning");
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression (F054): `prune` must reject every block size that is not a
+    // valid CUDA thread-block configuration — zero (would panic the
+    // register estimator's division), above the universal 1024
+    // maxThreadsPerBlock limit, or not a multiple of the 32-thread warp.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_pruning_rejects_invalid_block_sizes() {
+        let space = SearchSpaceBuilder::new()
+            .tile_m(vec![64])
+            .tile_n(vec![64])
+            .tile_k(vec![16])
+            .warp_m(vec![32])
+            .warp_n(vec![32])
+            .stages(vec![2])
+            .use_tensor_core(vec![false])
+            .block_size(vec![0, 1025, 100, 2048])
+            .build();
+
+        // Generous shared-mem/register budget so only the block-size
+        // constraint can reject anything.
+        let pruned = space.prune(256 * 1024, 255, 4);
+        assert!(
+            pruned.is_empty(),
+            "every candidate block size (0, 1025, 100, 2048) is invalid: {pruned:?}",
+        );
+    }
+
+    #[test]
+    fn test_pruning_accepts_valid_multiple_of_32_block_size() {
+        let space = SearchSpaceBuilder::new()
+            .tile_m(vec![64])
+            .tile_n(vec![64])
+            .tile_k(vec![16])
+            .warp_m(vec![32])
+            .warp_n(vec![32])
+            .stages(vec![2])
+            .use_tensor_core(vec![false])
+            .block_size(vec![1024])
+            .build();
+
+        let pruned = space.prune(256 * 1024, 255, 4);
+        assert_eq!(
+            pruned.len(),
+            1,
+            "block_size=1024 is the maximum valid CUDA block size and should survive pruning"
+        );
     }
 }

@@ -4,14 +4,16 @@
 //! it emits PTX with `oxicuda-ptx` (the `ElementwiseTemplate` for unary/binary
 //! ops and a [`KernelBuilder`]-built kernel for per-axis reductions), caches
 //! the generated PTX text on disk via [`PtxCache`], JIT-compiles it into a
-//! [`Module`], and dispatches the kernel through `oxicuda-launch` with a
-//! grid/block sizing that covers the work.
+//! [`Module`] (itself cached per `(kernel_name, sm)` in the backend, see
+//! [`build_kernel`]), and dispatches the kernel through `oxicuda-launch` on a
+//! stream cached in the backend (see [`launch_with`]) with a grid/block
+//! sizing that covers the work.
 //!
 //! All buffers are single-precision `f32` — the abstract backend's
 //! element-wise operations carry no dtype, and `f32` is the working type
 //! shared across the COOLJAPAN GPU stack.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use oxicuda_backend::{BackendError, BackendResult, BinaryOp, ReduceOp, UnaryOp};
 use oxicuda_driver::ffi::CUdeviceptr;
@@ -45,17 +47,62 @@ fn device_sm(device: Device) -> BackendResult<SmVersion> {
     })
 }
 
+/// Process-wide PTX disk cache, built exactly once (including its one-time
+/// `create_dir_all` I/O) and shared by every [`CudaBackend`] instance in this
+/// process, rather than being rebuilt on every elementwise/reduce call.
+static PTX_CACHE: OnceLock<Result<PtxCache, String>> = OnceLock::new();
+
 /// Returns the process-wide PTX disk cache, creating it on first use.
-fn ptx_cache() -> BackendResult<PtxCache> {
-    PtxCache::new().map_err(|e| BackendError::DeviceError(format!("PTX cache init failed: {e}")))
+fn ptx_cache() -> BackendResult<&'static PtxCache> {
+    PTX_CACHE
+        .get_or_init(|| PtxCache::new().map_err(|e| e.to_string()))
+        .as_ref()
+        .map_err(|e| BackendError::DeviceError(format!("PTX cache init failed: {e}")))
 }
 
-/// JIT-compiles `ptx` into a launchable [`Kernel`] for `kernel_name`.
-fn build_kernel(ptx: &str, kernel_name: &str) -> BackendResult<Kernel> {
+/// JIT-compiles `ptx` into a launchable [`Kernel`] for `kernel_name`, or
+/// returns the already-compiled kernel from `backend`'s cache.
+///
+/// The cache is keyed by `(kernel_name, sm)`: modules are loaded via
+/// `cuModuleLoadData` while the backend's persistent primary context is
+/// current, so a module compiled once for a given SM target remains valid for
+/// the lifetime of the backend and does not need to be re-JIT-compiled on
+/// every call.
+fn build_kernel(
+    backend: &CudaBackend,
+    ptx: &str,
+    kernel_name: &str,
+    sm: SmVersion,
+) -> BackendResult<Arc<Kernel>> {
+    let key = (kernel_name.to_string(), sm);
+
+    {
+        let cache = backend
+            .kernel_cache
+            .lock()
+            .map_err(|_| BackendError::DeviceError("kernel cache lock poisoned".into()))?;
+        if let Some(kernel) = cache.get(&key) {
+            return Ok(Arc::clone(kernel));
+        }
+    }
+
+    // Compile outside the lock so a slow JIT compile on one thread does not
+    // block lookups for unrelated kernels on other threads.
     let module = Module::from_ptx(ptx)
         .map_err(|e| BackendError::DeviceError(format!("PTX module load failed: {e}")))?;
-    Kernel::from_module(Arc::new(module), kernel_name)
-        .map_err(|e| BackendError::DeviceError(format!("kernel lookup failed: {e}")))
+    let kernel = Arc::new(
+        Kernel::from_module(Arc::new(module), kernel_name)
+            .map_err(|e| BackendError::DeviceError(format!("kernel lookup failed: {e}")))?,
+    );
+
+    let mut cache = backend
+        .kernel_cache
+        .lock()
+        .map_err(|_| BackendError::DeviceError("kernel cache lock poisoned".into()))?;
+    // Another thread may have raced us to compile the same kernel; keep
+    // whichever copy is already cached so every caller observes the same
+    // `Kernel` instance for a given key.
+    Ok(Arc::clone(cache.entry(key).or_insert(kernel)))
 }
 
 /// Maps a backend [`UnaryOp`] to the corresponding `oxicuda-ptx` elementwise op.
@@ -231,7 +278,7 @@ pub(super) fn unary_elementwise(
         .get_or_generate(&key, || template.generate())
         .map_err(|e| BackendError::DeviceError(format!("unary PTX generation failed: {e}")))?;
 
-    let kernel = build_kernel(&ptx, &kernel_name)?;
+    let kernel = build_kernel(backend, &ptx, &kernel_name, sm)?;
     let grid = grid_size_for(n_u, ELEMENTWISE_BLOCK);
     let params = LaunchParams::builder()
         .grid(Dim3::new(grid, 1, 1))
@@ -271,7 +318,7 @@ pub(super) fn binary_elementwise(
         .get_or_generate(&key, || template.generate())
         .map_err(|e| BackendError::DeviceError(format!("binary PTX generation failed: {e}")))?;
 
-    let kernel = build_kernel(&ptx, &kernel_name)?;
+    let kernel = build_kernel(backend, &ptx, &kernel_name, sm)?;
     let grid = grid_size_for(n_u, ELEMENTWISE_BLOCK);
     let params = LaunchParams::builder()
         .grid(Dim3::new(grid, 1, 1))
@@ -349,7 +396,7 @@ pub(super) fn reduce_axis(
         .get_or_generate(&key, || generate_reduce_ptx(op, sm))
         .map_err(|e| BackendError::DeviceError(format!("reduce PTX generation failed: {e}")))?;
 
-    let kernel = build_kernel(&ptx, &kernel_name)?;
+    let kernel = build_kernel(backend, &ptx, &kernel_name, sm)?;
     // One thread per output element.
     let grid = grid_size_for(n_out_u, REDUCE_BLOCK);
     let params = LaunchParams::builder()
@@ -370,36 +417,63 @@ pub(super) fn reduce_axis(
     launch_with(backend, &kernel, &params, &args)
 }
 
-/// Launches `kernel` with `args` on a stream bound to the backend's primary
-/// context, translating a launch failure into a [`BackendError`].
+/// Returns the backend's cached PTX-launch stream (with its lifetime-token
+/// context), creating both lazily on first use and reusing them on every
+/// subsequent call instead of standing up a throwaway context and stream per
+/// launch.
 ///
-/// `oxicuda-launch` requires a [`Stream`](oxicuda_driver::Stream), which in
-/// turn needs an `Arc<Context>`. A throwaway regular context is built solely
-/// to satisfy that signature; the primary context is re-bound before
-/// `Stream::new` so the stream — and therefore the kernel — runs in the
-/// context that owns the device memory. The throwaway context owns no
-/// resources and is destroyed together with the stream.
+/// The returned guard must be held for the duration of the launch (and the
+/// trailing synchronize): [`oxicuda-launch`](oxicuda_launch) requires a
+/// [`Stream`](oxicuda_driver::Stream), which in turn needs an `Arc<Context>`.
+/// A throwaway regular context is built once, solely to satisfy that
+/// signature; the primary context is re-bound before `Stream::new` so the
+/// stream — and therefore every kernel launched on it — runs in the context
+/// that owns the device memory. The throwaway context owns no resources and
+/// is destroyed together with the backend.
+fn ptx_stream_state(
+    backend: &CudaBackend,
+    device: Device,
+) -> BackendResult<std::sync::MutexGuard<'_, super::PtxStreamState>> {
+    let mut guard = backend
+        .ptx_stream
+        .lock()
+        .map_err(|_| BackendError::DeviceError("PTX stream lock poisoned".into()))?;
+    if guard.is_none() {
+        // `Context::new` makes the throwaway context current; re-bind primary
+        // so the stream is created in the context that owns the device
+        // buffers.
+        let token = Arc::new(oxicuda_driver::Context::new(&device).map_err(|e| {
+            BackendError::DeviceError(format!("stream context token creation failed: {e}"))
+        })?);
+        backend.activate_gpu()?;
+        let stream = oxicuda_driver::Stream::new(&token)
+            .map_err(|e| BackendError::DeviceError(format!("stream creation failed: {e}")))?;
+        *guard = Some((token, stream));
+    }
+    Ok(guard)
+}
+
+/// Launches `kernel` with `args` on the backend's cached PTX stream,
+/// translating a launch failure into a [`BackendError`].
 fn launch_with<A: oxicuda_launch::KernelArgs>(
     backend: &CudaBackend,
     kernel: &Kernel,
     params: &LaunchParams,
     args: &A,
 ) -> BackendResult<()> {
-    // `Context::new` makes the throwaway context current; re-bind primary so
-    // the stream is created in the context that owns the device buffers.
+    // `activate_gpu` still runs on every call: the CUDA current-context is
+    // per-thread, so this thread's context must be (re-)bound regardless of
+    // whether the launch stream itself is freshly created or cached.
     let device = backend.activate_gpu()?;
-    let token = std::sync::Arc::new(oxicuda_driver::Context::new(&device).map_err(|e| {
-        BackendError::DeviceError(format!("stream context token creation failed: {e}"))
-    })?);
-    backend.activate_gpu()?;
-    let stream = oxicuda_driver::Stream::new(&token)
-        .map_err(|e| BackendError::DeviceError(format!("stream creation failed: {e}")))?;
+    let guard = ptx_stream_state(backend, device)?;
+    let (_, stream) = guard.as_ref().ok_or_else(|| {
+        BackendError::DeviceError("PTX stream state unexpectedly empty after initialization".into())
+    })?;
 
     kernel
-        .launch(params, &stream, args)
+        .launch(params, stream, args)
         .map_err(|e| BackendError::DeviceError(format!("kernel launch failed: {e}")))?;
-    // Block until the kernel finishes so callers observe results immediately
-    // and the throwaway context can be safely torn down.
+    // Block until the kernel finishes so callers observe results immediately.
     stream
         .synchronize()
         .map_err(|e| BackendError::DeviceError(format!("stream synchronize failed: {e}")))

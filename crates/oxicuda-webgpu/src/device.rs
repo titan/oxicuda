@@ -23,6 +23,9 @@ pub struct WebGpuDevice {
     pub(crate) queue: wgpu::Queue,
     /// Human-readable adapter name for diagnostics.
     pub adapter_name: String,
+    /// Whether the `SHADER_F16` feature was successfully enabled on the device.
+    /// Gates the FP16 GEMM path, whose WGSL declares `enable f16;`.
+    pub(crate) supports_f16: bool,
 }
 
 impl WebGpuDevice {
@@ -49,12 +52,24 @@ impl WebGpuDevice {
 
         let adapter_name = adapter.get_info().name.clone();
 
+        // Enable FP16 shader support when the adapter advertises it, so the
+        // `gemm_f16` path (whose WGSL declares `enable f16;`) validates instead
+        // of being rejected for a missing capability.  When the adapter lacks
+        // it we simply do not request it, and `gemm_f16` returns a typed
+        // `Unsupported` error rather than emitting an invalid module.
+        let supports_f16 = adapter.features().contains(wgpu::Features::SHADER_F16);
+        let required_features = if supports_f16 {
+            wgpu::Features::SHADER_F16
+        } else {
+            wgpu::Features::empty()
+        };
+
         // `DeviceDescriptor` does implement `Default` in wgpu-types 29 so we
         // can use struct-update syntax.
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("oxicuda-webgpu"),
-                required_features: wgpu::Features::empty(),
+                required_features,
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::default(),
                 ..Default::default()
@@ -68,6 +83,7 @@ impl WebGpuDevice {
             device,
             queue,
             adapter_name,
+            supports_f16,
         })
     }
 }

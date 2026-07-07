@@ -100,15 +100,33 @@ impl<T: Copy> DeviceBuffer<T> {
     /// This is equivalent to [`alloc`](Self::alloc) followed by a
     /// `cuMemsetD8_v2` call that writes `0` to every byte.
     ///
+    /// The zero-fill is **fully completed on the device before this function
+    /// returns**: `cuMemsetD8_v2` is issued on the legacy default stream and is
+    /// asynchronous with respect to the host for device memory, so the returned
+    /// buffer would otherwise not be guaranteed zeroed relative to work later
+    /// submitted on a `CU_STREAM_NON_BLOCKING` stream (which does *not*
+    /// implicitly synchronise with the default stream). A context synchronise
+    /// after the memset makes the "every byte is 0" postcondition hold for any
+    /// consumer stream, closing a data race where a kernel on a non-blocking
+    /// stream could read/overwrite this buffer concurrently with the pending
+    /// zero-fill.
+    ///
     /// # Errors
     ///
-    /// Same as [`alloc`](Self::alloc), plus any error from `cuMemsetD8_v2`.
+    /// Same as [`alloc`](Self::alloc), plus any error from `cuMemsetD8_v2` or
+    /// the context synchronise.
     pub fn zeroed(n: usize) -> CudaResult<Self> {
         let buf = Self::alloc(n)?;
         let api = try_driver()?;
         // SAFETY: the buffer was just allocated with the correct byte size.
         let rc = unsafe { (api.cu_memset_d8_v2)(buf.ptr, 0, buf.byte_size()) };
         oxicuda_driver::check(rc)?;
+        // The non-async memset runs on the legacy default stream and is host
+        // asynchronous for device memory; block until it has actually landed so
+        // the buffer is zeroed with respect to every stream, not just the
+        // default one. Synchronises the context current on this thread (the
+        // same one `alloc`/memset targeted).
+        oxicuda_driver::check(unsafe { (api.cu_ctx_synchronize)() })?;
         Ok(buf)
     }
 

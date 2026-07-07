@@ -235,6 +235,14 @@ pub struct DriverApi {
     /// Returns the CUDA context bound to the calling CPU thread.
     pub cu_ctx_get_current: unsafe extern "C" fn(pctx: *mut CUcontext) -> CUresult,
 
+    /// `cuCtxPopCurrent_v2(pctx*) -> CUresult`
+    ///
+    /// Pops the current CUDA context off the calling thread's context stack and
+    /// (optionally) writes the popped handle to `pctx`. Used to turn a
+    /// just-created context into a "floating" context that is not bound to any
+    /// thread until an explicit `cuCtxSetCurrent`.
+    pub cu_ctx_pop_current_v2: unsafe extern "C" fn(pctx: *mut CUcontext) -> CUresult,
+
     /// `cuCtxSynchronize() -> CUresult`
     ///
     /// Blocks until the device has completed all preceding requested tasks.
@@ -804,19 +812,29 @@ pub struct DriverApi {
     pub cu_multicast_add_device:
         Option<unsafe extern "C" fn(mc_handle: CUmulticastObject, dev: CUdevice) -> CUresult>,
 
-    /// `cuMemcpyBatchAsync(dsts*, srcs*, sizes*, count, flags, stream) -> CUresult`
+    /// `cuMemcpyBatchAsync(dsts*, srcs*, sizes*, count, attrs*, attrsIdxs*,
+    /// numAttrs, failIdx*, stream) -> CUresult`
     ///
     /// Issues *count* asynchronous memory copies (H2D, D2H, or D2D) in a
     /// single driver call (CUDA 12.8+). When `None`, issue individual
     /// `cuMemcpyAsync` calls as a fallback.
+    ///
+    /// The signature mirrors the real CUDA 12.8 export exactly: `dsts`/`srcs`
+    /// are arrays of `CUdeviceptr`, `attrs` is an array of
+    /// [`CUmemcpyAttributes`] indexed via `attrs_idxs`, and `fail_idx` receives
+    /// the index of the first failed copy. (CUDA 13.x changed this ABI again by
+    /// dropping `failIdx`; callers must gate on driver version before invoking.)
     #[allow(clippy::type_complexity)]
     pub cu_memcpy_batch_async: Option<
         unsafe extern "C" fn(
-            dsts: *const *mut c_void,
-            srcs: *const *const c_void,
-            sizes: *const usize,
-            count: u64,
-            flags: u64,
+            dsts: *mut CUdeviceptr,
+            srcs: *mut CUdeviceptr,
+            sizes: *mut usize,
+            count: usize,
+            attrs: *mut CUmemcpyAttributes,
+            attrs_idxs: *mut usize,
+            num_attrs: usize,
+            fail_idx: *mut usize,
             stream: CUstream,
         ) -> CUresult,
     >,
@@ -1306,6 +1324,39 @@ pub struct DriverApi {
     /// is not supported.
     pub cu_graph_launch:
         Option<unsafe extern "C" fn(h_graph_exec: CUgraphExec, h_stream: CUstream) -> CUresult>,
+
+    /// `cuStreamBeginCapture_v2(hStream, mode) -> CUresult`
+    ///
+    /// Begins recording the GPU work submitted to `hStream` into a graph.
+    /// When `None`, the loaded driver predates stream capture (pre-CUDA 10.0).
+    pub cu_stream_begin_capture:
+        Option<unsafe extern "C" fn(h_stream: CUstream, mode: CUstreamCaptureMode) -> CUresult>,
+
+    /// `cuStreamEndCapture(hStream, phGraph*) -> CUresult`
+    ///
+    /// Ends capture on `hStream` and writes the captured `CUgraph` to
+    /// `phGraph`.  When `None`, stream capture is not supported.
+    pub cu_stream_end_capture:
+        Option<unsafe extern "C" fn(h_stream: CUstream, ph_graph: *mut CUgraph) -> CUresult>,
+
+    /// `cuStreamIsCapturing(hStream, captureStatus*) -> CUresult`
+    ///
+    /// Reports whether `hStream` is currently capturing.
+    pub cu_stream_is_capturing: Option<
+        unsafe extern "C" fn(h_stream: CUstream, status: *mut CUstreamCaptureStatus) -> CUresult,
+    >,
+
+    /// `cuGraphGetNodes(hGraph, nodes*, numNodes*) -> CUresult`
+    ///
+    /// Queries a graph's nodes; with a null `nodes` pointer it returns only
+    /// the node count in `*numNodes`.  Used to size a captured graph.
+    pub cu_graph_get_nodes: Option<
+        unsafe extern "C" fn(
+            h_graph: CUgraph,
+            nodes: *mut CUgraphNode,
+            num_nodes: *mut usize,
+        ) -> CUresult,
+    >,
 }
 
 // SAFETY: All fields are plain function pointers (which are Send + Sync) and
@@ -1440,6 +1491,7 @@ impl DriverApi {
             cu_ctx_destroy_v2: load_sym!(lib, "cuCtxDestroy_v2"),
             cu_ctx_set_current: load_sym!(lib, "cuCtxSetCurrent"),
             cu_ctx_get_current: load_sym!(lib, "cuCtxGetCurrent"),
+            cu_ctx_pop_current_v2: load_sym!(lib, "cuCtxPopCurrent_v2"),
             cu_ctx_synchronize: load_sym!(lib, "cuCtxSynchronize"),
 
             // -- Module management ---------------------------------------------
@@ -1611,6 +1663,10 @@ impl DriverApi {
             cu_graph_instantiate: load_sym_optional!(lib, "cuGraphInstantiate_v2"),
             cu_graph_exec_destroy: load_sym_optional!(lib, "cuGraphExecDestroy"),
             cu_graph_launch: load_sym_optional!(lib, "cuGraphLaunch"),
+            cu_stream_begin_capture: load_sym_optional!(lib, "cuStreamBeginCapture_v2"),
+            cu_stream_end_capture: load_sym_optional!(lib, "cuStreamEndCapture"),
+            cu_stream_is_capturing: load_sym_optional!(lib, "cuStreamIsCapturing"),
+            cu_graph_get_nodes: load_sym_optional!(lib, "cuGraphGetNodes"),
 
             // Keep the library handle alive.
             _lib: lib,
@@ -1646,8 +1702,30 @@ pub fn try_driver() -> CudaResult<&'static DriverApi> {
     let result = DRIVER.get_or_init(DriverApi::load);
     match result {
         Ok(api) => Ok(api),
-        Err(_) => Err(CudaError::NotInitialized),
+        Err(e) => {
+            // Emit the underlying diagnostic once (which library/symbol or
+            // cuInit code failed) so the reason is not lost behind the coarse
+            // `NotInitialized` mapping. Gated by `Once` to avoid log spam from
+            // the many `try_driver()` call sites hitting the cached error.
+            static LOGGED: std::sync::Once = std::sync::Once::new();
+            LOGGED.call_once(|| {
+                tracing::warn!(error = %e, "CUDA driver load failed");
+            });
+            Err(CudaError::NotInitialized)
+        }
     }
+}
+
+/// Returns the cached [`DriverLoadError`] from the first driver-load attempt,
+/// if the driver failed to load.
+///
+/// This lets callers programmatically inspect *why* the driver is unavailable
+/// (which library was missing, which symbol failed to resolve, or the `cuInit`
+/// error code) rather than only seeing the coarse
+/// [`CudaError::NotInitialized`] returned by [`try_driver`]. Returns `None` if
+/// the driver loaded successfully or has not been probed yet.
+pub fn driver_load_error() -> Option<&'static DriverLoadError> {
+    DRIVER.get().and_then(|r| r.as_ref().err())
 }
 
 // ---------------------------------------------------------------------------

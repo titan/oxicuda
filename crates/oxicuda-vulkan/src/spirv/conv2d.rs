@@ -92,6 +92,17 @@ pub fn conv2d_spirv(
     m.emit_function(b.ty_void, b.main_fn, FUNCTION_CONTROL_NONE, b.ty_fn_void);
     m.emit_label(lbl_entry);
 
+    // SPIR-V requires all Function-storage OpVariables to be declared in the
+    // first (entry) basic block, so allocate them here before any branch.
+    let var_acc = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
+    let var_ci = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_uint, var_ci, STORAGE_CLASS_FUNCTION);
+    let var_fy = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_uint, var_fy, STORAGE_CLASS_FUNCTION);
+    let var_fx = m.alloc_id();
+    m.emit_variable(b.ty_ptr_func_uint, var_fx, STORAGE_CLASS_FUNCTION);
+
     let gid = load_gid_x(&mut m, &b);
     let cond = m.alloc_id();
     m.emit(OP_U_LESS_THAN, &[b.ty_bool, cond, gid, c_total]);
@@ -114,17 +125,10 @@ pub fn conv2d_spirv(
     let batch = m.alloc_id();
     m.emit(OP_U_DIV, &[b.ty_uint, batch, t2, c_kout]);
 
-    // Local variables (Function-scope, in first block after function start)
-    let var_acc = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_float, var_acc, STORAGE_CLASS_FUNCTION);
+    // Initialise the accumulator and channel counter (variables declared in the
+    // entry block); the fy/fx counters are initialised inside their loops.
     m.emit_store(var_acc, b.c_float_0);
-    let var_ci = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_ci, STORAGE_CLASS_FUNCTION);
     m.emit_store(var_ci, b.c_uint_0);
-    let var_fy = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_fy, STORAGE_CLASS_FUNCTION);
-    let var_fx = m.alloc_id();
-    m.emit_variable(b.ty_ptr_func_uint, var_fx, STORAGE_CLASS_FUNCTION);
 
     m.emit_branch(lbl_ci_h);
 

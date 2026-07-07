@@ -263,7 +263,7 @@ mod tests {
     fn e2e_prefix_cache_hit_rate() {
         let mut cache = PrefixCache::new(32);
         let t = vec![1_u32, 2, 3, 4];
-        cache.insert(&t, vec![BlockId(0), BlockId(1)]);
+        let _ = cache.insert(&t, vec![BlockId(0), BlockId(1)]);
         cache.lookup(&[99_u32, 88]); // miss
         cache.lookup(&t); // hit
         cache.lookup(&t); // hit

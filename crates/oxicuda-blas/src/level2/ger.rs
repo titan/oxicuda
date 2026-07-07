@@ -18,7 +18,7 @@ use oxicuda_ptx::prelude::*;
 
 use crate::error::{BlasError, BlasResult};
 use crate::handle::BlasHandle;
-use crate::types::{GpuFloat, MatrixDescMut};
+use crate::types::{GpuFloat, Layout, MatrixDescMut};
 
 /// Default block dimensions for GER kernels (16x16 = 256 threads).
 const GER_BLOCK_X: u32 = 16;
@@ -57,6 +57,15 @@ pub fn ger<T: GpuFloat>(
 ) -> BlasResult<()> {
     if m == 0 || n == 0 {
         return Ok(());
+    }
+
+    // The kernel addresses A as row-major; reject column-major descriptors
+    // rather than reading out of bounds.
+    if a.layout == Layout::ColMajor {
+        return Err(BlasError::InvalidArgument(
+            "ger: ColMajor layout is not supported by this kernel; pass a RowMajor descriptor"
+                .to_string(),
+        ));
     }
 
     validate_ger_args(m, n, x, incx, y, incy, a)?;
@@ -172,16 +181,18 @@ fn generate_ger_ptx<T: GpuFloat>(sm: SmVersion) -> BlasResult<String> {
 
                     let alpha = reinterpret_bits_to_float(b, alpha_bits, is_f64);
 
-                    // Load x[row * incx]
-                    let x_idx = b.alloc_reg(PtxType::U32);
-                    b.raw_ptx(&format!("mul.lo.u32 {x_idx}, {row}, {incx};"));
-                    let x_addr = b.byte_offset_addr(x_ptr, x_idx, elem_bytes);
+                    // Load x[row * incx] (offset formed in 64-bit).
+                    let x_elem64 = b.mul_wide_u32_to_u64(row.clone(), incx);
+                    let x_off = b.alloc_reg(PtxType::U64);
+                    b.raw_ptx(&format!("mul.lo.u64 {x_off}, {x_elem64}, {elem_bytes};"));
+                    let x_addr = b.add_u64(x_ptr, x_off);
                     let x_val = load_float(b, x_addr, is_f64);
 
-                    // Load y[col * incy]
-                    let y_idx = b.alloc_reg(PtxType::U32);
-                    b.raw_ptx(&format!("mul.lo.u32 {y_idx}, {col}, {incy};"));
-                    let y_addr = b.byte_offset_addr(y_ptr, y_idx, elem_bytes);
+                    // Load y[col * incy] (offset formed in 64-bit).
+                    let y_elem64 = b.mul_wide_u32_to_u64(col.clone(), incy);
+                    let y_off = b.alloc_reg(PtxType::U64);
+                    b.raw_ptx(&format!("mul.lo.u64 {y_off}, {y_elem64}, {elem_bytes};"));
+                    let y_addr = b.add_u64(y_ptr, y_off);
                     let y_val = load_float(b, y_addr, is_f64);
 
                     // Compute alpha * x[i] * y[j]
@@ -204,11 +215,15 @@ fn generate_ger_ptx<T: GpuFloat>(sm: SmVersion) -> BlasResult<String> {
                         r
                     };
 
-                    // Load current A[row][col]
-                    let a_row_off = b.alloc_reg(PtxType::U32);
-                    b.raw_ptx(&format!("mul.lo.u32 {a_row_off}, {row}, {lda};"));
-                    let a_idx = b.add_u32(a_row_off, col.clone());
-                    let a_addr = b.byte_offset_addr(a_ptr, a_idx, elem_bytes);
+                    // Load current A[row][col]. The linear index `row * lda +
+                    // col` is formed in 64-bit so a matrix wider than 4 GiB
+                    // does not wrap and address the wrong row.
+                    let a_row_elems64 = b.mul_wide_u32_to_u64(row.clone(), lda);
+                    let col64 = b.cvt_u32_to_u64(col.clone());
+                    let a_idx64 = b.add_u64(a_row_elems64, col64);
+                    let a_off = b.alloc_reg(PtxType::U64);
+                    b.raw_ptx(&format!("mul.lo.u64 {a_off}, {a_idx64}, {elem_bytes};"));
+                    let a_addr = b.add_u64(a_ptr, a_off);
                     let a_cur = load_float(b, a_addr.clone(), is_f64);
 
                     // A[row][col] += alpha * x[row] * y[col]

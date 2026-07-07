@@ -70,6 +70,7 @@ impl ComputeBackend for MetalBackend {
         if m == 0 || n == 0 || k == 0 {
             return Ok(());
         }
+        super::types::validate_gemm_layout(trans_a, trans_b, n, k, lda, ldb, ldc)?;
         self.dispatch_gemm(
             trans_a, trans_b, m, n, k, alpha, a_ptr, lda, b_ptr, ldb, beta, c_ptr, ldc,
         )
@@ -206,11 +207,15 @@ impl ComputeBackend for MetalBackend {
         let v = read_f32_le(&v_bytes);
         let mut o = vec![0.0f32; o_len];
         let scale_f = scale as f32;
+        // Reusable per-(bh,sq) score buffer: the scaled Q·Kᵀ dot products are
+        // computed once in the max pass and reused in the accumulate pass instead
+        // of recomputing the O(head_dim) inner product a second time.
+        let mut scores = vec![0.0f32; seq_kv];
         for bh in 0..batch_heads {
             for sq in 0..seq_q {
                 let q_off = (bh * seq_q + sq) * head_dim;
                 let mut max_score = f32::NEG_INFINITY;
-                for sk in 0..seq_kv {
+                for (sk, score_slot) in scores.iter_mut().enumerate() {
                     if causal && sk > sq {
                         continue;
                     }
@@ -220,22 +225,19 @@ impl ComputeBackend for MetalBackend {
                         dot += q[q_off + d] * k[k_off + d];
                     }
                     let score = dot * scale_f;
+                    *score_slot = score;
                     if score > max_score {
                         max_score = score;
                     }
                 }
                 let mut sum_exp = 0.0f32;
                 let mut acc = vec![0.0f32; head_dim];
-                for sk in 0..seq_kv {
+                for (sk, &score) in scores.iter().enumerate() {
                     if causal && sk > sq {
                         continue;
                     }
-                    let k_off = (bh * seq_kv + sk) * head_dim;
-                    let mut dot = 0.0f32;
-                    for d in 0..head_dim {
-                        dot += q[q_off + d] * k[k_off + d];
-                    }
-                    let w = (dot * scale_f - max_score).exp();
+                    // Reuse the scaled score cached in the max pass above.
+                    let w = (score - max_score).exp();
                     sum_exp += w;
                     let v_off = (bh * seq_kv + sk) * head_dim;
                     for d in 0..head_dim {
@@ -321,6 +323,7 @@ impl ComputeBackend for MetalBackend {
         if batch_count == 0 || m == 0 || n == 0 || k == 0 {
             return Ok(());
         }
+        super::types::validate_gemm_layout(trans_a, trans_b, n, k, lda, ldb, ldc)?;
         self.dispatch_batched_gemm(
             trans_a,
             trans_b,

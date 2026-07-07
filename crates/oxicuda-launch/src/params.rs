@@ -94,7 +94,7 @@ impl LaunchParams {
     /// are both large `u32` values.
     #[inline]
     pub fn total_threads(&self) -> u64 {
-        self.grid.total() as u64 * self.block.total() as u64
+        self.grid.total_u64() * self.block.total() as u64
     }
 
     /// Validates launch parameters against device hardware limits.

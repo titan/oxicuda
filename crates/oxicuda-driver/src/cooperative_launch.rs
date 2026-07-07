@@ -843,4 +843,128 @@ mod tests {
         let total = config.total_blocks();
         assert_eq!(total, 65535u64 * 65535 * 64);
     }
+
+    /// Arch-portable grid-stride doubling kernel: `out[i] = 2 * in[i]`. It does
+    /// not itself require grid-wide synchronisation, so this test validates the
+    /// `cuLaunchCooperativeKernel` launch path + occupancy/support queries on
+    /// real hardware (a small grid that trivially fits the cooperative limit),
+    /// not cross-block synchronisation.
+    const COOP_DOUBLE_PTX: &str = "\
+.version 7.0
+.target sm_70
+.address_size 64
+.visible .entry coop_double(
+    .param .u64 ptr,
+    .param .u32 n
+)
+{
+    .reg .b32 %r<8>;
+    .reg .b64 %rd<8>;
+    .reg .f32 %f<2>;
+    .reg .pred %p<2>;
+    ld.param.u64 %rd0, [ptr];
+    ld.param.u32 %r0, [n];
+    mov.u32 %r1, %ctaid.x;
+    mov.u32 %r2, %ntid.x;
+    mov.u32 %r3, %tid.x;
+    mad.lo.u32 %r4, %r1, %r2, %r3;
+    mov.u32 %r5, %nctaid.x;
+    mul.lo.u32 %r6, %r5, %r2;
+$LOOP:
+    setp.ge.u32 %p0, %r4, %r0;
+    @%p0 bra $DONE;
+    mul.wide.u32 %rd1, %r4, 4;
+    add.u64 %rd2, %rd0, %rd1;
+    ld.global.f32 %f0, [%rd2];
+    add.f32 %f0, %f0, %f0;
+    st.global.f32 [%rd2], %f0;
+    add.u32 %r4, %r4, %r6;
+    bra $LOOP;
+$DONE:
+    ret;
+}
+";
+
+    /// Real-hardware cooperative launch: verify support, query the cooperative
+    /// occupancy, then launch the doubling kernel via `cuLaunchCooperativeKernel`
+    /// and check the device output matches the CPU oracle. No-op without a GPU.
+    #[test]
+    fn cooperative_launch_doubles_buffer_on_real_device() {
+        use crate::context::Context;
+        use crate::module::Module;
+        use crate::stream::Stream;
+
+        let Ok(dev) = Device::get(0) else {
+            return;
+        };
+        let ctx = match Context::new(&dev) {
+            Ok(c) => std::sync::Arc::new(c),
+            Err(_) => return,
+        };
+        let stream = match Stream::new(&ctx) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        // Skip cleanly if cooperative launch is unsupported on this device.
+        match CooperativeLaunchSupport::is_cooperative_supported(&dev) {
+            Ok(true) => {}
+            _ => return,
+        }
+
+        let module = match Module::from_ptx(COOP_DOUBLE_PTX) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let func = module.get_function("coop_double").expect("coop_double");
+
+        // The cooperative occupancy (blocks/SM) must be at least one.
+        let blocks_per_sm = CooperativeLaunchSupport::max_cooperative_grid_blocks(&func, 128, 0)
+            .expect("cooperative occupancy");
+        assert!(blocks_per_sm >= 1, "cooperative occupancy must be >= 1");
+
+        const N: usize = 4096;
+        let host: Vec<f32> = (0..N).map(|i| i as f32 * 0.5).collect();
+        let bytes = N * std::mem::size_of::<f32>();
+
+        let api = crate::loader::try_driver().expect("driver");
+        let mut dptr: crate::ffi::CUdeviceptr = 0;
+        crate::error::check(unsafe { (api.cu_mem_alloc_v2)(&mut dptr, bytes) }).expect("alloc");
+
+        let run = || -> CudaResult<Vec<f32>> {
+            crate::error::check(unsafe {
+                (api.cu_memcpy_htod_v2)(dptr, host.as_ptr().cast(), bytes)
+            })?;
+
+            // A small grid (8 x 128) trivially fits the cooperative limit.
+            let config =
+                CooperativeLaunchConfig::new((8, 1, 1), (128, 1, 1)).with_stream(stream.raw());
+            let mut dptr_arg = dptr;
+            let mut n_arg: u32 = N as u32;
+            let args: [*mut c_void; 2] = [
+                (&mut dptr_arg as *mut crate::ffi::CUdeviceptr).cast(),
+                (&mut n_arg as *mut u32).cast(),
+            ];
+            cooperative_launch(&func, &config, &args)?;
+            stream.synchronize()?;
+
+            let mut out = vec![0.0f32; N];
+            crate::error::check(unsafe {
+                (api.cu_memcpy_dtoh_v2)(out.as_mut_ptr().cast(), dptr, bytes)
+            })?;
+            Ok(out)
+        };
+
+        let result = run();
+        let _ = unsafe { (api.cu_mem_free_v2)(dptr) };
+
+        let out = result.expect("cooperative launch round-trip");
+        for (i, (&got, &src)) in out.iter().zip(host.iter()).enumerate() {
+            let want = 2.0 * src;
+            assert!(
+                (got - want).abs() <= 1e-5,
+                "element {i}: cooperative kernel gave {got}, expected {want}"
+            );
+        }
+    }
 }
