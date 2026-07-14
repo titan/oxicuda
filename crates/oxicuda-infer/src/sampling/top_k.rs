@@ -50,8 +50,10 @@ pub fn top_k_filter(logits: &mut [f32], k: usize) -> InferResult<()> {
 
     // Find the k-th largest value via a partial sort of a copy.
     let mut sorted: Vec<f32> = logits.to_vec();
-    // Sort descending (NaN-free after check above).
-    sorted.sort_unstable_by(|a, b| b.partial_cmp(a).expect("no NaN after check"));
+    // Sort descending. `total_cmp` gives a total order over all f32 values
+    // (never panics, even on NaN) and agrees with `partial_cmp` on the
+    // NaN-free values guaranteed by the check above.
+    sorted.sort_unstable_by(|a, b| b.total_cmp(a));
     let threshold = sorted[k - 1];
 
     // Mask: keep at most k values that are ≥ threshold.

@@ -344,22 +344,17 @@ where
 
     // --- Iteration phase ---
     for _ in 0..cfg.n_iters {
-        // Collect occupied cell indices
-        let occupied: Vec<usize> = (0..archive.cells.len())
-            .filter(|&i| archive.cells[i].is_some())
-            .collect();
+        // Collect references to occupied elites directly, so the
+        // "occupied" proof from the filter travels with the reference
+        // instead of being re-derived via a second indexed lookup.
+        let occupied: Vec<&Elite> = archive.cells.iter().filter_map(|c| c.as_ref()).collect();
 
         if occupied.is_empty() {
             continue;
         }
 
         // Pick a random occupied cell
-        let chosen_cell = occupied[rng.next_usize(occupied.len())];
-        let parent_genome = archive.cells[chosen_cell]
-            .as_ref()
-            .expect("occupied cell must have elite")
-            .genome
-            .clone();
+        let parent_genome = occupied[rng.next_usize(occupied.len())].genome.clone();
 
         // Apply Gaussian mutation and clamp to genome bounds
         let offspring_genome: Vec<f64> = parent_genome

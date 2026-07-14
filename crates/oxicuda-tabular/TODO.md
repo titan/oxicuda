@@ -126,7 +126,7 @@ Target: forward latency comparable to PyTorch + pytorch-tabular reference for FT
 |--------|-------------|--------|
 | Files | source `.rs` files under `src/` | 58 |
 | SLoC | code lines (tokei) | ~23,573 |
-| Tests | e2e + unit | 538 |
+| Tests | e2e + unit | 564 |
 | Coverage | tabular DL models | 4 (TabNet, SAINT, FT-Transformer, NODE) |
 | Coverage | normalizers | 3 (Quantile, Standard, MinMax) |
 

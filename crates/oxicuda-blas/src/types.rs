@@ -160,6 +160,23 @@ pub trait GpuFloat: Copy + Send + Sync + 'static + std::fmt::Debug + PartialOrd 
     /// This is how scalar constants are passed to PTX kernels.
     fn to_bits_u64(self) -> u64;
 
+    /// Converts the scalar into its [`Accumulator`](Self::Accumulator)
+    /// precision and returns that value's raw bit representation as a `u64`.
+    ///
+    /// The generated GEMM kernels declare their `alpha`/`beta` parameters in
+    /// the *accumulator* precision (e.g. `f32` for `f16`/`bf16`/FP8 inputs),
+    /// not the input precision, because the epilogue `alpha * acc + beta * C`
+    /// runs in the accumulator's registers. Passing the raw input-precision
+    /// bits (via [`to_bits_u64`](Self::to_bits_u64)) would make the kernel
+    /// reinterpret, say, a 16-bit `0x3C00` (`1.0_f16`) as an `f32`, yielding a
+    /// near-zero denormal and silently zeroing the whole product. This method
+    /// performs the widening so the scalar the kernel reads matches its
+    /// declared parameter type.
+    ///
+    /// For `f32`/`f64` (where the accumulator is `Self`) it is identical to
+    /// [`to_bits_u64`](Self::to_bits_u64).
+    fn to_accumulator_bits(self) -> u64;
+
     /// Reconstructs a value from its raw bit representation stored in a `u64`.
     fn from_bits_u64(bits: u64) -> Self;
 
@@ -194,6 +211,12 @@ impl GpuFloat for f32 {
     }
 
     #[inline]
+    fn to_accumulator_bits(self) -> u64 {
+        // Accumulator == f32 == Self.
+        self.to_bits_u64()
+    }
+
+    #[inline]
     fn from_bits_u64(bits: u64) -> Self {
         f32::from_bits(bits as u32)
     }
@@ -221,6 +244,12 @@ impl GpuFloat for f64 {
     #[inline]
     fn to_bits_u64(self) -> u64 {
         self.to_bits()
+    }
+
+    #[inline]
+    fn to_accumulator_bits(self) -> u64 {
+        // Accumulator == f64 == Self.
+        self.to_bits_u64()
     }
 
     #[inline]
@@ -255,6 +284,12 @@ impl GpuFloat for half::f16 {
     }
 
     #[inline]
+    fn to_accumulator_bits(self) -> u64 {
+        // Accumulator is f32: widen the half to f32 before taking bits.
+        u64::from(f32::from(self).to_bits())
+    }
+
+    #[inline]
     fn from_bits_u64(bits: u64) -> Self {
         half::f16::from_bits(bits as u16)
     }
@@ -283,6 +318,12 @@ impl GpuFloat for half::bf16 {
     #[inline]
     fn to_bits_u64(self) -> u64 {
         u64::from(self.to_bits())
+    }
+
+    #[inline]
+    fn to_accumulator_bits(self) -> u64 {
+        // Accumulator is f32: widen the bf16 to f32 before taking bits.
+        u64::from(f32::from(self).to_bits())
     }
 
     #[inline]
@@ -329,6 +370,50 @@ unsafe impl Sync for E4M3 {}
 unsafe impl Send for E5M2 {}
 unsafe impl Sync for E5M2 {}
 
+/// Decodes an OCP FP8 E4M3 (`e4m3fn`, finite -- no infinities) byte to `f32`.
+///
+/// Layout: 1 sign bit, 4 exponent bits (bias 7), 3 mantissa bits. The single
+/// pattern `S.1111.111` is NaN; every other `exp == 0b1111` value is a normal
+/// number (max normal 448). `exp == 0` encodes zero / subnormals.
+#[inline]
+fn e4m3_to_f32(bits: u8) -> f32 {
+    let sign = if bits & 0x80 != 0 { -1.0_f32 } else { 1.0_f32 };
+    let exp = (bits >> 3) & 0x0F;
+    let mant = bits & 0x07;
+    if exp == 0 {
+        // Zero or subnormal: 2^(1 - 7) * (mant / 8).
+        sign * 2.0_f32.powi(-6) * (f32::from(mant) / 8.0)
+    } else if exp == 0x0F && mant == 0x07 {
+        f32::NAN
+    } else {
+        sign * 2.0_f32.powi(i32::from(exp) - 7) * (1.0 + f32::from(mant) / 8.0)
+    }
+}
+
+/// Decodes an OCP FP8 E5M2 byte to `f32`.
+///
+/// Layout: 1 sign bit, 5 exponent bits (bias 15), 2 mantissa bits, with
+/// IEEE-style specials: `exp == 0b11111` is infinity (mantissa 0) or NaN.
+/// `exp == 0` encodes zero / subnormals.
+#[inline]
+fn e5m2_to_f32(bits: u8) -> f32 {
+    let sign = if bits & 0x80 != 0 { -1.0_f32 } else { 1.0_f32 };
+    let exp = (bits >> 2) & 0x1F;
+    let mant = bits & 0x03;
+    if exp == 0 {
+        // Zero or subnormal: 2^(1 - 15) * (mant / 4).
+        sign * 2.0_f32.powi(-14) * (f32::from(mant) / 4.0)
+    } else if exp == 0x1F {
+        if mant == 0 {
+            sign * f32::INFINITY
+        } else {
+            f32::NAN
+        }
+    } else {
+        sign * 2.0_f32.powi(i32::from(exp) - 15) * (1.0 + f32::from(mant) / 4.0)
+    }
+}
+
 impl GpuFloat for E4M3 {
     const PTX_TYPE: PtxType = PtxType::E4M3;
     const SIZE: usize = 1;
@@ -339,6 +424,12 @@ impl GpuFloat for E4M3 {
     #[inline]
     fn to_bits_u64(self) -> u64 {
         u64::from(self.0)
+    }
+
+    #[inline]
+    fn to_accumulator_bits(self) -> u64 {
+        // Accumulator is f32: decode the FP8 byte to f32 before taking bits.
+        u64::from(e4m3_to_f32(self.0).to_bits())
     }
 
     #[inline]
@@ -367,6 +458,12 @@ impl GpuFloat for E5M2 {
     #[inline]
     fn to_bits_u64(self) -> u64 {
         u64::from(self.0)
+    }
+
+    #[inline]
+    fn to_accumulator_bits(self) -> u64 {
+        // Accumulator is f32: decode the FP8 byte to f32 before taking bits.
+        u64::from(e5m2_to_f32(self.0).to_bits())
     }
 
     #[inline]
@@ -639,5 +736,83 @@ impl<T: GpuFloat> MatrixDescMut<T> {
             layout: self.layout,
             _phantom: PhantomData,
         }
+    }
+}
+
+#[cfg(test)]
+mod accumulator_bits_tests {
+    use super::*;
+
+    #[test]
+    fn f32_accumulator_bits_equal_plain_bits() {
+        // Accumulator == Self, so the two encodings agree bit-for-bit.
+        for v in [0.0_f32, 1.0, -2.5, 128.0, f32::MIN_POSITIVE] {
+            assert_eq!(v.to_accumulator_bits(), v.to_bits_u64());
+        }
+    }
+
+    #[test]
+    fn f64_accumulator_bits_equal_plain_bits() {
+        for v in [0.0_f64, 1.0, -2.5, 128.0] {
+            assert_eq!(v.to_accumulator_bits(), v.to_bits_u64());
+        }
+    }
+
+    #[cfg(feature = "f16")]
+    #[test]
+    fn f16_accumulator_bits_widen_to_f32() {
+        // The whole point of the fix: a half's accumulator bits are the *f32*
+        // encoding, NOT the raw 16-bit pattern. Reading the raw pattern as an
+        // f32 (the old bug) would have made 1.0 a near-zero denormal.
+        let one = half::f16::ONE;
+        assert_eq!(one.to_accumulator_bits(), 1.0_f32.to_bits() as u64);
+        assert_ne!(one.to_accumulator_bits(), one.to_bits_u64());
+
+        let two_five = half::f16::from_f32(2.5);
+        assert_eq!(two_five.to_accumulator_bits(), 2.5_f32.to_bits() as u64);
+        assert_eq!(
+            half::f16::ZERO.to_accumulator_bits(),
+            0.0_f32.to_bits() as u64
+        );
+    }
+
+    #[cfg(feature = "f16")]
+    #[test]
+    fn bf16_accumulator_bits_widen_to_f32() {
+        let one = half::bf16::ONE;
+        assert_eq!(one.to_accumulator_bits(), 1.0_f32.to_bits() as u64);
+        assert_ne!(one.to_accumulator_bits(), one.to_bits_u64());
+        assert_eq!(
+            half::bf16::from_f32(-4.0).to_accumulator_bits(),
+            (-4.0_f32).to_bits() as u64
+        );
+    }
+
+    #[test]
+    fn fp8_accumulator_bits_decode_to_f32() {
+        // `gpu_one()` must decode to exactly 1.0 in both FP8 formats, and zero
+        // to 0.0 -- otherwise an FP8 GEMM would mis-scale by alpha/beta.
+        assert_eq!(
+            E4M3::gpu_one().to_accumulator_bits(),
+            1.0_f32.to_bits() as u64
+        );
+        assert_eq!(
+            E4M3::gpu_zero().to_accumulator_bits(),
+            0.0_f32.to_bits() as u64
+        );
+        assert_eq!(
+            E5M2::gpu_one().to_accumulator_bits(),
+            1.0_f32.to_bits() as u64
+        );
+        assert_eq!(
+            E5M2::gpu_zero().to_accumulator_bits(),
+            0.0_f32.to_bits() as u64
+        );
+
+        // A representative non-unit value: E4M3 0x40 = +2.0
+        // (exp = 0b1000 = 8, bias 7 -> 2^1; mantissa 0 -> 1.0).
+        assert_eq!(E4M3(0x40).to_accumulator_bits(), 2.0_f32.to_bits() as u64);
+        // E5M2 0x40 = +2.0 (exp = 0b10000 = 16, bias 15 -> 2^1; mantissa 0).
+        assert_eq!(E5M2(0x40).to_accumulator_bits(), 2.0_f32.to_bits() as u64);
     }
 }

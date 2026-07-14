@@ -8,7 +8,7 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 ## Implementation Status
 
 - **Actual SLoC:** 7,287 across 22 files
-- **Tests:** 255 unit + 3 doc = 258 passing (host/codegen surface; on-device tests are `#[cfg(target_os = "macos")]`-gated and skip without a GPU)
+- **Tests:** 262 unit + 3 doc = 265 passing (host/codegen surface; on-device tests are `#[cfg(target_os = "macos")]`-gated and skip without a GPU)
 - **Status:** Full memory + compute backend with MSL, MPS interop, ANE hints, GPU FFT, plus host-side codegen/builders for `simdgroup_matrix`/df64-FP64/INT8 GEMM, MTLHeap suballocation, storage-mode planning, argument buffers, events/fences, indirect command + blit lists, GPU-family capability gating, and dispatch planning
 - **Targets:** Apple Silicon (M1/M2/M3/M4 series) and Intel Mac (discrete + integrated)
 
@@ -72,7 +72,7 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 - [x] f64 emulation path -- `msl_nn::gemm_msl_f64_ds` emits a double-single (`df64`) GEMM (Dekker `two_prod`/`fma` + Knuth `two_sum`, `float2` limb storage); `numeric::DoubleSingle` + `pack_df64`/`unpack_df64` provide the matching host-side split arithmetic. *Codegen + host math CPU-tested.*
 - [x] INT8 dynamic quantization GEMM -- `msl_nn::int8_quant_gemm_msl` emits the `char`x`char`->`int`->dequant-`float` GEMM; `numeric::Int8Quantizer` (symmetric + asymmetric) derives the scale/zero-point constants the kernel consumes. *Codegen + quant math CPU-tested.*
 - [x] Argument buffers (`MTLArgumentEncoder`) -- `argbuffer::ArgumentBufferLayout` + builder lay out `[[id(n)]]` slots, byte offsets, and `encodedLength` for bindless buffer/texture/sampler/inline-constant tables. *Layout logic CPU-tested; encoding into a real argument buffer requires Apple GPU/Metal hardware.*
-- [x] `MTLEvent` / `MTLSharedEvent` cross-queue synchronization -- `event::MetalEvent`/`MetalFence`/`EventTimeline` model monotonic signal/wait values and validate a multi-queue sync plan for satisfiability + deadlock cycles. *Ordering logic CPU-tested; real cross-process events require Apple GPU/Metal hardware.*
+- [x] `MTLEvent` / `MTLSharedEvent` cross-queue synchronization -- `event::MetalEvent`/`MetalFence`/`EventTimeline` model monotonic signal/wait values and validate a multi-queue sync plan for satisfiability + deadlock cycles. *Ordering logic CPU-tested; real cross-process events require Apple GPU/Metal hardware.* (0.5.0: `EventTimeline::validate` no longer `.expect()`s on the missing-program-counter invariant -- it now returns a proper `MetalResult` error instead of panicking, with new regression-test coverage.)
 - [x] Indirect command buffers (`MTLIndirectCommandBuffer`) -- `command::IndirectCommandBuffer` records a fixed-capacity, pre-encoded compute-dispatch list (`set_compute_command`/`reset_range`). *Recording logic CPU-tested; GPU-driven replay requires Apple GPU/Metal hardware.*
 
 #### P2 -- Nice-to-Have
@@ -96,7 +96,7 @@ on macOS through MSL shader dispatch. Part of [OxiCUDA](https://github.com/cool-
 ## Quality Status
 
 - Warnings: 0
-- Tests: 258 passing (255 unit + 3 doc)
+- Tests: 265 passing (262 unit + 3 doc)
 - unwrap() calls: 0 (production code; tests use `.expect(...)`)
 - Clippy: clean (`-D warnings`, all-features all-targets)
 

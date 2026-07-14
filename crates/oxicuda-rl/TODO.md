@@ -119,7 +119,7 @@ observation/reward normalization, and a vectorized environment abstraction.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![warn(missing_docs)]`)
-- Tests: 453 passing (root TODO.md count)
+- Tests: 453 passing (root TODO.md count); 0.5.0 eliminated the crate's remaining `.expect()` panic sites via `Result`/`Option` propagation (reliability hardening on error paths only, not a new feature; test count unchanged)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime

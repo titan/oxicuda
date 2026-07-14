@@ -155,6 +155,11 @@ impl ReductionTemplate {
         let combine = self.op.combine_instruction(ty);
         let smem_bytes = (self.block_size as usize) * byte_size;
         let kernel_name = self.kernel_name();
+        let is_f64 = self.precision == PtxType::F64;
+        // Storage class for the floating-point value registers. f64 values are
+        // 64-bit, so the `%f<8>` bank must be declared `.f64` rather than the
+        // `.f32` that a 32-bit reduction uses.
+        let reg_ty = if is_f64 { ".f64" } else { ".f32" };
 
         let mut ptx = String::with_capacity(4096);
 
@@ -181,7 +186,7 @@ impl ReductionTemplate {
         // Declarations
         writeln!(ptx, "    .reg .b32 %r<16>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .b64 %rd<8>;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    .reg .f32 %f<8>;").map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    .reg {reg_ty} %f<8>;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    .reg .pred %p<4>;").map_err(PtxGenError::FormatError)?;
         writeln!(
             ptx,
@@ -251,45 +256,86 @@ impl ReductionTemplate {
         writeln!(ptx, "    bar.sync 0;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
-        // Shared memory tree reduction (down to warp size)
-        writeln!(ptx, "    // Shared memory tree reduction").map_err(PtxGenError::FormatError)?;
-        let mut stride = self.block_size / 2;
-        while stride > 16 {
-            writeln!(ptx, "    setp.lt.u32 %p1, %r0, {stride};")
-                .map_err(PtxGenError::FormatError)?;
-            writeln!(ptx, "    @!%p1 bra $SKIP_S{stride};").map_err(PtxGenError::FormatError)?;
-
-            // Load the partner element from shared memory
-            let partner_offset = stride as usize * byte_size;
-            writeln!(ptx, "    ld.shared{ty} %f1, [%rd5+{partner_offset}];")
-                .map_err(PtxGenError::FormatError)?;
-            writeln!(ptx, "    ld.shared{ty} %f2, [%rd5];").map_err(PtxGenError::FormatError)?;
-            writeln!(ptx, "    {combine} %f2, %f2, %f1;").map_err(PtxGenError::FormatError)?;
-            writeln!(ptx, "    st.shared{ty} [%rd5], %f2;").map_err(PtxGenError::FormatError)?;
-
-            writeln!(ptx, "$SKIP_S{stride}:").map_err(PtxGenError::FormatError)?;
-            writeln!(ptx, "    bar.sync 0;").map_err(PtxGenError::FormatError)?;
-            stride /= 2;
-        }
-        writeln!(ptx).map_err(PtxGenError::FormatError)?;
-
-        // Warp shuffle reduction for the final 32 elements
-        writeln!(ptx, "    // Warp shuffle reduction (final 32 elements)")
-            .map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    setp.lt.u32 %p2, %r0, 32;").map_err(PtxGenError::FormatError)?;
-        writeln!(ptx, "    @!%p2 bra $DONE;").map_err(PtxGenError::FormatError)?;
-
-        // Load from shared memory into register for warp shuffle
-        writeln!(ptx, "    ld.shared{ty} %f3, [%rd5];").map_err(PtxGenError::FormatError)?;
-
-        // Warp shuffle down for offsets 16, 8, 4, 2, 1
-        for shfl_offset in [16u32, 8, 4, 2, 1] {
+        // Reduce each block to a single value.
+        if is_f64 {
+            // f64: shared-memory tree reduction all the way down to stride 1.
+            // The warp-shuffle fast path is f32-only (`shfl.sync.down.b32` moves
+            // 32 bits per instruction), so a 64-bit value would need two
+            // half-shuffles per step; tree-to-1 keeps the kernel correct and
+            // simple. The final value lands in `smem_reduce[0]` and is reloaded
+            // by thread 0 below.
             writeln!(
                 ptx,
-                "    shfl.sync.down.b32 %f4, %f3, {shfl_offset}, 31, 0xFFFFFFFF;"
+                "    // Shared memory tree reduction (f64: tree down to stride 1)"
             )
             .map_err(PtxGenError::FormatError)?;
-            writeln!(ptx, "    {combine} %f3, %f3, %f4;").map_err(PtxGenError::FormatError)?;
+            let mut stride = self.block_size / 2;
+            while stride >= 1 {
+                writeln!(ptx, "    setp.lt.u32 %p1, %r0, {stride};")
+                    .map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    @!%p1 bra $SKIP_S{stride};")
+                    .map_err(PtxGenError::FormatError)?;
+                let partner_offset = stride as usize * byte_size;
+                writeln!(ptx, "    ld.shared{ty} %f1, [%rd5+{partner_offset}];")
+                    .map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    ld.shared{ty} %f2, [%rd5];")
+                    .map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    {combine} %f2, %f2, %f1;").map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    st.shared{ty} [%rd5], %f2;")
+                    .map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "$SKIP_S{stride}:").map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    bar.sync 0;").map_err(PtxGenError::FormatError)?;
+                stride /= 2;
+            }
+        } else {
+            // f32: shared-memory tree reduction down to one warp (stride 16),
+            // then a warp-shuffle reduction over the final 32 elements.
+            writeln!(
+                ptx,
+                "    // Shared memory tree reduction (f32: down to one warp)"
+            )
+            .map_err(PtxGenError::FormatError)?;
+            let mut stride = self.block_size / 2;
+            while stride > 16 {
+                writeln!(ptx, "    setp.lt.u32 %p1, %r0, {stride};")
+                    .map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    @!%p1 bra $SKIP_S{stride};")
+                    .map_err(PtxGenError::FormatError)?;
+
+                // Load the partner element from shared memory
+                let partner_offset = stride as usize * byte_size;
+                writeln!(ptx, "    ld.shared{ty} %f1, [%rd5+{partner_offset}];")
+                    .map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    ld.shared{ty} %f2, [%rd5];")
+                    .map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    {combine} %f2, %f2, %f1;").map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    st.shared{ty} [%rd5], %f2;")
+                    .map_err(PtxGenError::FormatError)?;
+
+                writeln!(ptx, "$SKIP_S{stride}:").map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    bar.sync 0;").map_err(PtxGenError::FormatError)?;
+                stride /= 2;
+            }
+            writeln!(ptx).map_err(PtxGenError::FormatError)?;
+
+            // Warp shuffle reduction for the final 32 elements
+            writeln!(ptx, "    // Warp shuffle reduction (final 32 elements)")
+                .map_err(PtxGenError::FormatError)?;
+            writeln!(ptx, "    setp.lt.u32 %p2, %r0, 32;").map_err(PtxGenError::FormatError)?;
+            writeln!(ptx, "    @!%p2 bra $DONE;").map_err(PtxGenError::FormatError)?;
+
+            // Load from shared memory into register for warp shuffle
+            writeln!(ptx, "    ld.shared{ty} %f3, [%rd5];").map_err(PtxGenError::FormatError)?;
+
+            // Warp shuffle down for offsets 16, 8, 4, 2, 1
+            for shfl_offset in [16u32, 8, 4, 2, 1] {
+                writeln!(
+                    ptx,
+                    "    shfl.sync.down.b32 %f4, %f3, {shfl_offset}, 31, 0xFFFFFFFF;"
+                )
+                .map_err(PtxGenError::FormatError)?;
+                writeln!(ptx, "    {combine} %f3, %f3, %f4;").map_err(PtxGenError::FormatError)?;
+            }
         }
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
@@ -297,6 +343,13 @@ impl ReductionTemplate {
         writeln!(ptx, "    // Thread 0 writes block result").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    setp.eq.u32 %p3, %r0, 0;").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    @!%p3 bra $DONE;").map_err(PtxGenError::FormatError)?;
+
+        // f64 reduces via the shared-memory tree, so the block result sits in
+        // smem_reduce[0]; reload it into the value register the write path uses.
+        // (The f32 path already has the shuffled result live in %f3.)
+        if is_f64 {
+            writeln!(ptx, "    ld.shared{ty} %f3, [%rd5];").map_err(PtxGenError::FormatError)?;
+        }
 
         // For L2Norm, apply sqrt to the final result
         if self.op == ReductionOp::L2Norm {
@@ -873,5 +926,45 @@ mod tests {
         assert!(ptx.contains("param_inv_axis_len"));
         assert!(ptx.contains("cvt.f64.f32"));
         assert!(ptx.contains("mul.f64"));
+    }
+
+    #[test]
+    fn block_reduce_sum_f64_uses_64bit_bank_and_no_shuffle() {
+        // Regression: the block reduction hardcoded `.reg .f32 %f<8>` and a
+        // 32-bit warp shuffle, so an f64 kernel failed ptxas at the first
+        // `mov.f64` into a 32-bit register. f64 must declare an `.f64` value
+        // bank and reduce via a tree down to stride 1 (a `shfl.sync.down.b32`
+        // moves only 32 bits of a 64-bit value).
+        let t = ReductionTemplate {
+            op: ReductionOp::Sum,
+            precision: PtxType::F64,
+            target: SmVersion::Sm86,
+            block_size: 256,
+        };
+        let ptx = t.generate().expect("should generate block sum f64 kernel");
+        assert!(ptx.contains(".reg .f64 %f<8>;"), "got:\n{ptx}");
+        assert!(
+            !ptx.contains(".reg .f32 %f<8>;"),
+            "f64 kernel must not use the f32 value bank"
+        );
+        assert!(
+            !ptx.contains("shfl.sync.down"),
+            "f64 kernel must not 32-bit-shuffle a 64-bit value"
+        );
+        assert!(ptx.contains("add.f64"), "got:\n{ptx}");
+    }
+
+    #[test]
+    fn block_reduce_sum_f32_still_uses_shuffle() {
+        // The f32 path must keep its `.f32` bank and warp-shuffle tail intact.
+        let t = ReductionTemplate {
+            op: ReductionOp::Sum,
+            precision: PtxType::F32,
+            target: SmVersion::Sm86,
+            block_size: 256,
+        };
+        let ptx = t.generate().expect("should generate block sum f32 kernel");
+        assert!(ptx.contains(".reg .f32 %f<8>;"), "got:\n{ptx}");
+        assert!(ptx.contains("shfl.sync.down.b32"), "got:\n{ptx}");
     }
 }

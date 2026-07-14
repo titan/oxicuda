@@ -18,6 +18,7 @@ impl ElementwiseTemplate {
     pub(super) fn generate_xor(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let two_lit = float_two_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -43,13 +44,13 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         add{ty} %f_s, %f_a, %f_b;\n    \
-                         mul{ty} %f_t, %f_a, %f_b;\n    \
-                         mul{ty} %f_t2, %f_t, {two_lit};\n    \
-                         sub{ty} %f_c, %f_s, %f_t2;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         add{ty} %{vp}_s, %{vp}_a, %{vp}_b;\n    \
+                         mul{ty} %{vp}_t, %{vp}_a, %{vp}_b;\n    \
+                         mul{ty} %{vp}_t2, %{vp}_t, {two_lit};\n    \
+                         sub{ty} %{vp}_c, %{vp}_s, %{vp}_t2;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();
@@ -60,6 +61,7 @@ impl ElementwiseTemplate {
     pub(super) fn generate_fused_scale_add(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let scalar_ty = scalar_param_type(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -87,14 +89,14 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.param{ty} %f_alpha, [%param_alpha];\n    \
-                         ld.param{ty} %f_beta, [%param_beta];\n    \
-                         ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         mul{ty} %f_aa, %f_alpha, %f_a;\n    \
-                         mul{ty} %f_bb, %f_beta, %f_b;\n    \
-                         add{ty} %f_y, %f_aa, %f_bb;\n    \
-                         st.global{ty} [%rd_c], %f_y;"
+                        "ld.param{ty} %{vp}_alpha, [%param_alpha];\n    \
+                         ld.param{ty} %{vp}_beta, [%param_beta];\n    \
+                         ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         mul{ty} %{vp}_aa, %{vp}_alpha, %{vp}_a;\n    \
+                         mul{ty} %{vp}_bb, %{vp}_beta, %{vp}_b;\n    \
+                         add{ty} %{vp}_y, %{vp}_aa, %{vp}_bb;\n    \
+                         st.global{ty} [%rd_c], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -109,6 +111,7 @@ impl ElementwiseTemplate {
     pub(super) fn generate_fill(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let scalar_ty = scalar_param_type(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -127,8 +130,8 @@ impl ElementwiseTemplate {
                         "cvt.u64.u32 %rd_off, {tid_name};\n    \
                          mul.lo.u64 %rd_off, %rd_off, {byte_size};\n    \
                          add.u64 %rd_dst, {dst_ptr}, %rd_off;\n    \
-                         ld.param{ty} %f_val, [%param_value];\n    \
-                         st.global{ty} [%rd_dst], %f_val;"
+                         ld.param{ty} %{vp}_val, [%param_value];\n    \
+                         st.global{ty} [%rd_dst], %{vp}_val;"
                     ));
                 });
                 b.ret();

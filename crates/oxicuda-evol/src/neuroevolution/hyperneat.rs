@@ -143,10 +143,19 @@ impl CppnWeights {
     }
 
     /// Sample random initial weights from N(0, sigma^2).
+    ///
+    /// Draws normals directly into each field (in the same order `to_flat`/
+    /// `from_flat` would lay them out) instead of round-tripping through the
+    /// flat fallible parser, so construction is infallible by structure.
     pub fn random(n_hidden: usize, sigma: f64, rng: &mut LcgRng) -> Self {
-        let n_params = 5 * n_hidden + n_hidden + n_hidden + 1;
-        let flat: Vec<f64> = (0..n_params).map(|_| rng.next_normal() * sigma).collect();
-        Self::from_flat(&flat, n_hidden).expect("random: n_params consistent")
+        Self {
+            hidden_weights: (0..5 * n_hidden)
+                .map(|_| rng.next_normal() * sigma)
+                .collect(),
+            hidden_bias: (0..n_hidden).map(|_| rng.next_normal() * sigma).collect(),
+            output_weights: (0..n_hidden).map(|_| rng.next_normal() * sigma).collect(),
+            output_bias: rng.next_normal() * sigma,
+        }
     }
 }
 

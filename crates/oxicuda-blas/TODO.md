@@ -138,8 +138,9 @@ to cuBLAS. Part of [OxiCUDA](https://github.com/cool-japan/oxicuda) (Vol.3).
 ## Quality Status
 
 - Warnings: 0 (clippy clean)
-- Tests: 791 passing
+- Tests: 965 passing
 - unwrap() calls: 0 (production code)
+- 0.5.0 fix: mixed-precision GEMM `alpha`/`beta` scalars were encoded at the input precision (F16/BF16/FP8 E4M3/E5M2) instead of the accumulator (F32) precision the generated kernels' epilogue actually reads, silently corrupting results for every mixed-precision GEMM call; fixed via a new `GpuFloat::to_accumulator_bits()` conversion. `bf16_gemm_error` now also returns `0.0` for an empty product (`m`/`n`/`k` == 0) instead of panicking, matching its documented contract.
 
 ## Performance Targets
 

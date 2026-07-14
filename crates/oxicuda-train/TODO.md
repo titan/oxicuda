@@ -124,7 +124,7 @@ and large-scale ZeRO-style distributed training.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![warn(missing_docs)]`)
-- Tests: 362 lib + 9 doc passing (`cargo test -p oxicuda-train --all-features`)
+- Tests: 364 lib + 9 doc passing (`cargo test -p oxicuda-train --all-features`)
 - unwrap() calls: 0 (production code; test code documented with `.expect()` messages)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, returns `UnsupportedPlatform` at runtime

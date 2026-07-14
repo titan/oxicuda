@@ -176,4 +176,31 @@ impl ElementwiseOp {
             Self::Scale | Self::AddScalar | Self::FusedScaleAdd | Self::Fill
         )
     }
+    /// Returns `true` if this operation is implemented with the special
+    /// function unit (SFU) approximation instructions `ex2.approx` /
+    /// `lg2.approx`, which PTX only defines for `.f32`.
+    ///
+    /// Such kernels can therefore only be generated at [`crate::ir::PtxType::F32`]
+    /// precision; requesting F16/BF16/F64 for them yields PTX that `ptxas`
+    /// rejects (`Unexpected instruction types specified for 'ex2'`), so the
+    /// template refuses those precisions up front with a clear error rather
+    /// than emitting a module that fails at load time. Note that `rsqrt`,
+    /// `sqrt`, and the `hard_*`/`leaky_relu` activations are intentionally
+    /// excluded: they use only instructions (`rsqrt.approx.f64`, `sqrt.rn`,
+    /// `min`/`max`/`mul`/`add`/`selp`) that PTX defines for every supported
+    /// precision.
+    #[must_use]
+    pub const fn requires_f32_sfu(self) -> bool {
+        matches!(
+            self,
+            Self::Exp
+                | Self::Log
+                | Self::Sigmoid
+                | Self::Gelu
+                | Self::Silu
+                | Self::Tanh
+                | Self::Softplus
+                | Self::Pow
+        )
+    }
 }

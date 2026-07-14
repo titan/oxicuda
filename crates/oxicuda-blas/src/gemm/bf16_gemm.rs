@@ -182,13 +182,24 @@ pub fn sgemm_bf16(
 /// # Returns
 ///
 /// The maximum absolute difference `max_{i,j} |C_bf16[i,j] - C_f32[i,j]|`.
-/// Returns `0.0` if the product matrix is empty.
+/// Returns `0.0` if the product matrix is empty (`m == 0` or `n == 0`) or the
+/// contraction dimension is empty (`k == 0`), since both GEMMs reduce to an
+/// all-zero (or zero-length) result in those cases.
 ///
 /// # Panics
 ///
-/// Panics if `a` or `b` are shorter than `m*k` / `k*n` respectively.  Call
-/// `sgemm_bf16` for validated execution.
+/// Panics if `a` or `b` are shorter than `m*k` / `k*n` respectively (for
+/// non-zero `m`, `n`, `k`).  Call `sgemm_bf16` for validated execution.
 pub fn bf16_gemm_error(m: usize, n: usize, k: usize, a: &[f32], b: &[f32]) -> f32 {
+    // Degenerate dimensions: the product matrix is empty (m or n is zero) or
+    // the contraction is over zero terms (k == 0). Both GEMMs are trivially
+    // equal (all-zero or zero-length) in these cases, so the error is 0.0.
+    // This also avoids ever calling `sgemm_bf16` with a zero dimension,
+    // which is the only way it can fail below (see comment there).
+    if m == 0 || n == 0 || k == 0 {
+        return 0.0;
+    }
+
     // Reference: f32 GEMM
     let mut c_ref = vec![0.0_f32; m * n];
     for i in 0..m {
@@ -203,8 +214,16 @@ pub fn bf16_gemm_error(m: usize, n: usize, k: usize, a: &[f32], b: &[f32]) -> f3
 
     // BF16 GEMM
     let mut c_bf16 = vec![0.0_f32; m * n];
-    sgemm_bf16(m, n, k, 1.0, a, b, 0.0, &mut c_bf16)
-        .expect("sgemm_bf16 should not fail with valid inputs");
+    if sgemm_bf16(m, n, k, 1.0, a, b, 0.0, &mut c_bf16).is_err() {
+        // Unreachable in practice: `m`, `n`, `k` are all non-zero (checked
+        // above), so the only remaining failure mode is `BufferTooSmall` —
+        // but the `c_ref` loop above already indexed `a` and `b` up to the
+        // same bounds `sgemm_bf16` validates, so if either were too short
+        // this function would already have panicked on the raw slice index.
+        // Fall back to the documented degenerate-case value rather than
+        // panicking a second time via `.expect()`.
+        return 0.0;
+    }
 
     // Max absolute error
     c_ref

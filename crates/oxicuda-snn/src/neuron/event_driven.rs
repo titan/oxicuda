@@ -266,11 +266,13 @@ impl EventDrivenLif {
             });
         }
         let mut spikes = Vec::new();
-        while let Some(top) = self.queue.peek().copied() {
-            if top.event.time > t_end {
+        while let Some(qe) = self.queue.pop() {
+            if qe.event.time > t_end {
+                // Not yet due: restore it and stop. `BinaryHeap::push` rebuilds
+                // the heap invariant, so this is equivalent to having peeked.
+                self.queue.push(qe);
                 break;
             }
-            let qe = self.queue.pop().expect("peeked element exists");
             let SynapticEvent {
                 time,
                 target,

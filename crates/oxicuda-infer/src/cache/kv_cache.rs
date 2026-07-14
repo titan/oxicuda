@@ -211,11 +211,21 @@ impl PagedKvCache {
                 available: self.free_list.len(),
             });
         }
-        let mut ids = Vec::with_capacity(n);
-        for _ in 0..n {
-            let id = self.free_list.pop().expect("checked above");
+        // `free_list` is used as a stack (see `alloc_block`'s `pop()`), so
+        // allocating `n` blocks "at once" must return them in the same order
+        // as `n` sequential `pop()` calls would (last-in-first-out).
+        // `split_off` preserves the sub-slice's original (ascending) order,
+        // so reverse it to match that LIFO order without any fallible
+        // per-element `pop()`.
+        let split_at = self.free_list.len() - n;
+        let ids: Vec<BlockId> = self
+            .free_list
+            .split_off(split_at)
+            .into_iter()
+            .rev()
+            .collect();
+        for &id in &ids {
             self.ref_counts[id.0 as usize] = 1;
-            ids.push(id);
         }
         Ok(ids)
     }

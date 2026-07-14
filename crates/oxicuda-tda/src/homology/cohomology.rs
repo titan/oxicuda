@@ -119,11 +119,10 @@ pub fn reduce_coboundary_matrix(coboundary: &mut BoundaryMatrix) -> Vec<Option<u
     let mut low_to_col: HashMap<usize, usize> = HashMap::new();
 
     for j in 0..n {
-        loop {
-            if coboundary.is_zero(j) {
-                break;
-            }
-            let low_j = coboundary.low(j).expect("column is non-zero");
+        // `low(j)` is `None` exactly when the column is zero, so loop on it
+        // directly instead of checking `is_zero` and then re-deriving the
+        // same fact via a second call that we'd have to `.expect()`.
+        while let Some(low_j) = coboundary.low(j) {
             match low_to_col.get(&low_j).copied() {
                 Some(j_prime) => {
                     coboundary.add_cols(j, j_prime);

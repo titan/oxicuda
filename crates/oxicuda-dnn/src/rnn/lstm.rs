@@ -369,13 +369,23 @@ pub fn lstm_sequence_forward<T: GpuFloat>(
     //
     // Rather than raw D2D memcpy with pointer offsets, we launch a simple
     // copy kernel to transfer h_seq[last] -> h_n. For the cell state, if it
-    // ended up in h_n, we first copy it to c_n using copy_from_device, then
-    // overwrite h_n.
+    // ended up in h_n, we first copy it to c_n, then overwrite h_n.
 
     // Determine where the final cell state landed
     if seq_len > 1 && (seq_len - 1) % 2 == 1 {
-        // Final c is currently in h_n; copy h_n -> c_n before overwriting
-        c_n.copy_from_device(h_n)?;
+        // Final c is currently in h_n; copy h_n -> c_n before overwriting.
+        // Must be enqueued on `handle.stream()` (not `DeviceBuffer::copy_from_device`,
+        // which issues a blocking DtoD copy on the legacy default stream): the
+        // preceding per-timestep kernels run on `handle.stream()`, which is a
+        // non-blocking stream that the legacy stream does not implicitly wait
+        // on, so a legacy-stream copy here can race ahead of the kernel that
+        // last wrote `h_n`.
+        oxicuda_driver::memory_info::memcpy_device_to_device_async(
+            c_n.as_device_ptr(),
+            h_n.as_device_ptr(),
+            bh_bytes as usize,
+            handle.stream(),
+        )?;
     }
     // else: final c is already in c_n (step 0 wrote there, or even-indexed last step)
 

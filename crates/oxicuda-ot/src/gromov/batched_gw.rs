@@ -402,13 +402,13 @@ pub fn batched_gromov_wasserstein(
             }
         }
 
-        let mut f: Vec<f64> = if cfg.warm_start && warm_f.is_some() {
-            warm_f.clone().expect("warm_f is Some (checked above)")
+        let mut f: Vec<f64> = if cfg.warm_start {
+            warm_f.clone().unwrap_or_else(|| vec![0.0_f64; n])
         } else {
             vec![0.0_f64; n]
         };
-        let mut g: Vec<f64> = if cfg.warm_start && warm_g.is_some() {
-            warm_g.clone().expect("warm_g is Some (checked above)")
+        let mut g: Vec<f64> = if cfg.warm_start {
+            warm_g.clone().unwrap_or_else(|| vec![0.0_f64; m])
         } else {
             vec![0.0_f64; m]
         };

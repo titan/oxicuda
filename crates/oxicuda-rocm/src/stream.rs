@@ -203,7 +203,19 @@ impl StreamPlan {
             let mut progressed = false;
             for (&stream, cmds) in &queues {
                 loop {
-                    let idx = pc[&stream];
+                    // Single lookup reused for both the read (`idx`) and the
+                    // write (`idx + 1`) below, instead of an `Index` read
+                    // followed by a redundant `get_mut` re-lookup. `pc` is
+                    // seeded from `queues.keys()` and `stream` is a key of
+                    // `queues`, so this can only miss if that invariant is
+                    // ever violated -- in which case we fail loudly with a
+                    // Result instead of panicking.
+                    let Some(pc_entry) = pc.get_mut(&stream) else {
+                        return Err(RocmError::DeviceError(format!(
+                            "internal error: no program counter tracked for stream {stream}"
+                        )));
+                    };
+                    let idx = *pc_entry;
                     if idx >= cmds.len() {
                         break;
                     }
@@ -220,7 +232,7 @@ impl StreamPlan {
                             events_done.push(*event);
                         }
                     }
-                    *pc.get_mut(&stream).expect("pc entry exists") = idx + 1;
+                    *pc_entry = idx + 1;
                     completed += 1;
                     progressed = true;
                 }

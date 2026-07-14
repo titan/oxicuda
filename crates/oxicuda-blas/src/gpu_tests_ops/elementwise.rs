@@ -38,6 +38,13 @@ const EXACT_ABS: f32 = 1e-4;
 const APPROX_REL: f32 = 5e-3;
 /// Relative/absolute tolerance for SFU-approximation f32 kernels.
 const APPROX_ABS: f32 = 5e-3;
+/// Relative/absolute tolerance for exact-arithmetic f64 kernels. `add.f64`,
+/// `mul.f64`, `sqrt.rn.f64`, and negation/relu are IEEE-754 correctly rounded
+/// on device, so they agree with the f64 CPU oracle to a few ULP — orders of
+/// magnitude tighter than the ~1e-7 error an accidental f32 evaluation shows.
+const EXACT_REL_F64: f64 = 1e-12;
+/// Relative/absolute tolerance for exact-arithmetic f64 kernels.
+const EXACT_ABS_F64: f64 = 1e-12;
 
 // ---------------------------------------------------------------------------
 // Shared host helpers
@@ -93,6 +100,50 @@ where
     op(&handle, a.len() as u32, &d_a, &d_b, &mut d_c).expect("binary launch");
     handle.stream().synchronize().expect("sync");
     let mut got = vec![0.0f32; a.len()];
+    d_c.copy_to_host(&mut got).expect("d2h");
+    got
+}
+
+/// Launches a unary `(input, output)` f64 production op and returns the device
+/// result copied back to the host.
+fn run_unary_f64<F>(fx: &GpuFixture, op: F, input: &[f64]) -> Vec<f64>
+where
+    F: Fn(
+        &BlasHandle,
+        u32,
+        &DeviceBuffer<f64>,
+        &mut DeviceBuffer<f64>,
+    ) -> crate::error::BlasResult<()>,
+{
+    let handle = BlasHandle::new(&fx.ctx).expect("blas handle");
+    let x = DeviceBuffer::from_host(input).expect("x upload");
+    let mut out = DeviceBuffer::from_host(&vec![0.0f64; input.len()]).expect("out alloc");
+    op(&handle, input.len() as u32, &x, &mut out).expect("unary launch");
+    handle.stream().synchronize().expect("sync");
+    let mut got = vec![0.0f64; input.len()];
+    out.copy_to_host(&mut got).expect("d2h");
+    got
+}
+
+/// Launches a binary `(a, b, c)` f64 production op and returns C copied back.
+fn run_binary_f64<F>(fx: &GpuFixture, op: F, a: &[f64], b: &[f64]) -> Vec<f64>
+where
+    F: Fn(
+        &BlasHandle,
+        u32,
+        &DeviceBuffer<f64>,
+        &DeviceBuffer<f64>,
+        &mut DeviceBuffer<f64>,
+    ) -> crate::error::BlasResult<()>,
+{
+    assert_eq!(a.len(), b.len(), "binary inputs length mismatch");
+    let handle = BlasHandle::new(&fx.ctx).expect("blas handle");
+    let d_a = DeviceBuffer::from_host(a).expect("a upload");
+    let d_b = DeviceBuffer::from_host(b).expect("b upload");
+    let mut d_c = DeviceBuffer::from_host(&vec![0.0f64; a.len()]).expect("c alloc");
+    op(&handle, a.len() as u32, &d_a, &d_b, &mut d_c).expect("binary launch");
+    handle.stream().synchronize().expect("sync");
+    let mut got = vec![0.0f64; a.len()];
     d_c.copy_to_host(&mut got).expect("d2h");
     got
 }
@@ -372,55 +423,85 @@ fn unary_scale_f32_matches_host() {
 }
 
 // ===========================================================================
-// 2. Unary/binary elementwise — f64 path: KNOWN BUG in oxicuda-ptx
+// 2. Unary/binary elementwise — f64 exact-arithmetic path
 // ===========================================================================
 //
-// Every f64 elementwise kernel from `ElementwiseTemplate` is currently rejected
-// by ptxas at module load ("invalid PTX"), so `elementwise::*::<f64>` is a
-// broken production path. Root cause (OUT of this crate's scope, reported in the
-// task notes — do NOT "fix" by softening anything here):
+// The f64 elementwise path was historically broken: `oxicuda-ptx`'s `raw_ptx`
+// register inference declared every `%f_*` register `.f32`, so an f64 kernel
+// (which issues `ld.global.f64` / `add.f64` / ...) declared its registers at the
+// wrong width and ptxas rejected the whole module at load. That is now fixed —
+// the elementwise template emits `%fd_*` names for f64 and `raw_ptx` declares
+// those `.b64` — so the *exact-arithmetic* f64 kernels JIT, load, and run on
+// device. These tests validate `relu`/`neg`/`sqrt`/`add`/`mul` against an
+// independent f64 CPU oracle at a few-ULP tolerance; an accidental f32
+// evaluation would miss by ~1e-7 and fail loudly (see `EXACT_REL_F64`).
 //
-//   oxicuda-ptx/src/builder/body_builder/mod.rs:1645  `raw_ptx` auto-declares
-//   any `%f_*` register as `.reg .f32` unconditionally. The elementwise
-//   template emits `%f_x`/`%f_a`/... for BOTH precisions but issues
-//   `ld.global.f64` / `add.f64` / ... for f64, so each f64 register is declared
-//   `.f32` while used as `.f64` -> ptxas rejects the module. (complex_gemm f64
-//   works because complex_gemm.rs hand-declares `.reg .f64 %fd<..>`.)
-//
-// The fix is to make `%f_*` inference precision-aware (or emit `%fd_*` names for
-// f64) inside oxicuda-ptx. Until then, this test pins the *actual* current
-// behavior: the f64 elementwise launch returns an error. It is a deliberate
-// tripwire — once oxicuda-ptx is fixed these calls will succeed, this test will
-// FAIL, and it must then be replaced with the numeric f64 CPU-oracle checks
-// (relu/neg/sqrt/add/mul) that were removed when the bug was found.
+// SFU-approximation ops (sigmoid/tanh/exp/log/rsqrt/silu/gelu/softplus/pow)
+// stay f32-only — the `ex2.approx` / `lg2.approx` / `rsqrt.approx` units have no
+// `.f64` form — and the template rejects them up front at f64 with an `f32-only`
+// error (e.g. `ptx_template_rejects_sigmoid_f64` in `elementwise/unary.rs`).
 
 #[test]
-fn f64_elementwise_currently_rejected_by_ptxas_known_oxiptx_bug() {
+fn unary_relu_f64_matches_host() {
     let Some(fx) = gpu_fixture() else {
         return;
     };
-    let handle = BlasHandle::new(&fx.ctx).expect("blas handle");
-    let x = DeviceBuffer::from_host(&[1.0f64, 2.0, 3.0, 4.0]).expect("x");
-    let y = DeviceBuffer::from_host(&[5.0f64, 6.0, 7.0, 8.0]).expect("y");
-    let mut out = DeviceBuffer::from_host(&[0.0f64; 4]).expect("out");
+    let mut rng = Lcg::new(0x6464_0001);
+    let x = rand_f64(&mut rng, N_MULTIBLOCK, -3.0, 3.0);
+    let got = run_unary_f64(&fx, crate::elementwise::relu::<f64>, &x);
+    let exp: Vec<f64> = x.iter().map(|&v| v.max(0.0)).collect();
+    assert_close_f64(&got, &exp, EXACT_REL_F64, EXACT_ABS_F64, "relu_f64");
+}
 
-    // Unary f64 (relu) — PTX is rejected during module load.
-    let unary = crate::elementwise::relu::<f64>(&handle, 4, &x, &mut out);
-    assert!(
-        unary.is_err(),
-        "f64 unary elementwise unexpectedly succeeded — the oxicuda-ptx \
-         `%f_`->f32 register-inference bug appears fixed; replace this tripwire \
-         with the numeric f64 oracle checks (see module comment)"
-    );
+#[test]
+fn unary_neg_f64_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+    let mut rng = Lcg::new(0x6464_0002);
+    let x = rand_f64(&mut rng, N_MULTIBLOCK, -5.0, 5.0);
+    let got = run_unary_f64(&fx, crate::elementwise::neg::<f64>, &x);
+    let exp: Vec<f64> = x.iter().map(|&v| -v).collect();
+    assert_close_f64(&got, &exp, EXACT_REL_F64, EXACT_ABS_F64, "neg_f64");
+}
 
-    // Binary f64 (add) — same root cause.
-    let binary = crate::elementwise::add::<f64>(&handle, 4, &x, &y, &mut out);
-    assert!(
-        binary.is_err(),
-        "f64 binary elementwise unexpectedly succeeded — the oxicuda-ptx \
-         `%f_`->f32 register-inference bug appears fixed; replace this tripwire \
-         with the numeric f64 oracle checks (see module comment)"
-    );
+#[test]
+fn unary_sqrt_f64_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+    let mut rng = Lcg::new(0x6464_0003);
+    let x = rand_f64(&mut rng, N_MULTIBLOCK, 0.01, 16.0);
+    let got = run_unary_f64(&fx, crate::elementwise::sqrt::<f64>, &x);
+    // sqrt.rn.f64 is correctly rounded — matches the f64 oracle to <1 ULP.
+    let exp: Vec<f64> = x.iter().map(|&v| v.sqrt()).collect();
+    assert_close_f64(&got, &exp, EXACT_REL_F64, EXACT_ABS_F64, "sqrt_f64");
+}
+
+#[test]
+fn binary_add_f64_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+    let mut rng = Lcg::new(0x6464_0004);
+    let a = rand_f64(&mut rng, N_MULTIBLOCK, -4.0, 4.0);
+    let b = rand_f64(&mut rng, N_MULTIBLOCK, -4.0, 4.0);
+    let got = run_binary_f64(&fx, crate::elementwise::add::<f64>, &a, &b);
+    let exp: Vec<f64> = a.iter().zip(&b).map(|(&x, &y)| x + y).collect();
+    assert_close_f64(&got, &exp, EXACT_REL_F64, EXACT_ABS_F64, "add_f64");
+}
+
+#[test]
+fn binary_mul_f64_matches_host() {
+    let Some(fx) = gpu_fixture() else {
+        return;
+    };
+    let mut rng = Lcg::new(0x6464_0005);
+    let a = rand_f64(&mut rng, N_MULTIBLOCK, -4.0, 4.0);
+    let b = rand_f64(&mut rng, N_MULTIBLOCK, -4.0, 4.0);
+    let got = run_binary_f64(&fx, crate::elementwise::mul::<f64>, &a, &b);
+    let exp: Vec<f64> = a.iter().zip(&b).map(|(&x, &y)| x * y).collect();
+    assert_close_f64(&got, &exp, EXACT_REL_F64, EXACT_ABS_F64, "mul_f64");
 }
 
 // ===========================================================================

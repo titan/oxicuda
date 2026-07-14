@@ -154,8 +154,25 @@ pub fn moe_grouped_gemm<T: GpuFloat>(
         return Ok(());
     }
 
+    // `gemm_grouped` dispatches on the BLAS sub-handle's own stream, which is
+    // separate from `handle.stream()` (where `tokens`/`weights` were most
+    // likely produced by a preceding kernel, and where a following kernel is
+    // likely to consume `output`). The two streams have no implicit ordering,
+    // so bracket the dispatch with an event handshake: wait for everything
+    // already queued on `handle.stream()` before reading `tokens`/`weights`,
+    // then join the GEMM's completion back into `handle.stream()` so callers
+    // that only track the primary stream still observe `output` correctly
+    // once it is synchronised or waited on.
+    let inputs_ready = oxicuda_driver::Event::new()?;
+    inputs_ready.record(handle.stream())?;
+    handle.blas().stream().wait_event(&inputs_ready)?;
+
     // Dispatch through Vol.3's grouped GEMM
     gemm_grouped(handle.blas(), &problems, T::gpu_one(), T::gpu_zero())?;
+
+    let gemm_done = oxicuda_driver::Event::new()?;
+    gemm_done.record(handle.blas().stream())?;
+    handle.stream().wait_event(&gemm_done)?;
 
     Ok(())
 }

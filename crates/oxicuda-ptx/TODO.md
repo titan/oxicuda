@@ -106,7 +106,7 @@ The PTX crate is the largest in Vol.1+2 and the core differentiator of OxiCUDA. 
 ## Quality Status
 
 - Warnings: 0
-- Tests: 1006 unit + 29 doc passing (added cp_async_gen + fusion_cost_model)
+- Tests: 1034 unit + 29 doc passing (0.5.0: added F64 elementwise/reduction register-width and transcendental-precision-validation regression tests; previously added cp_async_gen + fusion_cost_model)
 - unwrap() calls: 0 (production code; tests use `.unwrap()` on infallible `new()` fixtures)
 - Clippy: clean (pedantic + nursery)
 - `#![deny(unsafe_code)]` -- entire crate is safe Rust
@@ -198,6 +198,8 @@ PTX generation is CPU-bound and should be fast enough for JIT scenarios:
 - [x] PTX .address_size 64 present for all SM versions
 - [x] GEMM template numerical output matches cuBLAS reference within precision tolerance
 - [x] Elementwise template `relu/sigmoid/gelu/tanh` precision vs CPU reference < 1 ULP for f32
+- [x] F64 elementwise/reduction kernels emit correctly-sized value registers (0.5.0 fix) -- `ElementwiseTemplate::vreg_prefix()` now selects `fd`/`fh`/`f` by precision instead of a hardcoded `.b32`-sized `%f_*` bank, which `ptxas` rejected for every F64 elementwise kernel; `ReductionTemplate`'s F64 path uses a `.f64` register bank and a shared-memory-only tree (a 32-bit `shfl.sync.down.b32` cannot move a 64-bit value in one step)
+- [x] Transcendental elementwise ops (exp/log/sigmoid/gelu/silu/tanh/softplus/pow) reject non-F32 precision up front (0.5.0 fix) -- `ElementwiseOp::requires_f32_sfu()` + `ElementwiseTemplate::validate_precision()` catch the `ex2.approx`/`lg2.approx` special-function-unit instructions' F32-only PTX restriction at generation time instead of silently emitting PTX `ptxas` would reject; `rsqrt`/`sqrt`/`hard_*`/`leaky_relu` are unaffected
 
 ### Code Quality
 - [x] Register pressure analysis used to warn when kernel exceeds 255 regs/thread

@@ -481,11 +481,7 @@ fn compute_h1(n: usize, dist_matrix: &[f64], max_radius: f64) -> (Vec<Persistenc
     for col in 0..n_triangles {
         // Reduce column `col`: repeatedly XOR with the column that has the same pivot,
         // until no such column exists or the column becomes zero.
-        loop {
-            if columns[col].is_empty() {
-                break;
-            }
-            let pivot = *columns[col].last().expect("non-empty");
+        while let Some(&pivot) = columns[col].last() {
             match pivot_col[pivot] {
                 None => {
                     // No prior column has this pivot → register and stop.

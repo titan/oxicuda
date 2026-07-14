@@ -388,12 +388,15 @@ fn is_stagnated(best_history: &[f64], window: usize, tol: f64, sigma: f64, cond_
     if cond_num > 1e14 {
         return true;
     }
-    // No significant improvement over the last `window` generations
-    if best_history.len() >= window {
+    // No significant improvement over the last `window` generations.
+    // `window == 0` has no well-defined trailing window, so it can never
+    // signal stagnation via this criterion (the guard also proves the
+    // indexing and `.last()` access below can never fail).
+    if window > 0
+        && best_history.len() >= window
+        && let Some(&newest) = best_history.last()
+    {
         let oldest = best_history[best_history.len() - window];
-        let newest = *best_history
-            .last()
-            .expect("best_history.len() >= window > 0 (checked above)");
         if (oldest - newest).abs() <= tol.max(1e-300) {
             return true;
         }

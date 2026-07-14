@@ -550,12 +550,23 @@ mod tests {
     }
 
     fn make_db_with_entries() -> (ResultDb, std::path::PathBuf) {
+        // The directory must be unique per (process, call). `nextest` runs each
+        // test in its own process, and the libtest worker thread reuses the same
+        // `ThreadId` across those processes — so a `nanos + thread-id` name can
+        // collide when two test processes start within the same clock tick. A
+        // collision is not benign here: the colliding `remove_dir_all` below then
+        // races the atomic tmp-write + rename inside `ResultDb::save`, surfacing as
+        // an intermittent `.expect("save")` I/O panic under full-suite parallelism.
+        // Include the PID (distinct per test process) and a per-process atomic
+        // counter (like production `ResultDb::tmp_path`) so the path is unique.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let tid = std::thread::current().id();
-        let dir = std::env::temp_dir().join(format!("oxicuda_guided_ptx_{id}_{tid:?}"));
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("oxicuda_guided_ptx_{pid}_{id}_{seq}"));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create dir");
         let path = dir.join("results.json");

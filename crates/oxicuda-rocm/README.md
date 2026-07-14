@@ -48,8 +48,8 @@ match backend.init() {
 
 ## Status
 
-- **Version**: 0.3.0 (2026-06-25)
-- **Tests**: 213 passing (host-side / codegen; device-execution paths require AMD ROCm hardware)
+- **Version**: 0.5.0 (2026-07-14)
+- **Tests**: 217 passing (host-side / codegen; device-execution paths require AMD ROCm hardware)
 
 ## License
 

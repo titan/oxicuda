@@ -308,7 +308,9 @@ pub fn sure_independence_screening(
     }
 
     let n = data.len();
-    let covariates = data.covariates.as_ref().expect("checked above");
+    let covariates = data.covariates.as_ref().ok_or_else(|| {
+        SurvivalError::InvalidConfiguration("dataset must have covariates for SIS".to_owned())
+    })?;
     let sorted_indices = data.order_by_time();
 
     // Compute raw scores U_j.

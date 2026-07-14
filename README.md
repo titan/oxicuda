@@ -5,7 +5,7 @@
 [![CI](https://github.com/cool-japan/oxicuda/workflows/CI/badge.svg)](https://github.com/cool-japan/oxicuda/actions)
 [![License](https://img.shields.io/crates/l/oxicuda.svg)](LICENSE)
 
-**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~1.28M SLoC of safe Rust across 73 crates.**
+**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~1.30M SLoC of safe Rust across 73 crates.**
 
 OxiCUDA replaces the entire NVIDIA CUDA Toolkit software stack with type-safe,
 memory-safe Rust code. The only runtime dependency is the NVIDIA driver
@@ -217,10 +217,10 @@ fn main() -> Result<(), oxicuda::Error> {
 | `oxicuda-launch` | cuLaunchKernel | Dim3, LaunchParams, `launch!` macro | 5,506 | 231 |
 | `oxicuda-runtime` | CUDA Runtime | High-level cudaRT API layer | 4,955 | 126 |
 | **Vol.2 -- PTX Codegen & Autotuner** | | | | |
-| `oxicuda-ptx` | nvcc / CUTLASS | PTX IR, codegen DSL, Tensor Core gen | 35,030 | 1,029 |
+| `oxicuda-ptx` | nvcc / CUTLASS | PTX IR, codegen DSL, Tensor Core gen | 35,030 | 1,034 |
 | `oxicuda-autotune` | -- | Search space, benchmark, tuning DB | 16,500 | 472 |
 | **Vol.3 -- Linear Algebra** | | | | |
-| `oxicuda-blas` | cuBLAS | BLAS L1/L2/L3, GEMM, batched, elementwise | 33,597 | 981 |
+| `oxicuda-blas` | cuBLAS | BLAS L1/L2/L3, GEMM, batched, elementwise | 33,597 | 965 |
 | **Vol.4 -- Deep Learning** | | | | |
 | `oxicuda-dnn` | cuDNN | Conv, attention, MoE, norm, pool, quantize | 47,562 | 1,262 |
 | **Vol.5 -- Scientific Computing** | | | | |
@@ -341,7 +341,7 @@ fn main() -> Result<(), oxicuda::Error> {
 | `oxicuda-geom2d` | -- | Delaunay/Voronoi/convex-hull/sweep-line | 11,071 | 301 |
 | **Umbrella** | | | | |
 | `oxicuda` | -- | Umbrella re-export crate | 21,496 | 526 |
-| | | **Total** | **~1,280,142** | **38,612** |
+| | | **Total** | **~1,295,285** | **38,622** |
 
 ## Feature Flags
 
@@ -478,6 +478,15 @@ cargo nextest run --all-features
 - Real driver-backed CUDA Graph stream capture (`cuStreamBeginCapture_v2`/`cuStreamEndCapture`, finalized into a launchable graph) lands for the first time
 - Security hardening: PTX cache symlink/cache-poisoning fix (`oxicuda-ptx`), plus untrusted-input allocation-size fixes in device-printf parsing (`oxicuda-driver`) and index/adapter deserializers (`oxicuda-ann`, `oxicuda-peft`)
 - Test suite expanded to 38,612 passing tests (`--all-features`; 37,288 with default features), up from 38,093/37,166 at 0.4.0
+
+**Released (v0.5.0) -- 2026-07-14** *(38,622 tests passing, ~1.30M SLoC, 73 crates)*
+- `oxicuda-ptx`: F64-precision elementwise PTX kernels declared the wrong register width (`.b32` instead of `.b64`) via a hardcoded value-register prefix, so `ptxas` rejected every F64 elementwise kernel outright -- fixed via a new precision-aware register prefix (`ElementwiseTemplate::vreg_prefix()`)
+- `oxicuda-ptx`: transcendental elementwise ops (exp/log/sigmoid/gelu/silu/tanh/softplus/pow), which rely on F32-only special-function-unit instructions, now correctly reject non-F32 precision instead of silently emitting invalid PTX
+- `oxicuda-ptx`: block-level reduction (sum/mean/L2-norm/etc.) hardcoded an F32 register bank and a 32-bit warp-shuffle tail, so F64 reductions failed `ptxas`; F64 now reduces via a shared-memory tree instead
+- `oxicuda-blas`: GEMM `alpha`/`beta` scalars were encoded at the wrong (input, not accumulator) precision for F16/BF16/FP8 inputs, silently corrupting mixed-precision GEMM results instead of erroring -- fixed via a new `GpuFloat::to_accumulator_bits()` conversion
+- `oxicuda-blas`'s `bf16_gemm_error` and `oxicuda-gen`'s `lora::merge::scale_adapter` now honor their documented contracts instead of panicking: the former returns `0.0` for degenerate (empty-product) dimensions, the latter returns `GenResult<LoraLinear>` on a reconstruction failure
+- Workspace-wide: eliminated the remaining 42 production-code `.expect()` call sites across 22 crates, completing the workspace's zero-unwrap policy (0 unwrap/expect in library code now, verified)
+- Test suite expanded to 38,622 passing tests (`--all-features`; 37,296 with default features), up from 38,612/37,288 at 0.4.1
 
 **Next**
 - Published documentation on docs.rs

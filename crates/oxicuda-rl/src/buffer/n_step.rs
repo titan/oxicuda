@@ -38,7 +38,7 @@ pub struct NStepTransition {
 
 // ─── Internal single step ─────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct Step {
     obs: Vec<f32>,
     action: Vec<f32>,
@@ -54,7 +54,7 @@ struct Step {
 pub struct NStepBuffer {
     n: usize,
     gamma: f32,
-    steps: Vec<Option<Step>>,
+    steps: Vec<Step>,
     head: usize,
     count: usize,
 }
@@ -74,7 +74,7 @@ impl NStepBuffer {
         Self {
             n,
             gamma,
-            steps: vec![None; n],
+            steps: vec![Step::default(); n],
             head: 0,
             count: 0,
         }
@@ -121,7 +121,7 @@ impl NStepBuffer {
             next_obs: next_obs.into(),
             done,
         };
-        self.steps[self.head] = Some(step);
+        self.steps[self.head] = step;
         self.head = (self.head + 1) % self.n;
         if self.count < self.n {
             self.count += 1;
@@ -145,7 +145,7 @@ impl NStepBuffer {
             out.push(self.compute_partial_return());
             // Advance the oldest step pointer
             let oldest = (self.head + self.n - self.count) % self.n;
-            self.steps[oldest] = None;
+            self.steps[oldest] = Step::default();
             self.count -= 1;
         }
         out
@@ -162,11 +162,13 @@ impl NStepBuffer {
     }
 
     fn compute_n_step_return(&self, steps: usize) -> NStepTransition {
-        // Oldest step index in the circular buffer
+        // Oldest step index in the circular buffer. `steps` is always either
+        // `self.n` or `self.count` (both >= 1 whenever this private helper is
+        // invoked), so it never exceeds the number of populated slots. Every
+        // slot in `self.steps` holds a real `Step` (no `Option` wrapper), so
+        // indexing here can never observe an uninitialised entry.
         let oldest = (self.head + self.n - self.count) % self.n;
-        let first = self.steps[oldest]
-            .as_ref()
-            .expect("oldest step must be Some");
+        let first = &self.steps[oldest];
 
         let mut cumulative = 0.0_f32;
         let mut gamma_k = 1.0_f32;
@@ -175,7 +177,7 @@ impl NStepBuffer {
 
         for k in 0..steps {
             let idx = (oldest + k) % self.n;
-            let step = self.steps[idx].as_ref().expect("step must be Some");
+            let step = &self.steps[idx];
             cumulative += gamma_k * step.reward;
             gamma_k *= self.gamma;
             last_next_obs = step.next_obs.clone();
@@ -199,7 +201,7 @@ impl NStepBuffer {
     /// Clear the buffer (e.g. at episode reset).
     pub fn reset(&mut self) {
         for s in self.steps.iter_mut() {
-            *s = None;
+            *s = Step::default();
         }
         self.head = 0;
         self.count = 0;

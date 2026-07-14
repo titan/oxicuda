@@ -171,13 +171,21 @@ impl EventTimeline {
                     SyncOp::Signal { event, value } => {
                         let e = current.entry(event).or_insert(0);
                         *e = (*e).max(value);
-                        *pc.get_mut(&q).expect("queue pc") = i + 1;
+                        *pc.get_mut(&q).ok_or_else(|| {
+                            MetalError::CommandBufferError(format!(
+                                "internal error: no program counter tracked for queue {q}"
+                            ))
+                        })? = i + 1;
                         progressed = true;
                     }
                     SyncOp::Wait { event, value } => {
                         let have = current.get(&event).copied().unwrap_or(0);
                         if have >= value {
-                            *pc.get_mut(&q).expect("queue pc") = i + 1;
+                            *pc.get_mut(&q).ok_or_else(|| {
+                                MetalError::CommandBufferError(format!(
+                                    "internal error: no program counter tracked for queue {q}"
+                                ))
+                            })? = i + 1;
                             progressed = true;
                         }
                     }

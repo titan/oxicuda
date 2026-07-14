@@ -103,7 +103,12 @@ pub fn verify_merge_roundtrip(base: &[f32], lora: &LoraLinear, tol: f32) -> GenR
 /// # Arguments
 /// - `lora`: The original adapter.
 /// - `scale`: The multiplicative scale factor.
-pub fn scale_adapter(lora: &LoraLinear, scale: f32) -> LoraLinear {
+///
+/// # Errors
+/// - `DimensionMismatch` if `lora`'s own matrices are inconsistent with its
+///   `rank` / `in_features` / `out_features` (only reachable if the adapter
+///   was mutated into an invalid shape via [`LoraLinear::matrix_b_mut`]).
+pub fn scale_adapter(lora: &LoraLinear, scale: f32) -> GenResult<LoraLinear> {
     let new_b: Vec<f32> = lora.matrix_b().iter().map(|&v| v * scale).collect();
     LoraLinear::from_matrices(
         lora.in_features(),
@@ -113,7 +118,6 @@ pub fn scale_adapter(lora: &LoraLinear, scale: f32) -> LoraLinear {
         lora.matrix_a().to_vec(),
         new_b,
     )
-    .expect("scale_adapter: internal shape error")
 }
 
 // ─── compose_adapters ─────────────────────────────────────────────────────────
@@ -219,7 +223,8 @@ mod tests {
         for v in lora.matrix_b_mut() {
             *v = 1.0;
         }
-        let scaled = scale_adapter(&lora, 2.0);
+        let scaled =
+            scale_adapter(&lora, 2.0).expect("scale_adapter should succeed for a valid adapter");
         // B in scaled should be 2.0
         for &v in scaled.matrix_b() {
             assert!((v - 2.0).abs() < 1e-5, "scaled B should be 2.0: {v}");

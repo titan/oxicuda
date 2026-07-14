@@ -84,7 +84,9 @@ impl CacheManager {
             .block_tables
             .get(&seq_id)
             .ok_or(InferError::InvalidSequenceId(seq_id))?;
-        let tail_id = *table.last().expect("table guaranteed non-empty");
+        let tail_id = *table.last().ok_or_else(|| {
+            InferError::CacheManagerError(format!("block table for sequence {seq_id} is empty"))
+        })?;
         let slot = self.kv_cache.block_filled(tail_id);
 
         if kvs.len() != self.kv_cache.n_layers {
@@ -100,7 +102,10 @@ impl CacheManager {
             //  we advance the "tail" pointer via layer-0.)
             let _ = slot;
         }
-        *self.seq_lengths.get_mut(&seq_id).expect("seq present") += 1;
+        let len = self.seq_lengths.get_mut(&seq_id).ok_or_else(|| {
+            InferError::CacheManagerError(format!("sequence {seq_id} has no length entry"))
+        })?;
+        *len += 1;
         Ok(())
     }
 
@@ -145,18 +150,17 @@ impl CacheManager {
             .block_tables
             .get_mut(&seq_id)
             .ok_or(InferError::InvalidSequenceId(seq_id))?;
-        let tail_id = *table
-            .last()
-            .expect("table guaranteed non-empty after allocate");
+        let tail_id = *table.last().ok_or_else(|| {
+            InferError::CacheManagerError(format!("block table for sequence {seq_id} is empty"))
+        })?;
         if self.kv_cache.block_filled(tail_id) < self.kv_cache.block_size {
             return Ok(()); // Current tail block still has room.
         }
-        // Current block is full — allocate a new one.
+        // Current block is full — allocate a new one. `table` still borrows
+        // `self.block_tables` (disjoint from `self.kv_cache`), so we can push
+        // onto it directly instead of re-looking it up by `seq_id`.
         let new_id = self.kv_cache.alloc_block()?;
-        self.block_tables
-            .get_mut(&seq_id)
-            .expect("still present")
-            .push(new_id);
+        table.push(new_id);
         Ok(())
     }
 }

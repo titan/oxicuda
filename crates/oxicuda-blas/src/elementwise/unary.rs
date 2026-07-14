@@ -576,16 +576,25 @@ mod tests {
     }
 
     #[test]
-    fn ptx_template_generates_sigmoid_f64() {
+    fn ptx_template_rejects_sigmoid_f64() {
+        // `sigmoid` is built from the `ex2.approx` special-function unit, which
+        // PTX only defines for `.f32`. Generating it at F64 would emit a module
+        // `ptxas` rejects (`Unexpected instruction types specified for 'ex2'`),
+        // so the template refuses the precision up front with a clear error
+        // rather than fabricating invalid PTX that fails at load time.
         let template = ElementwiseTemplate::new(
             PtxOp::Sigmoid,
             oxicuda_ptx::ir::PtxType::F64,
             oxicuda_ptx::arch::SmVersion::Sm80,
         );
-        let ptx = template
+        let err = template
             .generate()
-            .expect("sigmoid PTX generation should succeed");
-        assert!(ptx.contains("elementwise_sigmoid_f64"));
+            .expect_err("sigmoid PTX generation must be rejected at F64 precision");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("sigmoid") && msg.contains("f32-only"),
+            "unexpected error message: {msg}"
+        );
     }
 
     #[test]

@@ -180,7 +180,8 @@ time and would be JIT-compiled by `oxicuda-driver` on Linux + NVIDIA hardware.
 - Tests: 612 host-side unit tests + 2 doctests passing (incl. 18 cross-module e2e tests, the
   6 ZDT1-3 / DTLZ1-2 NSGA-II analytic-front convergence tests, the 6 CMA-ME quality-diversity
   tests, and 36 ZDT4-6 / DTLZ3-7 / WFG1-9 analytic-front structural tests); PTX kernel strings
-  validated per SM version
+  validated per SM version. 0.5.0 eliminated the crate's remaining `.expect()` panic sites via
+  `Result`/`Option` propagation (reliability hardening on error paths only, not a new feature; test count unchanged)
 - `unwrap()` calls in production code: 0
 - `unsafe` code: 0 (handled by workspace lints)
 - macOS: compiles; GPU integration paths return `UnsupportedPlatform` at runtime

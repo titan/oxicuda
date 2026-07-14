@@ -151,12 +151,31 @@ impl Im2colGemmConv {
         // Phase 1: im2col expansion
         self.launch_im2col(handle, input, workspace)?;
 
+        // The GEMM (phase 2) runs on the BLAS sub-handle's own stream, which
+        // is a separate non-blocking stream from `handle.stream()` (where the
+        // im2col kernel above was launched) with no implicit ordering between
+        // the two. Record an event after the im2col launch and make the BLAS
+        // stream wait on it, so the GEMM cannot start reading the workspace
+        // before im2col has finished writing it.
+        let im2col_done = oxicuda_driver::Event::new()?;
+        im2col_done.record(handle.stream())?;
+        handle.blas().stream().wait_event(&im2col_done)?;
+
         // Phase 2: GEMM
         // output = filter * col_matrix
         // filter: [K, C*R*S] (out_channels x filter_volume)
         // col:    [C*R*S, M] (filter_volume x spatial_points)
         // output: [K, M]     (out_channels x spatial_points)
         self.launch_gemm(handle, filter, output, workspace)?;
+
+        // Join the GEMM's completion back into `handle.stream()` so that any
+        // caller who only tracks `handle.stream()` (the documented primary
+        // stream) observes `output` as ready once that stream is synchronised
+        // or otherwise waited on, without needing to know the GEMM ran on the
+        // BLAS sub-handle's separate stream internally.
+        let gemm_done = oxicuda_driver::Event::new()?;
+        gemm_done.record(handle.blas().stream())?;
+        handle.stream().wait_event(&gemm_done)?;
 
         Ok(())
     }

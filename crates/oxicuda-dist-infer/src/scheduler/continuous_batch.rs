@@ -251,10 +251,15 @@ impl ContinuousBatcher {
                 break; // head-of-line blocked; preserve FCFS within priority.
             }
             // Commit admission: remove from the waiting queue at `scan`.
-            let mut rec = self
-                .waiting
-                .remove(scan)
-                .expect("index in range; remove must succeed");
+            let Some(mut rec) = self.waiting.remove(scan) else {
+                // Unreachable: the `while` guard above re-checks
+                // `scan < self.waiting.len()` fresh on every iteration, and
+                // nothing between that check and this call mutates
+                // `waiting`, so `remove` always finds an element here. Stop
+                // admitting defensively rather than panicking if that
+                // invariant is ever broken by a future refactor.
+                break;
+            };
             rec.generated = 0;
             rec.blocks = need;
             rec.state = SeqState::Running;

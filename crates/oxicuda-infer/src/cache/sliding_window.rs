@@ -157,11 +157,13 @@ impl SlidingWindowManager {
         if self.window.len() <= self.config.window {
             return Vec::new();
         }
-        // Window overflow → evict the oldest windowed token.
-        let evicted = self
-            .window
-            .pop_front()
-            .expect("window non-empty after overflow");
+        // Window overflow → evict the oldest windowed token. We just pushed
+        // onto `self.window` above and only reach here when its length
+        // exceeds `self.config.window` (>= 0), so it is guaranteed non-empty;
+        // the `None` arm is unreachable but handled instead of panicking.
+        let Some(evicted) = self.window.pop_front() else {
+            return Vec::new();
+        };
         self.release_block_ref(evicted.block).into_iter().collect()
     }
 

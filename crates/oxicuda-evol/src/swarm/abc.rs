@@ -108,12 +108,15 @@ impl AbcState {
         let raw_vals: Vec<f64> = food.iter().map(|x| fitness_fn(x)).collect();
         let fitness: Vec<f64> = raw_vals.iter().map(|&v| fitness_transform(v)).collect();
 
-        // Best source
+        // Best source. `raw_vals.len() == food.len() == n_food > 0` (checked
+        // above), so this can never be empty; propagate via the same
+        // `SwarmEmpty` error the empty-swarm case above already uses instead
+        // of asserting the invariant with a panic.
         let (best_idx, &best_raw) = raw_vals
             .iter()
             .enumerate()
             .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .expect("raw_vals is non-empty (n_food > 0 is checked above)");
+            .ok_or(EvolError::SwarmEmpty)?;
 
         let best = food[best_idx].clone();
 

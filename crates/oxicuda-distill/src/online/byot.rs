@@ -76,7 +76,9 @@ pub fn byot_loss(branch_logits: &[Vec<f32>], label: usize, temp: f32) -> Distill
             msg: "byot_loss requires at least 2 branches (branches + teacher)".into(),
         });
     }
-    let teacher = branch_logits.last().expect("branch_logits is non-empty");
+    let teacher = branch_logits.last().ok_or_else(|| DistillError::Internal {
+        msg: "byot_loss: branch_logits unexpectedly empty after length check".into(),
+    })?;
     let t_safe = temp.max(1e-12);
     let p_teacher = softmax(&teacher.iter().map(|&x| x / t_safe).collect::<Vec<_>>());
     let non_teacher = &branch_logits[..branch_logits.len() - 1];

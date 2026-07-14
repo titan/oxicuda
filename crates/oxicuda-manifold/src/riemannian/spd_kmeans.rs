@@ -296,25 +296,28 @@ pub fn spd_kmeans(
         });
     }
 
-    let mut best: Option<SpdKmeansResult> = None;
-
-    for restart in 0..config.n_restarts {
-        // Each restart gets a distinct seed derived from the base seed.
-        let restart_seed = config
+    // Each restart gets a distinct seed derived from the base seed.
+    let restart_seed = |restart: usize| {
+        config
             .seed
-            .wrapping_add((restart as u64).wrapping_mul(0xDEAD_BEEF_CAFE_BABE));
-        let mut rng = LcgRng::new(restart_seed);
+            .wrapping_add((restart as u64).wrapping_mul(0xDEAD_BEEF_CAFE_BABE))
+    };
 
+    // `config.n_restarts >= 1` is guaranteed by the validation above, so restart 0
+    // always runs and seeds `best` directly — no `Option<SpdKmeansResult>` sentinel
+    // (and no end-of-function unwrap) is needed to track "has a restart completed".
+    let mut rng0 = LcgRng::new(restart_seed(0));
+    let mut best = run_single_kmeans(data, n_matrices, n, config, &mut rng0)?;
+
+    for restart in 1..config.n_restarts {
+        let mut rng = LcgRng::new(restart_seed(restart));
         let result = run_single_kmeans(data, n_matrices, n, config, &mut rng)?;
-
-        let is_better = best.as_ref().is_none_or(|b| result.inertia < b.inertia);
-        if is_better {
-            best = Some(result);
+        if result.inertia < best.inertia {
+            best = result;
         }
     }
 
-    // SAFETY: n_restarts >= 1 and we propagate errors, so `best` is always Some here.
-    Ok(best.expect("at least one restart must have completed"))
+    Ok(best)
 }
 
 // ────────────────────────────────────────────────────────────────────────────

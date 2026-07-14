@@ -173,10 +173,10 @@ impl IsotonicCalibrator {
 /// Append a `(x, y)` knot, coalescing with the previous knot when the score is
 /// identical (keeping the most recent — and hence non-decreasing — `y`).
 fn push_knot(xs: &mut Vec<f32>, ys: &mut Vec<f32>, x: f32, y: f32) {
-    if let Some(&last_x) = xs.last()
+    if let (Some(&last_x), Some(last_y)) = (xs.last(), ys.last_mut())
         && (x - last_x).abs() <= f32::EPSILON
     {
-        *ys.last_mut().expect("ys non-empty when xs non-empty") = y;
+        *last_y = y;
         return;
     }
     xs.push(x);

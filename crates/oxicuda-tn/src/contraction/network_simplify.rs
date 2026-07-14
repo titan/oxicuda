@@ -829,10 +829,10 @@ fn fuse_axes_in_tensor(
         });
     }
     // Build the output dims and labels: replace fused axes with single fused dim.
-    let insert_pos = *axes
-        .iter()
-        .min()
-        .expect("axes is non-empty (empty case returned early above)");
+    // The fused axis is inserted at the position of the first fused axis
+    // encountered while scanning in increasing order (i.e. at min(axes)),
+    // which is exactly what the `fused_inserted` flag below achieves without
+    // needing to compute that position separately.
     let mut new_dims: Vec<usize> = Vec::new();
     let mut new_labels: Vec<i64> = Vec::new();
     let mut fused_inserted = false;
@@ -848,7 +848,6 @@ fn fuse_axes_in_tensor(
             new_labels.push(t.labels[ax]);
         }
     }
-    let _ = insert_pos; // used conceptually above
 
     // Now we need to re-order/re-layout the data.
     // The multi-index order in new tensor: all non-fused axes in original order,

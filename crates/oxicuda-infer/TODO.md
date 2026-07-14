@@ -104,7 +104,7 @@ structured sampling.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `#![forbid(unsafe_code)]`)
-- Tests: 399 lib + 1 doctest passing (added radix cache, grammar FSM, sliding-window/attention-sink, KV quant, page compaction, chunked prefill, per-sequence sampling override + GQA-vs-MHA / preemption-churn verification)
+- Tests: 405 lib + 1 doctest passing (0.5.0: eliminated the crate's remaining `.expect()` panic sites via `Result`/`Option` propagation -- reliability hardening on error paths only, not a new feature; previously added radix cache, grammar FSM, sliding-window/attention-sink, KV quant, page compaction, chunked prefill, per-sequence sampling override + GQA-vs-MHA / preemption-churn verification)
 - unwrap() calls: 0 (production code)
 - GPU tests behind `#[cfg(feature = "gpu-tests")]`
 - macOS: compiles, all CPU reference paths work; runtime GPU executor returns `UnsupportedPlatform`

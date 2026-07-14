@@ -183,7 +183,7 @@ scratch.
 ## Quality Status
 
 - Warnings: 0 (clippy clean, `--all-features --all-targets -D warnings`)
-- Tests: 398 passing (host-side; incl. 2 worked-example reproductions — textbook two-circles
+- Tests: 402 passing (host-side; incl. 2 worked-example reproductions — textbook two-circles
   persistence and Mapper circular-topology recovery); PTX kernel strings validated per SM version
 - `unwrap()` calls in production code: 0
 - `unsafe` code: 0
@@ -216,6 +216,9 @@ pass (chunk-based pivot lookup with shared-memory hashing).
   match every TDA library that follows Edelsbrunner-Harer.
 - `Filtration` always stores simplices sorted by `(value, dim, lex)` so the boundary
   matrix can be built directly without resorting.
+- 0.5.0: `homology/cohomology.rs` and `homology/reduction.rs` each had a redundant
+  is-empty-check-then-panic pattern eliminated (restructured to `while let` loops) --
+  an internal code-quality fix with no algorithm or behavior change.
 
 ---
 

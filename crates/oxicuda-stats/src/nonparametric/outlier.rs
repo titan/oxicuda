@@ -115,7 +115,7 @@ pub fn grubbs_test(data: &[f64], alpha: f64) -> StatsResult<GrubbsResult> {
         .enumerate()
         .map(|(i, &x)| (i, x, (x - mean).abs()))
         .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-        .expect("data is non-empty (checked above)");
+        .ok_or(StatsError::EmptyInput)?;
 
     let g_stat = max_deviation / std_dev;
 

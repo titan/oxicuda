@@ -199,7 +199,9 @@ fn kmeans_plus_plus(
 
     for _ in 1..k {
         // Update minimum squared distances to nearest already-chosen centre
-        let last_centre = centres.last().expect("centres non-empty");
+        let last_centre = centres.last().ok_or_else(|| AnomalyError::Internal {
+            msg: "k-means++ centres unexpectedly empty".into(),
+        })?;
         for i in 0..n {
             let row = &data[i * d..(i + 1) * d];
             let sq: f64 = row

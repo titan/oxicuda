@@ -79,9 +79,12 @@ impl AliasTable {
         }
 
         // Vose construction: pair each "small" with a "large" to fill columns.
-        while !small.is_empty() && !large.is_empty() {
-            let l = small.pop().expect("small non-empty");
-            let g = large.pop().expect("large non-empty");
+        // Peek both stacks in the loop condition itself so the pops below are
+        // structurally guaranteed to succeed (no separate is_empty + pop that
+        // could ever observe a different state).
+        while let (Some(&l), Some(&g)) = (small.last(), large.last()) {
+            let _ = small.pop();
+            let _ = large.pop();
 
             prob[l] = p[l];
             alias[l] = g;

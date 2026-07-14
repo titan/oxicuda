@@ -211,7 +211,9 @@ impl Fpn {
             let target_h = lateral_maps[l].height;
             let target_w = lateral_maps[l].width;
             // The coarser merged level was added last to our temporary vec.
-            let coarser = merged.last().expect("at least one element");
+            let coarser = merged.last().ok_or_else(|| {
+                VisionError::Internal("FPN merge: no coarser level pushed".into())
+            })?;
             let upsampled = upsample_nearest(coarser, target_h, target_w);
             // Element-wise addition: lateral[l] + upsampled
             let lat = &lateral_maps[l];

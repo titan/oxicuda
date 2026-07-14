@@ -8,7 +8,7 @@ providing GPU-accelerated operations on AMD GPUs. Part of [OxiCUDA](https://gith
 ## Implementation Status
 
 - **Actual SLoC:** ~6,523 across 20 files
-- **Tests:** 213 passing (host-side / codegen; +109 over the 0.2.0 baseline)
+- **Tests:** 217 passing (host-side / codegen; +113 over the 0.2.0 baseline)
 - **Status:** HIP kernel generators, hipBLAS/hipBLASLt/hipRTC runtime loaders, multi-GPU dispatcher,
   gfx-arch capability tables, host-side occupancy calculator, launch-config / stream / hipGraph
   planners, MFMA/WMMA/FP8 matrix-core codegen, memory-pool suballocator, xGMI peer topology model
@@ -135,7 +135,7 @@ providing GPU-accelerated operations on AMD GPUs. Part of [OxiCUDA](https://gith
 ## Quality Status
 
 - Warnings: 0
-- Tests: 213 passing (host-side / codegen)
+- Tests: 217 passing (host-side / codegen)
 - unwrap() calls: 0 (production paths)
 - Clippy: clean (`-D warnings`, all-features, all-targets)
 
@@ -163,6 +163,10 @@ ROCm performance is bound by CDNA matrix-core throughput and Infinity Fabric / x
 - Windows builds compile but return `UnsupportedPlatform` -- HIP-on-Windows is not yet integrated
 - Generated HIP source uses `extern "C" __global__` ABI to remain compatible with both `hipcc` and `hiprtcCompileProgram`
 - Buffer handles are 64-bit opaque IDs mapped to raw device pointers internally (poisoning-resistant)
+- 0.5.0: `hipblas.rs` candidate-library-name probing no longer panics on a CString-construction
+  edge case -- it now falls through to the next candidate gracefully
+- 0.5.0: `stream.rs`'s program-counter tracking now returns a proper `RocmResult` error instead
+  of panicking on an internal invariant violation
 
 ## Architecture-Specific Deepening Opportunities
 

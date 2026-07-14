@@ -81,16 +81,6 @@ impl AmgSolver {
             });
         }
         let mut levels: Vec<AmgLevel> = Vec::with_capacity(config.max_levels);
-        // Level 0: store the fine matrix; R and P are placeholders.
-        // We will fill R and P once the coarse level is known.
-        levels.push(AmgLevel {
-            n,
-            a: a.to_vec(),
-            r: Vec::new(), // filled below
-            p: Vec::new(), // filled below
-            n_coarse: 0,   // filled below
-        });
-
         let mut current_n = n;
         let mut current_a = a.to_vec();
 
@@ -112,24 +102,29 @@ impl AmgSolver {
             // Galerkin coarse operator A_c = R * A * P  [n_agg × n_agg]
             let a_coarse = galerkin_product(&r_mat, &current_a, &p_mat, n_agg, current_n);
 
-            // Update the previous level's R, P, n_coarse
-            let last = levels.last_mut().expect("at least one level");
-            last.r = r_mat;
-            last.p = p_mat;
-            last.n_coarse = n_agg;
-
-            // Push the new coarse level (R and P will be filled in next iteration).
+            // Push the current level now that its R/P/n_coarse are fully known
+            // — no need to look it back up afterwards to patch it in.
             levels.push(AmgLevel {
-                n: n_agg,
-                a: a_coarse.clone(),
-                r: Vec::new(),
-                p: Vec::new(),
-                n_coarse: 0,
+                n: current_n,
+                a: current_a,
+                r: r_mat,
+                p: p_mat,
+                n_coarse: n_agg,
             });
 
             current_n = n_agg;
             current_a = a_coarse;
         }
+
+        // Push the coarsest level reached: nothing coarser exists below it, so
+        // its R and P stay empty (see `v_cycle`'s `n_coarse == 0` terminal check).
+        levels.push(AmgLevel {
+            n: current_n,
+            a: current_a,
+            r: Vec::new(),
+            p: Vec::new(),
+            n_coarse: 0,
+        });
 
         Ok(Self { levels, config })
     }

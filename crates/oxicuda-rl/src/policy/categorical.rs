@@ -190,8 +190,8 @@ impl CategoricalPolicy {
         let (idx, _) = probs
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .expect("probs is non-empty");
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .ok_or(RlError::EmptyDistribution)?;
         Ok(idx)
     }
 

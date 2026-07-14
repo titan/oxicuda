@@ -21,12 +21,10 @@ pub fn reduce_boundary_matrix(matrix: &mut BoundaryMatrix) -> Vec<Option<usize>>
     let mut low_to_col: HashMap<usize, usize> = HashMap::new();
 
     for j in 0..n {
-        loop {
-            if matrix.is_zero(j) {
-                break;
-            }
-            // low(j) is Some because column is non-zero
-            let low_j = matrix.low(j).expect("column known non-zero");
+        // `low(j)` is `None` exactly when the column is zero, so loop on it
+        // directly instead of checking `is_zero` and then re-deriving the
+        // same fact via a second call that we'd have to `.expect()`.
+        while let Some(low_j) = matrix.low(j) {
             match low_to_col.get(&low_j).copied() {
                 Some(j_prime) => {
                     // Reduce: add column j_prime to column j

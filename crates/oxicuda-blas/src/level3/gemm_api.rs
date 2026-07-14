@@ -210,9 +210,13 @@ fn gemm_impl<T: GpuFloat>(
     // across calls (a fresh dispatcher would re-JIT every GEMM).
     let dispatcher = handle.gemm_dispatcher();
 
-    // Convert scalar arguments to bit representation for the kernel.
-    let alpha_bits = alpha.to_bits_u64();
-    let beta_bits = beta.to_bits_u64();
+    // Convert scalar arguments to bit representation for the kernel. The
+    // generated kernels declare `alpha`/`beta` in the *accumulator* precision
+    // (F32 for F16/BF16/FP8 inputs), so the scalars must be widened to that
+    // precision here -- passing the raw input-precision bits would make the
+    // kernel read a denormal near-zero and silently zero the product.
+    let alpha_bits = alpha.to_accumulator_bits();
+    let beta_bits = beta.to_accumulator_bits();
 
     dispatcher.dispatch(
         &problem,

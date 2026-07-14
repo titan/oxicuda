@@ -70,7 +70,12 @@ LoRA adapters, and score-network building blocks. Part of
       `W' = W + (alpha/r)*B*A`; B from Gaussian init, A = 0 init; `forward()` adds rank-r
       correction; named adapter collection with `add_adapter()`/`apply()`
 - [x] `lora/merge.rs` -- `merge_lora`, `unmerge_lora`, `verify_merge_roundtrip`,
-      `scale_adapter`, `compose_adapters`
+      `scale_adapter`, `compose_adapters` (0.5.0: `scale_adapter` now returns
+      `GenResult<LoraLinear>` instead of `LoraLinear` -- it previously
+      reconstructed the scaled adapter via an internal `.expect()` that could
+      panic if `LoraLinear::matrix_b_mut()` had left the matrix in an
+      inconsistent state; callers now receive `Err` instead of a panic on
+      that path)
 - [x] `lora/checkpoint.rs` -- `save`/`load` round-trip for `LoraModel` via a hand-rolled
       versioned little-endian byte format (`OXLORA01`); bit-for-bit A/B/rank/scaling/alpha
       identity; `LoraLinear::from_parts` exact-scaling constructor

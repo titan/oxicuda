@@ -86,7 +86,8 @@ impl ElementwiseTemplate {
             ElementwiseOp::Fill => self.generate_fill(),
         }
     }
-    /// Validates that the precision type is a supported floating-point type.
+    /// Validates that the precision type is a supported floating-point type
+    /// for the requested operation.
     fn validate_precision(&self) -> Result<(), PtxGenError> {
         if !matches!(
             self.precision,
@@ -97,11 +98,40 @@ impl ElementwiseTemplate {
                 self.precision.as_ptx_str()
             )));
         }
+        // Transcendental activations built on the `ex2.approx`/`lg2.approx`
+        // special-function units are `.f32`-only in PTX; reject any other
+        // precision honestly instead of emitting a module `ptxas` refuses.
+        if self.op.requires_f32_sfu() && self.precision != PtxType::F32 {
+            return Err(PtxGenError::InvalidType(format!(
+                "elementwise '{}' relies on f32-only SFU approximation \
+                 (ex2.approx/lg2.approx) and is only supported at F32 precision, got {}",
+                self.op.as_str(),
+                self.precision.as_ptx_str()
+            )));
+        }
         Ok(())
     }
     /// Returns the PTX type suffix string (e.g., `.f32`).
     pub(super) const fn ty_str(&self) -> &'static str {
         self.precision.as_ptx_str()
+    }
+    /// Register-name prefix for value registers holding this kernel's
+    /// precision.
+    ///
+    /// [`BodyBuilder::raw_ptx`](crate::builder::BodyBuilder::raw_ptx) keys a
+    /// named register's declared width off its prefix: `%fd_*` → `.b64`
+    /// (f64), `%fh_*` → `.b16` (f16/bf16), and a bare `%{vp}_*` → `.b32`
+    /// (f32/tf32). Emitting the width-correct prefix is what makes an f64
+    /// kernel declare 64-bit value registers instead of the 32-bit ones a
+    /// hardcoded `%{vp}_*` name would otherwise produce (which `ptxas` rejects
+    /// with "Arguments mismatch" once those registers feed `.f64`
+    /// loads/stores/arithmetic).
+    pub(super) const fn vreg_prefix(&self) -> &'static str {
+        match self.precision {
+            PtxType::F64 => "fd",
+            PtxType::F16 | PtxType::BF16 => "fh",
+            _ => "f",
+        }
     }
     /// Generates a binary arithmetic kernel (add, sub, mul).
     ///
@@ -109,6 +139,7 @@ impl ElementwiseTemplate {
     fn generate_binary_arith(&self, op_name: &str) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let op_name = op_name.to_string();
         KernelBuilder::new(&kernel_name)
@@ -134,10 +165,10 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         {op_name}{ty} %f_c, %f_a, %f_b;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         {op_name}{ty} %{vp}_c, %{vp}_a, %{vp}_b;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();
@@ -148,6 +179,7 @@ impl ElementwiseTemplate {
     fn generate_div(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -172,10 +204,10 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         div.rn{ty} %f_c, %f_a, %f_b;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         div.rn{ty} %{vp}_c, %{vp}_a, %{vp}_b;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();
@@ -186,6 +218,7 @@ impl ElementwiseTemplate {
     fn generate_relu(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let zero_lit = float_zero_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -208,9 +241,9 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         max{ty} %f_y, %f_x, {zero_lit};\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         max{ty} %{vp}_y, %{vp}_x, {zero_lit};\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -224,6 +257,7 @@ impl ElementwiseTemplate {
     fn generate_sigmoid(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -245,13 +279,13 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         neg{ty} %f_neg, %f_x;\n    \
-                         mul{ty} %f_neg, %f_neg, 0f3FB8AA3B;\n    \
-                         ex2.approx{ty} %f_exp, %f_neg;\n    \
-                         add{ty} %f_denom, %f_exp, 0f3F800000;\n    \
-                         rcp.approx{ty} %f_y, %f_denom;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         neg{ty} %{vp}_neg, %{vp}_x;\n    \
+                         mul{ty} %{vp}_neg, %{vp}_neg, 0f3FB8AA3B;\n    \
+                         ex2.approx{ty} %{vp}_exp, %{vp}_neg;\n    \
+                         add{ty} %{vp}_denom, %{vp}_exp, 0f3F800000;\n    \
+                         rcp.approx{ty} %{vp}_y, %{vp}_denom;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -267,6 +301,7 @@ impl ElementwiseTemplate {
     fn generate_gelu(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -288,24 +323,24 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         mul{ty} %f_x3, %f_x, %f_x;\n    \
-                         mul{ty} %f_x3, %f_x3, %f_x;\n    \
-                         mul{ty} %f_x3, %f_x3, 0f3D372713;\n    \
-                         add{ty} %f_inner, %f_x, %f_x3;\n    \
-                         mul{ty} %f_inner, %f_inner, 0f3F4C422A;\n    \
-                         mul{ty} %f_2a, %f_inner, 0f40000000;\n    \
-                         neg{ty} %f_neg2a, %f_2a;\n    \
-                         mul{ty} %f_neg2a, %f_neg2a, 0f3FB8AA3B;\n    \
-                         ex2.approx{ty} %f_exp, %f_neg2a;\n    \
-                         add{ty} %f_denom, %f_exp, 0f3F800000;\n    \
-                         rcp.approx{ty} %f_sig, %f_denom;\n    \
-                         mul{ty} %f_sig, %f_sig, 0f40000000;\n    \
-                         sub{ty} %f_tanh, %f_sig, 0f3F800000;\n    \
-                         add{ty} %f_tanh, %f_tanh, 0f3F800000;\n    \
-                         mul{ty} %f_y, 0f3F000000, %f_x;\n    \
-                         mul{ty} %f_y, %f_y, %f_tanh;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         mul{ty} %{vp}_x3, %{vp}_x, %{vp}_x;\n    \
+                         mul{ty} %{vp}_x3, %{vp}_x3, %{vp}_x;\n    \
+                         mul{ty} %{vp}_x3, %{vp}_x3, 0f3D372713;\n    \
+                         add{ty} %{vp}_inner, %{vp}_x, %{vp}_x3;\n    \
+                         mul{ty} %{vp}_inner, %{vp}_inner, 0f3F4C422A;\n    \
+                         mul{ty} %{vp}_2a, %{vp}_inner, 0f40000000;\n    \
+                         neg{ty} %{vp}_neg2a, %{vp}_2a;\n    \
+                         mul{ty} %{vp}_neg2a, %{vp}_neg2a, 0f3FB8AA3B;\n    \
+                         ex2.approx{ty} %{vp}_exp, %{vp}_neg2a;\n    \
+                         add{ty} %{vp}_denom, %{vp}_exp, 0f3F800000;\n    \
+                         rcp.approx{ty} %{vp}_sig, %{vp}_denom;\n    \
+                         mul{ty} %{vp}_sig, %{vp}_sig, 0f40000000;\n    \
+                         sub{ty} %{vp}_tanh, %{vp}_sig, 0f3F800000;\n    \
+                         add{ty} %{vp}_tanh, %{vp}_tanh, 0f3F800000;\n    \
+                         mul{ty} %{vp}_y, 0f3F000000, %{vp}_x;\n    \
+                         mul{ty} %{vp}_y, %{vp}_y, %{vp}_tanh;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -316,6 +351,7 @@ impl ElementwiseTemplate {
     fn generate_silu(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -337,14 +373,14 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         neg{ty} %f_neg, %f_x;\n    \
-                         mul{ty} %f_neg, %f_neg, 0f3FB8AA3B;\n    \
-                         ex2.approx{ty} %f_exp, %f_neg;\n    \
-                         add{ty} %f_denom, %f_exp, 0f3F800000;\n    \
-                         rcp.approx{ty} %f_sig, %f_denom;\n    \
-                         mul{ty} %f_y, %f_x, %f_sig;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         neg{ty} %{vp}_neg, %{vp}_x;\n    \
+                         mul{ty} %{vp}_neg, %{vp}_neg, 0f3FB8AA3B;\n    \
+                         ex2.approx{ty} %{vp}_exp, %{vp}_neg;\n    \
+                         add{ty} %{vp}_denom, %{vp}_exp, 0f3F800000;\n    \
+                         rcp.approx{ty} %{vp}_sig, %{vp}_denom;\n    \
+                         mul{ty} %{vp}_y, %{vp}_x, %{vp}_sig;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -355,6 +391,7 @@ impl ElementwiseTemplate {
     fn generate_tanh(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -376,16 +413,16 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         mul{ty} %f_2x, %f_x, 0f40000000;\n    \
-                         neg{ty} %f_neg, %f_2x;\n    \
-                         mul{ty} %f_neg, %f_neg, 0f3FB8AA3B;\n    \
-                         ex2.approx{ty} %f_exp, %f_neg;\n    \
-                         add{ty} %f_denom, %f_exp, 0f3F800000;\n    \
-                         rcp.approx{ty} %f_sig, %f_denom;\n    \
-                         mul{ty} %f_y, %f_sig, 0f40000000;\n    \
-                         sub{ty} %f_y, %f_y, 0f3F800000;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         mul{ty} %{vp}_2x, %{vp}_x, 0f40000000;\n    \
+                         neg{ty} %{vp}_neg, %{vp}_2x;\n    \
+                         mul{ty} %{vp}_neg, %{vp}_neg, 0f3FB8AA3B;\n    \
+                         ex2.approx{ty} %{vp}_exp, %{vp}_neg;\n    \
+                         add{ty} %{vp}_denom, %{vp}_exp, 0f3F800000;\n    \
+                         rcp.approx{ty} %{vp}_sig, %{vp}_denom;\n    \
+                         mul{ty} %{vp}_y, %{vp}_sig, 0f40000000;\n    \
+                         sub{ty} %{vp}_y, %{vp}_y, 0f3F800000;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -396,6 +433,7 @@ impl ElementwiseTemplate {
     fn generate_unary(&self, op_name: &str) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let op_name = op_name.to_string();
         KernelBuilder::new(&kernel_name)
@@ -418,9 +456,9 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         {op_name}{ty} %f_y, %f_x;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         {op_name}{ty} %{vp}_y, %{vp}_x;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -431,6 +469,7 @@ impl ElementwiseTemplate {
     fn generate_sqrt(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -452,9 +491,9 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         sqrt.rn{ty} %f_y, %f_x;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         sqrt.rn{ty} %{vp}_y, %{vp}_x;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -465,6 +504,7 @@ impl ElementwiseTemplate {
     fn generate_rsqrt(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -486,9 +526,9 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         rsqrt.approx{ty} %f_y, %f_x;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         rsqrt.approx{ty} %{vp}_y, %{vp}_x;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -499,6 +539,7 @@ impl ElementwiseTemplate {
     fn generate_exp(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -520,10 +561,10 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         mul{ty} %f_x2, %f_x, 0f3FB8AA3B;\n    \
-                         ex2.approx{ty} %f_y, %f_x2;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         mul{ty} %{vp}_x2, %{vp}_x, 0f3FB8AA3B;\n    \
+                         ex2.approx{ty} %{vp}_y, %{vp}_x2;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -534,6 +575,7 @@ impl ElementwiseTemplate {
     fn generate_log(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -555,10 +597,10 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         lg2.approx{ty} %f_lg, %f_x;\n    \
-                         mul{ty} %f_y, %f_lg, 0f3F317218;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         lg2.approx{ty} %{vp}_lg, %{vp}_x;\n    \
+                         mul{ty} %{vp}_y, %{vp}_lg, 0f3F317218;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -571,6 +613,7 @@ impl ElementwiseTemplate {
     fn generate_ceil(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -592,9 +635,9 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         cvt.rpi{ty}{ty} %f_y, %f_x;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         cvt.rpi{ty}{ty} %{vp}_y, %{vp}_x;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -607,6 +650,7 @@ impl ElementwiseTemplate {
     fn generate_floor(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -628,9 +672,9 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         cvt.rmi{ty}{ty} %f_y, %f_x;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         cvt.rmi{ty}{ty} %{vp}_y, %{vp}_x;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -643,6 +687,7 @@ impl ElementwiseTemplate {
     fn generate_hard_sigmoid(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let zero_lit = float_zero_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -665,12 +710,12 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         mul{ty} %f_ax, %f_x, 0f3E4CCCCD;\n    \
-                         add{ty} %f_lin, %f_ax, 0f3F000000;\n    \
-                         min{ty} %f_clip, %f_lin, 0f3F800000;\n    \
-                         max{ty} %f_y, %f_clip, {zero_lit};\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         mul{ty} %{vp}_ax, %{vp}_x, 0f3E4CCCCD;\n    \
+                         add{ty} %{vp}_lin, %{vp}_ax, 0f3F000000;\n    \
+                         min{ty} %{vp}_clip, %{vp}_lin, 0f3F800000;\n    \
+                         max{ty} %{vp}_y, %{vp}_clip, {zero_lit};\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -683,6 +728,7 @@ impl ElementwiseTemplate {
     fn generate_hard_swish(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let zero_lit = float_zero_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -705,13 +751,13 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         add{ty} %f_xp3, %f_x, 0f40400000;\n    \
-                         min{ty} %f_clip, %f_xp3, 0f40C00000;\n    \
-                         max{ty} %f_clip, %f_clip, {zero_lit};\n    \
-                         mul{ty} %f_div, %f_clip, 0f3E2AAAAB;\n    \
-                         mul{ty} %f_y, %f_x, %f_div;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         add{ty} %{vp}_xp3, %{vp}_x, 0f40400000;\n    \
+                         min{ty} %{vp}_clip, %{vp}_xp3, 0f40C00000;\n    \
+                         max{ty} %{vp}_clip, %{vp}_clip, {zero_lit};\n    \
+                         mul{ty} %{vp}_div, %{vp}_clip, 0f3E2AAAAB;\n    \
+                         mul{ty} %{vp}_y, %{vp}_x, %{vp}_div;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -724,6 +770,7 @@ impl ElementwiseTemplate {
     fn generate_softplus(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -745,13 +792,13 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         mul{ty} %f_xe, %f_x, 0f3FB8AA3B;\n    \
-                         ex2.approx{ty} %f_exp, %f_xe;\n    \
-                         add{ty} %f_sum, %f_exp, 0f3F800000;\n    \
-                         lg2.approx{ty} %f_lg, %f_sum;\n    \
-                         mul{ty} %f_y, %f_lg, 0f3F317218;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         mul{ty} %{vp}_xe, %{vp}_x, 0f3FB8AA3B;\n    \
+                         ex2.approx{ty} %{vp}_exp, %{vp}_xe;\n    \
+                         add{ty} %{vp}_sum, %{vp}_exp, 0f3F800000;\n    \
+                         lg2.approx{ty} %{vp}_lg, %{vp}_sum;\n    \
+                         mul{ty} %{vp}_y, %{vp}_lg, 0f3F317218;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -764,6 +811,7 @@ impl ElementwiseTemplate {
     fn generate_leaky_relu(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let zero_lit = float_zero_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -786,11 +834,11 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         mul{ty} %f_leak, %f_x, 0f3C23D70A;\n    \
-                         setp.ge{ty} %p_ge, %f_x, {zero_lit};\n    \
-                         selp{ty} %f_y, %f_x, %f_leak, %p_ge;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         mul{ty} %{vp}_leak, %{vp}_x, 0f3C23D70A;\n    \
+                         setp.ge{ty} %p_ge, %{vp}_x, {zero_lit};\n    \
+                         selp{ty} %{vp}_y, %{vp}_x, %{vp}_leak, %p_ge;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -801,6 +849,7 @@ impl ElementwiseTemplate {
     fn generate_scale(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let scalar_ty = scalar_param_type(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -824,10 +873,10 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.param{ty} %f_alpha, [%param_alpha];\n    \
-                         ld.global{ty} %f_x, [%rd_a];\n    \
-                         mul{ty} %f_y, %f_alpha, %f_x;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.param{ty} %{vp}_alpha, [%param_alpha];\n    \
+                         ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         mul{ty} %{vp}_y, %{vp}_alpha, %{vp}_x;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -838,6 +887,7 @@ impl ElementwiseTemplate {
     fn generate_add_scalar(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let scalar_ty = scalar_param_type(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -861,10 +911,10 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.param{ty} %f_s, [%param_scalar];\n    \
-                         ld.global{ty} %f_x, [%rd_a];\n    \
-                         add{ty} %f_y, %f_x, %f_s;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.param{ty} %{vp}_s, [%param_scalar];\n    \
+                         ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         add{ty} %{vp}_y, %{vp}_x, %{vp}_s;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -875,6 +925,7 @@ impl ElementwiseTemplate {
     fn generate_fused_add_relu(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let zero_lit = float_zero_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -900,11 +951,11 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         add{ty} %f_sum, %f_a, %f_b;\n    \
-                         max{ty} %f_y, %f_sum, {zero_lit};\n    \
-                         st.global{ty} [%rd_c], %f_y;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         add{ty} %{vp}_sum, %{vp}_a, %{vp}_b;\n    \
+                         max{ty} %{vp}_y, %{vp}_sum, {zero_lit};\n    \
+                         st.global{ty} [%rd_c], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -915,6 +966,7 @@ impl ElementwiseTemplate {
     fn generate_one_minus(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let one_lit = float_one_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -937,9 +989,9 @@ impl ElementwiseTemplate {
                          add.u64 %rd_b, {b_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_x, [%rd_a];\n    \
-                         sub{ty} %f_y, {one_lit}, %f_x;\n    \
-                         st.global{ty} [%rd_b], %f_y;"
+                        "ld.global{ty} %{vp}_x, [%rd_a];\n    \
+                         sub{ty} %{vp}_y, {one_lit}, %{vp}_x;\n    \
+                         st.global{ty} [%rd_b], %{vp}_y;"
                     ));
                 });
                 b.ret();
@@ -950,6 +1002,7 @@ impl ElementwiseTemplate {
     fn generate_pow(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -974,12 +1027,12 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         lg2.approx{ty} %f_t1, %f_a;\n    \
-                         mul{ty} %f_t2, %f_t1, %f_b;\n    \
-                         ex2.approx{ty} %f_c, %f_t2;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         lg2.approx{ty} %{vp}_t1, %{vp}_a;\n    \
+                         mul{ty} %{vp}_t2, %{vp}_t1, %{vp}_b;\n    \
+                         ex2.approx{ty} %{vp}_c, %{vp}_t2;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();
@@ -990,6 +1043,7 @@ impl ElementwiseTemplate {
     fn generate_binary_minmax(&self, min_or_max: &str) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let min_or_max = min_or_max.to_string();
         KernelBuilder::new(&kernel_name)
@@ -1015,10 +1069,10 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         {min_or_max}{ty} %f_c, %f_a, %f_b;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         {min_or_max}{ty} %{vp}_c, %{vp}_a, %{vp}_b;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();
@@ -1029,6 +1083,7 @@ impl ElementwiseTemplate {
     fn generate_binary_cmp(&self, cond: &str) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let one_lit = float_one_literal(self.precision);
         let zero_lit = float_zero_literal(self.precision);
@@ -1056,11 +1111,11 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         setp.{cond}{ty} %p_cmp, %f_a, %f_b;\n    \
-                         selp{ty} %f_c, {one_lit}, {zero_lit}, %p_cmp;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         setp.{cond}{ty} %p_cmp, %{vp}_a, %{vp}_b;\n    \
+                         selp{ty} %{vp}_c, {one_lit}, {zero_lit}, %p_cmp;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();
@@ -1071,6 +1126,7 @@ impl ElementwiseTemplate {
     fn generate_or_prob_sum(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         KernelBuilder::new(&kernel_name)
             .target(self.target)
@@ -1095,12 +1151,12 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         mul{ty} %f_t, %f_a, %f_b;\n    \
-                         sub{ty} %f_s, %f_a, %f_t;\n    \
-                         add{ty} %f_c, %f_s, %f_b;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         mul{ty} %{vp}_t, %{vp}_a, %{vp}_b;\n    \
+                         sub{ty} %{vp}_s, %{vp}_a, %{vp}_t;\n    \
+                         add{ty} %{vp}_c, %{vp}_s, %{vp}_b;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();
@@ -1111,6 +1167,7 @@ impl ElementwiseTemplate {
     fn generate_nand(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let one_lit = float_one_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -1136,11 +1193,11 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         mul{ty} %f_t, %f_a, %f_b;\n    \
-                         sub{ty} %f_c, {one_lit}, %f_t;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         mul{ty} %{vp}_t, %{vp}_a, %{vp}_b;\n    \
+                         sub{ty} %{vp}_c, {one_lit}, %{vp}_t;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();
@@ -1151,6 +1208,7 @@ impl ElementwiseTemplate {
     fn generate_nor(&self) -> Result<String, PtxGenError> {
         let kernel_name = self.kernel_name();
         let ty = self.ty_str();
+        let vp = self.vreg_prefix();
         let byte_size = self.precision.size_bytes();
         let one_lit = float_one_literal(self.precision);
         KernelBuilder::new(&kernel_name)
@@ -1176,13 +1234,13 @@ impl ElementwiseTemplate {
                          add.u64 %rd_c, {c_ptr}, %rd_off;"
                     ));
                     b.raw_ptx(&format!(
-                        "ld.global{ty} %f_a, [%rd_a];\n    \
-                         ld.global{ty} %f_b, [%rd_b];\n    \
-                         mul{ty} %f_t, %f_a, %f_b;\n    \
-                         sub{ty} %f_s, %f_a, %f_t;\n    \
-                         add{ty} %f_u, %f_s, %f_b;\n    \
-                         sub{ty} %f_c, {one_lit}, %f_u;\n    \
-                         st.global{ty} [%rd_c], %f_c;"
+                        "ld.global{ty} %{vp}_a, [%rd_a];\n    \
+                         ld.global{ty} %{vp}_b, [%rd_b];\n    \
+                         mul{ty} %{vp}_t, %{vp}_a, %{vp}_b;\n    \
+                         sub{ty} %{vp}_s, %{vp}_a, %{vp}_t;\n    \
+                         add{ty} %{vp}_u, %{vp}_s, %{vp}_b;\n    \
+                         sub{ty} %{vp}_c, {one_lit}, %{vp}_u;\n    \
+                         st.global{ty} [%rd_c], %{vp}_c;"
                     ));
                 });
                 b.ret();

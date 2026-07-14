@@ -187,11 +187,9 @@ impl Sequence {
     /// Returns the finish reason if generation should stop, `None` otherwise.
     #[must_use]
     pub fn check_finish(&self) -> Option<FinishReason> {
-        let n_out = self.output_tokens.len();
-        if n_out == 0 {
-            return None;
-        }
-        let last = *self.output_tokens.last().expect("n_out > 0");
+        // `?` returns `None` immediately when `output_tokens` is empty,
+        // exactly mirroring the previous explicit `n_out == 0` early-return.
+        let last = *self.output_tokens.last()?;
 
         // EOS token check.
         if let Some(eos) = self.sampling_params.eos_token_id {
@@ -200,7 +198,7 @@ impl Sequence {
             }
         }
         // Max new tokens check.
-        if n_out >= self.sampling_params.max_new_tokens {
+        if self.output_tokens.len() >= self.sampling_params.max_new_tokens {
             return Some(FinishReason::MaxLength);
         }
         None

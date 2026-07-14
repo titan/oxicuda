@@ -321,10 +321,7 @@ pub fn lof_kd_fit(x: &[f64], n: usize, d: usize, cfg: &LofKdConfig) -> AnomalyRe
             if ki < neighbours.len() {
                 knn_indices[i * k + ki] = neighbours[ki].0;
                 knn_dists_flat[i * k + ki] = neighbours[ki].1;
-            } else if !neighbours.is_empty() {
-                let last = neighbours
-                    .last()
-                    .expect("neighbours is non-empty (checked above)");
+            } else if let Some(last) = neighbours.last() {
                 knn_indices[i * k + ki] = last.0;
                 knn_dists_flat[i * k + ki] = last.1;
             }

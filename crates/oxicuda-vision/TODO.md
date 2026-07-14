@@ -160,6 +160,7 @@ Target: bandwidth-bound kernels at >=90% peak DRAM throughput on sm_80+.
 - `bipartite_match` is a greedy + 2-opt heuristic (full Hungarian algorithm is
   future P1 work)
 - `giou` returns `iou - (|enclosing - union|) / |enclosing|`
+- `fpn/top_down.rs`'s top-down merge now returns `VisionResult::Err` on an internal-invariant failure instead of an internal `.expect()` panic (0.5.0 robustness fix; behavior unchanged for valid inputs)
 - macOS: kernels compile to PTX strings but device launch returns `UnsupportedPlatform`
 
 ---

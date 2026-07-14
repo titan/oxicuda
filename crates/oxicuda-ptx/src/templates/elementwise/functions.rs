@@ -723,4 +723,56 @@ mod tests {
         );
         assert!(ptx.contains("elementwise_fill_f32"), "wrong kernel name");
     }
+    #[test]
+    fn ptx_template_add_f64_uses_64bit_value_registers() {
+        // Regression: f64 value registers must be declared `.b64` (emitted via
+        // the width-carrying `%fd_` prefix), not the `.b32` bank a hardcoded
+        // `%f_` name produced — the latter made ptxas reject every f64
+        // elementwise kernel with "Arguments mismatch for instruction 'ld'".
+        let template = ElementwiseTemplate::new(ElementwiseOp::Add, PtxType::F64, SmVersion::Sm86);
+        let ptx = template.generate().expect("f64 add PTX generation failed");
+        assert!(
+            ptx.contains(".reg .b64 %fd_a;"),
+            "f64 value registers must be declared .b64; got:\n{ptx}"
+        );
+        assert!(
+            !ptx.contains(".reg .b32 %f_a;"),
+            "f64 kernel must not use the 32-bit %f_ value bank; got:\n{ptx}"
+        );
+        assert!(ptx.contains("add.f64 %fd_c, %fd_a, %fd_b;"), "got:\n{ptx}");
+    }
+    #[test]
+    fn ptx_template_add_f32_value_registers_unchanged() {
+        // The width-aware prefix must leave the f32 path byte-for-byte the
+        // same: plain `%f_` names declared `.b32`.
+        let template = ElementwiseTemplate::new(ElementwiseOp::Add, PtxType::F32, SmVersion::Sm86);
+        let ptx = template.generate().expect("f32 add PTX generation failed");
+        assert!(ptx.contains(".reg .b32 %f_a;"), "got:\n{ptx}");
+        assert!(ptx.contains("add.f32 %f_c, %f_a, %f_b;"), "got:\n{ptx}");
+    }
+    #[test]
+    fn ptx_template_sfu_ops_reject_non_f32() {
+        // Transcendental activations built on the f32-only `ex2.approx` /
+        // `lg2.approx` SFUs must refuse f64 with an honest error rather than
+        // emit a module ptxas rejects — while still generating for f32.
+        for op in [
+            ElementwiseOp::Exp,
+            ElementwiseOp::Log,
+            ElementwiseOp::Sigmoid,
+            ElementwiseOp::Gelu,
+            ElementwiseOp::Silu,
+            ElementwiseOp::Tanh,
+            ElementwiseOp::Softplus,
+            ElementwiseOp::Pow,
+        ] {
+            assert!(op.requires_f32_sfu(), "{op:?} should be classed f32-only");
+            let f64_t = ElementwiseTemplate::new(op, PtxType::F64, SmVersion::Sm86);
+            assert!(f64_t.generate().is_err(), "{op:?} must reject f64");
+            let f32_t = ElementwiseTemplate::new(op, PtxType::F32, SmVersion::Sm86);
+            assert!(
+                f32_t.generate().is_ok(),
+                "{op:?} must still generate for f32"
+            );
+        }
+    }
 }

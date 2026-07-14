@@ -311,7 +311,11 @@ impl GpuOptimizer for GpuCame {
 
             let state = self.states[i]
                 .as_mut()
-                .expect("state guaranteed by ensure_states()");
+                .ok_or_else(|| TrainError::Internal {
+                    msg: format!(
+                        "CAME optimizer state missing for parameter {i} after ensure_states()"
+                    ),
+                })?;
             match &mut state.v {
                 CameV::Flat { v } => {
                     Self::update_flat(
