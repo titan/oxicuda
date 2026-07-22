@@ -29,7 +29,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxicuda-metal = "0.5.0"
+oxicuda-metal = "0.5.1"
 ```
 
 ```rust
@@ -46,7 +46,7 @@ backend.free(ptr)?;
 
 ## Status
 
-- **Version**: 0.5.0 (2026-07-14)
+- **Version**: 0.5.1 (2026-07-14)
 - **Tests**: 262 passing
 
 ## License

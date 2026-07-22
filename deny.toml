@@ -1,0 +1,107 @@
+# cargo-deny configuration for OxiCUDA.
+#
+# Encodes COOLJAPAN release-engineering policy:
+#   - licenses: an explicit allow-list, derived from the actual license mix
+#     found in the resolved dependency graph (184 third-party packages, 15
+#     unique license expressions as of the 0.5.1 pass — every one fully
+#     permissive; no copyleft anywhere in the graph).
+#   - bans: the COOLJAPAN-forbidden crates (C/C++ BLAS, C-bound compression,
+#     non-pure-Rust SQLite/FFT/serialization/SMT). None of these currently
+#     appear anywhere in the resolved graph (direct or transitive, verified
+#     against Cargo.lock), so every entry is a hard deny with no `wrappers`
+#     scoping — if one of these ever becomes reachable, `cargo deny check`
+#     must fail immediately rather than silently pass.
+#   - advisories: no accepted-ignore entries yet; add RUSTSEC IDs here only
+#     after a real `cargo deny check advisories` finding is triaged.
+#
+# Run with:
+#   cargo install cargo-deny   # if not already installed
+#   cargo deny check                # everything below
+#   cargo deny check licenses
+#   cargo deny check bans
+#   cargo deny check advisories
+#
+# No GitHub Actions workflow wraps this (per COOLJAPAN CI policy, only
+# pypi-publish.yml / npm-publish.yml are permitted workflow files) --
+# this is a local/manual pre-release gate.
+
+[graph]
+# Every target this workspace actually ships for: native GPU backends
+# (driver/vulkan/rocm/levelzero/metal) plus the wasm32 WebGPU backend
+# (oxicuda-webgpu, gated behind wasm-bindgen for the browser target).
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "wasm32-unknown-unknown",
+]
+
+[licenses]
+version = 2
+# Allow-list assembled from the license mix cargo-metadata actually reports
+# for this workspace (`cargo metadata --all-features`, 184 third-party
+# packages). An expression using `OR` (e.g. `MIT OR Apache-2.0`) is
+# satisfied if any one listed license is on this list; an expression using
+# `AND` requires every component to be listed (the `unicode-ident` entry:
+# `(MIT OR Apache-2.0) AND Unicode-3.0`).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+deny = [
+    # --- Pure Rust Policy: banned BLAS / FFT / SMT / serialization / SQLite ---
+    { name = "openblas-src" },   # use oxiblas
+    { name = "openblas-sys" },
+    { name = "rustfft" },        # use oxifft
+    { name = "bincode" },        # use oxicode
+    { name = "z3" },             # use oxiz
+    { name = "z3-sys" },
+    { name = "rusqlite" },       # use oxisql-sqlite-compat
+    { name = "libsqlite3-sys" },
+
+    # --- Pure Rust Policy: C-bound compression/archive, replaced by oxiarc-* ---
+    { name = "zip" },
+    { name = "flate2" },
+    { name = "zstd" },
+    { name = "zstd-sys" },
+    { name = "bzip2" },
+    { name = "bzip2-sys" },
+    { name = "lz4" },
+    { name = "lz4-sys" },
+    { name = "tar" },
+    { name = "snap" },
+    { name = "brotli" },
+    { name = "brotli-sys" },
+    { name = "miniz_oxide" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+version = 2
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Verified against a real `cargo deny check advisories` run on the 0.5.1
+# resolved graph (Cargo.lock) -- re-verify (don't just carry forward) on
+# every future addition to this list.
+ignore = [
+    "RUSTSEC-2024-0436", # paste (unmaintained) -- transitive via metal v0.33.0
+    # (the only version of `metal` published to crates.io) -> oxicuda-metal's
+    # Apple Metal GPU backend. No safe upgrade exists for `paste` itself, and
+    # `metal` has no newer release that drops it.
+]

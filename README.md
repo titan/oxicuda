@@ -5,7 +5,7 @@
 [![CI](https://github.com/cool-japan/oxicuda/workflows/CI/badge.svg)](https://github.com/cool-japan/oxicuda/actions)
 [![License](https://img.shields.io/crates/l/oxicuda.svg)](LICENSE)
 
-**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~1.30M SLoC of safe Rust across 73 crates.**
+**Pure Rust CUDA replacement -- cuBLAS, cuDNN, cuFFT, cuSPARSE, cuSOLVER, cuRAND and beyond in ~1.30M SLoC of safe Rust across 74 crates.**
 
 OxiCUDA replaces the entire NVIDIA CUDA Toolkit software stack with type-safe,
 memory-safe Rust code. The only runtime dependency is the NVIDIA driver
@@ -26,10 +26,10 @@ architecture to achieve near-peak throughput from Turing through Blackwell.
 |                         OxiCUDA                               |
 |                     (Pure Rust GPU)                            |
 |                                                               |
-|  Vol.1 Foundation (4 crates)                                  |
-|  +----------+ +--------+ +---------+ +---------+             |
-|  | Driver   | | Memory | | Launch  | | Runtime |             |
-|  +----------+ +--------+ +---------+ +---------+             |
+|  Vol.1 Foundation (5 crates)                                  |
+|  +----------+ +--------+ +---------+ +---------+ +---------+  |
+|  | Driver   | | Memory | | Launch  | | Runtime | | NVRTC   |  |
+|  +----------+ +--------+ +---------+ +---------+ +---------+  |
 |                                                               |
 |  Vol.2 Codegen (2 crates)                                     |
 |  +-----------+ +------------+                                 |
@@ -73,11 +73,13 @@ architecture to achieve near-peak throughput from Turing through Blackwell.
 
 ## Feature Highlights
 
-**Vol.1 -- Foundation** (4 crates, 26,438 SLoC)
+**Vol.1 -- Foundation** (5 crates, 27,080 SLoC)
 - Dynamic driver loading via `libloading` -- zero build-time SDK dependency
 - `DeviceBuffer<T>` with Rust ownership semantics -- `Send + Sync`, RAII
 - Type-safe `launch!` macro with compile-time grid/block validation
 - CUDA Runtime API layer for high-level device management
+- NVRTC runtime JIT (CUDA-C to PTX) loaded the same way -- no `nvcc`, and
+  absence degrades to a typed error rather than a panic
 
 **Vol.2 -- PTX Codegen & Autotuner** (2 crates, 47,429 SLoC)
 - Rust DSL that generates PTX IR covering SM 7.5 through SM 10.0
@@ -216,6 +218,7 @@ fn main() -> Result<(), oxicuda::Error> {
 | `oxicuda-memory` | cuMemAlloc | DeviceBuffer, PinnedBuffer, unified, pool | 6,812 | 301 |
 | `oxicuda-launch` | cuLaunchKernel | Dim3, LaunchParams, `launch!` macro | 5,506 | 231 |
 | `oxicuda-runtime` | CUDA Runtime | High-level cudaRT API layer | 4,955 | 126 |
+| `oxicuda-nvrtc` | NVRTC | Runtime CUDA-C to PTX JIT, dlopen'd libnvrtc | 642 | 20 |
 | **Vol.2 -- PTX Codegen & Autotuner** | | | | |
 | `oxicuda-ptx` | nvcc / CUTLASS | PTX IR, codegen DSL, Tensor Core gen | 35,030 | 1,034 |
 | `oxicuda-autotune` | -- | Search space, benchmark, tuning DB | 16,500 | 472 |
@@ -341,7 +344,7 @@ fn main() -> Result<(), oxicuda::Error> {
 | `oxicuda-geom2d` | -- | Delaunay/Voronoi/convex-hull/sweep-line | 11,071 | 301 |
 | **Umbrella** | | | | |
 | `oxicuda` | -- | Umbrella re-export crate | 21,496 | 526 |
-| | | **Total** | **~1,295,285** | **38,622** |
+| | | **Total** | **~1,296,155** | **38,646** |
 
 ## Feature Flags
 
@@ -350,6 +353,7 @@ fn main() -> Result<(), oxicuda::Error> {
 | `driver` | on | CUDA driver API layer |
 | `memory` | on | Device/pinned/unified memory |
 | `launch` | on | Kernel launch primitives |
+| `nvrtc` | off | NVRTC runtime JIT compiler (CUDA-C to PTX) |
 | `ptx` | off | PTX IR codegen DSL |
 | `autotune` | off | Runtime autotuner with disk cache |
 | `blas` | off | BLAS L1/L2/L3 and GEMM |
@@ -487,6 +491,12 @@ cargo nextest run --all-features
 - `oxicuda-blas`'s `bf16_gemm_error` and `oxicuda-gen`'s `lora::merge::scale_adapter` now honor their documented contracts instead of panicking: the former returns `0.0` for degenerate (empty-product) dimensions, the latter returns `GenResult<LoraLinear>` on a reconstruction failure
 - Workspace-wide: eliminated the remaining 42 production-code `.expect()` call sites across 22 crates, completing the workspace's zero-unwrap policy (0 unwrap/expect in library code now, verified)
 - Test suite expanded to 38,622 passing tests (`--all-features`; 37,296 with default features), up from 38,612/37,288 at 0.4.1
+
+**Released (v0.5.1) -- 2026-07-22** *(38,646 tests passing, ~1.30M SLoC, 74 crates)*
+- New crate `oxicuda-nvrtc` -- a runtime loader for NVIDIA's NVRTC (the CUDA-C to PTX JIT compiler), completing the runtime-JIT half of the zero-SDK-dependency story alongside `oxicuda-driver`: it `dlopen`s `libnvrtc` via `libloading` with no `#[link]`, no `build.rs`, and no `-lnvrtc`, and caches the resolved function table process-wide
+- Degrades gracefully on a host without NVRTC -- `is_available()` returns `false` and every entry point returns a typed `NvrtcError::Unavailable` naming the libraries that were tried; optional entry points (CUBIN retrieval, C++ name expressions, supported-arch queries) return `NvrtcError::NotSupported` on older runtimes rather than failing the whole library load
+- `Ptx::as_str()` feeds `oxicuda_driver::Module::from_ptx` directly, so hand-written CUDA-C can be compiled and launched without leaving the workspace
+- Exposed from the umbrella as `oxicuda::nvrtc` behind the `nvrtc` feature (off by default); 20 new tests, bringing the workspace to 74 members
 
 **Next**
 - Published documentation on docs.rs

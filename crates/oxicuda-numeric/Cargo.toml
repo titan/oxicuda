@@ -22,9 +22,9 @@ num-complex.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
-oxicuda-driver = { workspace = true }
-oxicuda-memory = { workspace = true }
-oxicuda-launch = { workspace = true }
+oxicuda-driver = { path = "../oxicuda-driver" }
+oxicuda-memory = { path = "../oxicuda-memory" }
+oxicuda-launch = { path = "../oxicuda-launch" }
 
 [lints]
 workspace = true

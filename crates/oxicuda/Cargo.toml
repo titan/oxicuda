@@ -16,6 +16,7 @@ oxicuda-backend.workspace = true
 oxicuda-driver.workspace = true
 oxicuda-memory.workspace = true
 oxicuda-launch.workspace = true
+oxicuda-nvrtc = { workspace = true, optional = true }
 oxicuda-ptx = { workspace = true, optional = true }
 oxicuda-autotune = { workspace = true, optional = true }
 oxicuda-blas = { workspace = true, optional = true }
@@ -41,6 +42,7 @@ driver = []
 memory = []
 launch = []
 backend = []
+nvrtc = ["dep:oxicuda-nvrtc"]
 ptx = ["dep:oxicuda-ptx"]
 autotune = ["dep:oxicuda-autotune", "ptx"]
 blas = ["dep:oxicuda-blas"]

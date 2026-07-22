@@ -199,6 +199,10 @@ pub use oxicuda_launch as launch;
 
 // ─── Optional crates (feature-gated) ────────────────────────
 
+/// NVRTC runtime JIT compiler (CUDA-C source → PTX).
+#[cfg(feature = "nvrtc")]
+pub use oxicuda_nvrtc as nvrtc;
+
 /// PTX code generation DSL.
 #[cfg(feature = "ptx")]
 pub use oxicuda_ptx as ptx;
@@ -296,6 +300,8 @@ pub fn init() -> CudaResult<()> {
 
 /// Compile-time feature availability.
 pub mod features {
+    /// Whether the NVRTC runtime JIT compiler wrapper is available.
+    pub const HAS_NVRTC: bool = cfg!(feature = "nvrtc");
     /// Whether PTX code generation is available.
     pub const HAS_PTX: bool = cfg!(feature = "ptx");
     /// Whether the autotuner is available.

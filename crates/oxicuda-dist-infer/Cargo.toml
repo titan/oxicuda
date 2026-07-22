@@ -29,6 +29,6 @@ gpu-tests = []
 thiserror.workspace = true
 
 [dev-dependencies]
-oxicuda-driver = { workspace = true }
-oxicuda-memory = { workspace = true }
-oxicuda-launch = { workspace = true }
+oxicuda-driver = { path = "../oxicuda-driver" }
+oxicuda-memory = { path = "../oxicuda-memory" }
+oxicuda-launch = { path = "../oxicuda-launch" }

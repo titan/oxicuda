@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-07-22
+
+### Added
+
+- **`oxicuda-nvrtc`** — a new pure-Rust runtime loader for NVIDIA's NVRTC shared library (CUDA-C → PTX JIT compiler), completing the runtime-JIT half of the "zero SDK dependency" story alongside `oxicuda-driver`. It `dlopen`s `libnvrtc` via `libloading` (no `#[link]`, no `build.rs`, no `-lnvrtc`), caches the resolved function table process-wide, and degrades gracefully: `is_available()` returns `false` and every entry point returns a typed `NvrtcError::Unavailable` on a host without NVRTC, while optional entry points (CUBIN retrieval, C++ name expressions, supported-arch queries) return `NvrtcError::NotSupported` when absent from an older runtime rather than failing the load. Public surface: `Program` (RAII, `Send`), `Ptx` (NUL-terminated output whose `as_str()` feeds `oxicuda_driver::Module::from_ptx` directly), `Header`, `compile_to_ptx`, `version`, `supported_archs`, and `is_available`. Exposed from the `oxicuda` umbrella behind the `nvrtc` feature as `oxicuda::nvrtc`.
+
 ## [0.5.0] - 2026-07-14
 
 This release continues the on-device PTX correctness sweep, narrowing in this time on `oxicuda-ptx`'s elementwise/reduction kernel templates and the `oxicuda-blas` GEMM scalar path — fixing a class of F64-precision code-generation bugs that made `ptxas` reject the kernel outright, plus a mixed-precision GEMM bug that silently corrupted results instead of failing loud.

@@ -26,8 +26,8 @@ num-traits = { workspace = true }
 
 [dev-dependencies]
 approx = { workspace = true }
-oxicuda-memory = { workspace = true }
-oxicuda-launch = { workspace = true }
+oxicuda-memory = { path = "../oxicuda-memory" }
+oxicuda-launch = { path = "../oxicuda-launch" }
 
 [package.metadata.docs.rs]
 all-features = true
