@@ -506,6 +506,11 @@ cargo nextest run --all-features
 - Windows portability fixes across `ptxas`-invoking tests in `oxicuda-blas`, `oxicuda-dnn`, `oxicuda-ptx`, `oxicuda-solver`, `oxicuda-sparse`, and `oxicuda-signal`: tests now find `ptxas.exe`, assemble to a throwaway file instead of `/dev/null` (not openable on Windows), and surface `ptxas`'s stdout in failure messages
 - Test suite expanded to 38,675 passing tests (`--all-features`; 37,320 with default features), up from 38,646/37,316 at 0.5.1
 
+**Released (v0.5.3) -- 2026-07-27** *(38,675 tests passing, ~1.30M SLoC, 74 crates)*
+- `oxicuda-fft` (`transforms::c2c`, `c2r`, `fft2d`, `fft3d`, `r2c`): fixed an async-copy race where the shared `copy_dtoh_async`/`copy_htod_async` helpers enqueued `cuMemcpyDtoHAsync`/`cuMemcpyHtoDAsync` but returned before the copy actually completed, letting the caller read a still-in-flight (effectively zeroed) buffer or drop the source before the upload landed -- both helpers now call `stream.synchronize()` before returning
+- `oxicuda-memory`: `DeviceBuffer::copy_from_host` only blocked until the host source was staged into the driver's DMA buffer, not until the transfer to device memory itself completed -- since every OxiCUDA `Stream` uses `CU_STREAM_NON_BLOCKING`, a kernel issued right after `copy_from_host` on such a stream could observe pre-upload zeros; it now also calls `cuCtxSynchronize`, mirroring `zeroed`'s existing behavior
+- Test count unchanged at 38,675 passing (`--all-features`; 37,320 with default features) -- this release is a correctness fix, not a feature addition
+
 **Next**
 - Published documentation on docs.rs
 - GPU hardware benchmark validation (CI regression tracking)

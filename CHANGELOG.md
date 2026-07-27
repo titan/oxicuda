@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-07-27
+
+This release fixes a class of asynchronous-copy race conditions: on a non-blocking stream, a
+`cuMemcpy*Async`/`cuMemcpyHtoD_v2` call can return before the transfer has actually landed in
+device or host memory, letting the very next read observe stale or zeroed data instead of the
+copied result.
+
+### Fixed
+
+- `oxicuda-fft` (`transforms::c2c`, `c2r`, `fft2d`, `fft3d`, `r2c`): the shared `copy_dtoh_async` /
+  `copy_htod_async` helpers enqueued `cuMemcpyDtoHAsync`/`cuMemcpyHtoDAsync` but returned before
+  the copy actually completed — `dst` (an ordinary pageable `Vec`) could still be mid-transfer
+  when the caller's very next line read it (for the host-fallback DFT), or `src` was dropped
+  before the upload landed (for the host-to-device path), producing a silently all-zero transform
+  or a driver read of freed host memory under load. Both helpers now call `stream.synchronize()`
+  before returning.
+- `oxicuda-memory`: `DeviceBuffer::copy_from_host` (`cuMemcpyHtoD_v2`) only blocked until `src` was
+  staged into the driver's DMA buffer, not until the transfer to device memory itself completed —
+  and every OxiCUDA `Stream` is created with `CU_STREAM_NON_BLOCKING`, which by definition does not
+  implicitly synchronize with the legacy default stream that `cuMemcpyHtoD_v2` uses. A kernel or
+  copy issued on a non-blocking stream immediately after `copy_from_host` could therefore observe
+  the buffer before the upload landed and read zeros. `copy_from_host` now also calls
+  `cuCtxSynchronize`, mirroring the existing behavior of `zeroed`.
+
 ## [0.5.2] - 2026-07-27
 
 This release fixes a class of PTX portability bugs surfaced by newer CUDA toolchains and Windows

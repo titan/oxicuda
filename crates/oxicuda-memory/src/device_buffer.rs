@@ -225,7 +225,16 @@ impl<T: Copy> DeviceBuffer<T> {
         let rc = unsafe {
             (api.cu_memcpy_htod_v2)(self.ptr, src.as_ptr().cast::<c_void>(), self.byte_size())
         };
-        oxicuda_driver::check(rc)
+        oxicuda_driver::check(rc)?;
+        // `cuMemcpyHtoD_v2` is only "synchronous" in the sense that it returns
+        // once `src` (pageable memory) has been staged into the driver's DMA
+        // buffer -- the transfer to device memory itself completes later, on the
+        // legacy default stream. Every OxiCUDA `Stream` is created with
+        // `CU_STREAM_NON_BLOCKING`, which by definition does *not* implicitly
+        // synchronise with the default stream, so a kernel or copy issued on one
+        // can observe this buffer before the upload lands and silently read
+        // zeros. Block until the DMA has completed, mirroring `zeroed`.
+        oxicuda_driver::check(unsafe { (api.cu_ctx_synchronize)() })
     }
 
     /// Copies this device buffer's contents into a host slice (synchronous).

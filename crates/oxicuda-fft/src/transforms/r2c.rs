@@ -200,6 +200,15 @@ fn post_process_r2c(
     Ok(())
 }
 
+/// Copies `dst.len()` elements device->host and **blocks until the copy has
+/// landed**.
+///
+/// The enqueue itself uses `cuMemcpyDtoHAsync`, but every caller reads `dst` on
+/// the very next line, and `dst` is an ordinary pageable `Vec` -- the driver is
+/// free to complete such a copy after the call returns. Without the join the
+/// host DFT below can run over the buffer's initial zeros and silently produce
+/// an all-zero transform; the failure is timing-dependent and only shows up when
+/// the GPU is busy, which makes it look like a flake rather than a bug.
 fn copy_dtoh_async<T: Copy>(dst: &mut [T], src: CUdeviceptr, stream: &Stream) -> FftResult<()> {
     let api = oxicuda_driver::try_driver()?;
     let byte_count = std::mem::size_of_val(dst);
@@ -212,9 +221,16 @@ fn copy_dtoh_async<T: Copy>(dst: &mut [T], src: CUdeviceptr, stream: &Stream) ->
         )
     };
     oxicuda_driver::check(rc)?;
+    stream.synchronize()?;
     Ok(())
 }
 
+/// Copies `src.len()` elements host->device and **blocks until the copy has
+/// landed**.
+///
+/// `src` is a caller-local `Vec` that is dropped as soon as the enclosing batch
+/// iteration ends, so returning while the copy is still in flight would let the
+/// driver read freed host memory. See `copy_dtoh_async` for the mirrored hazard.
 fn copy_htod_async<T: Copy>(dst: CUdeviceptr, src: &[T], stream: &Stream) -> FftResult<()> {
     let api = oxicuda_driver::try_driver()?;
     let byte_count = std::mem::size_of_val(src);
@@ -227,6 +243,7 @@ fn copy_htod_async<T: Copy>(dst: CUdeviceptr, src: &[T], stream: &Stream) -> Fft
         )
     };
     oxicuda_driver::check(rc)?;
+    stream.synchronize()?;
     Ok(())
 }
 
