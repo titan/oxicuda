@@ -550,11 +550,15 @@ fn implicit_gemm_multichannel_3x3_nhwc() {
 fn ptxas_assembles(ptx: &str, tag: &str) -> Result<(), String> {
     let path = std::env::temp_dir().join(format!("oxicuda_{tag}.ptx"));
     std::fs::write(&path, ptx).map_err(|e| e.to_string())?;
+    // Assemble to a throwaway file rather than a null device: `/dev/null` is not
+    // openable on Windows, where ptxas then fails for a reason unrelated to the
+    // PTX under test.
+    let cubin = std::env::temp_dir().join(format!("oxicuda_{tag}.cubin"));
     let out = match Command::new("ptxas")
         .arg("-arch=sm_86")
         .arg(&path)
         .arg("-o")
-        .arg("/dev/null")
+        .arg(&cubin)
         .output()
     {
         Ok(o) => o,
@@ -563,10 +567,16 @@ fn ptxas_assembles(ptx: &str, tag: &str) -> Result<(), String> {
             return Ok(());
         }
     };
+    let _ = std::fs::remove_file(&cubin);
     if out.status.success() {
         Ok(())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).into_owned())
+        // ptxas prints its diagnostics on stdout, not stderr.
+        Err(format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ))
     }
 }
 

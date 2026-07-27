@@ -105,7 +105,7 @@ pub fn emit_pretwiddle_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     setp.eq.u64     %p_k0, %tid64, 0;
     @%p_k0 mul.{ty} %xk, %xk, {half_imm};
 
-    // Load twiddle cos(πk/2N) and sin(πk/2N)
+    // Load twiddle cos(pi*k/2N) and sin(pi*k/2N)
     mul.lo.u64      %off2, %tid64, {bytes2};
     add.u64         %addr, %tw_base, %off2;
     ld.global.{ty}  %cw, [%addr];
@@ -198,7 +198,7 @@ pub fn emit_unpermute_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     @!%p_even sub.u64 %in_idx, %in_idx, %tid64;
     @!%p_even shr.u64 %in_idx, %in_idx, 1;
 
-    // Load y[in_idx]  (real part only; IFFT interleaved → step by 2 scalars)
+    // Load y[in_idx]  (real part only; IFFT interleaved -> step by 2 scalars)
     // The caller stores the full real IFFT output as stride-2 from interleaved.
     // Convention: y_ptr points to real part buffer (already extracted by caller).
     mul.lo.u64      %off, %in_idx, {bytes};

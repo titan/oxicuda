@@ -130,10 +130,13 @@ fn ptxas_prescreen(ptx: &str, entry: &str, sm: SmVersion) {
         .output();
     let _ = std::fs::remove_file(&path);
     if let Ok(out) = out {
+        // ptxas writes its diagnostics to stdout, not stderr; reporting only
+        // stderr leaves the panic message empty and the failure undiagnosable.
         assert!(
             out.status.success(),
-            "ptxas rejected `{entry}` for {}:\n{}",
+            "ptxas rejected `{entry}` for {}:\n{}{}\n--- PTX ---\n{ptx}",
             sm.as_ptx_str(),
+            String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
     }

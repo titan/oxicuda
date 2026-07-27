@@ -397,6 +397,40 @@ pub struct Module {
 /// Size of the JIT log buffers in bytes.
 const JIT_LOG_BUFFER_SIZE: usize = 4096;
 
+/// Replaces every non-ASCII byte in `ptx` with `?`, returning `None` when the
+/// input is already pure ASCII (the overwhelmingly common case, which then costs
+/// no allocation).
+///
+/// `ptxas` and the driver's JIT reject **any** non-ASCII byte in a PTX module —
+/// including inside `//` comments, which carry no semantics at all. CUDA 11.x
+/// accepted such modules silently, so a generator that emitted a typographic
+/// character in a comment (`x`, `->`, box-drawing rules) worked for years and
+/// then began failing with `CUDA_ERROR_INVALID_PTX` on CUDA 12.9+ toolchains,
+/// with no indication of which character or which kernel was at fault.
+///
+/// Individual generators in this workspace have been corrected to emit ASCII,
+/// but every PTX string in every dependent crate funnels through `Module`, so
+/// scrubbing here means a stray non-ASCII comment can never again turn into an
+/// opaque load failure. Each non-ASCII character is replaced with one `?` per
+/// UTF-8 byte it occupies, so total byte length — and therefore all offsets —
+/// stays stable and JIT diagnostics still point at the right line and column.
+fn ascii_only(ptx: &str) -> Option<String> {
+    if ptx.is_ascii() {
+        return None;
+    }
+    let mut scrubbed = String::with_capacity(ptx.len());
+    for c in ptx.chars() {
+        if c.is_ascii() {
+            scrubbed.push(c);
+        } else {
+            for _ in 0..c.len_utf8() {
+                scrubbed.push('?');
+            }
+        }
+    }
+    Some(scrubbed)
+}
+
 impl Module {
     /// Loads a module from PTX source with default JIT options.
     ///
@@ -410,6 +444,10 @@ impl Module {
     /// call fails (e.g. no current context).
     pub fn from_ptx(ptx: &str) -> CudaResult<Self> {
         let api = try_driver()?;
+        // See `ascii_only`: the JIT rejects non-ASCII bytes anywhere in the
+        // module, comments included.
+        let scrubbed = ascii_only(ptx);
+        let ptx = scrubbed.as_deref().unwrap_or(ptx);
         let c_ptx = CString::new(ptx).map_err(|_| CudaError::InvalidValue)?;
         let mut raw = CUmodule::default();
         crate::cuda_call!((api.cu_module_load_data)(
@@ -433,6 +471,9 @@ impl Module {
     /// call otherwise errors.
     pub fn from_ptx_with_options(ptx: &str, options: &JitOptions) -> CudaResult<(Self, JitLog)> {
         let api = try_driver()?;
+        // See `ascii_only`.
+        let scrubbed = ascii_only(ptx);
+        let ptx = scrubbed.as_deref().unwrap_or(ptx);
         let c_ptx = CString::new(ptx).map_err(|_| CudaError::InvalidValue)?;
 
         // Allocate log buffers on the heap.
@@ -621,6 +662,36 @@ fn buf_to_string(buf: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── ascii_only ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn ascii_only_leaves_pure_ascii_untouched() {
+        // Pure-ASCII PTX must not be copied at all.
+        assert!(ascii_only(".version 7.1\n.target sm_86\n").is_none());
+    }
+
+    #[test]
+    fn ascii_only_scrubs_non_ascii_comment() {
+        // The exact shape that made CUDA 12.9+ reject the generated f64 GEMM:
+        // typographic characters inside a PTX comment.
+        let ptx = "    // total_elems = M*N (64-bit: 32×32→64 widening)\n";
+        let scrubbed = ascii_only(ptx).expect("non-ASCII input must be scrubbed");
+        assert!(scrubbed.is_ascii(), "output must be pure ASCII");
+        assert!(scrubbed.starts_with("    // total_elems = M*N (64-bit: 32"));
+        assert!(scrubbed.ends_with(" widening)\n"));
+    }
+
+    #[test]
+    fn ascii_only_preserves_byte_offsets() {
+        // Byte-for-byte substitution keeps JIT line/column diagnostics accurate.
+        let ptx = "// ── x\nmov.u32 %r0, 1;\n";
+        let scrubbed = ascii_only(ptx).expect("non-ASCII input must be scrubbed");
+        assert_eq!(scrubbed.len(), ptx.len());
+        assert_eq!(scrubbed.lines().count(), ptx.lines().count());
+        // Instruction lines are untouched.
+        assert!(scrubbed.contains("mov.u32 %r0, 1;"));
+    }
 
     // ── parse_ptxas_line ──────────────────────────────────────────────────────
 

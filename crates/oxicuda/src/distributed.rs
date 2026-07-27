@@ -574,13 +574,34 @@ impl FileLockGuard {
                         path: path.to_path_buf(),
                     });
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(e) if Self::is_contention(&e) => {
                     std::thread::sleep(Self::RETRY_DELAY);
                 }
                 Err(_) => return Err(CudaError::InvalidValue),
             }
         }
         Err(CudaError::InvalidValue)
+    }
+
+    /// Whether `err` from the `create_new` attempt means "someone else holds
+    /// the lock right now" rather than a genuine, non-retryable failure.
+    ///
+    /// The obvious signal is [`ErrorKind::AlreadyExists`]. Windows adds a
+    /// second one: `DeleteFile` on a sentinel that still has an open handle
+    /// only *marks* it for deletion, and until the last handle closes the name
+    /// stays in the directory in a "delete pending" state. `CreateFileW` on a
+    /// delete-pending name fails with `ERROR_ACCESS_DENIED` (5), surfacing as
+    /// [`ErrorKind::PermissionDenied`] — so on Windows the releasing thread's
+    /// own `remove_file` makes concurrent acquirers see `PermissionDenied` for
+    /// a brief window. Treating that as fatal turned ordinary contention into
+    /// spurious `InvalidValue` failures; it is retryable, exactly like
+    /// `AlreadyExists`. A real permission problem still fails, just after the
+    /// bounded retry loop rather than immediately.
+    fn is_contention(err: &std::io::Error) -> bool {
+        if err.kind() == std::io::ErrorKind::AlreadyExists {
+            return true;
+        }
+        cfg!(windows) && err.kind() == std::io::ErrorKind::PermissionDenied
     }
 }
 

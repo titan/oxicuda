@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-07-27
+
+This release fixes a class of PTX portability bugs surfaced by newer CUDA toolchains and Windows
+hosts: non-ASCII characters in generated PTX comments silently worked through CUDA 11.x and began
+failing module load on CUDA 12.9+, and several test/runtime code paths assumed Unix-only filesystem
+and PATH conventions. It also fixes a numerical-correctness bug in the tensor-network DMRG
+excited-states solver.
+
+### Fixed
+
+- `oxicuda-driver`: `Module::from_ptx` / `Module::from_ptx_with_options` now scrub any non-ASCII
+  byte out of the PTX source (new internal `ascii_only()` helper) before submitting it to the
+  JIT. `ptxas` and the driver's JIT reject non-ASCII bytes anywhere in a module — including inside
+  `//` comments, which carry no semantics at all — but CUDA 11.x accepted such modules silently,
+  so a generator that emitted a typographic character in a comment worked for years and then began
+  failing with `CUDA_ERROR_INVALID_PTX` on CUDA 12.9+ toolchains with no indication of which
+  character or kernel was at fault. Substitution is byte-for-byte, so JIT diagnostics still point
+  at the correct line and column.
+- `oxicuda-ptx` (`templates::gemm`), `oxicuda-fft` (`callbacks`), `oxicuda-launch`
+  (`dynamic_parallelism`), `oxicuda-signal` (`dct::dct2`, `dct::dct3`, `dwt::haar`,
+  `filter::fir`): generated PTX comments no longer contain typographic Unicode (em dashes, `×`,
+  `→`, `π`, `√`, `Σ`, box-drawing rules) — replaced with ASCII equivalents (`-`, `x`, `->`, `pi`,
+  `sqrt`, `sum`, `----`) so the generated kernels themselves no longer trip the CUDA 12.9+
+  non-ASCII rejection that `oxicuda-driver`'s new scrubber now also guards against defensively.
+- `oxicuda-tn`: the DMRG excited-states penalty method (`optimise_with_penalty`) now rotates each
+  prior state's two-site tensor into the current state's block basis (new
+  `overlap_env_left`/`overlap_env_right`/`prior_two_site_projector`, contracting the overlap
+  transfer matrices between the two states' left/right blocks) before applying the
+  `ω·Σᵢ|Θᵢ⟩⟨Θᵢ|` penalty. Previously it normalised and applied the prior state's *raw* two-site
+  tensor directly, which is only meaningful if both states shared a bond basis — they do not, since
+  each is canonicalised independently by its own SVDs — so the penalty pushed against an
+  essentially arbitrary direction and left the "excited" state free to retain a large overlap with
+  previously found states instead of being repelled from them.
+- `oxicuda`: `FileLockGuard`'s lock-acquisition retry loop now also treats Windows'
+  `ErrorKind::PermissionDenied` as retryable contention (new `is_contention()` helper), not just
+  `ErrorKind::AlreadyExists`. On Windows, deleting a lock file only marks it "delete pending" until
+  the last open handle closes, so a concurrent acquirer's `CreateFileW` briefly surfaces
+  `ERROR_ACCESS_DENIED` for what is actually ordinary lock contention — previously misreported as a
+  fatal `InvalidValue` instead of being retried.
+- `oxicuda-memory`: the `managed_hints` test for `MigrationPolicy::PreferDevice(0)` now checks
+  `supports_concurrent_managed_access()` before asserting the call succeeds.
+  `cuMemAdvise(SET_PREFERRED_LOCATION, <gpu>)` is only accepted when the target device reports
+  `CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS`, which is always `0` on WDDM (Windows) GPUs, so a
+  *correct* driver call still fails there — the test previously asserted success unconditionally,
+  which tested the host platform rather than the crate, and now asserts the documented
+  `InvalidDevice` rejection on hosts without that capability.
+- Test infrastructure across `oxicuda-blas`, `oxicuda-dnn`, `oxicuda-ptx`, `oxicuda-solver`,
+  `oxicuda-sparse`, and `oxicuda-signal`: `ptxas`-invoking tests now also probe `ptxas.exe` on
+  Windows (previously probed only the bare `ptxas` name and silently skipped there), assemble to a
+  throwaway `.cubin` file instead of `/dev/null` (not openable on Windows, where `ptxas` then
+  failed for a reason unrelated to the PTX under test), and report `ptxas`'s stdout in failure
+  messages, where it actually writes its diagnostics, instead of only stderr, which previously
+  produced empty or misleading assertion messages on rejection.
+
 ## [0.5.1] - 2026-07-22
 
 ### Added

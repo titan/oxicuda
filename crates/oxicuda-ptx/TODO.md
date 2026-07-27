@@ -106,7 +106,7 @@ The PTX crate is the largest in Vol.1+2 and the core differentiator of OxiCUDA. 
 ## Quality Status
 
 - Warnings: 0
-- Tests: 1034 unit + 29 doc passing (0.5.0: added F64 elementwise/reduction register-width and transcendental-precision-validation regression tests; previously added cp_async_gen + fusion_cost_model)
+- Tests: 1035 unit + 31 doc passing (0.5.0: added F64 elementwise/reduction register-width and transcendental-precision-validation regression tests; previously added cp_async_gen + fusion_cost_model)
 - unwrap() calls: 0 (production code; tests use `.unwrap()` on infallible `new()` fixtures)
 - Clippy: clean (pedantic + nursery)
 - `#![deny(unsafe_code)]` -- entire crate is safe Rust

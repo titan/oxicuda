@@ -233,7 +233,7 @@ pub fn emit_fir_direct_kernel(prec: SignalPrecision, sm: SmVersion) -> String {
     format!(
         r"{header}
 // Kernel: fir_direct
-// y[n] = Σ_k h[k] * x[n - k]  (zero-boundary)
+// y[n] = sum_k h[k] * x[n - k]  (zero-boundary)
 // Params: x_ptr, y_ptr, h_ptr, n (signal length), m (filter length), all u64
 .visible .entry fir_direct(
     .param .u64 x_ptr,

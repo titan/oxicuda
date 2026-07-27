@@ -777,7 +777,7 @@ fn align_up(value: u32, align: u32) -> u32 {
 ///   parameter buffer and a `cudaStream_t`, and returns a `cudaError_t`.
 fn append_device_runtime_externs(ptx: &mut String) {
     ptx.push_str(
-        "// CUDA device runtime (cudadevrt) entry points — resolved at link time\n\
+        "// CUDA device runtime (cudadevrt) entry points - resolved at link time\n\
          .extern .func (.param .b64 func_retval0) cudaGetParameterBufferV2\n\
          (\n\
          \x20   .param .b64 cudaGetParameterBufferV2_param_0,\n\

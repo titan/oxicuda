@@ -804,17 +804,23 @@ mod tests {
             let mut ptx_path = std::env::temp_dir();
             ptx_path.push(format!("oxicuda_wmma_{}.ptx", std::process::id()));
             std::fs::write(&ptx_path, &ptx).expect("write PTX");
+            // Assemble to a throwaway file rather than a null device:
+            // `/dev/null` is not openable on Windows.
+            let cubin = ptx_path.with_extension("cubin");
             let out = std::process::Command::new(&ptxas)
                 .arg("-arch=sm_80")
                 .arg(&ptx_path)
                 .arg("-o")
-                .arg("/dev/null")
+                .arg(&cubin)
                 .output()
                 .expect("invoke ptxas");
             let _ = std::fs::remove_file(&ptx_path);
+            let _ = std::fs::remove_file(&cubin);
             assert!(
                 out.status.success(),
-                "ptxas rejected WMMA kernel:\n{}\n--- PTX ---\n{ptx}",
+                // ptxas prints its diagnostics on stdout, not stderr.
+                "ptxas rejected WMMA kernel:\n{}{}\n--- PTX ---\n{ptx}",
+                String::from_utf8_lossy(&out.stdout),
                 String::from_utf8_lossy(&out.stderr)
             );
         }
@@ -822,11 +828,16 @@ mod tests {
 
     /// Locate `ptxas` for on-toolchain assembly checks (skips gracefully).
     fn find_ptxas() -> Option<std::path::PathBuf> {
+        // Windows names the binary `ptxas.exe`; probing only the bare name made
+        // every ptxas assembly check silently skip there, so the toolchain was
+        // never actually exercised on that platform.
         if let Ok(path) = std::env::var("PATH") {
             for dir in std::env::split_paths(&path) {
-                let candidate = dir.join("ptxas");
-                if candidate.is_file() {
-                    return Some(candidate);
+                for name in ["ptxas", "ptxas.exe"] {
+                    let candidate = dir.join(name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
                 }
             }
         }
@@ -925,17 +936,23 @@ mod tests {
             let mut ptx_path = std::env::temp_dir();
             ptx_path.push(format!("oxicuda_wgmma_fp8_{}.ptx", std::process::id()));
             std::fs::write(&ptx_path, &ptx).expect("write PTX");
+            // Assemble to a throwaway file rather than a null device:
+            // `/dev/null` is not openable on Windows.
+            let cubin = ptx_path.with_extension("cubin");
             let out = std::process::Command::new(&ptxas)
                 .arg("-arch=sm_90a")
                 .arg(&ptx_path)
                 .arg("-o")
-                .arg("/dev/null")
+                .arg(&cubin)
                 .output()
                 .expect("invoke ptxas");
             let _ = std::fs::remove_file(&ptx_path);
+            let _ = std::fs::remove_file(&cubin);
             assert!(
                 out.status.success(),
-                "ptxas rejected FP8 wgmma:\n{}\n--- PTX ---\n{ptx}",
+                // ptxas prints its diagnostics on stdout, not stderr.
+                "ptxas rejected FP8 wgmma:\n{}{}\n--- PTX ---\n{ptx}",
+                String::from_utf8_lossy(&out.stdout),
                 String::from_utf8_lossy(&out.stderr)
             );
         }

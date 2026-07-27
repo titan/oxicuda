@@ -10,7 +10,7 @@ Part of the [OxiCUDA](https://github.com/cool-japan/oxicuda) ecosystem — Pure 
 
 | Version | Tests | Date |
 |---------|-------|------|
-| 0.5.1 | 239 passing | 2026-07-14 |
+| 0.5.2 | 239 passing | 2026-07-27 |
 | 0.4.0 | 239 passing | 2026-07-01 |
 | 0.3.0 | 233 passing | 2026-06-25 |
 | 0.2.0 | 133 passing | 2026-06-16 |

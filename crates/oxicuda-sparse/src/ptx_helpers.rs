@@ -255,17 +255,29 @@ pub(crate) mod test_support {
             f.write_all(ptx.as_bytes())
                 .expect("test: write temp PTX file");
         }
-        match std::process::Command::new("ptxas")
+        // Assemble to a throwaway file rather than a null device: `/dev/null` is
+        // not openable on Windows, where ptxas then fails for a reason that has
+        // nothing to do with the PTX under test.
+        let cubin = std::env::temp_dir().join(format!("oxicuda_sparse_{name}.cubin"));
+        let outcome = match std::process::Command::new("ptxas")
             .arg("-arch=sm_86")
             .arg(&path)
             .arg("-o")
-            .arg("/dev/null")
+            .arg(&cubin)
             .output()
         {
             Ok(out) if out.status.success() => PtxasOutcome::Ok,
-            Ok(out) => PtxasOutcome::Rejected(String::from_utf8_lossy(&out.stderr).into_owned()),
+            // ptxas prints its diagnostics on stdout, not stderr; capturing
+            // only stderr leaves the rejection message empty.
+            Ok(out) => PtxasOutcome::Rejected(format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            )),
             Err(_) => PtxasOutcome::Unavailable,
-        }
+        };
+        let _ = std::fs::remove_file(&cubin);
+        outcome
     }
 
     /// Asserts that `ptx` assembles for `sm_86` (or skips if `ptxas` is absent)

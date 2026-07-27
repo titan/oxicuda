@@ -833,16 +833,26 @@ mod tests {
         let dir = std::env::temp_dir();
         let src = dir.join(format!("oxicuda_chol_{tag}.ptx"));
         std::fs::write(&src, ptx).map_err(|e| format!("write ptx: {e}"))?;
+        // Assemble to a throwaway file rather than a null device: `/dev/null` is
+        // not openable on Windows, where ptxas then fails for a reason unrelated
+        // to the PTX under test.
+        let cubin = dir.join(format!("oxicuda_chol_{tag}.cubin"));
         let out = Command::new("ptxas")
             .arg("-arch=sm_86")
             .arg(&src)
             .arg("-o")
-            .arg("/dev/null")
+            .arg(&cubin)
             .output();
         let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&cubin);
         match out {
             Ok(o) if o.status.success() => Ok(()),
-            Ok(o) => Err(String::from_utf8_lossy(&o.stderr).into_owned()),
+            // ptxas prints its diagnostics on stdout, not stderr.
+            Ok(o) => Err(format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            )),
             Err(e) => {
                 eprintln!("skipping ptxas validation ({tag}): {e}");
                 Ok(())

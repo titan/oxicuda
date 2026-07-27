@@ -426,18 +426,29 @@ mod tests {
             f.write_all(ptx.as_bytes())
                 .expect("test: write temp PTX file");
         }
-        match std::process::Command::new("ptxas")
+        // Assemble to a throwaway file rather than a null device: `/dev/null` is
+        // not openable on Windows, where ptxas then fails for a reason that has
+        // nothing to do with the PTX under test.
+        let cubin = std::env::temp_dir().join(format!("oxicuda_spmv_{name}.cubin"));
+        let outcome = match std::process::Command::new("ptxas")
             .arg("-arch=sm_86")
             .arg(&path)
             .arg("-o")
-            .arg("/dev/null")
+            .arg(&cubin)
             .output()
         {
             Ok(out) if out.status.success() => Some(Ok(())),
-            Ok(out) => Some(Err(String::from_utf8_lossy(&out.stderr).into_owned())),
+            // ptxas prints its diagnostics on stdout, not stderr.
+            Ok(out) => Some(Err(format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ))),
             // ptxas missing (no CUDA toolkit): skip gracefully.
             Err(_) => None,
-        }
+        };
+        let _ = std::fs::remove_file(&cubin);
+        outcome
     }
 
     /// The f64 scalar and vector SpMV kernels must be well-formed double-precision

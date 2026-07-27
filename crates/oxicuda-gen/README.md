@@ -64,8 +64,8 @@ assert_eq!(combined.len(), 64);
 
 | Item | Value |
 |------|-------|
-| Version | 0.5.1 |
-| Release date | 2026-07-14 |
+| Version | 0.5.2 |
+| Release date | 2026-07-27 |
 | Default features | Pure Rust (`thiserror` only) |
 | `unwrap()` | 0 in production code |
 

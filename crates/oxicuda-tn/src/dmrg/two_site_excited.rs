@@ -339,21 +339,34 @@ fn optimise_with_penalty(
     }
 
     // ── Collect prior two-site tensors (penalty projectors) ──────────────────
-    // For each prior state we extract the two-site tensor at bond s, normalise it,
-    // and store it.  The penalty apply is: ω · Σᵢ ⟨Θᵢ|v⟩ Θᵢ.
+    //
+    // The penalty ω Σᵢ |ψᵢ⟩⟨ψᵢ|, restricted to the two-site variational space of
+    // this update, is ω Σᵢ |Θᵢᵉᶠᶠ⟩⟨Θᵢᵉᶠᶠ| where Θᵢᵉᶠᶠ is the prior state's
+    // two-site tensor **rotated into the current state's block bases**:
+    //
+    //     Θᵢᵉᶠᶠ[a,p₁,p₂,b] = Σ_{a',b'} L[a,a'] · Θᵢ[a',p₁,p₂,b'] · R[b,b']
+    //
+    // with L and R the overlap transfer matrices between the current MPS's and
+    // the prior MPS's left/right blocks (see [`prior_two_site_projector`]).
+    //
+    // Using the prior's *raw* Θᵢ instead only makes sense if both states shared
+    // a bond basis, which they do not: each is canonicalised by its own SVDs, so
+    // bond index `a` means something different in each. Penalising the raw
+    // tensor therefore pushes up an essentially arbitrary direction and leaves
+    // the "excited" state free to retain a large ⟨ψ₀|ψ₁⟩ overlap.
+    //
+    // The projectors are deliberately *not* renormalised: with the correct
+    // rotation ⟨Θᵢᵉᶠᶠ|Θ⟩ already equals ⟨ψᵢ|ψ⟩, so ω|Θᵢᵉᶠᶠ⟩⟨Θᵢᵉᶠᶠ| contributes
+    // exactly ω·|⟨ψᵢ|ψ⟩|² — the intended penalty energy. Rescaling it to unit
+    // norm would inflate the penalty by 1/‖Θᵢᵉᶠᶠ‖² whenever the current blocks
+    // only partially span |ψᵢ⟩.
     let mut penalty_vecs: Vec<Vec<f64>> = Vec::with_capacity(prior.len());
     for prior_mps in prior {
-        if prior_mps.n_sites() <= s + 1 {
-            continue;
-        }
-        match extract_two_site_tensor(prior_mps, s) {
+        match prior_two_site_projector(mps, prior_mps, s) {
             Ok(pv) => {
-                if pv.len() == n_theta {
-                    let nrm = dot_self(&pv).sqrt();
-                    if nrm > 1e-300 {
-                        let pv_n: Vec<f64> = pv.iter().map(|x| x / nrm).collect();
-                        penalty_vecs.push(pv_n);
-                    }
+                debug_assert_eq!(pv.len(), n_theta);
+                if dot_self(&pv) > 1e-300 {
+                    penalty_vecs.push(pv);
                 }
             }
             Err(_) => continue,
@@ -538,6 +551,171 @@ fn extract_two_site_tensor(mps: &Mps, s: usize) -> TnResult<Vec<f64>> {
         }
     }
     Ok(theta)
+}
+
+/// Overlap transfer matrix between the left blocks of `cur` and `prior`, i.e.
+/// the contraction of sites `0..s` of both states over their shared physical
+/// indices.
+///
+/// The result is row-major with shape `(cur.d_l at s) × (prior.d_l at s)`:
+/// entry `[a, a']` is ⟨block_a of `cur` | block_a' of `prior`⟩. For `s == 0` it
+/// is the 1×1 identity.
+fn overlap_env_left(cur: &Mps, prior: &Mps, s: usize) -> TnResult<(Vec<f64>, usize, usize)> {
+    let mut env = vec![1.0f64];
+    let (mut rows, mut cols) = (1usize, 1usize);
+    for t in 0..s {
+        let c = &cur.site_tensors[t];
+        let p = &prior.site_tensors[t];
+        if c.d_p != p.d_p {
+            return Err(TnError::DimensionMismatch { a: c.d_p, b: p.d_p });
+        }
+        if c.d_l != rows || p.d_l != cols {
+            return Err(TnError::DimensionMismatch { a: c.d_l, b: rows });
+        }
+        let (d, cr, pr) = (c.d_p, c.d_r, p.d_r);
+        let mut next = vec![0.0f64; cr * pr];
+        for ac in 0..rows {
+            for ap in 0..cols {
+                let e = env[ac * cols + ap];
+                if e == 0.0 {
+                    continue;
+                }
+                for ph in 0..d {
+                    for bc in 0..cr {
+                        let cv = e * c.data[(ac * d + ph) * cr + bc];
+                        if cv == 0.0 {
+                            continue;
+                        }
+                        for bp in 0..pr {
+                            next[bc * pr + bp] += cv * p.data[(ap * d + ph) * pr + bp];
+                        }
+                    }
+                }
+            }
+        }
+        env = next;
+        rows = cr;
+        cols = pr;
+    }
+    Ok((env, rows, cols))
+}
+
+/// Overlap transfer matrix between the right blocks of `cur` and `prior`, i.e.
+/// the contraction of sites `from..n` of both states over their shared physical
+/// indices.
+///
+/// The result is row-major with shape `(cur.d_l at from) × (prior.d_l at from)`.
+/// For `from == n` it is the 1×1 identity.
+fn overlap_env_right(cur: &Mps, prior: &Mps, from: usize) -> TnResult<(Vec<f64>, usize, usize)> {
+    let n = cur.n_sites();
+    let mut env = vec![1.0f64];
+    let (mut rows, mut cols) = (1usize, 1usize);
+    for t in (from..n).rev() {
+        let c = &cur.site_tensors[t];
+        let p = &prior.site_tensors[t];
+        if c.d_p != p.d_p {
+            return Err(TnError::DimensionMismatch { a: c.d_p, b: p.d_p });
+        }
+        if c.d_r != rows || p.d_r != cols {
+            return Err(TnError::DimensionMismatch { a: c.d_r, b: rows });
+        }
+        let (d, cl, pl) = (c.d_p, c.d_l, p.d_l);
+        let mut next = vec![0.0f64; cl * pl];
+        for ac in 0..cl {
+            for ap in 0..pl {
+                let mut acc = 0.0f64;
+                for ph in 0..d {
+                    for bc in 0..rows {
+                        let cv = c.data[(ac * d + ph) * rows + bc];
+                        if cv == 0.0 {
+                            continue;
+                        }
+                        for bp in 0..cols {
+                            acc += cv * p.data[(ap * d + ph) * cols + bp] * env[bc * cols + bp];
+                        }
+                    }
+                }
+                next[ac * pl + ap] = acc;
+            }
+        }
+        env = next;
+        rows = cl;
+        cols = pl;
+    }
+    Ok((env, rows, cols))
+}
+
+/// Build the penalty projector for `prior` at bond `(s, s+1)`, expressed in the
+/// two-site basis of `cur`.
+///
+/// Returns Θᵉᶠᶠ[a,p₁,p₂,b] = Σ_{a',b'} L[a,a'] · Θ_prior[a',p₁,p₂,b'] · R[b,b'],
+/// laid out row-major over `(cur d_l at s, d_p at s, d_p at s+1, cur d_r at s+1)`
+/// — the same layout as the current two-site tensor, so ⟨Θᵉᶠᶠ|Θ_cur⟩ is exactly
+/// the full-state overlap ⟨prior|cur⟩ when `cur` is in mixed-canonical form
+/// around this bond.
+fn prior_two_site_projector(cur: &Mps, prior: &Mps, s: usize) -> TnResult<Vec<f64>> {
+    let n = cur.n_sites();
+    if prior.n_sites() != n {
+        return Err(TnError::DimensionMismatch {
+            a: prior.n_sites(),
+            b: n,
+        });
+    }
+    if s + 1 >= n {
+        return Err(TnError::IndexOutOfBounds {
+            index: s + 1,
+            len: n,
+        });
+    }
+
+    let theta_prior = extract_two_site_tensor(prior, s)?;
+    let (l_env, dl_cur, dl_pri) = overlap_env_left(cur, prior, s)?;
+    let (r_env, dr_cur, dr_pri) = overlap_env_right(cur, prior, s + 2)?;
+
+    let dp1 = cur.site_tensors[s].d_p;
+    let dp2 = cur.site_tensors[s + 1].d_p;
+    if prior.site_tensors[s].d_p != dp1 || prior.site_tensors[s + 1].d_p != dp2 {
+        return Err(TnError::DimensionMismatch {
+            a: prior.site_tensors[s].d_p,
+            b: dp1,
+        });
+    }
+
+    // First rotate the left bond: tmp[a, p1, p2, b'] = Σ_{a'} L[a,a'] Θ[a',p1,p2,b'].
+    let phys = dp1 * dp2;
+    let mut tmp = vec![0.0f64; dl_cur * phys * dr_pri];
+    for a in 0..dl_cur {
+        for ap in 0..dl_pri {
+            let lv = l_env[a * dl_pri + ap];
+            if lv == 0.0 {
+                continue;
+            }
+            for pp in 0..phys {
+                let src = (ap * phys + pp) * dr_pri;
+                let dst = (a * phys + pp) * dr_pri;
+                for bp in 0..dr_pri {
+                    tmp[dst + bp] += lv * theta_prior[src + bp];
+                }
+            }
+        }
+    }
+
+    // Then the right bond: out[a, p1, p2, b] = Σ_{b'} tmp[a,p1,p2,b'] R[b,b'].
+    let mut out = vec![0.0f64; dl_cur * phys * dr_cur];
+    for a in 0..dl_cur {
+        for pp in 0..phys {
+            let src = (a * phys + pp) * dr_pri;
+            let dst = (a * phys + pp) * dr_cur;
+            for b in 0..dr_cur {
+                let mut acc = 0.0f64;
+                for bp in 0..dr_pri {
+                    acc += tmp[src + bp] * r_env[b * dr_pri + bp];
+                }
+                out[dst + b] = acc;
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Compute the inner product ⟨ψ₀|ψ₁⟩ between two MPS of the same chain length and

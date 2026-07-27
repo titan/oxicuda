@@ -1077,12 +1077,16 @@ mod tests {
     fn partial_gemm_f64_ptx_assembles_for_sm86() {
         let ptxas = {
             let mut found = None;
+            // Windows names the binary `ptxas.exe`; probing only the bare name
+            // made this check silently skip there.
             if let Ok(path) = std::env::var("PATH") {
-                for dir in std::env::split_paths(&path) {
-                    let candidate = dir.join("ptxas");
-                    if candidate.is_file() {
-                        found = Some(candidate);
-                        break;
+                'outer: for dir in std::env::split_paths(&path) {
+                    for name in ["ptxas", "ptxas.exe"] {
+                        let candidate = dir.join(name);
+                        if candidate.is_file() {
+                            found = Some(candidate);
+                            break 'outer;
+                        }
                     }
                 }
             }
@@ -1121,17 +1125,24 @@ mod tests {
             std::process::id()
         ));
         std::fs::write(&ptx_path, &ptx).expect("write PTX to temp file");
+        // Assemble to a throwaway file rather than a null device: `/dev/null` is
+        // not openable on Windows, where ptxas then fails for a reason unrelated
+        // to the PTX under test.
+        let cubin = ptx_path.with_extension("cubin");
         let output = std::process::Command::new(&ptxas)
             .arg("-arch=sm_86")
             .arg(&ptx_path)
             .arg("-o")
-            .arg("/dev/null")
+            .arg(&cubin)
             .output()
             .expect("invoke ptxas");
         let _ = std::fs::remove_file(&ptx_path);
+        let _ = std::fs::remove_file(&cubin);
         assert!(
             output.status.success(),
-            "ptxas rejected f64 partial GEMM PTX:\n{}\n--- PTX ---\n{ptx}",
+            // ptxas prints its diagnostics on stdout, not stderr.
+            "ptxas rejected f64 partial GEMM PTX:\n{}{}\n--- PTX ---\n{ptx}",
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );
     }

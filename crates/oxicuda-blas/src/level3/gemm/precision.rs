@@ -147,11 +147,16 @@ mod tests {
 
     /// Locate `ptxas` on PATH (or the well-known CUDA bin dir).
     fn find_ptxas() -> Option<std::path::PathBuf> {
+        // Windows names the binary `ptxas.exe`; probing only the bare name made
+        // every ptxas assembly check silently skip there, so the toolchain was
+        // never actually exercised on that platform.
         if let Ok(path) = std::env::var("PATH") {
             for dir in std::env::split_paths(&path) {
-                let candidate = dir.join("ptxas");
-                if candidate.is_file() {
-                    return Some(candidate);
+                for name in ["ptxas", "ptxas.exe"] {
+                    let candidate = dir.join(name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
                 }
             }
         }
@@ -171,19 +176,26 @@ mod tests {
         ));
         std::fs::write(&ptx_path, ptx).expect("write PTX to temp file");
 
+        // Assemble to a throwaway file rather than a null device: `/dev/null` is
+        // not openable on Windows, where ptxas then fails for a reason unrelated
+        // to the PTX under test.
+        let cubin = ptx_path.with_extension("cubin");
         let output = std::process::Command::new(ptxas)
             .arg("-arch=sm_86")
             .arg(&ptx_path)
             .arg("-o")
-            .arg("/dev/null")
+            .arg(&cubin)
             .output()
             .expect("invoke ptxas");
 
         let _ = std::fs::remove_file(&ptx_path);
+        let _ = std::fs::remove_file(&cubin);
 
         assert!(
             output.status.success(),
-            "ptxas rejected {tag} GEMM PTX:\n{}\n--- PTX ---\n{ptx}",
+            // ptxas prints its diagnostics on stdout, not stderr.
+            "ptxas rejected {tag} GEMM PTX:\n{}{}\n--- PTX ---\n{ptx}",
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );
     }

@@ -151,7 +151,7 @@ pub fn emit_haar_forward_kernel(prec: SignalPrecision, sm: SmVersion) -> String 
     add.u64         %addr, %addr, {bytes};
     ld.global.{ty}  %xo, [%addr];
 
-    // scale = 1/√2
+    // scale = 1/sqrt(2)
     mov.{ty}        %scale, {inv_sqrt2};
 
     // approx = (xe + xo) * scale

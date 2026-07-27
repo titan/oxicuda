@@ -657,15 +657,30 @@ mod tests {
                 return;
             };
 
-            // A valid ordinal (0) must succeed even though `dev0` is passed
-            // as the (now-ignored for this variant) `device` argument.
+            // A valid ordinal (0) must reach the driver even though `dev0` is
+            // passed as the (now-ignored for this variant) `device` argument.
             let ok_result = apply_migration_policy(
                 buf.as_device_ptr(),
                 buf.byte_size(),
                 &MigrationPolicy::PreferDevice(0),
                 &dev0,
             );
-            assert!(ok_result.is_ok(), "PreferDevice(0) failed: {ok_result:?}");
+            // `cuMemAdvise(SET_PREFERRED_LOCATION, <gpu>)` is only accepted when
+            // the target device reports `CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS`;
+            // otherwise the driver documents `CUDA_ERROR_INVALID_DEVICE`. That
+            // attribute is 0 on every WDDM (Windows) GPU, so a *correct* call
+            // still fails there — asserting success unconditionally tests the
+            // host platform, not this crate.
+            if dev0.supports_concurrent_managed_access().unwrap_or(false) {
+                assert!(ok_result.is_ok(), "PreferDevice(0) failed: {ok_result:?}");
+            } else {
+                assert_eq!(
+                    ok_result,
+                    Err(CudaError::InvalidDevice),
+                    "without concurrent managed access the driver must reject a \
+                     GPU preferred-location hint with InvalidDevice"
+                );
+            }
 
             // An out-of-range ordinal must fail — proving the policy's own
             // ordinal is actually being resolved and used, not silently

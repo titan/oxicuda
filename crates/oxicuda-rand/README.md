@@ -75,9 +75,9 @@ use oxicuda_rand::prelude::*;
 
 | Metric | Value |
 |--------|-------|
-| Version | 0.5.1 |
+| Version | 0.5.2 |
 | Tests passing | 435 |
-| Release date | 2026-07-14 |
+| Release date | 2026-07-27 |
 
 ## License
 

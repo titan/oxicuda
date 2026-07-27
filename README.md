@@ -214,16 +214,16 @@ fn main() -> Result<(), oxicuda::Error> {
 | Crate | CUDA Equivalent | Description | SLoC | Tests |
 |-------|-----------------|-------------|------|-------|
 | **Vol.1 -- Foundation** | | | | |
-| `oxicuda-driver` | Driver API | FFI, device/context/stream/event/module | 14,366 | 458 |
+| `oxicuda-driver` | Driver API | FFI, device/context/stream/event/module | 16,160 | 461 |
 | `oxicuda-memory` | cuMemAlloc | DeviceBuffer, PinnedBuffer, unified, pool | 6,812 | 301 |
 | `oxicuda-launch` | cuLaunchKernel | Dim3, LaunchParams, `launch!` macro | 5,506 | 231 |
 | `oxicuda-runtime` | CUDA Runtime | High-level cudaRT API layer | 4,955 | 126 |
 | `oxicuda-nvrtc` | NVRTC | Runtime CUDA-C to PTX JIT, dlopen'd libnvrtc | 642 | 20 |
 | **Vol.2 -- PTX Codegen & Autotuner** | | | | |
-| `oxicuda-ptx` | nvcc / CUTLASS | PTX IR, codegen DSL, Tensor Core gen | 35,030 | 1,034 |
+| `oxicuda-ptx` | nvcc / CUTLASS | PTX IR, codegen DSL, Tensor Core gen | 35,268 | 1,035 |
 | `oxicuda-autotune` | -- | Search space, benchmark, tuning DB | 16,500 | 472 |
 | **Vol.3 -- Linear Algebra** | | | | |
-| `oxicuda-blas` | cuBLAS | BLAS L1/L2/L3, GEMM, batched, elementwise | 33,597 | 965 |
+| `oxicuda-blas` | cuBLAS | BLAS L1/L2/L3, GEMM, batched, elementwise | 33,597 | 990 |
 | **Vol.4 -- Deep Learning** | | | | |
 | `oxicuda-dnn` | cuDNN | Conv, attention, MoE, norm, pool, quantize | 47,562 | 1,262 |
 | **Vol.5 -- Scientific Computing** | | | | |
@@ -344,7 +344,7 @@ fn main() -> Result<(), oxicuda::Error> {
 | `oxicuda-geom2d` | -- | Delaunay/Voronoi/convex-hull/sweep-line | 11,071 | 301 |
 | **Umbrella** | | | | |
 | `oxicuda` | -- | Umbrella re-export crate | 21,496 | 526 |
-| | | **Total** | **~1,296,155** | **38,646** |
+| | | **Total** | **~1,296,447** | **38,675** |
 
 ## Feature Flags
 
@@ -497,6 +497,14 @@ cargo nextest run --all-features
 - Degrades gracefully on a host without NVRTC -- `is_available()` returns `false` and every entry point returns a typed `NvrtcError::Unavailable` naming the libraries that were tried; optional entry points (CUBIN retrieval, C++ name expressions, supported-arch queries) return `NvrtcError::NotSupported` on older runtimes rather than failing the whole library load
 - `Ptx::as_str()` feeds `oxicuda_driver::Module::from_ptx` directly, so hand-written CUDA-C can be compiled and launched without leaving the workspace
 - Exposed from the umbrella as `oxicuda::nvrtc` behind the `nvrtc` feature (off by default); 20 new tests, bringing the workspace to 74 members
+
+**Released (v0.5.2) -- 2026-07-27** *(38,675 tests passing, ~1.30M SLoC, 74 crates)*
+- `oxicuda-driver`: `Module::from_ptx`/`from_ptx_with_options` now scrub non-ASCII bytes from PTX source (new `ascii_only()` helper) before submitting it to the JIT -- `ptxas` and the driver's JIT reject any non-ASCII byte anywhere in a module, even inside `//` comments, which CUDA 11.x tolerated silently but CUDA 12.9+ toolchains reject outright with an opaque `CUDA_ERROR_INVALID_PTX`
+- `oxicuda-ptx`/`oxicuda-fft`/`oxicuda-launch`/`oxicuda-signal`: generated PTX comments no longer contain typographic Unicode (em dashes, ×, →, π, √, Σ, box-drawing rules) -- replaced with ASCII equivalents, fixing the same CUDA 12.9+ rejection at its source rather than relying only on `oxicuda-driver`'s new scrubber
+- `oxicuda-tn`: the DMRG excited-states penalty method now rotates each prior state's two-site tensor into the current state's block basis (new `overlap_env_left`/`overlap_env_right`/`prior_two_site_projector`) before applying the penalty, instead of using the prior state's raw two-site tensor directly -- that was only valid if both states shared a bond basis, which they don't, since each MPS is canonicalised independently
+- `oxicuda`/`oxicuda-memory`: `FileLockGuard`'s retry loop now also treats Windows' `ErrorKind::PermissionDenied` as retryable lock contention rather than a fatal error, since a released lock file stays "delete pending" on Windows until the last handle closes; a `managed_hints` test now checks device capability before asserting `cuMemAdvise` succeeds, since WDDM (Windows) GPUs correctly reject it with `InvalidDevice`
+- Windows portability fixes across `ptxas`-invoking tests in `oxicuda-blas`, `oxicuda-dnn`, `oxicuda-ptx`, `oxicuda-solver`, `oxicuda-sparse`, and `oxicuda-signal`: tests now find `ptxas.exe`, assemble to a throwaway file instead of `/dev/null` (not openable on Windows), and surface `ptxas`'s stdout in failure messages
+- Test suite expanded to 38,675 passing tests (`--all-features`; 37,320 with default features), up from 38,646/37,316 at 0.5.1
 
 **Next**
 - Published documentation on docs.rs

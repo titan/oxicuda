@@ -746,7 +746,7 @@ fn emit_window_formula(ptx: &mut String, window: &WindowFunction) -> Result<(), 
             // Kaiser is hard to compute in PTX without a Bessel function.
             // We precompute the full coefficient table as immediates.
             ptx.push_str(&format!(
-                "    // Kaiser(beta={beta}) — coefficient lookup via immediates\n"
+                "    // Kaiser(beta={beta}) - coefficient lookup via immediates\n"
             ));
             ptx.push_str(&format!(
                 "    // Precomputed I0(beta) = {:.17e}\n",

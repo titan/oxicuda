@@ -265,7 +265,7 @@ impl GemmTemplate {
         writeln!(ptx, "    mul.lo.u32 %r13, %r13, %r4;").map_err(PtxGenError::FormatError)?;
         writeln!(
             ptx,
-            "    // total_elems = M*N (64-bit: 32×32→64 widening avoids overflow when M*N >= 2^32)"
+            "    // total_elems = M*N (64-bit: 32x32->64 widening avoids overflow when M*N >= 2^32)"
         )
         .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mul.wide.u32 %rd9, %r8, %r9;").map_err(PtxGenError::FormatError)?;
@@ -577,7 +577,7 @@ impl GemmTemplate {
         // ── Prologue: fill the pipeline with (stages-1) prefetch stages ──────
         writeln!(
             ptx,
-            "    // ── Pipeline prologue: prefetch stages 0..{} ──────",
+            "    // ---- Pipeline prologue: prefetch stages 0..{} ----",
             stages - 1
         )
         .map_err(PtxGenError::FormatError)?;
@@ -601,11 +601,8 @@ impl GemmTemplate {
         writeln!(ptx).map_err(PtxGenError::FormatError)?;
 
         // ── Main pipeline loop ───────────────────────────────────────────────
-        writeln!(
-            ptx,
-            "    // ── Main pipeline loop (steady state) ─────────────"
-        )
-        .map_err(PtxGenError::FormatError)?;
+        writeln!(ptx, "    // ---- Main pipeline loop (steady state) ----")
+            .map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mov.u32 %r1, 0; // stage_idx").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "    mov.u32 %r2, 0; // k_tile").map_err(PtxGenError::FormatError)?;
         writeln!(ptx, "$PIPE_LOOP:").map_err(PtxGenError::FormatError)?;
@@ -665,7 +662,7 @@ impl GemmTemplate {
         // ── Epilogue: drain remaining pipeline stages ────────────────────────
         writeln!(
             ptx,
-            "    // ── Pipeline epilogue: drain remaining stages ──────"
+            "    // ---- Pipeline epilogue: drain remaining stages ----"
         )
         .map_err(PtxGenError::FormatError)?;
         for flush in 0..(stages - 1) {
@@ -793,6 +790,67 @@ mod tests {
         assert!(ptx.contains(".entry gemm_"));
         assert!(ptx.contains("fma.rn.f32"));
         assert!(ptx.contains("$K_LOOP"));
+    }
+
+    /// Generated PTX must be pure ASCII for every precision and both code paths.
+    ///
+    /// `ptxas` and the driver JIT reject any non-ASCII byte in a module, even
+    /// inside a `//` comment. CUDA 11.x tolerated it, so a typographic character
+    /// in a generated comment (`32x32->64`, box-drawing rules) silently worked
+    /// until CUDA 12.9+, where it surfaced only as `CUDA_ERROR_INVALID_PTX`.
+    #[test]
+    fn generated_ptx_is_ascii_only() {
+        for (precision, accumulator) in [
+            (PtxType::F32, PtxType::F32),
+            (PtxType::F64, PtxType::F64),
+            (PtxType::F16, PtxType::F32),
+            (PtxType::F16, PtxType::F64),
+            (PtxType::BF16, PtxType::F32),
+        ] {
+            // Skinny-tile shape: the config the dispatcher picks for small
+            // f64 GEMMs, which is the one that failed on CUDA 12.9+.
+            let t = GemmTemplate {
+                tile_m: 64,
+                tile_n: 8,
+                tile_k: 8,
+                warp_m: 32,
+                warp_n: 8,
+                precision,
+                accumulator,
+                use_tensor_core: false,
+                stages: 1,
+                target: SmVersion::Sm86,
+                epilogue: EpilogueKind::LinearCombination,
+            };
+            let ptx = t.generate().expect("should generate GEMM");
+            assert!(
+                ptx.is_ascii(),
+                "generate() emitted non-ASCII for {precision:?}/{accumulator:?}: {:?}",
+                ptx.lines().find(|l| !l.is_ascii()),
+            );
+        }
+
+        // The software-pipelined path has its own comment banners.
+        let pipelined = GemmTemplate {
+            tile_m: 64,
+            tile_n: 64,
+            tile_k: 32,
+            warp_m: 32,
+            warp_n: 32,
+            precision: PtxType::F16,
+            accumulator: PtxType::F32,
+            use_tensor_core: true,
+            stages: 3,
+            target: SmVersion::Sm86,
+            epilogue: EpilogueKind::LinearCombination,
+        };
+        if let Ok(ptx) = pipelined.generate_pipelined() {
+            assert!(
+                ptx.is_ascii(),
+                "generate_pipelined() emitted non-ASCII: {:?}",
+                ptx.lines().find(|l| !l.is_ascii()),
+            );
+        }
     }
 
     #[test]
@@ -1342,11 +1400,16 @@ mod tests {
     /// Locate `ptxas` on PATH (or the well-known CUDA bin dir), returning its
     /// path if present so the test can skip gracefully on CPU-only machines.
     fn find_ptxas() -> Option<std::path::PathBuf> {
+        // Windows names the binary `ptxas.exe`; probing only the bare name made
+        // every ptxas assembly check silently skip there, so the toolchain was
+        // never actually exercised on that platform.
         if let Ok(path) = std::env::var("PATH") {
             for dir in std::env::split_paths(&path) {
-                let candidate = dir.join("ptxas");
-                if candidate.is_file() {
-                    return Some(candidate);
+                for name in ["ptxas", "ptxas.exe"] {
+                    let candidate = dir.join(name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
                 }
             }
         }
@@ -1394,19 +1457,26 @@ mod tests {
             ));
             std::fs::write(&ptx_path, &ptx).expect("write PTX to temp file");
 
+            // Assemble to a throwaway file rather than a null device:
+            // `/dev/null` is not openable on Windows, where ptxas then fails for
+            // a reason unrelated to the PTX under test.
+            let cubin = ptx_path.with_extension("cubin");
             let output = std::process::Command::new(&ptxas)
                 .arg("-arch=sm_86")
                 .arg(&ptx_path)
                 .arg("-o")
-                .arg("/dev/null")
+                .arg(&cubin)
                 .output()
                 .expect("invoke ptxas");
 
             let _ = std::fs::remove_file(&ptx_path);
+            let _ = std::fs::remove_file(&cubin);
 
             assert!(
                 output.status.success(),
-                "ptxas rejected {precision:?}/{accumulator:?} GEMM PTX:\n{}\n--- PTX ---\n{ptx}",
+                // ptxas prints its diagnostics on stdout, not stderr.
+                "ptxas rejected {precision:?}/{accumulator:?} GEMM PTX:\n{}{}\n--- PTX ---\n{ptx}",
+                String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr),
             );
         }

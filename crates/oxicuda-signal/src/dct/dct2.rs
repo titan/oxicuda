@@ -203,7 +203,7 @@ pub(crate) fn emit_twiddle_kernel(prec: SignalPrecision, sm: SmVersion) -> Strin
     add.u64         %fft_addr, %fft_addr, {bytes};
     ld.global.{ty}  %im, [%fft_addr];
 
-    // Load cos(πk/2N) and -sin(πk/2N)
+    // Load cos(pi*k/2N) and -sin(pi*k/2N)
     add.u64         %tw_addr, %tw_base, %byte_off2;
     ld.global.{ty}  %cw, [%tw_addr];
     add.u64         %tw_addr, %tw_addr, {bytes};
